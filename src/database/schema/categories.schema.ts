@@ -1,0 +1,98 @@
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  jsonb,
+  integer,
+  timestamp,
+  check,
+  unique,
+} from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { users } from './users.schema';
+import { communities } from './communities.schema';
+
+export const categories = pgTable('categories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 255 }).notNull().unique(),
+  slug: varchar('slug', { length: 255 }).notNull().unique(),
+  description: text('description'),
+  categoryConfig: jsonb('category_config').default('{}').notNull(),
+});
+
+export const eloTiers = pgTable(
+  'elo_tiers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    categoryId: uuid('category_id')
+      .references(() => categories.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    minElo: integer('min_elo').notNull(),
+    maxElo: integer('max_elo').notNull(),
+    iconUrl: text('icon_url'),
+  },
+  (table) => ({
+    eloRangeValid: check(
+      'elo_range_valid',
+      sql`${table.minElo} < ${table.maxElo}`,
+    ),
+  }),
+);
+
+export const userRanks = pgTable(
+  'user_ranks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    categoryId: uuid('category_id')
+      .references(() => categories.id, { onDelete: 'cascade' })
+      .notNull(),
+    communityId: uuid('community_id')
+      .references(() => communities.id, { onDelete: 'cascade' }),
+    matchType: varchar('match_type', { length: 50 }).notNull(),
+    eloPoints: integer('elo_points').default(1200).notNull(),
+    tierId: uuid('tier_id').references(() => eloTiers.id, {
+      onDelete: 'set null',
+    }),
+    matchesPlayed: integer('matches_played').default(0).notNull(),
+    matchesWon: integer('matches_won').default(0).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    eloNonNegative: check('elo_non_negative', sql`${table.eloPoints} >= 0`),
+    winsLtePlayed: check(
+      'wins_lte_played',
+      sql`${table.matchesWon} <= ${table.matchesPlayed}`,
+    ),
+    userCategoryRankUnique: unique('user_category_rank_unique_idx').on(
+      table.userId,
+      table.categoryId,
+      table.matchType,
+      table.communityId
+    ),
+  }),
+);
+
+export const eloHistoryLogs = pgTable('elo_history_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  categoryId: uuid('category_id')
+    .references(() => categories.id, { onDelete: 'cascade' })
+    .notNull(),
+  matchId: uuid('match_id'), // fk will be added via ALTER TABLE later or manually due to circular deps
+  reason: varchar('reason', { length: 100 }),
+  previousElo: integer('previous_elo').notNull(),
+  newElo: integer('new_elo').notNull(),
+  changedPoints: integer('changed_points').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});

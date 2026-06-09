@@ -3,6 +3,18 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+/* =========================================================================
+   DATABASE SCHEMA REVIEW & AUDIT REPORT (2026-06-08)
+   -------------------------------------------------------------------------
+   Bản phân tích Schema này đã được rà soát với `skills.md` và nghiệp vụ thực tế.
+   Các điểm [FIX] là những thay đổi nhằm bịt lỗ hổng nghiệp vụ:
+   1. Pháp lý: Bổ sung `accepted_tos_at` (Chấp nhận điều khoản).
+   2. Tổ chức giải: Bổ sung `registration_start_date`, `registration_end_date`, `max_participants`.
+   3. Hoàn tiền: Bổ sung `refund_status`, `refunded_amount` vào thanh toán.
+   4. Đặc cách (Bye): Thêm `is_bye` vào trận đấu.
+   5. Soft Delete: Thêm `deleted_at` cho Địa điểm thi đấu.
+   ========================================================================= */
+
 -- ==========================================
 -- 1. TẦNG AUTHENTICATION, PHÂN QUYỀN & AUDIT LOG
 -- ==========================================
@@ -11,6 +23,7 @@ CREATE TABLE users (
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     is_email_verified BOOLEAN DEFAULT FALSE NOT NULL,  -- [FIX] Xác minh email (pháp lý: chứng minh user đồng ý)
+    accepted_tos_at TIMESTAMP WITH TIME ZONE,          -- [FIX] Lưu vết: Thời điểm user đồng ý Điều khoản sử dụng (Pháp lý)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMP WITH TIME ZONE -- SOFT DELETE
@@ -69,6 +82,26 @@ CREATE TABLE audit_logs (
     user_agent TEXT,  -- [FIX] Lưu vết thiết bị (điện thoại hay máy tính)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
+
+-- BẢNG LIÊN KẾT ĐĂNG NHẬP BÊN THỨ 3 (OAuth 2.0 Providers)
+CREATE TABLE auth_providers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    provider VARCHAR(50) NOT NULL,              -- 'GOOGLE', 'FACEBOOK', 'GITHUB'
+    provider_user_id VARCHAR(255) NOT NULL,      -- ID của user bên provider (ví dụ: Google sub)
+    provider_email VARCHAR(255),                 -- Email từ provider
+    provider_avatar_url TEXT,                    -- Avatar từ provider
+    provider_display_name VARCHAR(255),          -- Tên hiển thị từ provider
+    access_token TEXT,                           -- Access token từ provider (optional)
+    refresh_token TEXT,                          -- Refresh token từ provider (optional)
+    token_expires_at TIMESTAMP WITH TIME ZONE,   -- Thời gian hết hạn token provider
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT provider_user_unique UNIQUE (provider, provider_user_id)
+);
+
+CREATE INDEX idx_auth_providers_user ON auth_providers(user_id);
+CREATE INDEX idx_auth_providers_lookup ON auth_providers(provider, provider_user_id);
 
 
 
@@ -170,7 +203,8 @@ CREATE TABLE tournament_venues (
     location_address TEXT NOT NULL,
     location_geolocation GEOGRAPHY(Point, 4326),
     images_urls TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE                -- [FIX] Skill 2: Soft delete bắt buộc cho các bảng chính
 );
 
 CREATE TABLE venue_courts (
@@ -196,6 +230,9 @@ CREATE TABLE tournaments (
     -- TẦNG TÀI CHÍNH & HOA HỒNG NỀN TẢNG
     entry_fee NUMERIC(12, 2) DEFAULT 0.00 NOT NULL,
     platform_fee_percentage NUMERIC(5, 2) DEFAULT 5.00 NOT NULL,
+    registration_start_date TIMESTAMP WITH TIME ZONE,  -- [FIX] Ngày mở đăng ký tham gia giải
+    registration_end_date TIMESTAMP WITH TIME ZONE,    -- [FIX] Ngày đóng cổng đăng ký (Chốt sổ)
+    max_participants INTEGER,                          -- [FIX] Giới hạn số lượng đội tối đa tham gia
     start_date TIMESTAMP WITH TIME ZONE,  -- [FIX] Ngày bắt đầu giải (pháp lý: xác nhận cam kết thời gian)
     end_date TIMESTAMP WITH TIME ZONE,    -- [FIX] Ngày kết thúc giải
     venue_id UUID REFERENCES tournament_venues(id) ON DELETE SET NULL,  -- [FIX] Sân đấu chính của giải
@@ -252,6 +289,8 @@ CREATE TABLE payments (
     amount NUMERIC(12, 2) NOT NULL,
     platform_fee_amount NUMERIC(12, 2),  -- [FIX] Lưu số tiền thực tế nền tảng giữ lại (tại thời điểm thanh toán)
     status VARCHAR(50) DEFAULT 'PENDING' NOT NULL,
+    refund_status VARCHAR(50),                        -- [FIX] Nghiệp vụ: Trạng thái hoàn tiền (nếu giải bị hủy)
+    refunded_amount NUMERIC(12, 2) DEFAULT 0.00,      -- [FIX] Nghiệp vụ: Số tiền đã hoàn lại cho user
     payment_gateway VARCHAR(50),
     transaction_reference VARCHAR(255) UNIQUE,  -- [FIX] Mã giao dịch phải duy nhất (chống duplicate webhook)
     gateway_response JSONB,  -- [FIX] Lưu nguyên response từ VNPay/MoMo (bằng chứng pháp lý)
@@ -302,6 +341,7 @@ CREATE TABLE matches (
     round_number INTEGER NOT NULL,
     match_order INTEGER NOT NULL,
     bracket_branch VARCHAR(50) DEFAULT 'MAIN' NOT NULL,
+    is_bye BOOLEAN DEFAULT FALSE NOT NULL,            -- [FIX] Nghiệp vụ: Đánh dấu đội được đặc cách vào thẳng (không cần thi đấu)
     next_match_id UUID REFERENCES matches(id) ON DELETE SET NULL,
     loser_next_match_id UUID REFERENCES matches(id) ON DELETE SET NULL,
     court_id UUID REFERENCES venue_courts(id) ON DELETE SET NULL,
@@ -374,7 +414,7 @@ CREATE TABLE chat_room_members (
 CREATE TABLE chat_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     room_id UUID REFERENCES chat_rooms(id) ON DELETE CASCADE NOT NULL,
-    sender_id UUID REFERENCES users(id) ON DELETE SET NULL NOT NULL,  -- [FIX] SET NULL: Giữ tin nhắn khi user bị xóa
+    sender_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- [FIX] SET NULL: Giữ tin nhắn khi user bị xóa (nullable vì user có thể bị xóa)
     message_text TEXT,
     attachments_urls TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
     is_read BOOLEAN DEFAULT FALSE NOT NULL,
@@ -396,7 +436,7 @@ CREATE TABLE notifications (
 CREATE TABLE match_comments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     match_id UUID REFERENCES matches(id) ON DELETE CASCADE NOT NULL,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL NOT NULL,  -- [FIX] Giữ comment khi user bị xóa
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- [FIX] Giữ comment khi user bị xóa (nullable vì user có thể bị xóa)
     comment_text TEXT NOT NULL,
     parent_id UUID REFERENCES match_comments(id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -461,7 +501,7 @@ CREATE TABLE payout_status_logs (
     payout_id UUID REFERENCES organizer_payouts(id) ON DELETE RESTRICT NOT NULL,
     previous_status VARCHAR(50) NOT NULL,
     new_status VARCHAR(50) NOT NULL,
-    changed_by UUID REFERENCES users(id) ON DELETE SET NULL NOT NULL,
+    changed_by UUID REFERENCES users(id) ON DELETE SET NULL,
     note TEXT,
     ip_address VARCHAR(45),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL

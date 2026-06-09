@@ -24,7 +24,7 @@ my-modular-monolith/
 │   │   └── utils/             # Hàm bổ trợ (Crypto, Date formatter, String helper)
 │   │
 │   ├── config/                # ⚙️ CẤU HÌNH HỆ THỐNG
-│   │   ├── database.config.ts # Cấu hình TypeORM/Database
+│   │   ├── database.config.ts # Cấu hình Drizzle ORM/Database
 │   │   ├── auth.config.ts     # Cấu hình JWT, Token thời hạn
 │   │   └── env.validation.ts  # Schema để check file .env khi khởi động
 │   │

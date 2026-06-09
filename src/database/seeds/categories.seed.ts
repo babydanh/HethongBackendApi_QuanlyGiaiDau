@@ -1,0 +1,125 @@
+import 'dotenv/config';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from '../schema';
+
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT || '5432'),
+  user: process.env.DB_USERNAME,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_DATABASE,
+});
+
+const db = drizzle(pool, { schema });
+
+async function main() {
+  console.log('Seeding categories and elo_tiers...');
+
+  // 1. Seed Pickleball
+  console.log('Seeding Pickleball...');
+  const [pickleball] = await db
+    .insert(schema.categories)
+    .values({
+      name: 'Pickleball',
+      slug: 'pickleball',
+      description: 'Môn thể thao dùng vợt, bóng nhựa đục lỗ',
+      categoryConfig: { hasSets: true, maxSets: 3 },
+    })
+    .onConflictDoNothing({ target: schema.categories.slug })
+    .returning();
+
+  if (pickleball) {
+    await db.insert(schema.eloTiers).values([
+      { categoryId: pickleball.id, name: 'Beginner', minElo: 0, maxElo: 1500 },
+      {
+        categoryId: pickleball.id,
+        name: 'Intermediate',
+        minElo: 1500,
+        maxElo: 2000,
+      },
+      {
+        categoryId: pickleball.id,
+        name: 'Advanced',
+        minElo: 2000,
+        maxElo: 2500,
+      },
+      { categoryId: pickleball.id, name: 'Pro', minElo: 2500, maxElo: 4000 },
+    ]);
+  }
+
+  // 2. Seed Tennis
+  console.log('Seeding Tennis...');
+  const [tennis] = await db
+    .insert(schema.categories)
+    .values({
+      name: 'Tennis',
+      slug: 'tennis',
+      description: 'Môn thể thao quần vợt',
+      categoryConfig: { hasSets: true, maxSets: 5 },
+    })
+    .onConflictDoNothing({ target: schema.categories.slug })
+    .returning();
+
+  if (tennis) {
+    await db.insert(schema.eloTiers).values([
+      {
+        categoryId: tennis.id,
+        name: 'NTRP 2.0-3.0 (Beginner)',
+        minElo: 0,
+        maxElo: 1500,
+      },
+      {
+        categoryId: tennis.id,
+        name: 'NTRP 3.5-4.0 (Intermediate)',
+        minElo: 1500,
+        maxElo: 2000,
+      },
+      {
+        categoryId: tennis.id,
+        name: 'NTRP 4.5+ (Advanced)',
+        minElo: 2000,
+        maxElo: 2500,
+      },
+    ]);
+  }
+
+  // 3. Seed Badminton
+  console.log('Seeding Badminton...');
+  const [badminton] = await db
+    .insert(schema.categories)
+    .values({
+      name: 'Cầu lông',
+      slug: 'badminton',
+      description: 'Môn thể thao dùng vợt và quả cầu lông',
+      categoryConfig: { hasSets: true, maxSets: 3 },
+    })
+    .onConflictDoNothing({ target: schema.categories.slug })
+    .returning();
+
+  if (badminton) {
+    await db.insert(schema.eloTiers).values([
+      { categoryId: badminton.id, name: 'Phong trào', minElo: 0, maxElo: 1500 },
+      {
+        categoryId: badminton.id,
+        name: 'Bán chuyên',
+        minElo: 1500,
+        maxElo: 2000,
+      },
+      {
+        categoryId: badminton.id,
+        name: 'Chuyên nghiệp',
+        minElo: 2000,
+        maxElo: 3000,
+      },
+    ]);
+  }
+
+  console.log('Seeding complete!');
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error('Error seeding data:', err);
+  process.exit(1);
+});

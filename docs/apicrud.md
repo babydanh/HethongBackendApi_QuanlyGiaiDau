@@ -17,16 +17,16 @@ Tài liệu này liệt kê kế hoạch xây dựng các RESTful API endpoints 
 - `PATCH  /users/:id`  : Cập nhật thông tin (Đổi avatar, cập nhật tên hiển thị, chiều cao, cân nặng...).
 - `DELETE /users/:id`  : Xóa hoặc vô hiệu hóa (Soft-delete) tài khoản người dùng.
 
-## 2. Module `Clubs` (Câu lạc bộ)
-*Quản lý thông tin hội nhóm, câu lạc bộ Pickleball/Tennis.*
-- `GET    /clubs`      : Xem danh sách các Câu lạc bộ.
-- `GET    /clubs/:id`  : Xem chi tiết CLB (thông tin giới thiệu, danh sách thành viên trực thuộc).
-- `POST   /clubs`      : Tạo CLB mới (Người tạo sẽ thành Owner/Chủ tịch CLB).
-- `PATCH  /clubs/:id`  : Chỉnh sửa thông tin CLB.
-- `DELETE /clubs/:id`  : Xóa CLB (Chỉ Owner hoặc Admin mới có quyền).
+## 2. Module `Communities` (Cộng đồng / Câu lạc bộ)
+*Quản lý thông tin cộng đồng, hội nhóm Pickleball/Tennis.*
+- `GET    /communities`      : Xem danh sách các Cộng đồng.
+- `GET    /communities/:id`  : Xem chi tiết Community (thông tin giới thiệu, danh sách thành viên trực thuộc).
+- `POST   /communities`      : Tạo Community mới (Người tạo sẽ thành Owner).
+- `PATCH  /communities/:id`  : Chỉnh sửa thông tin Community.
+- `DELETE /communities/:id`  : Xóa Community (Chỉ Owner hoặc Admin mới có quyền).
 - **Sub-routes:**
-  - `POST /clubs/:id/members` : Thêm thành viên vào CLB.
-  - `DELETE /clubs/:id/members/:userId` : Xóa thành viên khỏi CLB.
+  - `POST /communities/:id/members` : Thêm thành viên vào Community.
+  - `DELETE /communities/:id/members/:userId` : Xóa thành viên khỏi Community.
 
 ## 3. Module `Tournaments` (Giải đấu)
 *Phần trung tâm của hệ thống, quản lý thông tin giải đấu.*

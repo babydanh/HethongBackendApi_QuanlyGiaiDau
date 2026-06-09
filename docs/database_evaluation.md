@@ -19,7 +19,7 @@
 ### 3. **Không lưu bằng chứng đồng ý Điều khoản (Terms of Service)**
 - **Trước:** Không có bảng nào ghi lại việc user đã đồng ý Điều khoản sử dụng.
 - **Vấn đề pháp lý:** Theo luật GDPR/Bảo vệ dữ liệu cá nhân VN (Nghị định 13/2023), bạn phải **chứng minh** được rằng user đã đồng ý xử lý dữ liệu cá nhân của họ. Nếu user kiện "tôi không đồng ý cho bạn thu thập thông tin", mà bạn không có bằng chứng → bạn thua.
-- **Đã sửa:** Thêm bảng `user_consents` — lưu loại consent, phiên bản điều khoản, IP, thời gian chấp nhận.
+- **Đã sửa:** Thêm bảng `user_consents` vào `database_schema.md` (Tầng 9) — lưu loại consent, phiên bản điều khoản, IP, thời gian chấp nhận, thời gian thu hồi.
 
 ### 4. **Bảng `matches` thiếu ràng buộc CHECK quan trọng**
 - **Trước:** Không có ràng buộc nào ngăn `participant1_id = participant2_id` (tự đánh với chính mình) hoặc `p1_sets_won < 0` (số set âm).
