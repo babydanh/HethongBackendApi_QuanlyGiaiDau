@@ -13,6 +13,8 @@ export default defineConfig({
     user: process.env.DB_USERNAME || 'postgres',
     password: process.env.DB_PASSWORD || 'your_password',
     database: process.env.DB_DATABASE || 'tournament_db',
-    ssl: true,
+    ssl: {
+      rejectUnauthorized: false,
+    },
   },
 });

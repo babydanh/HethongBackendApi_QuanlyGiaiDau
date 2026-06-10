@@ -18,6 +18,7 @@ const geography = customType<{ data: string }>({
 import { users } from './users.schema';
 import { categories } from './categories.schema';
 import { provinces, districts, wards } from './regions.schema';
+import { tournaments } from './tournaments.schema';
 
 export const communities = pgTable('communities', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -102,3 +103,22 @@ export const communityFollows = pgTable('community_follows', {
 }, (table) => ({
   uniqueFollow: unique('unique_community_follow').on(table.communityId, table.userId, table.type),
 }));
+
+export const communityChallenges = pgTable('community_challenges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  challengerId: uuid('challenger_id')
+    .references(() => communities.id, { onDelete: 'cascade' })
+    .notNull(),
+  challengedId: uuid('challenged_id')
+    .references(() => communities.id, { onDelete: 'cascade' })
+    .notNull(),
+  senderUserId: uuid('sender_user_id')
+    .references(() => users.id, { onDelete: 'restrict' })
+    .notNull(),
+  status: varchar('status', { length: 50 }).default('PENDING').notNull(),
+  message: text('message'),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  tournamentId: uuid('tournament_id').references(() => tournaments.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});

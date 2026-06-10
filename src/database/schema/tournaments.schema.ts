@@ -9,6 +9,7 @@ import {
   timestamp,
   integer,
   check,
+  date,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
@@ -31,7 +32,7 @@ export const tournaments = pgTable(
       .notNull(),
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
-    status: varchar('status', { length: 50 }).default('UPCOMING').notNull(),
+    status: varchar('status', { length: 50 }).default('DRAFT').notNull(),
     matchType: varchar('match_type', { length: 50 }).default('DOUBLES').notNull(),
     sportRules: jsonb('sport_rules').notNull(),
     tournamentConfig: jsonb('tournament_config').notNull(),
@@ -44,6 +45,7 @@ export const tournaments = pgTable(
     })
       .default('5.00')
       .notNull(),
+    platformFeePerPlayer: integer('platform_fee_per_player').default(10000).notNull(),
     registrationStartDate: timestamp('registration_start_date', { withTimezone: true }),
     registrationEndDate: timestamp('registration_end_date', { withTimezone: true }),
     maxParticipants: integer('max_participants'),
@@ -52,6 +54,17 @@ export const tournaments = pgTable(
     venueId: uuid('venue_id').references(() => tournamentVenues.id, {
       onDelete: 'set null',
     }),
+    tournamentType: varchar('tournament_type', { length: 50 }).default('CLUB').notNull(),
+    bannerUrl: text('banner_url'),
+    logoUrl: text('logo_url'),
+    galleryImages: text('gallery_images')
+      .array()
+      .default(sql`'{}'::text[]`)
+      .notNull(),
+    prizeDescription: text('prize_description'),
+    prizes: jsonb('prizes').default(sql`'[]'::jsonb`),
+    inviteCode: varchar('invite_code', { length: 20 }).unique(),
+    contactInfo: jsonb('contact_info'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -80,6 +93,10 @@ export const tournamentStages = pgTable('tournament_stages', {
   name: varchar('name', { length: 255 }).notNull(),
   type: varchar('type', { length: 50 }).notNull(),
   order: integer('order').notNull(),
+  roundConfig: jsonb('round_config'),
+  venueId: uuid('venue_id').references(() => tournamentVenues.id, { onDelete: 'set null' }),
+  scheduledDate: date('scheduled_date'),
+  notificationNote: text('notification_note'),
 });
 
 export const tournamentGroups = pgTable('tournament_groups', {
