@@ -16,6 +16,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
 import { Public } from '../../common/decorators/public.decorator';
+import type { JwtPayload } from './interfaces/jwt-payload.interface';
 import { JwtRefreshAuthGuard } from '../../common/guards/jwt-refresh-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { OAuthProfileDto } from './dto/oauth-profile.dto';
@@ -62,7 +63,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({ status: 200, description: 'Tokens successfully refreshed' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async refresh(@Req() req: Request & { user: any }, @Res({ passthrough: true }) res: Response) {
+  async refresh(@Req() req: Request & { user: JwtPayload & { refreshToken: string } }, @Res({ passthrough: true }) res: Response) {
     const refreshToken = req.user.refreshToken;
 
     const userAgent = req.headers['user-agent'];
@@ -77,8 +78,8 @@ export class AuthController {
     this.setTokensCookies(res, responseData.accessToken, responseData.refreshToken);
 
     // Delete tokens from body
-    delete (responseData as any).accessToken;
-    delete (responseData as any).refreshToken;
+    delete (responseData as { accessToken?: string }).accessToken;
+    delete (responseData as { refreshToken?: string }).refreshToken;
 
     return responseData;
   }

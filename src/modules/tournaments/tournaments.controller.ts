@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -75,7 +76,7 @@ export class TournamentsController {
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('invite') inviteCode?: string,
-    @Req() req?: any,
+    @Req() req?: Request,
   ) {
     const userId = this.getUserIdFromRequest(req);
     return this.tournamentsService.findOne(id, userId, inviteCode);
@@ -91,7 +92,7 @@ export class TournamentsController {
     return this.tournamentsService.validateInvite(id, inviteCode);
   }
 
-  private getUserIdFromRequest(request: any): string | null {
+  private getUserIdFromRequest(request: Request | undefined): string | null {
     if (!request || !request.headers) return null;
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {

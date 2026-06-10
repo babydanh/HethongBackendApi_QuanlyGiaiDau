@@ -11,6 +11,15 @@ import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 
+export interface MatchBroadcastData {
+  id: string;
+  matchId?: string;
+  status?: string;
+  homeScore?: number;
+  awayScore?: number;
+  [key: string]: unknown;
+}
+
 @WebSocketGateway({
   cors: {
     origin: '*',
@@ -54,11 +63,11 @@ export class LiveScoreGateway
     return { event: 'left', data: room };
   }
 
-  broadcastScoreUpdate(matchId: string, matchData: any) {
+  broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData) {
     this.server.to(`match:${matchId}`).emit('score:update', matchData);
   }
 
-  broadcastMatchStatus(matchId: string, matchData: any) {
+  broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData) {
     this.server.to(`match:${matchId}`).emit('match:status', matchData);
   }
 }

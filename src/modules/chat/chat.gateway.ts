@@ -10,6 +10,14 @@ import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 
+export interface ChatMessagePayload {
+  senderId?: string | null;
+  senderName?: string;
+  content?: string | null;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
 @WebSocketGateway({
   cors: {
     origin: '*',
@@ -62,7 +70,7 @@ export class ChatGateway {
     return { event: 'messageSent', data: messagePayload };
   }
 
-  broadcastMessage(roomId: string, message: any) {
+  broadcastMessage(roomId: string, message: ChatMessagePayload) {
     this.server.to(`chat:${roomId}`).emit('chat:message', message);
   }
 }

@@ -73,11 +73,11 @@ export class CreateTournamentDto {
 
   @ApiPropertyOptional({ example: [], description: 'Giải thưởng chi tiết' })
   @IsOptional()
-  prizes?: any;
+  prizes?: Record<string, unknown>[];
 
   @ApiPropertyOptional({ example: {}, description: 'Thông tin liên hệ BTC' })
   @IsOptional()
-  contactInfo?: any;
+  contactInfo?: Record<string, string>;
 
   @ApiPropertyOptional({
     example: 'PUBLIC',
@@ -136,14 +136,14 @@ export class CreateTournamentDto {
     description: 'Cấu hình luật chơi thể thao',
   })
   @IsObject()
-  sportRules: any;
+  sportRules: Record<string, unknown>;
 
   @ApiProperty({
     example: { bracketType: 'SINGLE_ELIMINATION', maxTeams: 16 },
     description: 'Cấu hình giải đấu',
   })
   @IsObject()
-  tournamentConfig: any;
+  tournamentConfig: Record<string, unknown>;
 
   @ApiPropertyOptional({ example: 500000, description: 'Phí tham gia' })
   @IsNumber()

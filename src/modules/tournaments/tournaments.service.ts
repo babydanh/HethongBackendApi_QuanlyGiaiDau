@@ -77,7 +77,7 @@ export class TournamentsService {
     if (!createTournamentDto.sportRules) {
       const config = category.categoryConfig as CategoryConfig;
       if (config && config.defaultSportRules) {
-        createTournamentDto.sportRules = config.defaultSportRules;
+        createTournamentDto.sportRules = config.defaultSportRules as unknown as Record<string, unknown>;
       } else {
         createTournamentDto.sportRules = {};
       }
