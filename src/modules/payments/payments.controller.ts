@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, ParseUUIDPipe } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
@@ -42,5 +42,31 @@ export class PaymentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.paymentsService.requestPayout(user.sub, payoutRequestDto);
+  }
+
+  @Get('me')
+  @ApiBearerAuth()
+  @Roles(UserRole.PLAYER, UserRole.ORGANIZER)
+  @ApiOperation({ summary: 'Lấy danh sách lịch sử thanh toán cá nhân' })
+  async findMyPayments(@CurrentUser() user: JwtPayload) {
+    return this.paymentsService.findUserPayments(user.sub);
+  }
+
+  @Get('payouts')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER)
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu rút tiền của Ban tổ chức' })
+  async findMyPayouts(@CurrentUser() user: JwtPayload) {
+    return this.paymentsService.findOrganizerPayouts(user.sub);
+  }
+
+  @Get(':id')
+  @ApiBearerAuth()
+  @Roles(UserRole.PLAYER, UserRole.ORGANIZER)
+  @ApiOperation({ summary: 'Lấy chi tiết giao dịch thanh toán theo ID' })
+  async findPaymentById(
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.paymentsService.findPaymentById(id);
   }
 }

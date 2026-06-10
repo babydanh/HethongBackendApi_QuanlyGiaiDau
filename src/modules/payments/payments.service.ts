@@ -1,12 +1,16 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PaymentsRepository } from './payments.repository';
+import { BracketGeneratorService } from '../tournaments/bracket-generator.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
 import { WebhookDto } from './dto/webhook.dto';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly paymentsRepository: PaymentsRepository) {}
+  constructor(
+    private readonly paymentsRepository: PaymentsRepository,
+    private readonly bracketGeneratorService: BracketGeneratorService,
+  ) {}
 
   async createPaymentLink(userId: string, data: CreatePaymentDto) {
     const payment = await this.paymentsRepository.createPayment(userId, data);
@@ -44,7 +48,13 @@ export class PaymentsService {
         'WEBHOOK_CALLBACK',
       );
       
-      // Todo: Gọi ParticipantRepository để update is_paid = true
+      if (!payment.participantId) {
+        try {
+          await this.bracketGeneratorService.generateSingleElimination(payment.tournamentId, payment.userId);
+        } catch (err) {
+          console.error('Failed to auto-generate bracket on platform fee payment:', err);
+        }
+      }
       
       return { message: 'Payment confirmed successfully' };
     } else {
@@ -78,5 +88,21 @@ export class PaymentsService {
       totalCollected,
       platformFeeRetained,
     );
+  }
+
+  async findUserPayments(userId: string) {
+    return this.paymentsRepository.findUserPayments(userId);
+  }
+
+  async findOrganizerPayouts(organizerId: string) {
+    return this.paymentsRepository.findOrganizerPayouts(organizerId);
+  }
+
+  async findPaymentById(id: string) {
+    const payment = await this.paymentsRepository.findPaymentById(id);
+    if (!payment) {
+      throw new NotFoundException('Payment transaction not found');
+    }
+    return payment;
   }
 }

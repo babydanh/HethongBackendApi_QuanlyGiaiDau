@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
 
@@ -66,6 +66,20 @@ export class PaymentsRepository {
           newStatus: status,
           reason: reason || 'SYSTEM_UPDATE',
         });
+
+        if (status === 'COMPLETED') {
+          if (oldPayment.participantId) {
+            await tx
+              .update(schema.tournamentParticipants)
+              .set({ isPaid: true })
+              .where(eq(schema.tournamentParticipants.id, oldPayment.participantId));
+          } else {
+            await tx
+              .update(schema.tournaments)
+              .set({ status: 'UPCOMING', updatedAt: new Date() })
+              .where(eq(schema.tournaments.id, oldPayment.tournamentId));
+          }
+        }
       }
 
       return updated;
@@ -104,5 +118,35 @@ export class PaymentsRepository {
 
       return record;
     });
+  }
+
+  async findUserPayments(userId: string) {
+    return this.db
+      .select({
+        payment: schema.payments,
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
+      })
+      .from(schema.payments)
+      .innerJoin(schema.tournaments, eq(schema.payments.tournamentId, schema.tournaments.id))
+      .where(eq(schema.payments.userId, userId))
+      .orderBy(desc(schema.payments.createdAt));
+  }
+
+  async findOrganizerPayouts(organizerId: string) {
+    return this.db
+      .select({
+        payout: schema.organizerPayouts,
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
+      })
+      .from(schema.organizerPayouts)
+      .innerJoin(schema.tournaments, eq(schema.organizerPayouts.tournamentId, schema.tournaments.id))
+      .where(eq(schema.organizerPayouts.organizerId, organizerId))
+      .orderBy(desc(schema.organizerPayouts.createdAt));
   }
 }
