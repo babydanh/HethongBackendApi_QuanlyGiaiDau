@@ -207,4 +207,18 @@ export class TournamentsRepository {
       return participant;
     });
   }
+
+  async findCommunityMember(communityId: string, userId: string) {
+    const records = await this.db
+      .select()
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+    return records[0];
+  }
 }

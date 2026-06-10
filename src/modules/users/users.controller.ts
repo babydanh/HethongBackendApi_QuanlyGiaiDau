@@ -44,6 +44,14 @@ export class UsersController {
     return this.usersService.findAll(query);
   }
 
+  @Get('search/public')
+  @ApiOperation({ summary: 'Tìm kiếm người dùng công khai để mời vào nhóm' })
+  @ApiResponse({ status: 200, description: 'Danh sách người dùng khớp từ khoá' })
+  async searchPublic(@Query('q') q: string) {
+    if (!q || q.trim().length < 2) return { data: [] };
+    return this.usersService.findAll({ search: q, page: 1, limit: 10 });
+  }
+
   @Get('profile')
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'Return user profile' })

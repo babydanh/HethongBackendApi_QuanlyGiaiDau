@@ -42,36 +42,33 @@ export class TournamentsController {
 
   @Post()
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Tạo giải đấu mới' })
   async create(
     @Body() createTournamentDto: CreateTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.create(user.sub, createTournamentDto);
+    return this.tournamentsService.create(user.sub, createTournamentDto, [user.role]);
   }
 
   @Patch(':id')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật giải đấu' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateTournamentDto: UpdateTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.update(id, user.sub, updateTournamentDto);
+    return this.tournamentsService.update(id, user.sub, updateTournamentDto, [user.role]);
   }
 
   @Delete(':id')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xóa giải đấu (Soft Delete)' })
   async remove(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.remove(id, user.sub);
+    return this.tournamentsService.remove(id, user.sub, [user.role]);
   }
 
   @Post(':id/generate-bracket')

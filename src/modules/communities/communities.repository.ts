@@ -251,6 +251,54 @@ export class CommunitiesRepository {
     return member;
   }
 
+  async transferOwnership(communityId: string, currentOwnerId: string, newOwnerId: string) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Demote current owner to MODERATOR in community_members
+      await tx
+        .update(schema.communityMembers)
+        .set({ role: 'MODERATOR' })
+        .where(
+          and(
+            eq(schema.communityMembers.communityId, communityId),
+            eq(schema.communityMembers.userId, currentOwnerId)
+          )
+        );
+
+      // 2. Promote target user to OWNER in community_members
+      await tx
+        .update(schema.communityMembers)
+        .set({ role: 'OWNER' })
+        .where(
+          and(
+            eq(schema.communityMembers.communityId, communityId),
+            eq(schema.communityMembers.userId, newOwnerId)
+          )
+        );
+
+      // 3. Update creatorId in communities table
+      const [updatedCommunity] = await tx
+        .update(schema.communities)
+        .set({ creatorId: newOwnerId, updatedAt: new Date() })
+        .where(eq(schema.communities.id, communityId))
+        .returning();
+
+      // Return the promoted member record
+      const [newOwnerMember] = await tx
+        .select()
+        .from(schema.communityMembers)
+        .where(
+          and(
+            eq(schema.communityMembers.communityId, communityId),
+            eq(schema.communityMembers.userId, newOwnerId)
+          )
+        )
+        .limit(1);
+
+      return newOwnerMember;
+    });
+  }
+
+
   async removeMember(communityId: string, userId: string) {
     const [member] = await this.db
       .delete(schema.communityMembers)

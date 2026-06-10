@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, or, ilike, desc, asc, isNull } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -17,9 +17,11 @@ export class UsersRepository {
 
     let whereClause = isNull(schema.users.deletedAt);
     if (search) {
-      whereClause = or(
-        ilike(schema.users.email, `%${search}%`),
-        ilike(schema.profiles.fullName, `%${search}%`),
+      whereClause = and(
+        or(
+          ilike(schema.users.email, `%${search}%`),
+          ilike(schema.profiles.fullName, `%${search}%`),
+        ),
         isNull(schema.users.deletedAt),
       )!;
     }
@@ -49,6 +51,7 @@ export class UsersRepository {
     const countResult = await this.db
       .select({ id: schema.users.id })
       .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(whereClause);
 
     const total = countResult.length;

@@ -115,6 +115,37 @@ async function main() {
     ]);
   }
 
+  // 4. Seed Table Tennis
+  console.log('Seeding Table Tennis...');
+  const [tableTennis] = await db
+    .insert(schema.categories)
+    .values({
+      name: 'Bóng bàn',
+      slug: 'table-tennis',
+      description: 'Môn thể thao dùng vợt gỗ và quả bóng bàn nhỏ',
+      categoryConfig: { hasSets: true, maxSets: 5 },
+    })
+    .onConflictDoNothing({ target: schema.categories.slug })
+    .returning();
+
+  if (tableTennis) {
+    await db.insert(schema.eloTiers).values([
+      { categoryId: tableTennis.id, name: 'Phong trào', minElo: 0, maxElo: 1500 },
+      {
+        categoryId: tableTennis.id,
+        name: 'Bán chuyên',
+        minElo: 1500,
+        maxElo: 2000,
+      },
+      {
+        categoryId: tableTennis.id,
+        name: 'Chuyên nghiệp',
+        minElo: 2000,
+        maxElo: 3000,
+      },
+    ]);
+  }
+
   console.log('Seeding complete!');
   process.exit(0);
 }

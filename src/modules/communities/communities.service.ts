@@ -139,8 +139,19 @@ export class CommunitiesService {
       throw new NotFoundException('Target user is not a member');
     }
 
+    if (dto.role === 'OWNER') {
+      if (requesterId === targetUserId) {
+        throw new ConflictException('You are already the OWNER');
+      }
+      return await this.communitiesRepository.transferOwnership(
+        communityId,
+        requesterId,
+        targetUserId,
+      );
+    }
+
     // Prevent demoting self (optional, but good practice to ensure at least 1 owner remains)
-    if (requesterId === targetUserId && dto.role !== 'OWNER') {
+    if (requesterId === targetUserId) {
       throw new ForbiddenException('Cannot demote yourself from OWNER role');
     }
 
