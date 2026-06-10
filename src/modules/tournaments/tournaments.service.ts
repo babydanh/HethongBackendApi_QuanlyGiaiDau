@@ -15,9 +15,15 @@ export class TournamentsService {
     private readonly bracketGeneratorService: BracketGeneratorService,
   ) {}
 
-  private mapTournamentFormat(tournament: any) {
-    if (tournament && tournament.tournamentConfig && (tournament.tournamentConfig as any).bracketType) {
-      tournament.format = (tournament.tournamentConfig as any).bracketType;
+  private mapTournamentFormat<T extends { format?: string | null; tournamentConfig?: unknown }>(tournament: T): T {
+    if (
+      tournament &&
+      tournament.tournamentConfig &&
+      typeof tournament.tournamentConfig === 'object' &&
+      'bracketType' in tournament.tournamentConfig &&
+      typeof (tournament.tournamentConfig as Record<string, unknown>).bracketType === 'string'
+    ) {
+      tournament.format = (tournament.tournamentConfig as Record<string, unknown>).bracketType as string;
     }
     return tournament;
   }
@@ -44,11 +50,20 @@ export class TournamentsService {
     return result.map(t => this.mapTournamentFormat(t));
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, userId?: string | null, inviteCode?: string) {
     const tournament = await this.tournamentsRepository.findById(id);
     if (!tournament) {
       throw new NotFoundException('Tournament not found');
     }
+
+    if (tournament.visibility === 'PRIVATE') {
+      const isOwner = userId && tournament.createdBy === userId;
+      const isInviteMatch = inviteCode && tournament.inviteCode === inviteCode;
+      if (!isOwner && !isInviteMatch) {
+        throw new ForbiddenException('Giải đấu này yêu cầu mã mời');
+      }
+    }
+
     return this.mapTournamentFormat(tournament);
   }
 
@@ -258,8 +273,20 @@ export class TournamentsService {
     return this.bracketGeneratorService.generateSingleElimination(id, userId);
   }
 
-  async register(id: string, userId: string, registerTournamentDto: RegisterTournamentDto) {
-    return this.tournamentsRepository.registerParticipant(id, userId, registerTournamentDto);
+  async register(id: string, userId: string, registerTournamentDto: RegisterTournamentDto, inviteCode?: string) {
+    return this.tournamentsRepository.registerParticipant(id, userId, registerTournamentDto, inviteCode);
+  }
+
+  async joinTeam(tournamentId: string, userId: string, participantId: string, teamInviteToken: string) {
+    return this.tournamentsRepository.joinTeam(tournamentId, userId, participantId, teamInviteToken);
+  }
+
+  async withdraw(tournamentId: string, userId: string) {
+    return this.tournamentsRepository.withdraw(tournamentId, userId);
+  }
+
+  async myRegistration(tournamentId: string, userId: string) {
+    return this.tournamentsRepository.myRegistration(tournamentId, userId);
   }
 
   async findParticipants(id: string) {
@@ -475,5 +502,20 @@ export class TournamentsService {
     }
 
     return this.tournamentsRepository.updateStage(stageId, userId, data);
+  }
+
+  async validateInvite(id: string, inviteCode: string) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament || tournament.inviteCode !== inviteCode) {
+      throw new BadRequestException('Mã mời không hợp lệ');
+    }
+    return {
+      id: tournament.id,
+      name: tournament.name,
+      startDate: tournament.startDate,
+      entryFee: tournament.entryFee,
+      matchType: tournament.matchType,
+      genderRestriction: tournament.genderRestriction,
+    };
   }
 }

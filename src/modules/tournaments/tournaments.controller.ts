@@ -9,6 +9,7 @@ import {
   Query,
   ParseUUIDPipe,
   ParseIntPipe,
+  Req,
 } from '@nestjs/common';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
@@ -71,8 +72,38 @@ export class TournamentsController {
   @Public()
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết giải đấu' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.tournamentsService.findOne(id);
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('invite') inviteCode?: string,
+    @Req() req?: any,
+  ) {
+    const userId = this.getUserIdFromRequest(req);
+    return this.tournamentsService.findOne(id, userId, inviteCode);
+  }
+
+  @Public()
+  @Post(':id/validate-invite')
+  @ApiOperation({ summary: 'Kiểm tra mã mời giải đấu PRIVATE' })
+  async validateInvite(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('inviteCode') inviteCode: string,
+  ) {
+    return this.tournamentsService.validateInvite(id, inviteCode);
+  }
+
+  private getUserIdFromRequest(request: any): string | null {
+    if (!request || !request.headers) return null;
+    const authHeader = request.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return null;
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('ascii'));
+      return payload.sub || null;
+    } catch {
+      return null;
+    }
   }
 
   @Post()
@@ -144,8 +175,41 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() registerTournamentDto: RegisterTournamentDto,
     @CurrentUser() user: JwtPayload,
+    @Query('invite') inviteCode?: string,
   ) {
-    return this.tournamentsService.register(id, user.sub, registerTournamentDto);
+    return this.tournamentsService.register(id, user.sub, registerTournamentDto, inviteCode);
+  }
+
+  @Post(':id/join-team')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Đồng đội tham gia nhóm thi đấu đánh đôi' })
+  async joinTeam(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('participantId') participantId: string,
+    @Body('teamInviteToken') teamInviteToken: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.joinTeam(id, user.sub, participantId, teamInviteToken);
+  }
+
+  @Post(':id/withdraw')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Rút lui khỏi giải đấu' })
+  async withdraw(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.withdraw(id, user.sub);
+  }
+
+  @Get(':id/my-registration')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Kiểm tra trạng thái đăng ký của bản thân trong giải đấu' })
+  async myRegistration(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.myRegistration(id, user.sub);
   }
 
   @Post(':id/regenerate-invite')

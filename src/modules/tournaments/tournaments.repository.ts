@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema';
@@ -19,7 +19,7 @@ export class TournamentsRepository {
   ) {}
 
   async findAll(query: QueryTournamentDto) {
-    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId } = query;
+    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy } = query;
     const offset = (page - 1) * limit;
 
     const conditions: SQL[] = [];
@@ -27,8 +27,10 @@ export class TournamentsRepository {
     // Always exclude soft-deleted tournaments
     conditions.push(sql`${schema.tournaments.deletedAt} IS NULL`);
 
-    // Exclude DRAFT tournaments from public listing
-    conditions.push(ne(schema.tournaments.status, 'DRAFT'));
+    // Exclude DRAFT tournaments from public listing (unless createdBy is specified)
+    if (!createdBy) {
+      conditions.push(ne(schema.tournaments.status, 'DRAFT'));
+    }
 
     if (search) {
       conditions.push(ilike(schema.tournaments.name, `%${search}%`));
@@ -39,14 +41,36 @@ export class TournamentsRepository {
     if (status) {
       conditions.push(eq(schema.tournaments.status, status));
     }
-    if (tournamentType) {
-      conditions.push(eq(schema.tournaments.tournamentType, tournamentType));
+    if (communityId) {
+      conditions.push(eq(schema.tournaments.communityId, communityId));
+      const type = tournamentType || 'CLUB';
+      conditions.push(eq(schema.tournaments.tournamentType, type));
+    } else {
+      const type = tournamentType || 'PUBLIC';
+      conditions.push(eq(schema.tournaments.tournamentType, type));
     }
     if (matchType) {
       conditions.push(eq(schema.tournaments.matchType, matchType));
     }
-    if (communityId) {
-      conditions.push(eq(schema.tournaments.communityId, communityId));
+
+    if (createdBy) {
+      conditions.push(eq(schema.tournaments.createdBy, createdBy));
+      if (visibility) {
+        conditions.push(eq(schema.tournaments.visibility, visibility));
+      }
+    } else {
+      const reqVisibility = visibility || 'PUBLIC';
+      conditions.push(eq(schema.tournaments.visibility, reqVisibility));
+    }
+
+    if (region) {
+      conditions.push(
+        sql`exists (
+          select 1 from ${schema.tournamentVenues} v 
+          where v.id = ${schema.tournaments.venueId} 
+          and v.location_address ilike ${`%${region}%`}
+        )`
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -227,6 +251,8 @@ export class TournamentsRepository {
           contactInfo: data.contactInfo as typeof schema.tournaments.$inferInsert['contactInfo'],
           status: 'DRAFT',
           platformFeePerPlayer: data.platformFeePerPlayer !== undefined ? data.platformFeePerPlayer : 10000,
+          visibility: data.visibility || 'PUBLIC',
+          genderRestriction: data.genderRestriction || null,
         })
         .returning();
       
@@ -277,6 +303,8 @@ export class TournamentsRepository {
           ...(data.prizeDescription !== undefined && { prizeDescription: data.prizeDescription }),
           ...(data.prizes !== undefined && { prizes: data.prizes as typeof schema.tournaments.$inferInsert['prizes'] }),
           ...(data.contactInfo !== undefined && { contactInfo: data.contactInfo as typeof schema.tournaments.$inferInsert['contactInfo'] }),
+          ...(data.visibility !== undefined && { visibility: data.visibility }),
+          ...(data.genderRestriction !== undefined && { genderRestriction: data.genderRestriction }),
           updatedAt: new Date(),
         })
         .where(eq(schema.tournaments.id, id))
@@ -302,7 +330,7 @@ export class TournamentsRepository {
     });
   }
 
-  async registerParticipant(tournamentId: string, userId: string, data: RegisterTournamentDto) {
+  async registerParticipant(tournamentId: string, userId: string, data: RegisterTournamentDto, inviteCode?: string) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -315,33 +343,66 @@ export class TournamentsRepository {
         throw new BadRequestException('Tournament not found');
       }
 
-      // 2. Kiểm tra trạng thái - phải mở đăng ký (chấp nhận REGISTRATION_OPEN)
-      if (tournament.status !== 'REGISTRATION_OPEN') {
-        throw new BadRequestException('Tournament is not open for registration');
+      // 2. Kiểm tra trạng thái - phải mở đăng ký (REGISTRATION_OPEN hoặc UPCOMING)
+      if (tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
+        throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký.');
       }
 
       // 3. Kiểm tra thời hạn đăng ký
       const now = new Date();
       if (tournament.registrationStartDate && now < tournament.registrationStartDate) {
-        throw new BadRequestException('Registration has not started yet');
+        throw new BadRequestException('Thời gian đăng ký chưa bắt đầu.');
       }
       if (tournament.registrationEndDate && now > tournament.registrationEndDate) {
-        throw new BadRequestException('Registration has ended');
+        throw new BadRequestException('Thời gian đăng ký đã kết thúc.');
       }
 
-      // 4. Kiểm tra số lượng
+      // 4. Kiểm tra mã mời nếu giải PRIVATE
+      if (tournament.visibility === 'PRIVATE') {
+        if (!inviteCode || tournament.inviteCode !== inviteCode) {
+          throw new BadRequestException('Mã mời giải đấu không hợp lệ hoặc thiếu.');
+        }
+      }
+
+      // 5. Kiểm tra giới tính người đăng ký (đối với leader)
+      if (tournament.genderRestriction) {
+        const [profile] = await tx
+          .select({ gender: schema.profiles.gender })
+          .from(schema.profiles)
+          .where(eq(schema.profiles.userId, userId))
+          .limit(1);
+        if (!profile || !profile.gender) {
+          throw new BadRequestException('Vui lòng cập nhật giới tính trong hồ sơ cá nhân để đăng ký.');
+        }
+        const userGender = profile.gender.toUpperCase();
+        const restriction = tournament.genderRestriction.toUpperCase();
+        if (restriction === 'MALE' && userGender !== 'MALE') {
+          throw new BadRequestException('Giải đấu chỉ dành cho Nam.');
+        }
+        if (restriction === 'FEMALE' && userGender !== 'FEMALE') {
+          throw new BadRequestException('Giải đấu chỉ dành cho Nữ.');
+        }
+        // MIXED check will be enforced when partner joins for doubles
+      }
+
+      // 6. Kiểm tra số lượng tối đa
       if (tournament.maxParticipants) {
         const [participantCount] = await tx
           .select({ count: count() })
           .from(schema.tournamentParticipants)
-          .where(eq(schema.tournamentParticipants.tournamentId, tournamentId));
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, tournamentId),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+            )
+          );
         
         if (participantCount.count >= tournament.maxParticipants) {
-          throw new BadRequestException('Tournament is full');
+          throw new BadRequestException('Giải đấu đã đầy.');
         }
       }
 
-      // 5. CLUB check: user must be community member
+      // 7. CLUB check: user must be community member
       if (tournament.tournamentType === 'CLUB' && tournament.communityId) {
         const member = await tx
           .select()
@@ -349,30 +410,17 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.communityMembers.communityId, tournament.communityId),
-              eq(schema.communityMembers.userId, userId)
+              eq(schema.communityMembers.userId, userId),
+              eq(schema.communityMembers.status, 'JOINED')
             )
           )
           .limit(1);
         if (member.length === 0) {
-          throw new BadRequestException('You must be a member of the community to join this club tournament');
+          throw new BadRequestException('Chỉ thành viên CLB mới được đăng ký giải đấu này.');
         }
       }
 
-      // 6. MatchType doubles / singles checks
-      if (tournament.matchType === 'DOUBLES' || tournament.matchType === 'MIXED_DOUBLES') {
-        if (!data.memberIds || data.memberIds.length !== 2) {
-          throw new BadRequestException('Doubles team must have exactly 2 members');
-        }
-        if (!data.memberIds.includes(userId)) {
-          throw new BadRequestException('You must be one of the members of the team');
-        }
-      } else if (tournament.matchType === 'SINGLES') {
-        if (!data.memberIds || data.memberIds.length !== 1 || data.memberIds[0] !== userId) {
-          throw new BadRequestException('Singles team must have exactly 1 member (yourself)');
-        }
-      }
-
-      // 7. Check if any of the team members are already registered in this tournament
+      // 8. Kiểm tra xem người đăng ký đã có trong giải đấu này chưa (chống trùng)
       const existingRosters = await tx
         .select({ userId: schema.tournamentRosters.userId })
         .from(schema.tournamentRosters)
@@ -380,38 +428,344 @@ export class TournamentsRepository {
         .where(
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
-            inArray(schema.tournamentRosters.userId, data.memberIds)
+            eq(schema.tournamentRosters.userId, userId),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
           )
         );
       if (existingRosters.length > 0) {
-        throw new BadRequestException('One or more team members are already registered in this tournament');
+        throw new BadRequestException('Bạn đã đăng ký tham gia giải đấu này rồi.');
       }
 
-      // 8. Thêm participant
+      // 9. Thêm participant
+      const isDoubles = tournament.matchType === 'DOUBLES' || tournament.matchType === 'MIXED_DOUBLES';
+      const teamInviteToken = isDoubles ? Math.random().toString(36).substring(2, 14).toUpperCase() : null;
+      const teamStatus = isDoubles ? 'PENDING' : 'COMPLETE';
+      const entryFeeAmount = parseFloat(tournament.entryFee || '0');
+      const isPaid = entryFeeAmount === 0;
+
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
         .values({
           tournamentId,
           registeredBy: userId,
           teamName: data.teamName,
-          isPaid: false, // Mặc định chưa thanh toán
+          isPaid,
+          teamInviteToken,
+          teamStatus,
         })
         .returning();
 
-      // 9. Thêm rosters
-      const rostersData = data.memberIds.map(memberId => ({
+      // 10. Thêm rosters cho Leader
+      await tx.insert(schema.tournamentRosters).values({
         participantId: participant.id,
-        userId: memberId,
+        userId: userId,
         role: 'MAIN',
-      }));
+      });
 
-      await tx.insert(schema.tournamentRosters).values(rostersData);
+      // 11. Xử lý Payment cho Singles (nếu có phí)
+      let paymentUrl: string | null = null;
+      if (!isDoubles && entryFeeAmount > 0) {
+        const [payment] = await tx
+          .insert(schema.payments)
+          .values({
+            userId,
+            tournamentId,
+            participantId: participant.id,
+            amount: entryFeeAmount.toString(),
+            status: 'PENDING',
+            paymentGateway: 'VNPAY',
+          })
+          .returning();
+        
+        paymentUrl = `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_TxnRef=${payment.id}&vnp_Amount=${entryFeeAmount * 100}`;
+      }
 
-      // 10. Audit log
+      // 12. Audit log
       await this.auditService.logCreate(tx, userId, 'tournament_participants', participant.id, participant);
 
-      return participant;
+      return {
+        participant,
+        paymentUrl,
+        teamInviteLink: isDoubles 
+          ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
+          : null
+      };
     });
+  }
+
+  async joinTeam(tournamentId: string, userId: string, participantId: string, teamInviteToken: string) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Kiểm tra giải đấu
+      const [tournament] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1);
+      if (!tournament) throw new NotFoundException('Tournament not found');
+
+      // 2. Tìm participant khớp với token
+      const [participant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.id, participantId),
+            eq(schema.tournamentParticipants.teamInviteToken, teamInviteToken)
+          )
+        )
+        .limit(1);
+
+      if (!participant) {
+        throw new BadRequestException('Mã mời đồng đội hoặc đội thi đấu không hợp lệ.');
+      }
+
+      if (participant.teamStatus !== 'PENDING') {
+        throw new BadRequestException('Đội thi đấu này đã đủ thành viên hoặc không ở trạng thái chờ.');
+      }
+
+      // 3. Kiểm tra user chưa đăng ký giải này
+      const existingRosters = await tx
+        .select({ userId: schema.tournamentRosters.userId })
+        .from(schema.tournamentRosters)
+        .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            eq(schema.tournamentRosters.userId, userId),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+          )
+        );
+      if (existingRosters.length > 0) {
+        throw new BadRequestException('Bạn đã đăng ký tham gia giải đấu này rồi.');
+      }
+
+      // 4. Lấy giới tính của Leader và Partner để kiểm tra ràng buộc
+      const leaderRoster = await tx
+        .select()
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, participantId))
+        .limit(1);
+      
+      if (leaderRoster.length === 0) {
+        throw new BadRequestException('Không tìm thấy trưởng nhóm.');
+      }
+      const leaderId = leaderRoster[0].userId;
+
+      const [leaderProfile] = await tx
+        .select({ gender: schema.profiles.gender })
+        .from(schema.profiles)
+        .where(eq(schema.profiles.userId, leaderId))
+        .limit(1);
+
+      const [partnerProfile] = await tx
+        .select({ gender: schema.profiles.gender })
+        .from(schema.profiles)
+        .where(eq(schema.profiles.userId, userId))
+        .limit(1);
+
+      if (tournament.genderRestriction) {
+        if (!partnerProfile || !partnerProfile.gender) {
+          throw new BadRequestException('Vui lòng cập nhật giới tính trong hồ sơ để tham gia.');
+        }
+
+        const leaderGender = leaderProfile?.gender?.toUpperCase();
+        const partnerGender = partnerProfile.gender.toUpperCase();
+        const restriction = tournament.genderRestriction.toUpperCase();
+
+        if (restriction === 'MALE' && partnerGender !== 'MALE') {
+          throw new BadRequestException('Giải đấu chỉ dành cho Nam.');
+        }
+        if (restriction === 'FEMALE' && partnerGender !== 'FEMALE') {
+          throw new BadRequestException('Giải đấu chỉ dành cho Nữ.');
+        }
+        if (restriction === 'MIXED') {
+          if (!leaderGender) {
+            throw new BadRequestException('Không tìm thấy giới tính của trưởng nhóm để xác nhận Mixed Doubles.');
+          }
+          if (leaderGender === partnerGender) {
+            throw new BadRequestException('Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.');
+          }
+        }
+      }
+
+      // 5. Thêm roster cho Partner
+      await tx
+        .insert(schema.tournamentRosters)
+        .values({
+          participantId: participant.id,
+          userId: userId,
+          role: 'MAIN',
+        });
+
+      // 6. Cập nhật trạng thái đội hoàn tất
+      const entryFeeAmount = parseFloat(tournament.entryFee || '0');
+      const isPaid = entryFeeAmount === 0;
+
+      const [updatedParticipant] = await tx
+        .update(schema.tournamentParticipants)
+        .set({
+          teamStatus: 'COMPLETE',
+          isPaid,
+        })
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+
+      // 7. Tạo Payment cho Doubles khi đội hoàn tất (nếu có phí)
+      let paymentUrl: string | null = null;
+      if (entryFeeAmount > 0) {
+        const [payment] = await tx
+          .insert(schema.payments)
+          .values({
+            userId: participant.registeredBy, // Người đăng ký (Leader) thanh toán
+            tournamentId,
+            participantId: participant.id,
+            amount: entryFeeAmount.toString(),
+            status: 'PENDING',
+            paymentGateway: 'VNPAY',
+          })
+          .returning();
+        
+        paymentUrl = `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_TxnRef=${payment.id}&vnp_Amount=${entryFeeAmount * 100}`;
+      }
+
+      await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, participant, updatedParticipant);
+
+      return {
+        participant: updatedParticipant,
+        paymentUrl,
+      };
+    });
+  }
+
+  async withdraw(tournamentId: string, userId: string) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Tìm participant mà user đang tham gia
+      const userRoster = await tx
+        .select({ participantId: schema.tournamentRosters.participantId })
+        .from(schema.tournamentRosters)
+        .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            eq(schema.tournamentRosters.userId, userId),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+          )
+        )
+        .limit(1);
+
+      if (userRoster.length === 0) {
+        throw new BadRequestException('Bạn chưa đăng ký giải đấu này hoặc đã rút lui.');
+      }
+
+      const participantId = userRoster[0].participantId;
+
+      // 2. Kiểm tra giải đấu chưa bắt đầu
+      const [tournament] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1);
+
+      if (!tournament) throw new NotFoundException('Tournament not found');
+
+      if (tournament.status === 'IN_PROGRESS' || tournament.status === 'COMPLETED') {
+        throw new BadRequestException('Giải đấu đã bắt đầu hoặc kết thúc, không thể rút lui.');
+      }
+
+      // 3. Cập nhật trạng thái
+      const [oldParticipant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .limit(1);
+
+      const [updatedParticipant] = await tx
+        .update(schema.tournamentParticipants)
+        .set({ teamStatus: 'WITHDRAWN', teamInviteToken: null }) // clear invite code or invite tokens if any
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+
+      // 4. Nếu đã thanh toán, thực hiện hoàn tiền (mock refund log)
+      let refundAmount: string | null = null;
+      if (oldParticipant.isPaid) {
+        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
+        if (entryFeeAmount > 0) {
+          // Tạo một transaction refund trong bảng payments với trạng thái COMPLETED
+          await tx
+            .insert(schema.payments)
+            .values({
+              userId: oldParticipant.registeredBy,
+              tournamentId,
+              participantId,
+              amount: `-${entryFeeAmount}`,
+              status: 'COMPLETED',
+              paymentGateway: 'REFUND',
+            });
+          refundAmount = entryFeeAmount.toString();
+        }
+      }
+
+      await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, oldParticipant, updatedParticipant);
+
+      return {
+        message: 'Đã rút khỏi giải đấu thành công.',
+        refundAmount,
+      };
+    });
+  }
+
+  async myRegistration(tournamentId: string, userId: string) {
+    const userRoster = await this.db
+      .select({ participantId: schema.tournamentRosters.participantId })
+      .from(schema.tournamentRosters)
+      .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          eq(schema.tournamentRosters.userId, userId),
+          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+        )
+      )
+      .limit(1);
+
+    if (userRoster.length === 0) {
+      return { registered: false };
+    }
+
+    const participantId = userRoster[0].participantId;
+
+    const [participant] = await this.db
+      .select()
+      .from(schema.tournamentParticipants)
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .limit(1);
+
+    const members = await this.db
+      .select({
+        userId: schema.tournamentRosters.userId,
+        role: schema.tournamentRosters.role,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.tournamentRosters)
+      .innerJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(eq(schema.tournamentRosters.participantId, participantId));
+
+    return {
+      registered: true,
+      participant: {
+        id: participant.id,
+        teamName: participant.teamName,
+        teamStatus: participant.teamStatus,
+        isPaid: participant.isPaid,
+        teamInviteToken: participant.teamInviteToken,
+        teamMembers: members,
+        teamInviteLink: participant.teamStatus === 'PENDING' && participant.registeredBy === userId
+          ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${participant.teamInviteToken}`
+          : null
+      }
+    };
   }
 
   async findCommunityMember(communityId: string, userId: string) {
