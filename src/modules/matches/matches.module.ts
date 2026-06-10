@@ -5,9 +5,10 @@ import { MatchesRepository } from './matches.repository';
 import { DatabaseModule } from '../../database/database.module';
 import { LiveScoreGateway } from './live-score.gateway';
 import { AuthModule } from '../auth/auth.module';
+import { RankingsModule } from '../rankings/rankings.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule],
+  imports: [DatabaseModule, AuthModule, RankingsModule],
   controllers: [MatchesController],
   providers: [MatchesService, MatchesRepository, LiveScoreGateway],
   exports: [MatchesService],

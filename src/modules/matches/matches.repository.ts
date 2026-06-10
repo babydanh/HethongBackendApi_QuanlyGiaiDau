@@ -67,7 +67,13 @@ export class MatchesRepository {
         stageId: schema.tournamentGroups.stageId,
         tournamentId: schema.tournamentStages.tournamentId,
         tournamentName: schema.tournaments.name,
+        tournamentType: schema.tournaments.tournamentType,
+        communityId: schema.tournaments.communityId,
+        categoryId: schema.tournaments.categoryId,
+        matchType: schema.tournaments.matchType,
         createdBy: schema.tournaments.createdBy,
+        stageType: schema.tournamentStages.type,
+        roundConfig: schema.tournamentStages.roundConfig,
       })
       .from(schema.tournamentGroups)
       .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
@@ -101,7 +107,18 @@ export class MatchesRepository {
       ...match,
       groupName: group?.name || '',
       tournamentId: group?.tournamentId || '',
-      tournament: group ? { id: group.tournamentId, name: group.tournamentName, createdBy: group.createdBy } : null,
+      tournament: group
+        ? {
+            id: group.tournamentId,
+            name: group.tournamentName,
+            tournamentType: group.tournamentType,
+            communityId: group.communityId,
+            categoryId: group.categoryId,
+            matchType: group.matchType,
+            createdBy: group.createdBy,
+          }
+        : null,
+      stage: group ? { type: group.stageType, roundConfig: group.roundConfig } : null,
       participant1,
       participant2,
     };
@@ -144,6 +161,124 @@ export class MatchesRepository {
       .returning();
 
     return updated;
+  }
+
+  async completeMatch(
+    id: string,
+    winnerId: string,
+    matchDetails: {
+      nextMatchId?: string | null;
+      loserNextMatchId?: string | null;
+      matchOrder: number;
+      participant1Id: string | null;
+      participant2Id: string | null;
+      groupId: string;
+      isRoundRobin: boolean;
+      p1SetsWon: number;
+      p2SetsWon: number;
+      scoreDetails: Record<string, string> | null | undefined;
+    }
+  ) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Update the match status to COMPLETED and winnerId
+      const [updated] = await tx
+        .update(schema.matches)
+        .set({
+          status: 'COMPLETED',
+          winnerId,
+          p1SetsWon: matchDetails.p1SetsWon,
+          p2SetsWon: matchDetails.p2SetsWon,
+          scoreDetails: matchDetails.scoreDetails,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.matches.id, id))
+        .returning();
+
+      // 2. Auto-advance Winner
+      if (matchDetails.nextMatchId) {
+        const isOdd = (matchDetails.matchOrder % 2 !== 0);
+        const updateField = isOdd
+          ? { participant1Id: winnerId }
+          : { participant2Id: winnerId };
+        
+        await tx
+          .update(schema.matches)
+          .set(updateField)
+          .where(eq(schema.matches.id, matchDetails.nextMatchId));
+      }
+
+      // 3. Auto-advance Loser (Double Elimination)
+      if (matchDetails.loserNextMatchId) {
+        const isOdd = (matchDetails.matchOrder % 2 !== 0);
+        const loserId = (winnerId === matchDetails.participant1Id)
+          ? matchDetails.participant2Id
+          : matchDetails.participant1Id;
+
+        const updateField = isOdd
+          ? { participant1Id: loserId }
+          : { participant2Id: loserId };
+
+        await tx
+          .update(schema.matches)
+          .set(updateField)
+          .where(eq(schema.matches.id, matchDetails.loserNextMatchId));
+      }
+
+      // 4. Update standings if Round Robin
+      if (matchDetails.isRoundRobin) {
+        const p1Id = matchDetails.participant1Id;
+        const p2Id = matchDetails.participant2Id;
+        const participants = [p1Id, p2Id];
+
+        for (const pId of participants) {
+          if (!pId) continue;
+          const isWinner = pId === winnerId;
+
+          const existing = await tx
+            .select()
+            .from(schema.groupStandings)
+            .where(
+              and(
+                eq(schema.groupStandings.groupId, matchDetails.groupId),
+                eq(schema.groupStandings.participantId, pId)
+              )
+            )
+            .limit(1);
+
+          if (existing.length > 0) {
+            const row = existing[0];
+            await tx
+              .update(schema.groupStandings)
+              .set({
+                played: row.played + 1,
+                won: row.won + (isWinner ? 1 : 0),
+                lost: row.lost + (isWinner ? 0 : 1),
+                totalPoints: row.totalPoints + (isWinner ? 3 : 0),
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.groupStandings.id, row.id));
+          } else {
+            await tx
+              .insert(schema.groupStandings)
+              .values({
+                groupId: matchDetails.groupId,
+                participantId: pId,
+                played: 1,
+                won: isWinner ? 1 : 0,
+                lost: isWinner ? 0 : 1,
+                draws: 0,
+                pointsFor: 0,
+                pointsAgainst: 0,
+                totalPoints: isWinner ? 3 : 0,
+                updatedAt: new Date(),
+              });
+          }
+        }
+      }
+
+      return updated;
+    });
   }
 
   async updateSchedule(

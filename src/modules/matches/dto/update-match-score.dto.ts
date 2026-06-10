@@ -18,7 +18,7 @@ export class UpdateMatchScoreDto {
   })
   @IsOptional()
   @IsObject()
-  scoreDetails?: any;
+  scoreDetails?: Record<string, string>;
 
   @ApiPropertyOptional({
     example: 'uuid-participant',
