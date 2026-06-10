@@ -76,14 +76,18 @@ export class UsersRepository {
         isEmailVerified: schema.users.isEmailVerified,
         createdAt: schema.users.createdAt,
         profile: schema.profiles,
+        role: schema.roles.name,
       })
       .from(schema.users)
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .leftJoin(schema.userToRoles, eq(schema.users.id, schema.userToRoles.userId))
+      .leftJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
       .where(eq(schema.users.id, id))
       .limit(1);
 
     return result[0];
   }
+
 
   async updateProfile(
     userId: string,
