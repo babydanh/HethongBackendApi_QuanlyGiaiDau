@@ -105,4 +105,34 @@ export class PaymentsService {
     }
     return payment;
   }
+
+  async findAllPayouts() {
+    return this.paymentsRepository.findAllPayoutRequests();
+  }
+
+  async reviewPayout(
+    adminId: string,
+    id: string,
+    status: 'APPROVED' | 'REJECTED',
+    proofUrl?: string,
+    note?: string,
+  ) {
+    try {
+      return await this.paymentsRepository.updatePayoutStatus(id, status, adminId, {
+        transactionProofUrl: proofUrl,
+        note,
+      });
+    } catch (error: any) {
+      throw new BadRequestException(error.message || 'Failed to update payout status');
+    }
+  }
+
+  async findAllTransactions() {
+    return this.paymentsRepository.findAllPayments();
+  }
+
+  async getStats() {
+    return this.paymentsRepository.getAdminStats();
+  }
 }
+

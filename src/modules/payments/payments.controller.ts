@@ -1,8 +1,9 @@
-import { Controller, Post, Body, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Post, Body, Get, Patch, Param, ParseUUIDPipe } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
 import { WebhookDto } from './dto/webhook.dto';
+import { ReviewPayoutDto } from './dto/review-payout.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -14,6 +15,48 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
+
+  @Get('admin/stats')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Lấy dữ liệu thống kê Dashboard Admin (Chỉ ADMIN)' })
+  async getAdminStats() {
+    return this.paymentsService.getStats();
+  }
+
+  @Get('admin/payouts')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Lấy tất cả danh sách yêu cầu rút tiền (Chỉ ADMIN)' })
+  async findAllPayouts() {
+    return this.paymentsService.findAllPayouts();
+  }
+
+  @Patch('admin/payouts/:id/review')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Phê duyệt hoặc từ chối yêu cầu rút tiền (Chỉ ADMIN)' })
+  async reviewPayout(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() reviewPayoutDto: ReviewPayoutDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.paymentsService.reviewPayout(
+      user.sub,
+      id,
+      reviewPayoutDto.status,
+      reviewPayoutDto.transactionProofUrl,
+      reviewPayoutDto.note,
+    );
+  }
+
+  @Get('admin/transactions')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Lấy tất cả các giao dịch thanh toán trên sàn (Chỉ ADMIN)' })
+  async findAllTransactions() {
+    return this.paymentsService.findAllTransactions();
+  }
 
   @Post('create-link')
   @ApiBearerAuth()
@@ -70,3 +113,4 @@ export class PaymentsController {
     return this.paymentsService.findPaymentById(id);
   }
 }
+

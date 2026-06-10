@@ -149,4 +149,131 @@ export class PaymentsRepository {
       .where(eq(schema.organizerPayouts.organizerId, organizerId))
       .orderBy(desc(schema.organizerPayouts.createdAt));
   }
+
+  async findAllPayoutRequests() {
+    return this.db
+      .select({
+        payout: schema.organizerPayouts,
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
+        organizer: {
+          id: schema.users.id,
+          email: schema.users.email,
+          fullName: schema.profiles.fullName,
+        },
+      })
+      .from(schema.organizerPayouts)
+      .innerJoin(schema.tournaments, eq(schema.organizerPayouts.tournamentId, schema.tournaments.id))
+      .innerJoin(schema.users, eq(schema.organizerPayouts.organizerId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .orderBy(desc(schema.organizerPayouts.createdAt));
+  }
+
+  async updatePayoutStatus(
+    id: string,
+    status: 'APPROVED' | 'REJECTED',
+    adminId: string,
+    data?: { transactionProofUrl?: string; note?: string },
+  ) {
+    return await this.db.transaction(async (tx) => {
+      const [oldPayout] = await tx
+        .select()
+        .from(schema.organizerPayouts)
+        .where(eq(schema.organizerPayouts.id, id))
+        .limit(1);
+
+      if (!oldPayout) {
+        throw new Error('Payout request not found');
+      }
+
+      const [updated] = await tx
+        .update(schema.organizerPayouts)
+        .set({
+          status,
+          processedBy: adminId,
+          processedAt: new Date(),
+          updatedAt: new Date(),
+          ...(data?.transactionProofUrl && { transactionProofUrl: data.transactionProofUrl }),
+        })
+        .where(eq(schema.organizerPayouts.id, id))
+        .returning();
+
+      await tx.insert(schema.payoutStatusLogs).values({
+        payoutId: id,
+        previousStatus: oldPayout.status,
+        newStatus: status,
+        changedBy: adminId,
+        note: data?.note || (status === 'APPROVED' ? 'APPROVED_BY_ADMIN' : 'REJECTED_BY_ADMIN'),
+      });
+
+      return updated;
+    });
+  }
+
+  async findAllPayments() {
+    return this.db
+      .select({
+        payment: schema.payments,
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
+        user: {
+          id: schema.users.id,
+          email: schema.users.email,
+          fullName: schema.profiles.fullName,
+        },
+      })
+      .from(schema.payments)
+      .innerJoin(schema.tournaments, eq(schema.payments.tournamentId, schema.tournaments.id))
+      .innerJoin(schema.users, eq(schema.payments.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .orderBy(desc(schema.payments.createdAt));
+  }
+
+  async getAdminStats() {
+    // 1. Get total users count
+    const [usersCountResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.users);
+    
+    // 2. Get total communities count
+    const [communitiesCountResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.communities);
+
+    // 3. Get total tournaments count
+    const [tournamentsCountResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tournaments);
+
+    // 4. Get total amount processed (successful payments)
+    const [totalPaymentsResult] = await this.db
+      .select({
+        totalAmount: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
+        totalPlatformFee: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`
+      })
+      .from(schema.payments)
+      .where(eq(schema.payments.status, 'COMPLETED'));
+
+    // 5. Get total payout processed (approved payouts)
+    const [totalPayoutResult] = await this.db
+      .select({
+        totalPayout: sql<string>`coalesce(sum(${schema.organizerPayouts.amountRequested}), '0')`
+      })
+      .from(schema.organizerPayouts)
+      .where(eq(schema.organizerPayouts.status, 'APPROVED'));
+
+    return {
+      totalUsers: usersCountResult?.count || 0,
+      totalCommunities: communitiesCountResult?.count || 0,
+      totalTournaments: tournamentsCountResult?.count || 0,
+      totalAmountProcessed: totalPaymentsResult?.totalAmount || '0.00',
+      totalPlatformFee: totalPaymentsResult?.totalPlatformFee || '0.00',
+      totalPayoutProcessed: totalPayoutResult?.totalPayout || '0.00',
+    };
+  }
 }
+

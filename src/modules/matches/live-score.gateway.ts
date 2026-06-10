@@ -10,15 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
-
-export interface MatchBroadcastData {
-  id: string;
-  matchId?: string;
-  status?: string;
-  homeScore?: number;
-  awayScore?: number;
-  [key: string]: unknown;
-}
+import { MatchBroadcastData } from './interfaces/match-broadcast.interface';
 
 @WebSocketGateway({
   cors: {

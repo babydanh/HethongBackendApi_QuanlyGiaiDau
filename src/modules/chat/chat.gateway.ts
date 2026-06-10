@@ -9,14 +9,7 @@ import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
-
-export interface ChatMessagePayload {
-  senderId?: string | null;
-  senderName?: string;
-  content?: string | null;
-  timestamp?: string;
-  [key: string]: unknown;
-}
+import { ChatMessagePayload } from './interfaces/chat-message-payload.interface';
 
 @WebSocketGateway({
   cors: {
