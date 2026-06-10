@@ -1,5 +1,5 @@
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsInt, Min, IsUUID, IsString } from 'class-validator';
+import { IsOptional, IsInt, Min, IsUUID, IsString, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryRankingDto {
@@ -24,12 +24,18 @@ export class QueryRankingDto {
   @IsUUID()
   categoryId: string;
 
-  @ApiPropertyOptional({ example: 'SINGLES', description: 'Thể loại thi đấu (SINGLES/DOUBLES)' })
+  @ApiPropertyOptional({ example: 'SINGLES', description: 'Thể loại thi đấu (SINGLES/DOUBLES/MIXED_DOUBLES)' })
   @IsOptional()
   @IsString()
   matchType?: string;
 
-  @ApiPropertyOptional({ example: 'uuid-community', description: 'Lọc theo Community (nếu trống thì lấy Global)' })
+  @ApiPropertyOptional({ example: 'PUBLIC', description: 'Scope của bảng xếp hạng (PUBLIC/COMMUNITY)', enum: ['PUBLIC', 'COMMUNITY'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['PUBLIC', 'COMMUNITY'])
+  scope?: 'PUBLIC' | 'COMMUNITY' = 'PUBLIC';
+
+  @ApiPropertyOptional({ example: 'uuid-community', description: 'Lọc theo Community (bắt buộc khi scope = COMMUNITY)' })
   @IsOptional()
   @IsUUID()
   communityId?: string;

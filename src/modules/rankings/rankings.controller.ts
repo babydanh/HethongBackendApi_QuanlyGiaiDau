@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Post, Body } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body, Param, ParseUUIDPipe } from '@nestjs/common';
 import { RankingsService } from './rankings.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
@@ -17,6 +17,33 @@ export class RankingsController {
   @ApiOperation({ summary: 'Lấy bảng xếp hạng theo môn thể thao' })
   async getLeaderboard(@Query() query: QueryRankingDto) {
     return this.rankingsService.getLeaderboard(query);
+  }
+
+  @Public()
+  @Get('user/:userId')
+  @ApiOperation({ summary: 'Lấy tổng hợp ELO của user (Public + các CLB)' })
+  async getUserRankings(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.rankingsService.getUserRankings(userId);
+  }
+
+  @Public()
+  @Get('user/:userId/history')
+  @ApiOperation({ summary: 'Lấy lịch sử biến động ELO của user' })
+  async getEloHistory(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('scope') scope?: 'PUBLIC' | 'COMMUNITY',
+    @Query('communityId') communityId?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.rankingsService.getEloHistory(userId, {
+      categoryId,
+      scope,
+      communityId,
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 20,
+    });
   }
 
   // Internal/Admin endpoint for triggering ELO update manually if needed

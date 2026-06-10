@@ -1,10 +1,9 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema';
-import { eq, desc, and, isNull, SQL } from 'drizzle-orm';
+import { eq, desc, and, isNull, SQL, sql } from 'drizzle-orm';
 import { QueryRankingDto } from './dto/query-ranking.dto';
-import { UpdateEloDto } from './dto/update-elo.dto';
 
 @Injectable()
 export class RankingsRepository {
@@ -12,37 +11,204 @@ export class RankingsRepository {
     @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
   ) {}
 
+  // Get public db instance (useful for starting transaction in service)
+  getDbInstance() {
+    return this.db;
+  }
+
   async getLeaderboard(query: QueryRankingDto) {
-    const { page = 1, limit = 50, categoryId, matchType, communityId } = query;
+    const { page = 1, limit = 50, categoryId, matchType, communityId, scope = 'PUBLIC' } = query;
     const offset = (page - 1) * limit;
 
-    const conditions: SQL[] = [eq(schema.userRanks.categoryId, categoryId)];
-    if (matchType) {
-      conditions.push(eq(schema.userRanks.matchType, matchType));
-    }
-    if (communityId) {
-      conditions.push(eq(schema.userRanks.communityId, communityId));
+    if (scope === 'COMMUNITY') {
+      if (!communityId) {
+        throw new BadRequestException('communityId is required when scope is COMMUNITY');
+      }
+      const conditions: SQL[] = [
+        eq(schema.communityRankings.categoryId, categoryId),
+        eq(schema.communityRankings.communityId, communityId),
+      ];
+
+      const whereClause = and(...conditions);
+
+      const data = await this.db
+        .select({
+          id: schema.communityRankings.id,
+          userId: schema.communityRankings.userId,
+          categoryId: schema.communityRankings.categoryId,
+          communityId: schema.communityRankings.communityId,
+          eloPoints: schema.communityRankings.eloPoints,
+          matchesPlayed: schema.communityRankings.matchesPlayed,
+          matchesWon: schema.communityRankings.matchesWon,
+          winStreak: schema.communityRankings.winStreak,
+          updatedAt: schema.communityRankings.updatedAt,
+          user: {
+            id: schema.users.id,
+            fullName: schema.profiles.fullName,
+            avatarUrl: schema.profiles.avatarUrl,
+          },
+        })
+        .from(schema.communityRankings)
+        .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
+        .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+        .where(whereClause)
+        .orderBy(desc(schema.communityRankings.eloPoints))
+        .limit(limit)
+        .offset(offset);
+
+      return {
+        data,
+        meta: {
+          page,
+          limit,
+        },
+      };
     } else {
-      conditions.push(isNull(schema.userRanks.communityId));
+      // PUBLIC scope
+      const conditions: SQL[] = [
+        eq(schema.userRanks.categoryId, categoryId),
+        isNull(schema.userRanks.communityId),
+      ];
+      if (matchType) {
+        conditions.push(eq(schema.userRanks.matchType, matchType));
+      }
+
+      const whereClause = and(...conditions);
+
+      const data = await this.db
+        .select({
+          id: schema.userRanks.id,
+          userId: schema.userRanks.userId,
+          categoryId: schema.userRanks.categoryId,
+          matchType: schema.userRanks.matchType,
+          eloPoints: schema.userRanks.eloPoints,
+          matchesPlayed: schema.userRanks.matchesPlayed,
+          matchesWon: schema.userRanks.matchesWon,
+          winStreak: schema.userRanks.winStreak,
+          updatedAt: schema.userRanks.updatedAt,
+          user: {
+            id: schema.users.id,
+            fullName: schema.profiles.fullName,
+            avatarUrl: schema.profiles.avatarUrl,
+          },
+        })
+        .from(schema.userRanks)
+        .innerJoin(schema.users, eq(schema.userRanks.userId, schema.users.id))
+        .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+        .where(whereClause)
+        .orderBy(desc(schema.userRanks.eloPoints))
+        .limit(limit)
+        .offset(offset);
+
+      return {
+        data,
+        meta: {
+          page,
+          limit,
+        },
+      };
+    }
+  }
+
+  async getUserRankings(userId: string) {
+    const publicRanks = await this.db
+      .select({
+        id: schema.userRanks.id,
+        categoryId: schema.userRanks.categoryId,
+        categoryName: schema.categories.name,
+        matchType: schema.userRanks.matchType,
+        eloPoints: schema.userRanks.eloPoints,
+        matchesPlayed: schema.userRanks.matchesPlayed,
+        matchesWon: schema.userRanks.matchesWon,
+        winStreak: schema.userRanks.winStreak,
+        updatedAt: schema.userRanks.updatedAt,
+      })
+      .from(schema.userRanks)
+      .innerJoin(schema.categories, eq(schema.userRanks.categoryId, schema.categories.id))
+      .where(and(eq(schema.userRanks.userId, userId), isNull(schema.userRanks.communityId)));
+
+    const communityRanks = await this.db
+      .select({
+        id: schema.communityRankings.id,
+        communityId: schema.communityRankings.communityId,
+        communityName: schema.communities.name,
+        categoryId: schema.communityRankings.categoryId,
+        categoryName: schema.categories.name,
+        eloPoints: schema.communityRankings.eloPoints,
+        matchesPlayed: schema.communityRankings.matchesPlayed,
+        matchesWon: schema.communityRankings.matchesWon,
+        winStreak: schema.communityRankings.winStreak,
+        updatedAt: schema.communityRankings.updatedAt,
+      })
+      .from(schema.communityRankings)
+      .innerJoin(schema.communities, eq(schema.communityRankings.communityId, schema.communities.id))
+      .innerJoin(schema.categories, eq(schema.communityRankings.categoryId, schema.categories.id))
+      .where(eq(schema.communityRankings.userId, userId));
+
+    return {
+      publicRanks,
+      communityRanks,
+    };
+  }
+
+  async getEloHistory(
+    userId: string,
+    query: {
+      categoryId?: string;
+      scope?: 'PUBLIC' | 'COMMUNITY';
+      communityId?: string;
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    const { categoryId, scope = 'PUBLIC', communityId, page = 1, limit = 20 } = query;
+    const offset = (page - 1) * limit;
+
+    const conditions: SQL[] = [eq(schema.eloHistoryLogs.userId, userId)];
+    if (categoryId) {
+      conditions.push(eq(schema.eloHistoryLogs.categoryId, categoryId));
+    }
+
+    if (scope === 'COMMUNITY') {
+      if (!communityId) {
+        throw new BadRequestException('communityId is required when scope is COMMUNITY');
+      }
+      conditions.push(eq(schema.tournaments.communityId, communityId));
+      conditions.push(eq(schema.tournaments.tournamentType, 'CLUB'));
+    } else {
+      conditions.push(
+        sql`(${schema.eloHistoryLogs.matchId} IS NULL OR ${schema.tournaments.tournamentType} = 'PUBLIC')`
+      );
     }
 
     const whereClause = and(...conditions);
 
     const data = await this.db
       .select({
-        id: schema.userRanks.id,
-        userId: schema.userRanks.userId,
-        categoryId: schema.userRanks.categoryId,
-        communityId: schema.userRanks.communityId,
-        matchType: schema.userRanks.matchType,
-        eloPoints: schema.userRanks.eloPoints,
-        matchesPlayed: schema.userRanks.matchesPlayed,
-        matchesWon: schema.userRanks.matchesWon,
-        updatedAt: schema.userRanks.updatedAt,
+        id: schema.eloHistoryLogs.id,
+        userId: schema.eloHistoryLogs.userId,
+        categoryId: schema.eloHistoryLogs.categoryId,
+        matchId: schema.eloHistoryLogs.matchId,
+        reason: schema.eloHistoryLogs.reason,
+        previousElo: schema.eloHistoryLogs.previousElo,
+        newElo: schema.eloHistoryLogs.newElo,
+        changedPoints: schema.eloHistoryLogs.changedPoints,
+        createdAt: schema.eloHistoryLogs.createdAt,
+        match: {
+          id: schema.matches.id,
+          tournamentId: schema.tournaments.id,
+          tournamentName: schema.tournaments.name,
+          tournamentType: schema.tournaments.tournamentType,
+          communityId: schema.tournaments.communityId,
+        }
       })
-      .from(schema.userRanks)
+      .from(schema.eloHistoryLogs)
+      .leftJoin(schema.matches, eq(schema.eloHistoryLogs.matchId, schema.matches.id))
+      .leftJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
+      .leftJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+      .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
       .where(whereClause)
-      .orderBy(desc(schema.userRanks.eloPoints))
+      .orderBy(desc(schema.eloHistoryLogs.createdAt))
       .limit(limit)
       .offset(offset);
 
@@ -51,133 +217,115 @@ export class RankingsRepository {
       meta: {
         page,
         limit,
-      },
+      }
     };
   }
 
-  // Helper function to get or create user rank
-  private async getOrCreateUserRank(
+  async getOrCreateUserRank(
     tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
     userId: string,
     categoryId: string,
     matchType: string,
+    scope: 'PUBLIC' | 'COMMUNITY',
     communityId?: string,
+    forUpdate: boolean = false,
   ) {
-    const conditions: SQL[] = [
-      eq(schema.userRanks.userId, userId),
-      eq(schema.userRanks.categoryId, categoryId),
-      eq(schema.userRanks.matchType, matchType),
-    ];
-    if (communityId) {
-      conditions.push(eq(schema.userRanks.communityId, communityId));
+    if (scope === 'COMMUNITY') {
+      if (!communityId) throw new BadRequestException('communityId is required for COMMUNITY scope');
+      const conditions = [
+        eq(schema.communityRankings.userId, userId),
+        eq(schema.communityRankings.categoryId, categoryId),
+        eq(schema.communityRankings.communityId, communityId),
+      ];
+      
+      const existing = forUpdate
+        ? await tx.select().from(schema.communityRankings).where(and(...conditions)).for('update').limit(1)
+        : await tx.select().from(schema.communityRankings).where(and(...conditions)).limit(1);
+
+      if (existing.length > 0) return existing[0];
+
+      const [newRank] = await tx
+        .insert(schema.communityRankings)
+        .values({
+          userId,
+          categoryId,
+          communityId,
+          eloPoints: 1000,
+          matchesPlayed: 0,
+          matchesWon: 0,
+          winStreak: 0,
+        })
+        .returning();
+
+      return newRank;
     } else {
-      conditions.push(isNull(schema.userRanks.communityId));
+      const conditions = [
+        eq(schema.userRanks.userId, userId),
+        eq(schema.userRanks.categoryId, categoryId),
+        eq(schema.userRanks.matchType, matchType),
+        isNull(schema.userRanks.communityId),
+      ];
+
+      const existing = forUpdate
+        ? await tx.select().from(schema.userRanks).where(and(...conditions)).for('update').limit(1)
+        : await tx.select().from(schema.userRanks).where(and(...conditions)).limit(1);
+
+      if (existing.length > 0) return existing[0];
+
+      const [newRank] = await tx
+        .insert(schema.userRanks)
+        .values({
+          userId,
+          categoryId,
+          matchType,
+          eloPoints: 1000,
+          matchesPlayed: 0,
+          matchesWon: 0,
+          winStreak: 0,
+        })
+        .returning();
+
+      return newRank;
     }
-
-    const existing = await tx
-      .select()
-      .from(schema.userRanks)
-      .where(and(...conditions))
-      .limit(1);
-
-    if (existing.length > 0) return existing[0];
-
-    const [newRank] = await tx
-      .insert(schema.userRanks)
-      .values({
-        userId,
-        categoryId,
-        matchType,
-        ...(communityId && { communityId }),
-        eloPoints: 1200,
-        matchesPlayed: 0,
-        matchesWon: 0,
-      })
-      .returning();
-
-    return newRank;
   }
 
-  async processMatchEloUpdate(dto: UpdateEloDto) {
-    const { winnerId, loserId, categoryId, matchId, score, matchType, communityId } = dto;
-
-    // Pessimistic transaction for ELO calculation
-    return await this.db.transaction(async (tx) => {
-      // 1. Get or create Ranks
-      const winnerRank = await this.getOrCreateUserRank(
-        tx,
-        winnerId,
-        categoryId,
-        matchType,
-        communityId,
-      );
-      const loserRank = await this.getOrCreateUserRank(tx, loserId, categoryId, matchType, communityId);
-
-      // 2. Calculate ELO
-      const K = 32;
-      const expectedScoreWinner =
-        1 /
-        (1 + Math.pow(10, (loserRank.eloPoints - winnerRank.eloPoints) / 400));
-      const expectedScoreLoser =
-        1 /
-        (1 + Math.pow(10, (winnerRank.eloPoints - loserRank.eloPoints) / 400));
-
-      const newWinnerElo = Math.round(
-        winnerRank.eloPoints + K * (score - expectedScoreWinner),
-      );
-      const newLoserElo = Math.round(
-        loserRank.eloPoints + K * (1 - score - expectedScoreLoser),
-      );
-
-      const winnerChange = newWinnerElo - winnerRank.eloPoints;
-      const loserChange = newLoserElo - loserRank.eloPoints;
-
-      // 3. Update DB
-      await tx
-        .update(schema.userRanks)
+  async updateUserRank(
+    tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
+    id: string,
+    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number },
+    scope: 'PUBLIC' | 'COMMUNITY',
+  ) {
+    if (scope === 'COMMUNITY') {
+      return tx
+        .update(schema.communityRankings)
         .set({
-          eloPoints: newWinnerElo,
-          matchesPlayed: winnerRank.matchesPlayed + 1,
-          matchesWon: winnerRank.matchesWon + (score === 1 ? 1 : 0),
+          eloPoints: data.eloPoints,
+          matchesPlayed: data.matchesPlayed,
+          matchesWon: data.matchesWon,
+          winStreak: data.winStreak,
           updatedAt: new Date(),
         })
-        .where(eq(schema.userRanks.id, winnerRank.id));
-
-      await tx
+        .where(eq(schema.communityRankings.id, id))
+        .returning();
+    } else {
+      return tx
         .update(schema.userRanks)
         .set({
-          eloPoints: newLoserElo,
-          matchesPlayed: loserRank.matchesPlayed + 1,
+          eloPoints: data.eloPoints,
+          matchesPlayed: data.matchesPlayed,
+          matchesWon: data.matchesWon,
+          winStreak: data.winStreak,
           updatedAt: new Date(),
         })
-        .where(eq(schema.userRanks.id, loserRank.id));
+        .where(eq(schema.userRanks.id, id))
+        .returning();
+    }
+  }
 
-      // 4. Record history
-      await tx.insert(schema.eloHistoryLogs).values([
-        {
-          userId: winnerId,
-          categoryId: categoryId,
-          matchId: matchId,
-          reason: 'MATCH_RESULT',
-          previousElo: winnerRank.eloPoints,
-          newElo: newWinnerElo,
-          changedPoints: winnerChange,
-        },
-        {
-          userId: loserId,
-          categoryId: categoryId,
-          matchId: matchId,
-          reason: 'MATCH_RESULT',
-          previousElo: loserRank.eloPoints,
-          newElo: newLoserElo,
-          changedPoints: loserChange,
-        },
-      ]);
-
-      return {
-        winnerElo: newWinnerElo,
-        loserElo: newLoserElo,
-      };
-    });
+  async insertEloHistory(
+    tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
+    logs: (typeof schema.eloHistoryLogs.$inferInsert)[],
+  ) {
+    return tx.insert(schema.eloHistoryLogs).values(logs);
   }
 }

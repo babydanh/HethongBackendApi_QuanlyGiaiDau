@@ -22,6 +22,9 @@ export class CommunitiesRepository {
     if (query.search) {
       conditions.push(ilike(schema.communities.name, `%${query.search}%`));
     }
+    if (query.region) {
+      conditions.push(ilike(schema.communities.locationAddress, `%${query.region}%`));
+    }
 
     if (query.lat !== undefined && query.lng !== undefined) {
       const radiusMeters = (query.radiusKm || 10) * 1000;
@@ -198,7 +201,7 @@ export class CommunitiesRepository {
   async getMembers(communityId: string, status?: string) {
     let condition = eq(schema.communityMembers.communityId, communityId);
     if (status) {
-      condition = and(condition, eq(schema.communityMembers.status, status)) as any;
+      condition = and(condition, eq(schema.communityMembers.status, status)) as SQL;
     }
     return await this.db
       .select({
@@ -386,7 +389,7 @@ export class CommunitiesRepository {
   async getTournaments(communityId: string, status?: string) {
     let condition = eq(schema.tournaments.communityId, communityId);
     if (status && status !== 'ALL') {
-      condition = and(condition, eq(schema.tournaments.status, status)) as any;
+      condition = and(condition, eq(schema.tournaments.status, status)) as SQL;
     }
     return await this.db
       .select()

@@ -59,4 +59,9 @@ export class QueryCommunityDto {
   @IsNumber()
   @IsOptional()
   radiusKm?: number;
+
+  @ApiPropertyOptional({ example: 'Hồ Chí Minh', description: 'Lọc theo khu vực/tỉnh thành' })
+  @IsString()
+  @IsOptional()
+  region?: string;
 }
