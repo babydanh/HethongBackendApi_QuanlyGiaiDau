@@ -11,6 +11,7 @@ import { MatchesService } from './matches.service';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
+import { UpdateMatchScheduleDto } from './dto/update-match-schedule.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -60,5 +61,16 @@ export class MatchesController {
     @Body() updateMatchStatusDto: UpdateMatchStatusDto,
   ) {
     return this.matchesService.updateStatus(id, updateMatchStatusDto);
+  }
+
+  @Patch(':id/schedule')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Cập nhật lịch thi đấu, sân đấu và trọng tài' })
+  async updateSchedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateMatchScheduleDto: UpdateMatchScheduleDto,
+  ) {
+    return this.matchesService.updateSchedule(id, updateMatchScheduleDto);
   }
 }

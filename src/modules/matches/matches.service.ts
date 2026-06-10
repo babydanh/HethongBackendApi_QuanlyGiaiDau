@@ -59,4 +59,16 @@ export class MatchesService {
 
     return updatedMatch;
   }
+
+  async updateSchedule(
+    id: string,
+    data: { courtId?: string; refereeId?: string; scheduledAt?: string },
+  ) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const updatedMatch = await this.matchesRepository.updateSchedule(id, data);
+    this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
+    return updatedMatch;
+  }
 }

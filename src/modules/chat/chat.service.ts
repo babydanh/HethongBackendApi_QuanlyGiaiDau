@@ -11,6 +11,10 @@ export class ChatService {
     private readonly chatGateway: ChatGateway,
   ) {}
 
+  async getUserRooms(userId: string) {
+    return this.chatRepository.getUserRooms(userId);
+  }
+
   async createRoom(userId: string, data: CreateRoomDto) {
     if (!data.memberIds.includes(userId)) {
       data.memberIds.push(userId);

@@ -12,17 +12,31 @@ export class WsJwtGuard implements CanActivate {
         try {
             const client: Socket = context.switchToWs().getClient<Socket>();
             
-            const token = client.handshake.auth?.token?.split(' ')[1];
+            let token = client.handshake.auth?.token?.split(' ')[1];
+            
+            if (!token && client.handshake.headers.cookie) {
+                const cookieString = client.handshake.headers.cookie;
+                const cookies = cookieString.split(';').reduce((acc, cookie) => {
+                    const parts = cookie.split('=');
+                    const key = parts[0]?.trim();
+                    const value = parts.slice(1).join('=')?.trim();
+                    if (key && value) {
+                        acc[key] = decodeURIComponent(value);
+                    }
+                    return acc;
+                }, {} as Record<string, string>);
+                token = cookies['accessToken'];
+            }
             
             if (!token) {
-                throw new WsException('Unauthorized')
+                throw new WsException('Unauthorized');
             }
 
             const payload = this.jwtService.verify(token);
             client.data.user = payload;
 
             return true;
-        }catch(err) {
+        } catch(err) {
             throw new WsException('Invalid token');
         }
     }

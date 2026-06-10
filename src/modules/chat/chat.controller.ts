@@ -12,6 +12,12 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
+  @Get('rooms')
+  @ApiOperation({ summary: 'Lấy danh sách các phòng chat của user' })
+  async getMyRooms(@CurrentUser() user: JwtPayload) {
+    return this.chatService.getUserRooms(user.sub);
+  }
+
   @Post('rooms')
   @ApiOperation({ summary: 'Tạo phòng chat mới (Direct hoặc Group)' })
   async createRoom(
