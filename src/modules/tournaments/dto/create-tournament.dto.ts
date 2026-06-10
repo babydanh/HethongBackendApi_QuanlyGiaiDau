@@ -9,9 +9,75 @@ import {
   Min,
   Max,
   IsObject,
+  IsIn,
+  IsArray,
 } from 'class-validator';
 
 export class CreateTournamentDto {
+  @ApiProperty({
+    example: 'CLUB',
+    description: 'Loại giải đấu: CLUB hoặc PUBLIC',
+    enum: ['CLUB', 'PUBLIC'],
+  })
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['CLUB', 'PUBLIC'])
+  tournamentType: 'CLUB' | 'PUBLIC';
+
+  @ApiProperty({
+    example: 'DOUBLES',
+    description: 'Hình thức thi đấu: SINGLES, DOUBLES, MIXED_DOUBLES',
+    enum: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'],
+  })
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
+  matchType: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+
+  @ApiPropertyOptional({ example: 'https://...', description: 'Banner giải đấu' })
+  @IsString()
+  @IsOptional()
+  bannerUrl?: string;
+
+  @ApiPropertyOptional({ example: 'https://...', description: 'Logo giải đấu' })
+  @IsString()
+  @IsOptional()
+  logoUrl?: string;
+
+  @ApiPropertyOptional({ example: ['https://...'], description: 'Ảnh gallery (chỉ giải PUBLIC)', type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  galleryImages?: string[];
+
+  @ApiPropertyOptional({ example: '2026-10-01T00:00:00Z', description: 'Ngày mở đăng ký' })
+  @IsDateString()
+  @IsOptional()
+  registrationStartDate?: string;
+
+  @ApiPropertyOptional({ example: '2026-10-14T00:00:00Z', description: 'Ngày đóng đăng ký' })
+  @IsDateString()
+  @IsOptional()
+  registrationEndDate?: string;
+
+  @ApiPropertyOptional({ example: 16, description: 'Số đội/VĐV tối đa' })
+  @IsNumber()
+  @IsOptional()
+  @Min(2)
+  maxParticipants?: number;
+
+  @ApiPropertyOptional({ example: 'Tổng giải thưởng 10tr', description: 'Mô tả giải thưởng' })
+  @IsString()
+  @IsOptional()
+  prizeDescription?: string;
+
+  @ApiPropertyOptional({ example: [], description: 'Giải thưởng chi tiết' })
+  @IsOptional()
+  prizes?: any;
+
+  @ApiPropertyOptional({ example: {}, description: 'Thông tin liên hệ BTC' })
+  @IsOptional()
+  contactInfo?: any;
   @ApiProperty({
     example: 'Giải Quần Vợt Mùa Thu 2026',
     description: 'Tên giải đấu',
@@ -70,6 +136,12 @@ export class CreateTournamentDto {
   @Min(0)
   @Max(100)
   platformFeePercentage?: number;
+
+  @ApiPropertyOptional({ example: 10000, description: 'Lệ phí sàn tính trên mỗi VĐV đăng ký' })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  platformFeePerPlayer?: number;
 
   @ApiPropertyOptional({
     example: '2026-10-15T00:00:00Z',

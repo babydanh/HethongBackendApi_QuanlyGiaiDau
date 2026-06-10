@@ -5,6 +5,7 @@ export interface MatchNode {
   matchOrder: number;
   bracketBranch: string;
   status: string;
+  isBye: boolean;
   nextMatchId: string | null;
   participant1Id: string | null;
   participant2Id: string | null;

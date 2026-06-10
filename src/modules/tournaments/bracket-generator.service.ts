@@ -22,9 +22,6 @@ export class BracketGeneratorService {
         .limit(1);
 
       if (!tournament) throw new BadRequestException('Tournament not found');
-      if (tournament.createdBy !== userId) {
-        throw new BadRequestException('Only the creator can generate brackets');
-      }
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -84,6 +81,7 @@ export class BracketGeneratorService {
             matchOrder: i + 1,
             bracketBranch: 'MAIN',
             status: 'SCHEDULED',
+            isBye: false,
             nextMatchId: null,
             participant1Id: null,
             participant2Id: null,
@@ -109,27 +107,25 @@ export class BracketGeneratorService {
       }
 
       // 6. Xếp đội vào Round 1
-      // Sắp xếp hạt giống (tạm thời random/hoặc giữ nguyên thứ tự đăng ký)
+      // Sắp xếp hạt giống
       const sortedParticipants = [...participants].sort(
         (a, b) => (a.seed || 999) - (b.seed || 999),
       );
 
-      // Tạo mảng P slots
+      // Tạo thứ tự hạt giống theo tiêu chuẩn tournament (Standard Seeding Order)
+      const seedingOrder = this.getSeedingOrder(powerOf2);
       const slots = new Array(powerOf2).fill(null);
-      // Chia đều đội để những BYE nằm xen kẽ.
-      // Cách chia đơn giản: nhét lần lượt vào mảng slots.
-      // Một thuật toán chia chuẩn (ví dụ P=8): 1-8, 4-5, 2-7, 3-6.
-      // Nhưng để đơn giản, ta cứ nhét tuần tự.
-      for (let i = 0; i < numParticipants; i++) {
-        slots[i] = sortedParticipants[i].id;
+      for (let i = 0; i < powerOf2; i++) {
+        const seedRank = seedingOrder[i];
+        if (seedRank <= numParticipants) {
+          slots[i] = sortedParticipants[seedRank - 1].id;
+        }
       }
 
-      // Trộn slots để người chơi không bị dồn 1 cục nếu có BYE
-      // Với MVP, để dễ kiểm tra, ta cứ lấy tuần tự.
       const round1Matches = matchNodesByRound.get(1)!;
       for (let i = 0; i < round1Matches.length; i++) {
-        const p1 = slots[i];
-        const p2 = slots[powerOf2 - 1 - i]; // Pair top with bottom
+        const p1 = slots[2 * i];
+        const p2 = slots[2 * i + 1];
 
         round1Matches[i].participant1Id = p1 || null;
         round1Matches[i].participant2Id = p2 || null;
@@ -138,16 +134,18 @@ export class BracketGeneratorService {
         if (p1 && !p2) {
           round1Matches[i].status = 'COMPLETED';
           round1Matches[i].winnerId = p1;
-          // Ta cần đẩy p1 lên trận tiếp theo (Round 2)
+          round1Matches[i].isBye = true;
           this.advanceWinner(round1Matches[i], matchNodesByRound);
         } else if (!p1 && p2) {
           round1Matches[i].status = 'COMPLETED';
           round1Matches[i].winnerId = p2;
+          round1Matches[i].isBye = true;
           this.advanceWinner(round1Matches[i], matchNodesByRound);
         } else if (!p1 && !p2) {
-          // Trận đấu ma (cả 2 đều BYE) - sẽ đẩy null lên
           round1Matches[i].status = 'COMPLETED';
           round1Matches[i].winnerId = null;
+          round1Matches[i].isBye = true;
+          this.advanceWinner(round1Matches[i], matchNodesByRound);
         }
       }
 
@@ -166,6 +164,20 @@ export class BracketGeneratorService {
         totalMatches: allMatchesToInsert.length,
       };
     });
+  }
+
+  private getSeedingOrder(size: number): number[] {
+    let order = [1];
+    while (order.length < size) {
+      const nextOrder: number[] = [];
+      const currentSize = order.length * 2;
+      for (const x of order) {
+        nextOrder.push(x);
+        nextOrder.push(currentSize + 1 - x);
+      }
+      order = nextOrder;
+    }
+    return order;
   }
 
   private advanceWinner(
@@ -189,9 +201,20 @@ export class BracketGeneratorService {
         nextMatch.participant2Id = completedMatch.winnerId;
       }
 
-      // Nếu nextMatch đã có đủ 2 người, nó vẫn là SCHEDULED.
-      // Nhưng nếu nextMatch cũng vô tình lọt vào trường hợp đấu với BYE (rất hiếm khi xảy ra nếu chia hạt giống chuẩn),
-      // thì phải xử lý đệ quy. Để đơn giản MVP, bỏ qua đệ quy.
+      // Kiểm tra nếu trận đối diện (siblingMatch) là trống hoặc đã hoàn thành với winner = null (tức là double BYE)
+      const siblingMatchOrder = completedMatch.matchOrder % 2 !== 0
+        ? completedMatch.matchOrder + 1
+        : completedMatch.matchOrder - 1;
+
+      const currentRoundMatches = matchNodesByRound.get(completedMatch.roundNumber)!;
+      const siblingMatch = currentRoundMatches.find(m => m.matchOrder === siblingMatchOrder);
+
+      if (!siblingMatch || (siblingMatch.status === 'COMPLETED' && !siblingMatch.winnerId)) {
+        nextMatch.status = 'COMPLETED';
+        nextMatch.winnerId = completedMatch.winnerId;
+        nextMatch.isBye = true;
+        this.advanceWinner(nextMatch, matchNodesByRound);
+      }
     }
   }
 }

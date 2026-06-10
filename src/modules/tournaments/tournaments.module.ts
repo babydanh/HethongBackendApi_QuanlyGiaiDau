@@ -13,6 +13,6 @@ import { DatabaseModule } from '../../database/database.module';
     TournamentsRepository,
     BracketGeneratorService,
   ],
-  exports: [TournamentsService],
+  exports: [TournamentsService, BracketGeneratorService],
 })
 export class TournamentsModule {}
