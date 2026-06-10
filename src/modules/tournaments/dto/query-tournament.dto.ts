@@ -69,5 +69,25 @@ export class QueryTournamentDto {
   @IsOptional()
   @IsUUID()
   communityId?: string;
+
+  @ApiPropertyOptional({
+    example: 'PUBLIC',
+    description: 'Lọc theo chế độ hiển thị: PUBLIC hoặc PRIVATE',
+    enum: ['PUBLIC', 'PRIVATE'],
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['PUBLIC', 'PRIVATE'])
+  visibility?: 'PUBLIC' | 'PRIVATE';
+
+  @ApiPropertyOptional({ example: 'Hồ Chí Minh', description: 'Lọc theo khu vực/tỉnh thành' })
+  @IsOptional()
+  @IsString()
+  region?: string;
+
+  @ApiPropertyOptional({ example: 'uuid-user', description: 'Lọc theo ID người tạo' })
+  @IsOptional()
+  @IsString()
+  createdBy?: string;
 }
 

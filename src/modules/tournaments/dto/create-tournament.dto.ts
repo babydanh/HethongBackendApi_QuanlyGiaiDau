@@ -78,6 +78,27 @@ export class CreateTournamentDto {
   @ApiPropertyOptional({ example: {}, description: 'Thông tin liên hệ BTC' })
   @IsOptional()
   contactInfo?: any;
+
+  @ApiPropertyOptional({
+    example: 'PUBLIC',
+    description: 'Chế độ hiển thị: PUBLIC hoặc PRIVATE',
+    enum: ['PUBLIC', 'PRIVATE'],
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn(['PUBLIC', 'PRIVATE'])
+  visibility?: 'PUBLIC' | 'PRIVATE';
+
+  @ApiPropertyOptional({
+    example: 'MIXED',
+    description: 'Ràng buộc giới tính: MALE, FEMALE, MIXED',
+    enum: ['MALE', 'FEMALE', 'MIXED'],
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
+  genderRestriction?: 'MALE' | 'FEMALE' | 'MIXED' | null;
+
   @ApiProperty({
     example: 'Giải Quần Vợt Mùa Thu 2026',
     description: 'Tên giải đấu',

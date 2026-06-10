@@ -1,5 +1,5 @@
-import { IsNotEmpty, IsString, IsArray, IsUUID, ArrayMinSize } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterTournamentDto {
   @ApiProperty({ description: 'Tên đội tham gia' })
@@ -7,9 +7,9 @@ export class RegisterTournamentDto {
   @IsNotEmpty()
   teamName: string;
 
-  @ApiProperty({ description: 'Danh sách ID các thành viên trong đội', type: [String] })
+  @ApiPropertyOptional({ description: 'Danh sách ID các thành viên trong đội', type: [String] })
   @IsArray()
-  @ArrayMinSize(1)
+  @IsOptional()
   @IsUUID('4', { each: true })
-  memberIds: string[];
+  memberIds?: string[];
 }
