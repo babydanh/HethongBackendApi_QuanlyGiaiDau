@@ -11,3 +11,5 @@ export * from './advertisements.schema';
 export * from './audit.schema';
 export * from './community_gallery.schema';
 export * from './regions.schema';
+export * from './community_rankings.schema';
+

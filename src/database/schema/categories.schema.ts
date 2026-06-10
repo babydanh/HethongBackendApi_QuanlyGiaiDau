@@ -60,6 +60,7 @@ export const userRanks = pgTable(
     }),
     matchesPlayed: integer('matches_played').default(0).notNull(),
     matchesWon: integer('matches_won').default(0).notNull(),
+    winStreak: integer('win_streak').default(0).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

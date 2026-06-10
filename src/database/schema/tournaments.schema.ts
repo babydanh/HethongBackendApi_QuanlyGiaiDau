@@ -64,6 +64,8 @@ export const tournaments = pgTable(
     prizeDescription: text('prize_description'),
     prizes: jsonb('prizes').default(sql`'[]'::jsonb`),
     inviteCode: varchar('invite_code', { length: 20 }).unique(),
+    visibility: varchar('visibility', { length: 50 }).default('PUBLIC').notNull(),
+    genderRestriction: varchar('gender_restriction', { length: 20 }),
     contactInfo: jsonb('contact_info'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -122,6 +124,8 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   seed: integer('seed'),
   points: integer('points').default(0).notNull(),
   isPaid: boolean('is_paid').default(false).notNull(),
+  teamInviteToken: varchar('team_invite_token', { length: 50 }).unique(),
+  teamStatus: varchar('team_status', { length: 50 }).default('PENDING').notNull(),
   registeredAt: timestamp('registered_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
