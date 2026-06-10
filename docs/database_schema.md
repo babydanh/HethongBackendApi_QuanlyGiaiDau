@@ -528,4 +528,49 @@ CREATE INDEX idx_payments_user ON payments(user_id, created_at DESC);
 CREATE INDEX idx_payment_logs ON payment_status_logs(payment_id, created_at DESC);
 CREATE INDEX idx_disputes_match ON match_disputes(match_id, status);
 
+-- ==========================================
+-- PHASE 5: SCHEMA ADDITIONS (Pending Migration)
+-- ==========================================
+
+-- 5.1 Tournament Visibility & Gender Restriction
+ALTER TABLE tournaments ADD COLUMN visibility VARCHAR(50) DEFAULT 'PUBLIC' NOT NULL;
+-- 'PUBLIC': Hiển thị trên trang tìm kiếm, ai cũng đăng ký
+-- 'PRIVATE': Ẩn khỏi tìm kiếm, chỉ đăng ký qua invite_code
+
+ALTER TABLE tournaments ADD COLUMN gender_restriction VARCHAR(20);
+-- NULL = Không ràng buộc giới tính
+-- 'MALE' = Chỉ nam
+-- 'FEMALE' = Chỉ nữ
+-- 'MIXED' = Bắt buộc 1 nam + 1 nữ (cho doubles)
+
+-- 5.2 Tournament Participants — Team Invite & Status
+ALTER TABLE tournament_participants ADD COLUMN team_invite_token VARCHAR(50) UNIQUE;
+-- Token mời partner vào đội (doubles)
+
+ALTER TABLE tournament_participants ADD COLUMN team_status VARCHAR(50) DEFAULT 'PENDING' NOT NULL;
+-- 'PENDING': Đang chờ đủ thành viên
+-- 'COMPLETE': Đã đủ thành viên
+-- 'WITHDRAWN': Đã rút lui
+
+-- 5.3 User Ranks — Win Streak
+ALTER TABLE user_ranks ADD COLUMN win_streak INTEGER DEFAULT 0 NOT NULL;
+-- Chuỗi thắng liên tiếp (dùng cho ELO bonus)
+
+-- 5.4 Community-Scoped ELO Rankings (Bảng mới)
+CREATE TABLE community_rankings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    community_id UUID REFERENCES communities(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    category_id UUID REFERENCES categories(id) ON DELETE CASCADE NOT NULL,
+    elo_points INTEGER DEFAULT 1000 NOT NULL,
+    matches_played INTEGER DEFAULT 0 NOT NULL,
+    matches_won INTEGER DEFAULT 0 NOT NULL,
+    win_streak INTEGER DEFAULT 0 NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT community_user_category_unique UNIQUE (community_id, user_id, category_id),
+    CONSTRAINT community_elo_non_negative CHECK (elo_points >= 0)
+);
+
+CREATE INDEX idx_community_rankings_leaderboard ON community_rankings(community_id, category_id, elo_points DESC);
+
 ```

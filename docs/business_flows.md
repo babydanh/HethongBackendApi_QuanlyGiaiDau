@@ -116,3 +116,99 @@ sequenceDiagram
     Note over RankingsService: Commit Transaction
     Note over RanksRepo, DB: Mở khóa Row (Unlocked)
 ```
+
+---
+
+## 5. Luồng Đăng Ký Đánh Đôi (Doubles Registration — Phase 5)
+Giải đấu doubles yêu cầu 2 người tạo thành 1 đội. Người 1 đăng ký trước, hệ thống sinh link mời, Người 2 nhấn link để join.
+
+```mermaid
+sequenceDiagram
+    participant Leader
+    participant Partner
+    participant FE as Frontend
+    participant BE as Backend API
+    participant DB
+
+    Leader->>FE: Nhấn "Đăng ký giải đấu"
+    FE->>BE: POST /tournaments/:id/register { teamName }
+    Note over BE: Tạo participant (teamStatus: PENDING)<br/>Tạo roster cho Leader<br/>Sinh teamInviteToken
+    BE-->>FE: { participant, teamInviteLink }
+    FE-->>Leader: Hiển thị link mời + QR Code
+
+    Leader->>Partner: Gửi link mời (chat/SMS)
+    Partner->>FE: Mở link /join-team?pid=...&token=...
+    FE->>BE: POST /tournaments/:id/join-team { participantId, teamInviteToken }
+    Note over BE: Validate token<br/>Check giới tính (nếu MIXED)<br/>Tạo roster cho Partner<br/>teamStatus → COMPLETE
+    BE-->>FE: { participant, paymentUrl? }
+
+    alt Có phí tham gia
+        FE->>Partner: Redirect sang cổng thanh toán
+    else Miễn phí
+        FE->>Partner: Toast "Đã tham gia đội thành công!"
+    end
+```
+
+---
+
+## 6. Luồng Tính ELO Nâng Cao (Phase 5)
+ELO tách thành 2 scope: Public (user_ranks) và Community (community_rankings). K-factor thông minh dựa trên số trận + chuỗi thắng.
+
+```mermaid
+sequenceDiagram
+    participant MatchService
+    participant EloEngine
+    participant DB
+
+    MatchService->>EloEngine: processMatchResult(match, tournament)
+    Note over EloEngine: Xác định scope:<br/>PUBLIC → user_ranks<br/>CLUB → community_rankings
+
+    EloEngine->>DB: BEGIN TRANSACTION
+    EloEngine->>DB: SELECT ... FOR UPDATE (winner + loser ranks)
+
+    Note over EloEngine: Tính K-Factor:<br/>< 10 trận → K=40<br/>10-30 trận → K=24<br/>> 30 trận → K=16
+
+    Note over EloEngine: Win Streak Bonus:<br/>3 thắng → ×1.1<br/>5 thắng → ×1.2<br/>7+ thắng → ×1.3
+
+    Note over EloEngine: Upset Bonus:<br/>Thắng ELO cao hơn 200+ → +5<br/>Thắng ELO cao hơn 400+ → +10
+
+    EloEngine->>DB: UPDATE ranks (winner: +ELO, streak++)<br/>UPDATE ranks (loser: -ELO, streak=0)
+    EloEngine->>DB: INSERT elo_history_logs (2 records)
+    EloEngine->>DB: COMMIT
+```
+
+---
+
+## 7. Luồng Đăng Ký Giải Private (Invite Link — Phase 5)
+Giải PRIVATE ẩn khỏi tìm kiếm. Chỉ ai có link mời mới truy cập và đăng ký được.
+
+```mermaid
+sequenceDiagram
+    participant BTC as Ban Tổ Chức
+    participant User
+    participant FE as Frontend
+    participant BE as Backend API
+
+    BTC->>FE: Setting giải đấu: visibility = PRIVATE
+    FE->>BE: PATCH /tournaments/:id { visibility: 'PRIVATE' }
+    BE-->>FE: Trả về inviteCode
+
+    BTC->>User: Gửi link mời (copy từ manage page)
+
+    User->>FE: Mở link /tournaments/:id/register?invite=ABC123
+    FE->>BE: POST /tournaments/:id/validate-invite { inviteCode: 'ABC123' }
+
+    alt Code hợp lệ
+        BE-->>FE: Thông tin giải đấu
+        FE-->>User: Hiển thị form đăng ký
+        alt User chưa đăng nhập
+            FE->>User: Redirect /login?redirect=...
+            User->>FE: Đăng nhập xong → quay lại trang đăng ký
+        end
+        User->>FE: Nhấn "Đăng ký"
+        FE->>BE: POST /tournaments/:id/register { inviteCode, teamName }
+    else Code không hợp lệ
+        BE-->>FE: 400 "Mã mời không hợp lệ"
+        FE-->>User: Hiển thị lỗi
+    end
+```

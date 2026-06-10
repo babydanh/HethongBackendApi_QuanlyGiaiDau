@@ -132,19 +132,63 @@
 
 ---
 
-## Phase 5: Mobile App & Polish (Hoàn thiện) 📱
+## Phase 5: Nâng Cấp Toàn Diện — Visibility, Registration, ELO 🚀
+**Mục tiêu:** Tournament visibility/invite, đăng ký doubles, ELO chuyên nghiệp, region filtering.
+**Chi tiết đầy đủ:** Xem file `docs/phase5-plan.md`
+
+### 5.1 Schema Migration
+- [ ] Thêm `visibility`, `gender_restriction` vào tournaments.
+- [ ] Thêm `team_invite_token`, `team_status` vào tournament_participants.
+- [ ] Thêm `win_streak` vào user_ranks.
+- [ ] Tạo bảng `community_rankings` (ELO riêng CLB).
+- [ ] Chạy `drizzle-kit generate` + `drizzle-kit push`.
+
+### 5.2 Tournament Visibility & Invite Link
+- [ ] API filter `GET /tournaments` chỉ trả PUBLIC mặc định.
+- [ ] API `POST /tournaments/:id/validate-invite`.
+- [ ] API `POST /tournaments/:id/regenerate-invite`.
+- [ ] Check quyền truy cập giải PRIVATE (cần invite code).
+
+### 5.3 Tournament Registration (Singles + Doubles)
+- [ ] API `POST /tournaments/:id/register` (tạo đội + invite token cho doubles).
+- [ ] API `POST /tournaments/:id/join-team` (partner join, check giới tính).
+- [ ] API `POST /tournaments/:id/withdraw` (rút lui + hoàn phí).
+- [ ] API `GET /tournaments/:id/my-registration` (trạng thái đăng ký).
+
+### 5.4 Community-Scoped Tournaments
+- [ ] Filter `GET /tournaments` theo `tournamentType` (PUBLIC vs CLUB).
+- [ ] Chỉ member CLB mới được đăng ký giải CLUB.
+- [ ] Tách biệt hiển thị: giải CLB chỉ ở trang CLB.
+
+### 5.5 Bracket & Scoring Nâng Cao
+- [ ] Score validation dựa trên `roundConfig` (bestOf, deuce, tiebreak).
+- [ ] Auto-advance winner lên `next_match_id` khi match COMPLETED.
+- [ ] Loser advance cho Double Elimination.
+
+### 5.6 Professional ELO System
+- [ ] ELO engine: K-factor thông minh (40/24/16) + win streak bonus + upset bonus.
+- [ ] Public ELO (user_ranks) vs Community ELO (community_rankings).
+- [ ] Phân hạng: Bronze → Silver → Gold → Platinum → Diamond → Master → Grand Master.
+- [ ] API leaderboard nâng cấp (`scope=PUBLIC|COMMUNITY`).
+
+### 5.7 Region-Based Filtering
+- [ ] `GET /tournaments?region=xxx` (filter theo venue address).
+- [ ] `GET /communities?region=xxx` (filter theo location address).
+
+---
+
+## Phase 6: Mobile App & Polish (Tương lai) 📱
 **Mục tiêu:** Ship ứng dụng di động, tối ưu hệ thống.
 
-### 5.1 Mobile App
+### 6.1 Mobile App
 - [ ] Khởi tạo project (Flutter hoặc React Native).
 - [ ] Tích hợp toàn bộ API Backend đã xây dựng.
-- [ ] UI/UX tối ưu cho Player: Xem giải, đăng ký, xem live score, check ELO.
 
-### 5.2 Performance & DevOps
+### 6.2 Performance & DevOps
 - [ ] Redis caching cho Leaderboard, Live Score.
 - [ ] Docker Compose (Postgres + Redis + NestJS).
 - [ ] CI/CD Pipeline (GitHub Actions).
-- [ ] Monitoring & Logging (PM2, hoặc tương đương).
+- [ ] Monitoring & Logging (PM2).
 
 ---
 

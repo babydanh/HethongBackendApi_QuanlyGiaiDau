@@ -83,3 +83,18 @@ Dưới đây là tổng hợp toàn bộ các API Endpoint của hệ thống B
 - [ ] `POST /friendships/request`
 - [ ] `POST /matches/:id/comments`
 - [ ] `GET /notifications`
+
+## 11. Tournament Registration & Invite (Chưa làm - Phase 5)
+- [ ] `POST /tournaments/:id/validate-invite` - Validate invite code (Public endpoint)
+- [ ] `POST /tournaments/:id/regenerate-invite` - Tạo lại mã mời (Owner only)
+- [ ] `POST /tournaments/:id/register` - Đăng ký tham gia giải (Singles/Doubles)
+- [ ] `POST /tournaments/:id/join-team` - Partner join đội doubles
+- [ ] `POST /tournaments/:id/withdraw` - Rút khỏi giải + hoàn phí
+- [ ] `GET /tournaments/:id/my-registration` - Check trạng thái đăng ký hiện tại
+- [ ] `GET /communities/:id/tournaments` - Danh sách giải đấu của CLB
+
+## 12. Rankings Nâng Cấp (Phase 5)
+- [ ] `GET /rankings` - Leaderboard (thêm query: scope=PUBLIC|COMMUNITY, communityId)
+- [ ] `GET /rankings/user/:userId` - Tổng hợp ELO user (public + các CLB)
+- [ ] `GET /rankings/user/:userId/history` - Lịch sử biến động ELO
+- [ ] `POST /rankings/recalculate` - Admin: Tính lại toàn bộ ELO
