@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, sql, ilike, SQL } from 'drizzle-orm';
+import { eq, and, sql, ilike, SQL, isNull } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryCommunityDto } from './dto/query-community.dto';
@@ -14,7 +14,7 @@ export class CommunitiesRepository {
   // --- COMMUNITIES ---
 
   async findAll(query: QueryCommunityDto) {
-    const conditions: SQL[] = [];
+    const conditions: SQL[] = [isNull(schema.communities.deletedAt)];
 
     if (query.status) {
       conditions.push(eq(schema.communities.status, query.status));
@@ -59,7 +59,12 @@ export class CommunitiesRepository {
         schema.communityMembers,
         eq(schema.communities.id, schema.communityMembers.communityId),
       )
-      .where(eq(schema.communityMembers.userId, userId));
+      .where(
+        and(
+          eq(schema.communityMembers.userId, userId),
+          isNull(schema.communities.deletedAt),
+        ),
+      );
     return results.map(r => r.community);
   }
 
@@ -67,7 +72,12 @@ export class CommunitiesRepository {
     const records = await this.db
       .select()
       .from(schema.communities)
-      .where(eq(schema.communities.id, id))
+      .where(
+        and(
+          eq(schema.communities.id, id),
+          isNull(schema.communities.deletedAt),
+        ),
+      )
       .limit(1);
     return records[0];
   }
