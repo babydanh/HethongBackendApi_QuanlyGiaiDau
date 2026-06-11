@@ -40,7 +40,7 @@ export const communities = pgTable('communities', {
   joinQuestions: jsonb('join_questions').$type<string[]>().default([]).notNull(),
   rules: text('rules'),
   maxMembers: integer('max_members'),
-  status: varchar('status', { length: 50 }).default('PENDING').notNull(),
+  status: varchar('status', { length: 50 }).default('ACTIVE').notNull(),
   approvedBy: uuid('approved_by').references(() => users.id, {
     onDelete: 'set null',
   }),

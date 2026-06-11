@@ -54,7 +54,7 @@ export const userRanks = pgTable(
     communityId: uuid('community_id')
       .references(() => communities.id, { onDelete: 'cascade' }),
     matchType: varchar('match_type', { length: 50 }).notNull(),
-    eloPoints: integer('elo_points').default(1200).notNull(),
+    eloPoints: integer('elo_points').default(1000).notNull(),
     tierId: uuid('tier_id').references(() => eloTiers.id, {
       onDelete: 'set null',
     }),

@@ -7,12 +7,14 @@ import {
   timestamp,
   date,
 } from 'drizzle-orm/pg-core';
+import { provinces } from './regions.schema';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: text('password_hash'),
   isEmailVerified: boolean('is_email_verified').default(false).notNull(),
+  isMock: boolean('is_mock').default(false).notNull(),
   acceptedTosAt: timestamp('accepted_tos_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
@@ -83,6 +85,8 @@ export const profiles = pgTable('profiles', {
   gender: varchar('gender', { length: 20 }),
   address: text('address'),
   bio: text('bio'),
+  provinceCode: varchar('province_code', { length: 20 })
+    .references(() => provinces.code, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

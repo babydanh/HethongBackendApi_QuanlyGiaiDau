@@ -7,6 +7,14 @@ export default defineConfig({
   schema: './src/database/schema/index.ts',
   out: './src/database/migrations',
   dialect: 'postgresql',
+  tablesFilter: [
+    '!spatial_ref_sys',
+    '!__drizzle_migrations',
+    '!geography_columns',
+    '!geometry_columns',
+    '!raster_columns',
+    '!raster_overviews',
+  ],
   dbCredentials: {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432', 10),

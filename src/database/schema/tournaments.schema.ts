@@ -17,10 +17,32 @@ import { communities } from './communities.schema';
 import { categories } from './categories.schema';
 import { tournamentVenues } from './venues.schema';
 
+export const parentTournaments = pgTable('parent_tournaments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  bannerUrl: text('banner_url'),
+  logoUrl: text('logo_url'),
+  sports: jsonb('sports').$type<string[]>().default([]).notNull(),
+  createdBy: uuid('created_by')
+    .references(() => users.id, { onDelete: 'restrict' })
+    .notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+});
+
 export const tournaments = pgTable(
   'tournaments',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    parentId: uuid('parent_id').references(() => parentTournaments.id, {
+      onDelete: 'cascade',
+    }),
     communityId: uuid('community_id').references(() => communities.id, {
       onDelete: 'set null',
     }),
@@ -67,6 +89,8 @@ export const tournaments = pgTable(
     visibility: varchar('visibility', { length: 50 }).default('PUBLIC').notNull(),
     genderRestriction: varchar('gender_restriction', { length: 20 }),
     contactInfo: jsonb('contact_info'),
+    city: varchar('city', { length: 100 }),
+    reservedSlotsCount: integer('reserved_slots_count').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -99,6 +123,7 @@ export const tournamentStages = pgTable('tournament_stages', {
   venueId: uuid('venue_id').references(() => tournamentVenues.id, { onDelete: 'set null' }),
   scheduledDate: date('scheduled_date'),
   notificationNote: text('notification_note'),
+  matchSettings: jsonb('match_settings'),
 });
 
 export const tournamentGroups = pgTable('tournament_groups', {
@@ -126,6 +151,7 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   isPaid: boolean('is_paid').default(false).notNull(),
   teamInviteToken: varchar('team_invite_token', { length: 50 }).unique(),
   teamStatus: varchar('team_status', { length: 50 }).default('PENDING').notNull(),
+  isMock: boolean('is_mock').default(false).notNull(),
   registeredAt: timestamp('registered_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
