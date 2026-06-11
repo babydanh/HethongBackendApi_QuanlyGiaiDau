@@ -11,12 +11,14 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { ERROR_MESSAGES } from '../../common/constants/error-messages';
 import * as schema from '../../database/schema';
 import { CloudinaryService } from '../upload/cloudinary.service';
+import { RankingsService } from '../rankings/rankings.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly usersRepository: UsersRepository,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly rankingsService: RankingsService,
   ) {}
 
   async findAll(query: QueryUserDto) {
@@ -37,8 +39,8 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, updateUserDto: UpdateUserDto) {
-    // Check if user exists
-    await this.findOne(userId);
+    // Check if user exists and get current profile data
+    const currentUser = await this.findOne(userId);
 
     // Only pass defined values, also convert date format if necessary
     const updateData = { ...updateUserDto } as Partial<
@@ -46,6 +48,14 @@ export class UsersService {
     >;
 
     await this.usersRepository.updateProfile(userId, updateData);
+
+    // If provinceCode changed, recalculate tiers for all user's ranks
+    if (
+      updateData.provinceCode !== undefined &&
+      updateData.provinceCode !== currentUser.profile?.provinceCode
+    ) {
+      await this.rankingsService.recalculateUserTiersOnProvinceChange(userId);
+    }
 
     return this.findOne(userId);
   }

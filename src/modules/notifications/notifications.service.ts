@@ -16,7 +16,7 @@ export class NotificationsService {
     // Ép kiểu sang Record<string, unknown> để pass rule
     this.notificationsGateway.pushNotification(
       data.receiverId,
-      notification as unknown as Record<string, unknown>,
+      notification,
     );
 
     return notification;

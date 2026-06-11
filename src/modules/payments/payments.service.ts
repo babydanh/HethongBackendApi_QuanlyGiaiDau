@@ -44,7 +44,7 @@ export class PaymentsService {
       await this.paymentsRepository.updatePaymentStatus(
         payment.id,
         'COMPLETED',
-        payload.rawPayload as Record<string, unknown>,
+        payload.rawPayload,
         'WEBHOOK_CALLBACK',
       );
       
@@ -62,7 +62,7 @@ export class PaymentsService {
       await this.paymentsRepository.updatePaymentStatus(
         payment.id,
         'FAILED',
-        payload.rawPayload as Record<string, unknown>,
+        payload.rawPayload,
         'WEBHOOK_CALLBACK',
       );
       return { message: 'Payment marked as failed' };

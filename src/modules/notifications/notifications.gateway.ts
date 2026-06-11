@@ -6,11 +6,10 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { corsOptions } from '../../config/cors.config';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
+  cors: corsOptions,
   namespace: '/notifications',
 })
 export class NotificationsGateway {

@@ -26,6 +26,8 @@ import { AuditModule } from './modules/audit/audit.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { RegionsModule } from './modules/regions/regions.module';
 import { ChallengesModule } from './modules/communities/challenges.module';
+import { AdminModule } from './modules/admin/admin.module';
+import { SeriesModule } from './modules/series/series.module';
 
 @Module({
   imports: [
@@ -52,6 +54,8 @@ import { ChallengesModule } from './modules/communities/challenges.module';
     UploadModule,
     RegionsModule,
     ChallengesModule,
+    AdminModule,
+    SeriesModule,
   ],
   controllers: [AppController],
   providers: [

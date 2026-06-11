@@ -36,13 +36,13 @@ export class QueryCommunityDto {
   search?: string;
 
   @ApiPropertyOptional({
-    enum: ['PENDING', 'APPROVED', 'REJECTED'],
+    enum: ['ACTIVE', 'PENDING', 'APPROVED', 'REJECTED'],
     description: 'Lọc theo trạng thái',
   })
   @IsString()
-  @IsIn(['PENDING', 'APPROVED', 'REJECTED'])
+  @IsIn(['ACTIVE', 'PENDING', 'APPROVED', 'REJECTED'])
   @IsOptional()
-  status?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status?: 'ACTIVE' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
   @ApiPropertyOptional({ description: 'Vĩ độ để tìm quanh đây' })
   @IsLatitude()

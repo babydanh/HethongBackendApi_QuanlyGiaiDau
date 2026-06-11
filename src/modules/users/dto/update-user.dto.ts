@@ -36,4 +36,9 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   address?: string;
+
+  @ApiPropertyOptional({ example: '79', description: 'Mã tỉnh/thành phố' })
+  @IsString()
+  @IsOptional()
+  provinceCode?: string;
 }

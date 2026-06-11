@@ -10,11 +10,10 @@ import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { ChatMessagePayload } from './interfaces/chat-message-payload.interface';
+import { corsOptions } from '../../config/cors.config';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
+  cors: corsOptions,
   namespace: '/chat',
 })
 @UseGuards(WsJwtGuard)

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { CommunitiesRepository } from './communities.repository';
 import { CreateCommunityDto } from './dto/create-community.dto';
@@ -36,11 +37,16 @@ export class CommunitiesService {
   }
 
   async create(userId: string, dto: CreateCommunityDto) {
+    const activeCount = await this.communitiesRepository.countActiveByCreator(userId);
+    if (activeCount >= 5) {
+      throw new BadRequestException('Mỗi người dùng chỉ được phép tạo tối đa 5 cộng đồng.');
+    }
+
     const { lat, lng, categoryIds, ...rest } = dto;
     const data = {
       ...rest,
       creatorId: userId,
-      status: 'PENDING',
+      status: 'ACTIVE',
     };
     return await this.communitiesRepository.create(data, lat, lng, categoryIds);
   }

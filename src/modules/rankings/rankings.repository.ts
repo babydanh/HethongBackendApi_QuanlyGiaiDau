@@ -86,6 +86,10 @@ export class RankingsRepository {
           matchesWon: schema.userRanks.matchesWon,
           winStreak: schema.userRanks.winStreak,
           updatedAt: schema.userRanks.updatedAt,
+          tier: {
+            id: schema.eloTiers.id,
+            name: schema.eloTiers.name,
+          },
           user: {
             id: schema.users.id,
             fullName: schema.profiles.fullName,
@@ -95,6 +99,7 @@ export class RankingsRepository {
         .from(schema.userRanks)
         .innerJoin(schema.users, eq(schema.userRanks.userId, schema.users.id))
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+        .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
         .where(whereClause)
         .orderBy(desc(schema.userRanks.eloPoints))
         .limit(limit)
@@ -122,9 +127,11 @@ export class RankingsRepository {
         matchesWon: schema.userRanks.matchesWon,
         winStreak: schema.userRanks.winStreak,
         updatedAt: schema.userRanks.updatedAt,
+        tierName: schema.eloTiers.name,
       })
       .from(schema.userRanks)
       .innerJoin(schema.categories, eq(schema.userRanks.categoryId, schema.categories.id))
+      .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
       .where(and(eq(schema.userRanks.userId, userId), isNull(schema.userRanks.communityId)));
 
     const communityRanks = await this.db
@@ -327,5 +334,33 @@ export class RankingsRepository {
     logs: (typeof schema.eloHistoryLogs.$inferInsert)[],
   ) {
     return tx.insert(schema.eloHistoryLogs).values(logs);
+  }
+
+  async getEloTiersByCategory(categoryId: string) {
+    return this.db
+      .select()
+      .from(schema.eloTiers)
+      .where(eq(schema.eloTiers.categoryId, categoryId));
+  }
+
+  async getUserProvinceCode(userId: string) {
+    const profile = await this.db
+      .select({ provinceCode: schema.profiles.provinceCode })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1)
+      .then((rows) => rows[0]);
+    return profile?.provinceCode || null;
+  }
+
+  async updateUserRankTier(
+    tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
+    rankId: string,
+    tierId: string | null,
+  ) {
+    return tx
+      .update(schema.userRanks)
+      .set({ tierId })
+      .where(eq(schema.userRanks.id, rankId));
   }
 }

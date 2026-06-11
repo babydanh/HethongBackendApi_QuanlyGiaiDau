@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, sql, ilike, SQL, isNull } from 'drizzle-orm';
+import { eq, and, sql, ilike, SQL, isNull, count } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryCommunityDto } from './dto/query-community.dto';
@@ -30,7 +30,7 @@ export class CommunitiesRepository {
       const radiusMeters = (query.radiusKm || 10) * 1000;
       const point = sql`ST_SetSRID(ST_MakePoint(${query.lng}, ${query.lat}), 4326)`;
       conditions.push(
-        sql`ST_DWithin(${schema.communities.locationGeolocation}, ${point}, ${radiusMeters})` as SQL,
+        sql`ST_DWithin(${schema.communities.locationGeolocation}, ${point}, ${radiusMeters})`,
       );
     }
 
@@ -145,7 +145,7 @@ export class CommunitiesRepository {
         // more than just updatedAt
         await tx
           .update(schema.communities)
-          .set(updateData as typeof schema.communities.$inferInsert)
+          .set(updateData)
           .where(eq(schema.communities.id, id));
       }
 
@@ -428,5 +428,18 @@ export class CommunitiesRepository {
       )
       .returning();
     return item;
+  }
+
+  async countActiveByCreator(creatorId: string): Promise<number> {
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(schema.communities)
+      .where(
+        and(
+          eq(schema.communities.creatorId, creatorId),
+          isNull(schema.communities.deletedAt),
+        )
+      );
+    return result.count;
   }
 }

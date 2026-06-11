@@ -135,6 +135,7 @@ src/database/schema/
 
 ### Phải biết gì?
 - **WebSocket Gateway**: Tạo `@WebSocketGateway()` cho Live Score và Chat
+- **CORS Configuration**: Bắt buộc sử dụng cấu hình CORS tập trung (ví dụ từ `src/config/cors.config.ts`), kết hợp giữa biến môi trường `process.env.FRONTEND_URL` và `credentials: true`. Tuyệt đối KHÔNG cấu hình cứng `origin: '*'` hoặc hardcode tên miền riêng lẻ ở từng file Gateway để tránh lỗi CORS và dễ dàng thay đổi khi triển khai (host).
 - **Rooms**: Mỗi trận đấu 1 room (`match:{matchId}`), mỗi phòng chat 1 room (`chat:{roomId}`)
 - **Events**:
   - `score:update` — broadcast khi tỷ số thay đổi

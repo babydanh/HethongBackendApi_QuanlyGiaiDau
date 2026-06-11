@@ -43,9 +43,8 @@ export class CommunitiesController {
   @ApiOperation({ summary: 'Lấy danh sách các cộng đồng đã duyệt' })
   @ApiResponse({ status: 200, description: 'Danh sách cộng đồng' })
   async findAll(@Query() query: QueryCommunityDto) {
-    // Force status to APPROVED for public listing unless overridden by Admin
-    // For simplicity, public route only returns APPROVED
-    query.status = 'APPROVED';
+    // Force status to ACTIVE for public listing
+    query.status = 'ACTIVE';
     return await this.communitiesService.findAll(query);
   }
 
