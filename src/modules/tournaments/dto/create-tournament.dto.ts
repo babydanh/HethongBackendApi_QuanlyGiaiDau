@@ -187,4 +187,20 @@ export class CreateTournamentDto {
   @IsUUID()
   @IsOptional()
   venueId?: string;
+
+  @ApiPropertyOptional({
+    example: 'uuid-parent-tournament',
+    description: 'ID giải đấu cha (chuỗi giải đấu / nhiều thể loại)',
+  })
+  @IsUUID()
+  @IsOptional()
+  parentId?: string;
+
+  @ApiPropertyOptional({
+    example: 'Hải Dương',
+    description: 'Tỉnh/Thành phố diễn ra giải đấu',
+  })
+  @IsString()
+  @IsOptional()
+  city?: string;
 }

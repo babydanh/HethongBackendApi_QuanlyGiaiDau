@@ -59,4 +59,7 @@ export class UpdateStageDto {
   
   @IsOptional() @IsString()
   notificationNote?: string;
+
+  @IsOptional() @IsObject()
+  matchSettings?: Record<string, any>;
 }

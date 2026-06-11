@@ -138,7 +138,7 @@ export class MatchesService {
 
     let p1SetsWon = updateMatchScoreDto.p1SetsWon;
     let p2SetsWon = updateMatchScoreDto.p2SetsWon;
-    let scoreDetails = updateMatchScoreDto.scoreDetails;
+    const scoreDetails = updateMatchScoreDto.scoreDetails;
     let winnerId = updateMatchScoreDto.winnerId;
 
     // 1. Validate score details if provided

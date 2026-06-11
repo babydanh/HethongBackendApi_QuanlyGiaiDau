@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema';
-import { eq, and, count, SQL } from 'drizzle-orm';
+import { eq, and, or, count, SQL, inArray } from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
@@ -14,8 +14,9 @@ export class MatchesRepository {
   ) {}
 
   async findAll(query: QueryMatchDto) {
-    const { page = 1, limit = 10, groupId, status } = query;
+    const { page = 1, limit = 10, groupId, status, userId } = query;
     const offset = (page - 1) * limit;
+    const tId = query.tournamentId || query.tournament_id;
 
     const conditions: SQL[] = [];
     if (groupId) {
@@ -23,6 +24,47 @@ export class MatchesRepository {
     }
     if (status) {
       conditions.push(eq(schema.matches.status, status));
+    }
+
+    if (userId) {
+      const rosters = await this.db
+        .select({ participantId: schema.tournamentRosters.participantId })
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.userId, userId));
+      const pIds = rosters.map(r => r.participantId);
+      if (pIds.length === 0) {
+        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+      }
+      conditions.push(
+        or(
+          inArray(schema.matches.participant1Id, pIds),
+          inArray(schema.matches.participant2Id, pIds)
+        ) as SQL
+      );
+    }
+
+    if (tId) {
+      const stages = await this.db
+        .select({ id: schema.tournamentStages.id })
+        .from(schema.tournamentStages)
+        .where(eq(schema.tournamentStages.tournamentId, tId));
+      const stageIds = stages.map(s => s.id);
+      
+      if (stageIds.length === 0) {
+        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+      }
+
+      const groups = await this.db
+        .select({ id: schema.tournamentGroups.id })
+        .from(schema.tournamentGroups)
+        .where(inArray(schema.tournamentGroups.stageId, stageIds));
+      const groupIds = groups.map(g => g.id);
+
+      if (groupIds.length === 0) {
+        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+      }
+
+      conditions.push(inArray(schema.matches.groupId, groupIds));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -39,8 +81,81 @@ export class MatchesRepository {
       .limit(limit)
       .offset(offset);
 
+    if (data.length === 0) {
+      return {
+        data: [],
+        meta: {
+          total: totalRecord.count,
+          page,
+          limit,
+          totalPages: Math.ceil(totalRecord.count / limit),
+        },
+      };
+    }
+
+    const participantIds = new Set<string>();
+    const groupIdsForMatches = new Set<string>();
+    for (const match of data) {
+      if (match.participant1Id) participantIds.add(match.participant1Id);
+      if (match.participant2Id) participantIds.add(match.participant2Id);
+      groupIdsForMatches.add(match.groupId);
+    }
+
+    const participantsMap = new Map<string, { id: string; teamName: string; seed: number | null }>();
+    if (participantIds.size > 0) {
+      const participantsData = await this.db
+        .select({
+          id: schema.tournamentParticipants.id,
+          teamName: schema.tournamentParticipants.teamName,
+          seed: schema.tournamentParticipants.seed,
+        })
+        .from(schema.tournamentParticipants)
+        .where(inArray(schema.tournamentParticipants.id, Array.from(participantIds)));
+      for (const p of participantsData) {
+        participantsMap.set(p.id, p);
+      }
+    }
+
+    const groupsMap = new Map<string, { id: string; name: string; stageName: string }>();
+    if (groupIdsForMatches.size > 0) {
+      const groupsData = await this.db
+        .select({
+          groupId: schema.tournamentGroups.id,
+          groupName: schema.tournamentGroups.name,
+          stageName: schema.tournamentStages.name,
+        })
+        .from(schema.tournamentGroups)
+        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .where(inArray(schema.tournamentGroups.id, Array.from(groupIdsForMatches)));
+      for (const g of groupsData) {
+        groupsMap.set(g.groupId, {
+          id: g.groupId,
+          name: g.groupName,
+          stageName: g.stageName,
+        });
+      }
+    }
+
+    const enrichedData = data.map(match => {
+      const p1 = match.participant1Id ? participantsMap.get(match.participant1Id) : null;
+      const p2 = match.participant2Id ? participantsMap.get(match.participant2Id) : null;
+      const groupStage = groupsMap.get(match.groupId);
+
+      return {
+        ...match,
+        participant1: p1 ? { id: p1.id, teamName: p1.teamName, seed: p1.seed } : null,
+        participant2: p2 ? { id: p2.id, teamName: p2.teamName, seed: p2.seed } : null,
+        group: groupStage ? {
+          name: groupStage.name,
+          stage: {
+            name: groupStage.stageName,
+          }
+        } : null,
+      };
+    });
+
     return {
-      data,
+      data: enrichedData,
       meta: {
         total: totalRecord.count,
         page,

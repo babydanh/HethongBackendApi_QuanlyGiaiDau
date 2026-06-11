@@ -11,11 +11,10 @@ import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 import { MatchBroadcastData } from './interfaces/match-broadcast.interface';
+import { corsOptions } from '../../config/cors.config';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
+  cors: corsOptions,
   namespace: '/live',
 })
 @UseGuards(WsJwtGuard)

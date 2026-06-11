@@ -79,7 +79,7 @@ export class VenuesRepository {
         } as typeof schema.tournamentVenues.$inferInsert)
         .returning();
 
-      await this.auditService.logCreate(tx, userId, 'tournament_venues', record.id, record as Record<string, unknown>);
+      await this.auditService.logCreate(tx, userId, 'tournament_venues', record.id, record);
       return record;
     });
   }
@@ -100,11 +100,11 @@ export class VenuesRepository {
           ...(data.locationAddress && { locationAddress: data.locationAddress }),
           ...(geographyValue !== undefined && { locationGeolocation: geographyValue }),
           ...(data.imagesUrls && { imagesUrls: data.imagesUrls }),
-        } as typeof schema.tournamentVenues.$inferInsert)
+        })
         .where(eq(schema.tournamentVenues.id, id))
         .returning();
 
-      await this.auditService.logUpdate(tx, userId, 'tournament_venues', id, oldRecord as Record<string, unknown>, updated as Record<string, unknown>);
+      await this.auditService.logUpdate(tx, userId, 'tournament_venues', id, oldRecord, updated);
       return updated;
     });
   }

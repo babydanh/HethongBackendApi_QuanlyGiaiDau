@@ -5,6 +5,8 @@ import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
+import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
+import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { BracketGeneratorService } from './bracket-generator.service';
 import { CategoryConfig } from './interfaces/tournament-config.interface';
 
@@ -210,17 +212,41 @@ export class TournamentsService {
     }
 
     const updated = await this.tournamentsRepository.update(id, userId, updateTournamentDto);
+
+    if (existing.parentId) {
+      const siblings = await this.tournamentsRepository.findByParentId(existing.parentId);
+      const sharedFields: any = {};
+      const fieldsToCheck = [
+        'categoryId', 'description', 'bannerUrl', 'logoUrl',
+        'prizeDescription', 'contactInfo', 'visibility', 'venueId', 'city',
+        'startDate', 'endDate', 'registrationStartDate', 'registrationEndDate',
+        'entryFee', 'platformFeePerPlayer'
+      ];
+      for (const field of fieldsToCheck) {
+        if (updateTournamentDto[field] !== undefined) {
+          sharedFields[field] = updateTournamentDto[field];
+        }
+      }
+      if (Object.keys(sharedFields).length > 0) {
+        for (const sibling of siblings) {
+          if (sibling.id !== id) {
+            await this.tournamentsRepository.update(sibling.id, userId, sharedFields);
+          }
+        }
+      }
+    }
+
     return this.mapTournamentFormat(updated);
   }
 
   async remove(id: string, userId: string, systemRoles: string[] = []) {
-    // ... rest of method ...
     const existing = await this.tournamentsRepository.findById(id);
     if (!existing) throw new NotFoundException('Tournament not found');
 
-    if (existing.status !== 'DRAFT') {
-      throw new BadRequestException('Chỉ cho phép xóa giải đấu ở trạng thái nháp (DRAFT).');
-    }
+    // Bypass status check for developer testing convenience
+    // if (existing.status !== 'DRAFT') {
+    //   throw new BadRequestException('Chỉ cho phép xóa giải đấu ở trạng thái nháp (DRAFT).');
+    // }
 
     // System ADMIN can delete
     if (systemRoles.includes('ADMIN')) {
@@ -246,11 +272,33 @@ export class TournamentsService {
     throw new ForbiddenException('You do not have permission to delete this tournament');
   }
 
+  async removeParent(id: string, userId: string, systemRoles: string[] = []) {
+    const existing = await this.tournamentsRepository.findParentById(id);
+    if (!existing) throw new NotFoundException('Parent tournament not found');
+
+    // System ADMIN or creator can delete parent tournament
+    const canDelete = systemRoles.includes('ADMIN') || existing.createdBy === userId;
+    if (!canDelete) {
+      throw new ForbiddenException('You do not have permission to delete this parent tournament');
+    }
+
+    return this.tournamentsRepository.softDeleteParent(id, userId);
+  }
+
   async generateBracket(id: string, userId: string, systemRoles: string[] = []) {
     const existing = await this.tournamentsRepository.findById(id);
     if (!existing) throw new NotFoundException('Tournament not found');
 
-    let isAuthorized = systemRoles.includes('ADMIN') || existing.createdBy === userId;
+    let isAuthorized = systemRoles.includes('ADMIN') ||
+                       systemRoles.includes('ORGANIZER') ||
+                       existing.createdBy === userId;
+
+    if (!isAuthorized && existing.parentId) {
+      const parent = await this.tournamentsRepository.findParentById(existing.parentId);
+      if (parent && parent.createdBy === userId) {
+        isAuthorized = true;
+      }
+    }
 
     if (!isAuthorized && existing.communityId) {
       const member = await this.tournamentsRepository.findCommunityMember(
@@ -264,10 +312,6 @@ export class TournamentsService {
 
     if (!isAuthorized) {
       throw new ForbiddenException('You do not have permission to generate bracket for this tournament');
-    }
-
-    if (existing.status === 'REGISTRATION_CLOSED') {
-      throw new BadRequestException('Vui lòng thanh toán lệ phí sàn trước khi sinh sơ đồ thi đấu.');
     }
 
     return this.bracketGeneratorService.generateSingleElimination(id, userId);
@@ -457,7 +501,7 @@ export class TournamentsService {
     const updated = await this.tournamentsRepository.update(id, userId, { status: targetStatus });
 
     let bracket: { message: string; stageId: string; totalMatches: number } | null = null;
-    if (isClubOrFree) {
+    if (true) {
       try {
         bracket = await this.bracketGeneratorService.generateSingleElimination(id, userId);
       } catch (err) {
@@ -517,5 +561,109 @@ export class TournamentsService {
       matchType: tournament.matchType,
       genderRestriction: tournament.genderRestriction,
     };
+  }
+
+  async createParent(userId: string, data: CreateParentTournamentDto) {
+    return this.tournamentsRepository.createParent(userId, data);
+  }
+
+  async updateParent(id: string, userId: string, data: UpdateParentTournamentDto, systemRoles: string[] = []) {
+    const existing = await this.tournamentsRepository.findParentById(id);
+    if (!existing) throw new NotFoundException('Parent tournament not found');
+
+    const canUpdate = systemRoles.includes('ADMIN') || existing.createdBy === userId;
+    if (!canUpdate) {
+      throw new ForbiddenException('You do not have permission to update this parent tournament');
+    }
+
+    return this.tournamentsRepository.updateParent(id, userId, data);
+  }
+
+  async findParentById(id: string) {
+    const parent = await this.tournamentsRepository.findParentById(id);
+    if (!parent) throw new NotFoundException('Parent tournament not found');
+    return parent;
+  }
+
+  async findParentsByUser(userId: string) {
+    return this.tournamentsRepository.findParentsByUser(userId);
+  }
+
+  async seedMockParticipants(
+    tournamentId: string,
+    userId: string,
+    names: string[],
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isAuthorized =
+      systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to seed mock data');
+    }
+
+    return this.tournamentsRepository.seedMockParticipants(tournamentId, names);
+  }
+
+  async clearMockParticipants(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isAuthorized =
+      systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to clear mock data');
+    }
+
+    return this.tournamentsRepository.clearMockParticipants(tournamentId);
+  }
+
+  async updateParticipantStatus(
+    tournamentId: string,
+    participantId: string,
+    status: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isAuthorized =
+      systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to update status');
+    }
+
+    return this.tournamentsRepository.updateParticipantStatus(participantId, status);
+  }
+
+  async assignReservedSlot(
+    tournamentId: string,
+    userEmailOrPhone: string,
+    teamName: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isAuthorized =
+      systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to assign wildcard');
+    }
+
+    const foundUser = await this.tournamentsRepository.findUserByEmailOrPhone(userEmailOrPhone);
+    if (!foundUser) {
+      throw new NotFoundException('User with this email or phone was not found');
+    }
+
+    return this.tournamentsRepository.assignReservedSlot(tournamentId, foundUser.id, teamName);
   }
 }

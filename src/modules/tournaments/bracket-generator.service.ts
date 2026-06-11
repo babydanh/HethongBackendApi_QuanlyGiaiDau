@@ -149,19 +149,19 @@ export class BracketGeneratorService {
         }
       }
 
-      // Lấy tất cả matches để insert
-      const allMatchesToInsert: MatchNode[] = [];
-      for (let r = 1; r <= totalRounds; r++) {
-        allMatchesToInsert.push(...matchNodesByRound.get(r)!);
+      // 7. Insert vào Database theo thứ tự ngược từ chung kết về vòng 1
+      // Điều này đảm bảo nextMatchId (nằm ở vòng r+1) đã tồn tại trong DB khi chèn vòng r
+      for (let r = totalRounds; r >= 1; r--) {
+        const roundMatches = matchNodesByRound.get(r)!;
+        if (roundMatches.length > 0) {
+          await tx.insert(schema.matches).values(roundMatches);
+        }
       }
-
-      // 7. Insert vào Database
-      await tx.insert(schema.matches).values(allMatchesToInsert);
 
       return {
         message: 'Bracket generated successfully',
         stageId: stage.id,
-        totalMatches: allMatchesToInsert.length,
+        totalMatches: totalRounds > 0 ? Array.from(matchNodesByRound.values()).reduce((acc, val) => acc + val.length, 0) : 0,
       };
     });
   }

@@ -4,9 +4,10 @@ import { TournamentsController } from './tournaments.controller';
 import { TournamentsRepository } from './tournaments.repository';
 import { BracketGeneratorService } from './bracket-generator.service';
 import { DatabaseModule } from '../../database/database.module';
+import { SeriesModule } from '../series/series.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, SeriesModule],
   controllers: [TournamentsController],
   providers: [
     TournamentsService,

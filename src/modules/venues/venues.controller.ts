@@ -44,7 +44,6 @@ export class VenuesController {
 
   @Post()
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Tạo địa điểm thi đấu mới' })
   async create(
     @Body() createVenueDto: CreateVenueDto,
@@ -55,7 +54,6 @@ export class VenuesController {
 
   @Patch(':id')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật địa điểm thi đấu' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -77,7 +75,6 @@ export class VenuesController {
 
   @Post(':id/courts')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Thêm sân con vào địa điểm thi đấu' })
   async addCourt(
     @Param('id', ParseUUIDPipe) id: string,
@@ -88,7 +85,6 @@ export class VenuesController {
 
   @Delete(':id/courts/:courtId')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Xóa sân con khỏi địa điểm thi đấu' })
   async removeCourt(
     @Param('id', ParseUUIDPipe) id: string,

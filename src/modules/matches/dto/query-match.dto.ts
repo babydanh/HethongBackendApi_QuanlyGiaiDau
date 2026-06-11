@@ -32,4 +32,28 @@ export class QueryMatchDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @ApiPropertyOptional({
+    example: 'uuid-tournament',
+    description: 'Lọc theo Giải đấu (Tournament)',
+  })
+  @IsOptional()
+  @IsUUID()
+  tournamentId?: string;
+
+  @ApiPropertyOptional({
+    example: 'uuid-tournament',
+    description: 'Lọc theo Giải đấu (Tournament) (snake_case)',
+  })
+  @IsOptional()
+  @IsUUID()
+  tournament_id?: string;
+
+  @ApiPropertyOptional({
+    example: 'uuid-user',
+    description: 'Lọc theo User ID tham gia trận đấu',
+  })
+  @IsOptional()
+  @IsUUID()
+  userId?: string;
 }

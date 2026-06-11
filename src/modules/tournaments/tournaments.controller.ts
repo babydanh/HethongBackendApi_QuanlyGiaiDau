@@ -19,6 +19,8 @@ import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
+import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
+import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -68,6 +70,51 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Lấy danh sách giải đấu' })
   async findAll(@Query() query: QueryTournamentDto) {
     return this.tournamentsService.findAll(query);
+  }
+
+  @Post('parent')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo giải đấu cha (chuỗi giải đấu / nhiều thể loại)' })
+  async createParent(
+    @Body() createParentTournamentDto: CreateParentTournamentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.createParent(user.sub, createParentTournamentDto);
+  }
+
+  @Get('parent/my')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách giải đấu cha của tôi' })
+  async findMyParents(@CurrentUser() user: JwtPayload) {
+    return this.tournamentsService.findParentsByUser(user.sub);
+  }
+
+  @Public()
+  @Get('parent/:id')
+  @ApiOperation({ summary: 'Lấy chi tiết giải đấu cha kèm danh sách các thể loại/phân hạng' })
+  async findOneParent(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tournamentsService.findParentById(id);
+  }
+
+  @Patch('parent/:id')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật thông tin giải đấu cha' })
+  async updateParent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateParentTournamentDto: UpdateParentTournamentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateParent(id, user.sub, updateParentTournamentDto, [user.role]);
+  }
+
+  @Delete('parent/:id')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xóa giải đấu cha' })
+  async removeParent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.removeParent(id, user.sub, [user.role]);
   }
 
   @Public()
@@ -138,9 +185,10 @@ export class TournamentsController {
     return this.tournamentsService.remove(id, user.sub, [user.role]);
   }
 
+
+
   @Post(':id/generate-bracket')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Sinh nhánh đấu tự động (Bracket Generation)' })
   async generateBracket(
     @Param('id', ParseUUIDPipe) id: string,
@@ -275,5 +323,50 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.updateStage(id, user.sub, updateStageDto, [user.role]);
+  }
+
+  @Post(':id/mock-participants')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Sinh danh sách VĐV giả lập để test' })
+  async seedMockParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('names') names: string[],
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.seedMockParticipants(id, user.sub, names, [user.role]);
+  }
+
+  @Delete(':id/mock-participants')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xóa toàn bộ VĐV giả lập' })
+  async clearMockParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.clearMockParticipants(id, user.sub, [user.role]);
+  }
+
+  @Patch(':id/participants/:participantId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Duyệt hoặc từ chối vận động viên đăng ký' })
+  async updateParticipantStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body('status') status: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateParticipantStatus(id, participantId, status, user.sub, [user.role]);
+  }
+
+  @Post(':id/reserve-slots')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Gán trực tiếp người chơi vào slot giữ chỗ (Wildcard)' })
+  async assignReservedSlot(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('userEmailOrPhone') userEmailOrPhone: string,
+    @Body('teamName') teamName: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.assignReservedSlot(id, userEmailOrPhone, teamName, user.sub, [user.role]);
   }
 }
