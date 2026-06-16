@@ -26,6 +26,7 @@ export const payments = pgTable(
     tournamentId: uuid('tournament_id')
       .references(() => tournaments.id, { onDelete: 'restrict' })
       .notNull(),
+    divisionId: uuid('division_id'),
     amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
     platformFeeAmount: numeric('platform_fee_amount', {
       precision: 12,

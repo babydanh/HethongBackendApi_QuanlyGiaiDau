@@ -55,6 +55,7 @@ export const userRanks = pgTable(
     communityId: uuid('community_id')
       .references(() => communities.id, { onDelete: 'cascade' }),
     matchType: varchar('match_type', { length: 50 }).notNull(),
+    // genderRestriction: varchar('gender_restriction', { length: 20 }), // TODO: Add migration
     eloPoints: integer('elo_points').default(1000).notNull(),
     tierId: uuid('tier_id').references(() => eloTiers.id, {
       onDelete: 'set null',
@@ -99,3 +100,26 @@ export const eloHistoryLogs = pgTable('elo_history_logs', {
     .defaultNow()
     .notNull(),
 });
+
+export const pairRanks = pgTable(
+  'pair_ranks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    user1Id: uuid('user1_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+    user2Id: uuid('user2_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'cascade' }).notNull(),
+    eloPoints: integer('elo_points').default(1000).notNull(),
+    matchesPlayed: integer('matches_played').default(0).notNull(),
+    matchesWon: integer('matches_won').default(0).notNull(),
+    winStreak: integer('win_streak').default(0).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userPairUnique: unique('user_pair_category_unique_idx').on(
+      table.user1Id,
+      table.user2Id,
+      table.categoryId
+    ),
+  })
+);
+

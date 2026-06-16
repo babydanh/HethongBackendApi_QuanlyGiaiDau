@@ -1,32 +1,25 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import * as dotenv from 'dotenv';
+import { createPostgresClientFromEnv } from './src/database/postgres-client';
 
 dotenv.config();
 
 async function run() {
-  const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || '5432'),
-    user: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
-    ssl: { rejectUnauthorized: false }
+  const sql = createPostgresClientFromEnv({
+    max: 1,
   });
-  const client = await pool.connect();
   try {
-    console.log("Enabling PostGIS...");
-    await client.query('CREATE EXTENSION IF NOT EXISTS postgis;');
+    console.log('Enabling PostGIS...');
+    await sql`CREATE EXTENSION IF NOT EXISTS postgis;`;
+    const db = drizzle(sql);
+
+    console.log('Running migrations...');
+    await migrate(db, { migrationsFolder: './src/database/migrations' });
+    console.log('Migrations complete!');
   } finally {
-    client.release();
+    await sql.end();
   }
-  const db = drizzle(pool);
-  
-  console.log("Running migrations...");
-  await migrate(db, { migrationsFolder: './src/database/migrations' });
-  console.log("Migrations complete!");
-  pool.end();
 }
 
 run().catch(console.error);

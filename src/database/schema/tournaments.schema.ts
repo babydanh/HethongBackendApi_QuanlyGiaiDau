@@ -16,6 +16,7 @@ import { users } from './users.schema';
 import { communities } from './communities.schema';
 import { categories } from './categories.schema';
 import { tournamentVenues } from './venues.schema';
+import { tournamentDivisions } from './tournament_divisions.schema';
 
 export const parentTournaments = pgTable('parent_tournaments', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -67,7 +68,6 @@ export const tournaments = pgTable(
     })
       .default('5.00')
       .notNull(),
-    platformFeePerPlayer: integer('platform_fee_per_player').default(10000).notNull(),
     registrationStartDate: timestamp('registration_start_date', { withTimezone: true }),
     registrationEndDate: timestamp('registration_end_date', { withTimezone: true }),
     maxParticipants: integer('max_participants'),
@@ -118,6 +118,10 @@ export const tournamentStages = pgTable('tournament_stages', {
   tournamentId: uuid('tournament_id')
     .references(() => tournaments.id, { onDelete: 'cascade' })
     .notNull(),
+  tournamentDivisionId: uuid('tournament_division_id').references(
+    () => tournamentDivisions.id,
+    { onDelete: 'cascade' },
+  ),
   name: varchar('name', { length: 255 }).notNull(),
   type: varchar('type', { length: 50 }).notNull(),
   order: integer('order').notNull(),
@@ -141,6 +145,10 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   tournamentId: uuid('tournament_id')
     .references(() => tournaments.id, { onDelete: 'cascade' })
     .notNull(),
+  tournamentDivisionId: uuid('tournament_division_id').references(
+    () => tournamentDivisions.id,
+    { onDelete: 'cascade' },
+  ),
   groupId: uuid('group_id').references(() => tournamentGroups.id, {
     onDelete: 'set null',
   }),
@@ -171,4 +179,14 @@ export const tournamentRosters = pgTable('tournament_rosters', {
   joinedAt: timestamp('joined_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+});
+
+export const tournamentReferees = pgTable('tournament_referees', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tournamentId: uuid('tournament_id').references(() => tournaments.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'restrict' }).notNull(),
+  assignedBy: uuid('assigned_by').references(() => users.id, { onDelete: 'set null' }),
+  status: varchar('status', { length: 50 }).default('INVITED').notNull(), // 'INVITED' | 'ACCEPTED' | 'DECLINED'
+  assignedAt: timestamp('assigned_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

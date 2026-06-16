@@ -6,8 +6,11 @@ import {
   boolean,
   timestamp,
   date,
+  integer,
 } from 'drizzle-orm/pg-core';
 import { provinces } from './regions.schema';
+import { tournaments } from './tournaments.schema';
+
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -109,3 +112,14 @@ export const sessions = pgTable('sessions', {
     .defaultNow()
     .notNull(),
 });
+
+export const organizerReviews = pgTable('organizer_reviews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizerId: uuid('organizer_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  reviewerId: uuid('reviewer_id').references(() => users.id, { onDelete: 'restrict' }).notNull(),
+  tournamentId: uuid('tournament_id').references(() => tournaments.id, { onDelete: 'cascade' }).notNull(),
+  rating: integer('rating').notNull(),
+  comment: text('comment'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+

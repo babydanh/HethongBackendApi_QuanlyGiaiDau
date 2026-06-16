@@ -155,6 +155,20 @@
       "when": 1781598438463,
       "tag": "0021_fair_lady_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781624472646,
+      "tag": "0022_misty_goblin_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781667485791,
+      "tag": "0023_rainy_naoko",
+      "breakpoints": true
     }
   ]
 }

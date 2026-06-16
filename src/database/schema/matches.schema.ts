@@ -8,11 +8,12 @@ import {
   boolean,
   timestamp,
   check,
+  index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
 import { venueCourts } from './venues.schema';
-import { tournamentGroups, tournamentParticipants } from './tournaments.schema';
+import { tournamentGroups, tournamentParticipants, tournaments, tournamentStages } from './tournaments.schema';
 
 export const groupStandings = pgTable('group_standings', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -39,7 +40,12 @@ export const matches = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     groupId: uuid('group_id')
-      .references(() => tournamentGroups.id, { onDelete: 'cascade' })
+      .references(() => tournamentGroups.id, { onDelete: 'cascade' }),
+    tournamentId: uuid('tournament_id')
+      .references(() => tournaments.id, { onDelete: 'cascade' })
+      .notNull(),
+    stageId: uuid('stage_id')
+      .references(() => tournamentStages.id, { onDelete: 'cascade' })
       .notNull(),
     participant1Id: uuid('participant1_id').references(
       () => tournamentParticipants.id,
@@ -94,6 +100,19 @@ export const matches = pgTable(
     differentParticipants: check(
       'different_participants',
       sql`${table.participant1Id} IS NULL OR ${table.participant2Id} IS NULL OR ${table.participant1Id} <> ${table.participant2Id}`,
+    ),
+    idxMatchesTournamentStatus: index('idx_matches_tournament_status').on(
+      table.tournamentId,
+      table.status,
+    ),
+    idxMatchesStageRoundOrder: index('idx_matches_stage_round_order').on(
+      table.stageId,
+      table.roundNumber,
+      table.matchOrder,
+    ),
+    idxMatchesRefereeStatus: index('idx_matches_referee_status').on(
+      table.refereeId,
+      table.status,
     ),
   }),
 );
