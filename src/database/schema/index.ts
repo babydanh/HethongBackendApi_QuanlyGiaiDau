@@ -13,4 +13,5 @@ export * from './community_gallery.schema';
 export * from './regions.schema';
 export * from './community_rankings.schema';
 export * from './series.schema';
+export * from './admin_tables.schema';
 

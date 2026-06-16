@@ -91,6 +91,8 @@ export const tournaments = pgTable(
     contactInfo: jsonb('contact_info'),
     city: varchar('city', { length: 100 }),
     reservedSlotsCount: integer('reserved_slots_count').default(0).notNull(),
+    isRanked: boolean('is_ranked').default(true).notNull(),
+    isRegistrationLocked: boolean('is_registration_locked').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

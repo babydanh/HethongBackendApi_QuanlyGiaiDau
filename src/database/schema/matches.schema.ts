@@ -65,6 +65,8 @@ export const matches = pgTable(
     courtId: uuid('court_id').references(() => venueCourts.id, {
       onDelete: 'set null',
     }),
+    courtName: text('court_name'),
+    courtAddress: text('court_address'),
     refereeId: uuid('referee_id').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -91,7 +93,7 @@ export const matches = pgTable(
     ),
     differentParticipants: check(
       'different_participants',
-      sql`${table.participant1Id} IS DISTINCT FROM ${table.participant2Id}`,
+      sql`${table.participant1Id} IS NULL OR ${table.participant2Id} IS NULL OR ${table.participant1Id} <> ${table.participant2Id}`,
     ),
   }),
 );

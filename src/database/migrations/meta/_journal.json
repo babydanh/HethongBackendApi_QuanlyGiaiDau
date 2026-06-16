@@ -120,6 +120,41 @@
       "when": 1781156831384,
       "tag": "0016_funny_blur",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781542356128,
+      "tag": "0017_brave_jackpot",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781542419746,
+      "tag": "0018_curious_phil_sheldon",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781576227356,
+      "tag": "0019_illegal_sentinel",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781582691098,
+      "tag": "0020_colorful_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781598438463,
+      "tag": "0021_fair_lady_mastermind",
+      "breakpoints": true
     }
   ]
 }

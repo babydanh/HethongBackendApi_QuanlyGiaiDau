@@ -5,6 +5,7 @@ import {
   text,
   jsonb,
   integer,
+  boolean,
   timestamp,
   check,
   unique,
@@ -58,6 +59,7 @@ export const userRanks = pgTable(
     tierId: uuid('tier_id').references(() => eloTiers.id, {
       onDelete: 'set null',
     }),
+    shieldActive: boolean('shield_active').default(false).notNull(),
     matchesPlayed: integer('matches_played').default(0).notNull(),
     matchesWon: integer('matches_won').default(0).notNull(),
     winStreak: integer('win_streak').default(0).notNull(),

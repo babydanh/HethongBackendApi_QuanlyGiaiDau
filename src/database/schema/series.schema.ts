@@ -113,3 +113,29 @@ export const psrPointLogs = pgTable('psr_point_logs', {
   isDirectEntry: boolean('is_direct_entry').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// 6. series_invitations
+export const seriesInvitations = pgTable('series_invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  seriesId: uuid('series_id')
+    .references(() => tournamentSeries.id, { onDelete: 'cascade' })
+    .notNull(),
+  email: varchar('email', { length: 255 }),
+  phone: varchar('phone', { length: 50 }),
+  role: varchar('role', { length: 50 }).notNull(), // 'CO_ORGANIZER' | 'REFEREE' | 'CLERK'
+  status: varchar('status', { length: 50 }).default('PENDING').notNull(), // 'PENDING' | 'ACCEPTED' | 'REJECTED'
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// 7. series_managers
+export const seriesManagers = pgTable('series_managers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  seriesId: uuid('series_id')
+    .references(() => tournamentSeries.id, { onDelete: 'cascade' })
+    .notNull(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  role: varchar('role', { length: 50 }).notNull(), // 'CO_ORGANIZER' | 'REFEREE' | 'CLERK'
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});

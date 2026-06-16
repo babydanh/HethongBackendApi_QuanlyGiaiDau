@@ -1,0 +1,1 @@
+ALTER TABLE "user_ranks" ADD COLUMN "shield_active" boolean DEFAULT false NOT NULL;

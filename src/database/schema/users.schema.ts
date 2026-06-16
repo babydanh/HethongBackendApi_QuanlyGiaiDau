@@ -80,6 +80,7 @@ export const profiles = pgTable('profiles', {
     .unique(),
   fullName: varchar('full_name', { length: 255 }).notNull(),
   avatarUrl: text('avatar_url'),
+  coverUrl: text('cover_url'),
   phoneNumber: varchar('phone_number', { length: 20 }),
   dateOfBirth: date('date_of_birth'),
   gender: varchar('gender', { length: 20 }),
@@ -87,6 +88,7 @@ export const profiles = pgTable('profiles', {
   bio: text('bio'),
   provinceCode: varchar('province_code', { length: 20 })
     .references(() => provinces.code, { onDelete: 'set null' }),
+  isVerified: boolean('is_verified').default(false).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
