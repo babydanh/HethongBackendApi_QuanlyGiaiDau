@@ -13,17 +13,22 @@ export class AdminController {
 
   @Get('dashboard/metrics')
   @ApiOperation({ summary: 'Lấy dữ liệu GMV, doanh thu, escrow và số lượng giao dịch (Chỉ ADMIN)' })
-  async getMetrics() {
-    return this.adminService.getMetrics();
+  @ApiQuery({ name: 'groupBy', required: false, enum: ['day', 'week', 'month', 'year'], description: 'Gom nhóm thống kê và phần trăm tăng trưởng' })
+  async getMetrics(@Query('groupBy') groupBy?: 'day' | 'week' | 'month' | 'year') {
+    return this.adminService.getMetrics(groupBy || 'month');
   }
 
   @Get('dashboard/revenue-chart')
   @ApiOperation({ summary: 'Lấy dữ liệu doanh thu và GMV theo thời gian (Chỉ ADMIN)' })
-  @ApiQuery({ name: 'groupBy', required: false, enum: ['week', 'month', 'year'], description: 'Gom nhóm theo tuần, tháng hoặc năm' })
+  @ApiQuery({ name: 'groupBy', required: false, enum: ['day', 'week', 'month', 'year'], description: 'Gom nhóm theo ngày, tuần, tháng hoặc năm' })
+  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'Ngày bắt đầu lọc (YYYY-MM-DD)' })
+  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'Ngày kết thúc lọc (YYYY-MM-DD)' })
   async getRevenueChart(
-    @Query('groupBy') groupBy?: 'week' | 'month' | 'year',
+    @Query('groupBy') groupBy?: 'day' | 'week' | 'month' | 'year',
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.adminService.getRevenueChart(groupBy || 'month');
+    return this.adminService.getRevenueChart(groupBy || 'month', startDate, endDate);
   }
 
   @Get('audit-logs')
