@@ -34,6 +34,13 @@ export class TournamentsController {
   constructor(private readonly tournamentsService: TournamentsService) {}
 
   @Public()
+  @Get('fees')
+  @ApiOperation({ summary: 'Lấy cấu hình các loại phí giải đấu và phí hoa hồng' })
+  async getFeesConfig() {
+    return this.tournamentsService.getFeesConfig();
+  }
+
+  @Public()
   @Get('public')
   @ApiOperation({ summary: 'Chỉ lấy danh sách giải đấu PUBLIC công khai' })
   async findPublic(@Query() query: QueryTournamentDto) {
@@ -365,8 +372,31 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body('userEmailOrPhone') userEmailOrPhone: string,
     @Body('teamName') teamName: string,
+    @Body('partnerEmailOrPhone') partnerEmailOrPhone: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.assignReservedSlot(id, userEmailOrPhone, teamName, user.sub, [user.role]);
+    return this.tournamentsService.assignReservedSlot(id, userEmailOrPhone, teamName, user.sub, [user.role], partnerEmailOrPhone);
+  }
+
+  @Post(':id/participants/:participantId/kick')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Kick vận động viên/đội thi đấu khỏi giải và hoàn tiền' })
+  async kickParticipant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body('reason') reason: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.kickParticipant(id, participantId, user.sub, reason, [user.role]);
+  }
+
+  @Post(':id/cancel')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Hủy giải đấu / nội dung thi đấu và hoàn tiền cho mọi người' })
+  async cancelTournament(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.cancelTournament(id, user.sub, [user.role]);
   }
 }

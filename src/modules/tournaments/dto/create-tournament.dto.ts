@@ -11,6 +11,7 @@ import {
   IsObject,
   IsIn,
   IsArray,
+  IsBoolean,
 } from 'class-validator';
 
 export class CreateTournamentDto {
@@ -203,4 +204,9 @@ export class CreateTournamentDto {
   @IsString()
   @IsOptional()
   city?: string;
+
+  @ApiPropertyOptional({ example: true, description: 'Giải đấu có tính điểm ELO/hạng không' })
+  @IsBoolean()
+  @IsOptional()
+  isRanked?: boolean;
 }

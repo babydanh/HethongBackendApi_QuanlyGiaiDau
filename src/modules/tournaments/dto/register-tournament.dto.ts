@@ -12,4 +12,9 @@ export class RegisterTournamentDto {
   @IsOptional()
   @IsUUID('4', { each: true })
   memberIds?: string[];
+
+  @ApiPropertyOptional({ description: 'Email hoặc SĐT của đồng đội (cho đánh đôi)' })
+  @IsString()
+  @IsOptional()
+  partnerEmailOrPhone?: string;
 }

@@ -7,6 +7,7 @@ export interface MatchNode {
   status: string;
   isBye: boolean;
   nextMatchId: string | null;
+  loserNextMatchId?: string | null;
   participant1Id: string | null;
   participant2Id: string | null;
   winnerId: string | null;

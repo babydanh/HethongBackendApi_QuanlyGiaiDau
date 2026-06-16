@@ -6,7 +6,9 @@ export interface SportRules {
   tiebreakPoints?: number;
   serveSwitchEvery?: number;
   switchSidesBetweenSets?: boolean;
-  switchSidesAtTiebreakPoints?: number;
+  winPoints?: number;
+  drawPoints?: number;
+  lossPoints?: number;
 }
 
 export interface TournamentConfig {
@@ -18,6 +20,10 @@ export interface TournamentConfig {
   numberOfGroups?: number;
   teamsAdvancingPerGroup?: number;
   knockoutBracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION';
+  minElo?: number | null;
+  maxElo?: number | null;
+  maxCombinedElo?: number | null;
+  maxTeammateGap?: number | null;
 }
 
 export interface Prize {

@@ -32,9 +32,12 @@ export class TournamentsRepository {
     // Always exclude soft-deleted tournaments
     conditions.push(sql`${schema.tournaments.deletedAt} IS NULL`);
 
-    // Exclude DRAFT tournaments from public listing (unless createdBy is specified)
+    // Exclude DRAFT, PENDING_APPROVAL, SUSPENDED, and CANCELLED tournaments from public listing (unless createdBy is specified)
     if (!createdBy) {
       conditions.push(ne(schema.tournaments.status, 'DRAFT'));
+      conditions.push(ne(schema.tournaments.status, 'PENDING_APPROVAL'));
+      conditions.push(ne(schema.tournaments.status, 'SUSPENDED'));
+      conditions.push(ne(schema.tournaments.status, 'CANCELLED'));
     }
 
     if (search) {
@@ -114,7 +117,17 @@ export class TournamentsRepository {
           .where(eq(schema.tournamentParticipants.tournamentId, row.tournament.id));
 
         // Fetch divisions (siblings) if this tournament has a parentId
-        let divisions: any[] = [];
+        type DivisionInfo = {
+          id: string;
+          name: string;
+          matchType: string;
+          genderRestriction: string | null;
+          status: string;
+          categoryId: string;
+          maxParticipants: number | null;
+          _count: { participants: number };
+        };
+        let divisions: DivisionInfo[] = [];
         if (row.tournament.parentId) {
           const rawDivs = await this.db
             .select({
@@ -360,6 +373,24 @@ export class TournamentsRepository {
   async create(userId: string, data: CreateTournamentDto) {
     return await this.db.transaction(async (tx) => {
       const inviteCode = await this.generateUniqueInviteCode(tx);
+
+      // Get platform fee percentage from configs dynamically
+      let configKey = 'PLATFORM_FEE_PERCENTAGE_CLUB';
+      let defaultPct = '0';
+      if (data.tournamentType === 'PUBLIC') {
+        configKey = data.isRanked ? 'PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED' : 'PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED';
+        defaultPct = '5';
+      }
+      
+      const [configRecord] = await tx
+        .select()
+        .from(schema.systemConfigs)
+        .where(eq(schema.systemConfigs.key, configKey))
+        .limit(1);
+      const platformFeePercentage = data.platformFeePercentage !== undefined 
+        ? data.platformFeePercentage.toString() 
+        : (configRecord ? configRecord.value : defaultPct);
+
       const [record] = await tx
         .insert(schema.tournaments)
         .values({
@@ -371,7 +402,7 @@ export class TournamentsRepository {
           sportRules: data.sportRules,
           tournamentConfig: data.tournamentConfig,
           entryFee: (data.entryFee || 0).toString(),
-          platformFeePercentage: (data.platformFeePercentage || 5.0).toString(),
+          platformFeePercentage,
           registrationStartDate: data.registrationStartDate ? new Date(data.registrationStartDate) : null,
           registrationEndDate: data.registrationEndDate ? new Date(data.registrationEndDate) : null,
           maxParticipants: data.maxParticipants || null,
@@ -391,6 +422,7 @@ export class TournamentsRepository {
           visibility: data.visibility || 'PUBLIC',
           genderRestriction: data.genderRestriction || null,
           parentId: data.parentId || null,
+          isRanked: data.isRanked !== undefined ? data.isRanked : true,
         })
         .returning();
       
@@ -444,6 +476,7 @@ export class TournamentsRepository {
           ...(data.visibility !== undefined && { visibility: data.visibility }),
           ...(data.genderRestriction !== undefined && { genderRestriction: data.genderRestriction }),
           ...(data.parentId !== undefined && { parentId: data.parentId }),
+          ...(data.isRegistrationLocked !== undefined && { isRegistrationLocked: data.isRegistrationLocked }),
           updatedAt: new Date(),
         })
         .where(eq(schema.tournaments.id, id))
@@ -591,6 +624,28 @@ export class TournamentsRepository {
         .set({ deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(schema.tournaments.id, id))
         .returning();
+
+      // Cascade soft-delete to matches
+      const stages = await tx
+        .select({ id: schema.tournamentStages.id })
+        .from(schema.tournamentStages)
+        .where(eq(schema.tournamentStages.tournamentId, id));
+      const stageIds = stages.map(s => s.id);
+
+      if (stageIds.length > 0) {
+        const groups = await tx
+          .select({ id: schema.tournamentGroups.id })
+          .from(schema.tournamentGroups)
+          .where(inArray(schema.tournamentGroups.stageId, stageIds));
+        const groupIds = groups.map(g => g.id);
+
+        if (groupIds.length > 0) {
+          await tx
+            .update(schema.matches)
+            .set({ deletedAt: new Date(), updatedAt: new Date() })
+            .where(inArray(schema.matches.groupId, groupIds));
+        }
+      }
 
       await this.auditService.logDelete(tx, userId, 'tournaments', id, oldRecord);
       return deleted;
@@ -746,8 +801,84 @@ export class TournamentsRepository {
 
       // 9. Thêm participant
       const isDoubles = tournament.matchType === 'DOUBLES' || tournament.matchType === 'MIXED_DOUBLES';
+      
+      let partnerId: string | null = null;
+      if (isDoubles && data.partnerEmailOrPhone) {
+        // Resolve partner account
+        const [partnerUser] = await tx
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+          .where(
+            or(
+              eq(schema.users.email, data.partnerEmailOrPhone),
+              eq(schema.profiles.phoneNumber, data.partnerEmailOrPhone)
+            )
+          )
+          .limit(1);
+
+        if (!partnerUser) {
+          throw new BadRequestException('Không tìm thấy tài khoản Baseline của đồng đội. Vui lòng kiểm tra lại Email hoặc SĐT.');
+        }
+
+        if (partnerUser.id === userId) {
+          throw new BadRequestException('Email/SĐT của đồng đội không được trùng với tài khoản của bạn.');
+        }
+
+        // Check if partner already in tournament
+        const partnerExisting = await tx
+          .select({ userId: schema.tournamentRosters.userId })
+          .from(schema.tournamentRosters)
+          .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, tournamentId),
+              eq(schema.tournamentRosters.userId, partnerUser.id),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+            )
+          );
+        if (partnerExisting.length > 0) {
+          throw new BadRequestException('Đồng đội của bạn đã đăng ký tham gia giải đấu này rồi.');
+        }
+
+        // Enforce gender constraints for partner if any
+        if (tournament.genderRestriction) {
+          const [partnerProfile] = await tx
+            .select({ gender: schema.profiles.gender })
+            .from(schema.profiles)
+            .where(eq(schema.profiles.userId, partnerUser.id))
+            .limit(1);
+          
+          if (!partnerProfile || !partnerProfile.gender) {
+            throw new BadRequestException('Đồng đội chưa cập nhật giới tính trong hồ sơ cá nhân.');
+          }
+
+          const leaderProfileRes = await tx.select({ gender: schema.profiles.gender }).from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
+          const leaderGenderVal = leaderProfileRes[0]?.gender?.toUpperCase();
+          const partnerGenderVal = partnerProfile.gender.toUpperCase();
+          const restriction = tournament.genderRestriction.toUpperCase();
+
+          if (restriction === 'MALE' && partnerGenderVal !== 'MALE') {
+            throw new BadRequestException('Giải đấu chỉ dành cho Nam (cả 2 VĐV phải là Nam).');
+          }
+          if (restriction === 'FEMALE' && partnerGenderVal !== 'FEMALE') {
+            throw new BadRequestException('Giải đấu chỉ dành cho Nữ (cả 2 VĐV phải là Nữ).');
+          }
+          if (restriction === 'MIXED') {
+            if (!leaderGenderVal) {
+              throw new BadRequestException('Bạn cần cập nhật giới tính trong hồ sơ để xác nhận Mixed Doubles.');
+            }
+            if (leaderGenderVal === partnerGenderVal) {
+              throw new BadRequestException('Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.');
+            }
+          }
+        }
+
+        partnerId = partnerUser.id;
+      }
+
       const teamInviteToken = isDoubles ? Math.random().toString(36).substring(2, 14).toUpperCase() : null;
-      const teamStatus = isDoubles ? 'PENDING' : 'COMPLETE';
+      const teamStatus = isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
       const entryFeeAmount = parseFloat(tournament.entryFee || '0');
       // Bypass payment check for testing
       const isPaid = true; // entryFeeAmount === 0;
@@ -759,7 +890,7 @@ export class TournamentsRepository {
           registeredBy: userId,
           teamName: data.teamName,
           isPaid,
-          teamInviteToken,
+          teamInviteToken: partnerId ? null : teamInviteToken,
           teamStatus,
         })
         .returning();
@@ -771,9 +902,18 @@ export class TournamentsRepository {
         role: 'MAIN',
       });
 
-      // 11. Xử lý Payment cho Singles (nếu có phí)
+      // 10.5 Thêm rosters cho Partner nếu có
+      if (partnerId) {
+        await tx.insert(schema.tournamentRosters).values({
+          participantId: participant.id,
+          userId: partnerId,
+          role: 'MAIN',
+        });
+      }
+
+      // 11. Xử lý Payment (Singles, hoặc Doubles khi đội hoàn thành và có phí)
       let paymentUrl: string | null = null;
-      if (!isDoubles && entryFeeAmount > 0) {
+      if (entryFeeAmount > 0 && (teamStatus === 'COMPLETE')) {
         const [payment] = await tx
           .insert(schema.payments)
           .values({
@@ -795,7 +935,7 @@ export class TournamentsRepository {
       return {
         participant,
         paymentUrl,
-        teamInviteLink: isDoubles 
+        teamInviteLink: (isDoubles && !partnerId)
           ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
           : null
       };
@@ -1065,6 +1205,144 @@ export class TournamentsRepository {
     });
   }
 
+  async kickParticipant(tournamentId: string, participantId: string, userId: string, reason?: string) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Kiểm tra giải đấu
+      const [tournament] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1);
+
+      if (!tournament) throw new NotFoundException('Tournament not found');
+
+      // 2. Kiểm tra participant
+      const [participant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .limit(1);
+
+      if (!participant) throw new NotFoundException('Participant not found');
+
+      // 3. Cập nhật trạng thái sang KICKED
+      const [updatedParticipant] = await tx
+        .update(schema.tournamentParticipants)
+        .set({ teamStatus: 'KICKED', teamInviteToken: null })
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+
+      // 4. Hoàn tiền nếu đã nộp lệ phí
+      let refundAmount: string | null = null;
+      if (participant.isPaid) {
+        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
+        if (entryFeeAmount > 0) {
+          await tx
+            .insert(schema.payments)
+            .values({
+              userId: participant.registeredBy,
+              tournamentId,
+              participantId,
+              amount: `-${entryFeeAmount}`,
+              status: 'COMPLETED',
+              paymentGateway: 'REFUND',
+            });
+          refundAmount = entryFeeAmount.toString();
+        }
+      }
+
+      // 5. Xử lý Walkover/BYE trong sơ đồ thi đấu
+      const activeMatches = await tx
+        .select()
+        .from(schema.matches)
+        .where(
+          and(
+            or(eq(schema.matches.status, 'SCHEDULED'), eq(schema.matches.status, 'ONGOING')),
+            or(
+              eq(schema.matches.participant1Id, participantId),
+              eq(schema.matches.participant2Id, participantId)
+            )
+          )
+        );
+
+      for (const match of activeMatches) {
+        const opponentId = (match.participant1Id === participantId)
+          ? match.participant2Id
+          : match.participant1Id;
+
+        const winnerId = opponentId || null;
+
+        await tx
+          .update(schema.matches)
+          .set({
+            status: 'COMPLETED',
+            winnerId,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.matches.id, match.id));
+
+        if (match.nextMatchId && winnerId) {
+          const [nextMatch] = await tx
+            .select()
+            .from(schema.matches)
+            .where(eq(schema.matches.id, match.nextMatchId))
+            .limit(1);
+
+          let updateField: { participant1Id?: string | null; participant2Id?: string | null };
+
+          if (nextMatch && nextMatch.bracketBranch === 'GRAND_FINALS') {
+            if (match.bracketBranch === 'MAIN') {
+              updateField = { participant1Id: winnerId };
+            } else {
+              updateField = { participant2Id: winnerId };
+            }
+          } else {
+            if (match.bracketBranch === 'LOSERS') {
+              if (match.roundNumber % 2 !== 0) {
+                updateField = { participant1Id: winnerId };
+              } else {
+                const isOdd = (match.matchOrder % 2 !== 0);
+                updateField = isOdd ? { participant1Id: winnerId } : { participant2Id: winnerId };
+              }
+            } else {
+              const isOdd = (match.matchOrder % 2 !== 0);
+              updateField = isOdd ? { participant1Id: winnerId } : { participant2Id: winnerId };
+            }
+          }
+
+          await tx
+            .update(schema.matches)
+            .set(updateField)
+            .where(eq(schema.matches.id, match.nextMatchId));
+        }
+
+        if (match.loserNextMatchId) {
+          const isOdd = (match.matchOrder % 2 !== 0);
+          let updateField: { participant1Id?: string | null; participant2Id?: string | null };
+
+          if (match.roundNumber === 1) {
+            updateField = isOdd ? { participant1Id: null } : { participant2Id: null };
+          } else {
+            updateField = { participant2Id: null };
+          }
+
+          await tx
+            .update(schema.matches)
+            .set(updateField)
+            .where(eq(schema.matches.id, match.loserNextMatchId));
+        }
+      }
+
+      await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, participant, updatedParticipant);
+
+      return {
+        message: 'Đội thi đấu đã bị kick và hoàn tiền thành công.',
+        refundAmount,
+      };
+    });
+  }
+
   async myRegistration(tournamentId: string, userId: string) {
     const userRoster = await this.db
       .select({ participantId: schema.tournamentRosters.participantId })
@@ -1262,7 +1540,30 @@ export class TournamentsRepository {
         .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.tournamentId, tournamentId));
 
-      const participantMap = new Map(participants.map((p) => [p.id, p]));
+      const rosters = await this.db
+        .select({
+          participantId: schema.tournamentRosters.participantId,
+          userId: schema.tournamentRosters.userId,
+          fullName: schema.profiles.fullName,
+        })
+        .from(schema.tournamentRosters)
+        .leftJoin(schema.profiles, eq(schema.tournamentRosters.userId, schema.profiles.userId))
+        .where(inArray(schema.tournamentRosters.participantId, participants.map((p) => p.id)));
+
+      const rostersMap = new Map<string, { userId: string; fullName: string | null }[]>();
+      for (const r of rosters) {
+        const list = rostersMap.get(r.participantId) || [];
+        list.push({ userId: r.userId, fullName: r.fullName });
+        rostersMap.set(r.participantId, list);
+      }
+
+      const participantMap = new Map(participants.map((p) => [
+        p.id, 
+        {
+          ...p,
+          members: rostersMap.get(p.id) || [],
+        }
+      ]));
 
       matchesList = dbMatches.map((m) => ({
         ...m,
@@ -1474,15 +1775,55 @@ export class TournamentsRepository {
     if (!parent) return null;
 
     // Fetch divisions under this parent
-    const divisions = await this.db
-      .select()
+    const rawDivisions = await this.db
+      .select({
+        id: schema.tournaments.id,
+        parentId: schema.tournaments.parentId,
+        name: schema.tournaments.name,
+        description: schema.tournaments.description,
+        startDate: schema.tournaments.startDate,
+        endDate: schema.tournaments.endDate,
+        status: schema.tournaments.status,
+        matchType: schema.tournaments.matchType,
+        genderRestriction: schema.tournaments.genderRestriction,
+        categoryId: schema.tournaments.categoryId,
+        bannerUrl: schema.tournaments.bannerUrl,
+        logoUrl: schema.tournaments.logoUrl,
+        category: {
+          id: schema.categories.id,
+          name: schema.categories.name,
+        }
+      })
       .from(schema.tournaments)
+      .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
       .where(
         and(
           eq(schema.tournaments.parentId, id),
           sql`${schema.tournaments.deletedAt} IS NULL`
         )
       );
+
+    const divisions = await Promise.all(
+      rawDivisions.map(async (div) => {
+        // Count active participants
+        const [pCount] = await this.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.tournamentParticipants)
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, div.id),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+            )
+          );
+
+        return {
+          ...div,
+          _summary: {
+            participantCount: pCount?.count || 0
+          }
+        };
+      })
+    );
 
     return {
       ...parent,
@@ -1553,7 +1894,7 @@ export class TournamentsRepository {
       if (!tournament) throw new BadRequestException('Tournament not found');
 
       const isDoubles = tournament.matchType === 'DOUBLES' || tournament.matchType === 'MIXED_DOUBLES';
-      const createdParticipants: any[] = [];
+      const createdParticipants: (typeof schema.tournamentParticipants.$inferSelect)[] = [];
 
       if (isDoubles) {
         for (let i = 0; i < names.length; i += 2) {
@@ -1662,6 +2003,16 @@ export class TournamentsRepository {
     return updated;
   }
 
+  async getParticipantRosters(participantId: string) {
+    return this.db
+      .select({
+        userId: schema.tournamentRosters.userId,
+        role: schema.tournamentRosters.role,
+      })
+      .from(schema.tournamentRosters)
+      .where(eq(schema.tournamentRosters.participantId, participantId));
+  }
+
   async findUserByEmailOrPhone(emailOrPhone: string) {
     const [user] = await this.db
       .select({ id: schema.users.id })
@@ -1677,7 +2028,7 @@ export class TournamentsRepository {
     return user;
   }
 
-  async assignReservedSlot(tournamentId: string, userId: string, teamName: string) {
+  async assignReservedSlot(tournamentId: string, userId: string, teamName: string, partnerId?: string) {
     return await this.db.transaction(async (tx) => {
       const tournament = await tx
         .select()
@@ -1689,7 +2040,7 @@ export class TournamentsRepository {
       if (!tournament) throw new BadRequestException('Tournament not found');
 
       const isDoubles = tournament.matchType === 'DOUBLES' || tournament.matchType === 'MIXED_DOUBLES';
-      const teamStatus = isDoubles ? 'PENDING' : 'COMPLETE';
+      const teamStatus = isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
 
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
@@ -1708,7 +2059,137 @@ export class TournamentsRepository {
         role: 'MAIN',
       });
 
+      if (isDoubles && partnerId) {
+        await tx.insert(schema.tournamentRosters).values({
+          participantId: participant.id,
+          userId: partnerId,
+          role: 'MAIN',
+        });
+      }
+
       return participant;
     });
+  }
+
+  async getUserElo(userId: string, categoryId: string, matchType: string): Promise<number> {
+    const result = await this.db
+      .select({ eloPoints: schema.userRanks.eloPoints })
+      .from(schema.userRanks)
+      .where(
+        and(
+          eq(schema.userRanks.userId, userId),
+          eq(schema.userRanks.categoryId, categoryId),
+          eq(schema.userRanks.matchType, matchType),
+          sql`${schema.userRanks.communityId} IS NULL`
+        )
+      )
+      .limit(1);
+    return result[0]?.eloPoints ?? 1000;
+  }
+
+  async findLeaderByParticipantId(participantId: string) {
+    const result = await this.db
+      .select()
+      .from(schema.tournamentRosters)
+      .where(
+        and(
+          eq(schema.tournamentRosters.participantId, participantId),
+          eq(schema.tournamentRosters.role, 'MAIN')
+        )
+      )
+      .limit(1);
+    return result[0] || null;
+  }
+
+  async cancelTournament(tournamentId: string, userId: string) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Update tournament status to CANCELLED
+      const [updatedTournament] = await tx
+        .update(schema.tournaments)
+        .set({ status: 'CANCELLED', updatedAt: new Date() })
+        .where(eq(schema.tournaments.id, tournamentId))
+        .returning();
+
+      // 2. Fetch all active participants
+      const activeParticipants = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
+          )
+        );
+
+      // 3. Refund each paid participant
+      for (const participant of activeParticipants) {
+        if (participant.isPaid) {
+          const entryFeeAmount = parseFloat(updatedTournament.entryFee || '0');
+          if (entryFeeAmount > 0) {
+            await tx
+              .insert(schema.payments)
+              .values({
+                userId: participant.registeredBy,
+                tournamentId,
+                participantId: participant.id,
+                amount: `-${entryFeeAmount}`,
+                status: 'COMPLETED',
+                paymentGateway: 'REFUND',
+              });
+          }
+        }
+      }
+
+      // 4. Cancel all active matches
+      const stages = await tx
+        .select({ id: schema.tournamentStages.id })
+        .from(schema.tournamentStages)
+        .where(eq(schema.tournamentStages.tournamentId, tournamentId));
+      const stageIds = stages.map((s) => s.id);
+
+      if (stageIds.length > 0) {
+        const groups = await tx
+          .select({ id: schema.tournamentGroups.id })
+          .from(schema.tournamentGroups)
+          .where(inArray(schema.tournamentGroups.stageId, stageIds));
+        const groupIds = groups.map((g) => g.id);
+
+        if (groupIds.length > 0) {
+          await tx
+            .update(schema.matches)
+            .set({ status: 'CANCELLED', updatedAt: new Date() })
+            .where(
+              and(
+                inArray(schema.matches.groupId, groupIds),
+                ne(schema.matches.status, 'COMPLETED'),
+                ne(schema.matches.status, 'CANCELLED')
+              )
+            );
+        }
+      }
+
+      return updatedTournament;
+    });
+  }
+
+  async getFeesConfig() {
+    const getVal = async (key: string, def: string) => {
+      const [existing] = await this.db
+        .select()
+        .from(schema.systemConfigs)
+        .where(eq(schema.systemConfigs.key, key))
+        .limit(1);
+      return existing ? existing.value : def;
+    };
+
+    return {
+      feePublicRanked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED', '100000')),
+      feePublicUnranked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED', '50000')),
+      feeClub: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_CLUB', '0')),
+      pctPublicRanked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5')),
+      pctPublicUnranked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5')),
+      pctClub: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_CLUB', '0')),
+    };
   }
 }
