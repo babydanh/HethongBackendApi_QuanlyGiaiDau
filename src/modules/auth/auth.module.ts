@@ -15,14 +15,14 @@ import { GoogleStrategy } from './strategies/google.strategy';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('auth.jwtAccessSecret'),
-        signOptions: {
-          expiresIn: configService.get<string>(
-            'auth.jwtAccessExpiresIn',
-          ) as any,
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const expiresIn = configService.get<string>('auth.jwtAccessExpiresIn') || '15m';
+        return {
+          secret: configService.get<string>('auth.jwtAccessSecret'),
+          // Safe cast: expiresIn string value is valid for JWT SignOptions
+          signOptions: { expiresIn: expiresIn as unknown as never },
+        };
+      },
     }),
   ],
   controllers: [AuthController],

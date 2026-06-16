@@ -7,6 +7,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import { AuthRepository } from './auth.repository';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -17,11 +18,17 @@ import { ERROR_MESSAGES } from '../../common/constants/error-messages';
 
 @Injectable()
 export class AuthService {
+  private readonly googleClient: OAuth2Client;
+
   constructor(
     private readonly authRepository: AuthRepository,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.googleClient = new OAuth2Client(
+      this.configService.get<string>('auth.googleClientId'),
+    );
+  }
 
   async register(registerDto: RegisterDto) {
     const existingUser = await this.authRepository.findUserByEmail(
@@ -203,18 +210,18 @@ export class AuthService {
   ) {
     const payload = { sub: userId, email, roles, jti: crypto.randomUUID() };
 
+    const accessExpiresIn = this.configService.get<string>('auth.jwtAccessExpiresIn') || '15m';
+    const refreshExpiresIn = this.configService.get<string>('auth.jwtRefreshExpiresIn') || '7d';
+
+    // Safe cast: expiresIn string value is valid for JWT SignOptions
     const [accessToken, newRefreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
         secret: this.configService.get<string>('auth.jwtAccessSecret')!,
-        expiresIn: this.configService.get<string>(
-          'auth.jwtAccessExpiresIn',
-        ) as any,
+        expiresIn: accessExpiresIn as unknown as never,
       }),
       this.jwtService.signAsync(payload, {
         secret: this.configService.get<string>('auth.jwtRefreshSecret')!,
-        expiresIn: this.configService.get<string>(
-          'auth.jwtRefreshExpiresIn',
-        ) as any,
+        expiresIn: refreshExpiresIn as unknown as never,
       }),
     ]);
 
@@ -243,5 +250,44 @@ export class AuthService {
         roles,
       },
     };
+  }
+
+  async verifyGoogleIdToken(idToken: string): Promise<OAuthProfileDto> {
+    try {
+      const webClientId = this.configService.get<string>('auth.googleClientId');
+      // Lấy danh sách client ID của Mobile từ cấu hình ConfigService
+      const mobileClientIdsStr = this.configService.get<string>('auth.googleMobileClientIds') || '';
+      const mobileClientIds = mobileClientIdsStr
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+
+      const audiences = [webClientId, ...mobileClientIds].filter((id): id is string => !!id);
+
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken,
+        audience: audiences,
+      });
+      const payload = ticket.getPayload();
+      if (!payload || !payload.email) {
+        throw new UnauthorizedException('ID Token của Google không hợp lệ.');
+      }
+      return {
+        provider: 'GOOGLE',
+        providerUserId: payload.sub,
+        email: payload.email,
+        displayName: payload.name || 'User',
+        avatarUrl: payload.picture,
+        accessToken: undefined,
+        refreshToken: undefined,
+      };
+    } catch {
+      throw new UnauthorizedException('Xác thực Google ID Token thất bại.');
+    }
+  }
+
+  async googleMobileLogin(idToken: string, userAgent?: string, ipAddress?: string) {
+    const oauthProfile = await this.verifyGoogleIdToken(idToken);
+    return this.oauthLogin(oauthProfile, userAgent, ipAddress);
   }
 }

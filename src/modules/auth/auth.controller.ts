@@ -84,6 +84,7 @@ export class AuthController {
     return responseData;
   }
 
+  @Public()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout user' })
@@ -91,12 +92,22 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const refreshToken = req.cookies['refreshToken'];
     if (refreshToken) {
-      await this.authService.logout(refreshToken);
+      try {
+        await this.authService.logout(refreshToken);
+      } catch (e) {
+        // Ignore error during session revocation to ensure cookies are always cleared in response
+      }
     }
     
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+    };
+    
     // Clear cookies
-    res.clearCookie('accessToken');
-    res.clearCookie('refreshToken');
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
     
     return { message: 'Logged out successfully' };
   }
@@ -152,5 +163,52 @@ export class AuthController {
     
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
     res.redirect(`${frontendUrl}/auth/callback`);
+  }
+
+  @Public()
+  @Post('mobile/login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đăng nhập cho Mobile App (Trả về JSON chứa tokens)' })
+  @ApiResponse({ status: 200, description: 'Đăng nhập thành công' })
+  async mobileLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip;
+    return await this.authService.login(loginDto, userAgent, ipAddress);
+  }
+
+  @Public()
+  @Post('mobile/register')
+  @ApiOperation({ summary: 'Đăng ký tài khoản cho Mobile App (Trả về JSON)' })
+  @ApiResponse({ status: 201, description: 'Đăng ký thành công' })
+  async mobileRegister(@Body() registerDto: RegisterDto) {
+    return await this.authService.register(registerDto);
+  }
+
+  @Public()
+  @UseGuards(JwtRefreshAuthGuard)
+  @Post('mobile/refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Refresh access token cho Mobile App' })
+  @ApiResponse({ status: 200, description: 'Refresh tokens thành công' })
+  async mobileRefresh(@Req() req: Request & { user: JwtPayload & { refreshToken: string } }) {
+    const refreshToken = req.user.refreshToken;
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip;
+    return await this.authService.refreshToken(
+      refreshToken,
+      userAgent,
+      ipAddress,
+    );
+  }
+
+  @Public()
+  @Post('mobile/google')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đăng nhập bằng Google ID Token trên Mobile App' })
+  @ApiResponse({ status: 200, description: 'Đăng nhập Google thành công' })
+  async mobileGoogleLogin(@Body() body: { idToken: string }, @Req() req: Request) {
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip;
+    return await this.authService.googleMobileLogin(body.idToken, userAgent, ipAddress);
   }
 }
