@@ -2,13 +2,13 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 
 export class BaseException extends HttpException {
   public readonly code: string;
-  public readonly details: any;
+  public readonly details: unknown;
 
   constructor(
     message: string,
     code: string,
     status: HttpStatus,
-    details?: any,
+    details?: unknown,
   ) {
     super(
       {

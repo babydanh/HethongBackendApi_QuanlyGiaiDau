@@ -47,7 +47,7 @@ async function bootstrap() {
     '/api/docs',
     apiReference({
       spec: {
-        content: document as Record<string, any>,
+        content: document as unknown as Record<string, unknown>,
       },
     }),
   );

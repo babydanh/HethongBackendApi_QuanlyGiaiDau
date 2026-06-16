@@ -7,13 +7,15 @@ import { eq, and } from 'drizzle-orm';
 dotenv.config();
 
 const tierDefinitions = [
-  { name: 'Tier D (Low)', minElo: 0, maxElo: 1099 },
-  { name: 'Tier D (High)', minElo: 1100, maxElo: 1299 },
-  { name: 'Tier C (Low)', minElo: 1300, maxElo: 1499 },
-  { name: 'Tier C (High)', minElo: 1500, maxElo: 1699 },
-  { name: 'Tier B', minElo: 1700, maxElo: 1899 },
-  { name: 'Tier A', minElo: 1900, maxElo: 2199 },
-  { name: 'Tier S', minElo: 2200, maxElo: 99999 }, // Special Top 1 City Tier
+  { name: 'Tier D (Low)', minElo: 1000, maxElo: 1099 },
+  { name: 'Tier D (High)', minElo: 1100, maxElo: 1199 },
+  { name: 'Tier C (Low)', minElo: 1200, maxElo: 1299 },
+  { name: 'Tier C (High)', minElo: 1300, maxElo: 1399 },
+  { name: 'Tier B (Low)', minElo: 1400, maxElo: 1499 },
+  { name: 'Tier B (High)', minElo: 1500, maxElo: 1599 },
+  { name: 'Tier A (Low)', minElo: 1600, maxElo: 1699 },
+  { name: 'Tier A (High)', minElo: 1700, maxElo: 1799 },
+  { name: 'Tier S', minElo: 1800, maxElo: 99999 },
 ];
 
 async function run() {
@@ -75,8 +77,9 @@ async function run() {
     }
 
     console.log('--- ELO Tiers Seeding Completed Successfully! ---');
-  } catch (err: any) {
-    console.error('❌ ELO Tiers Seeding Failed:', err.message);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('❌ ELO Tiers Seeding Failed:', message);
   } finally {
     pool.end();
   }
