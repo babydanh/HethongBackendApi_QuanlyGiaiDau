@@ -4,7 +4,10 @@ import { EloEngineService } from './elo-engine.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
 import * as schema from '../../database/schema';
-import { eq, and, isNull, desc, sql } from 'drizzle-orm';
+import { eq, and, isNull, desc, sql, or, asc } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+
+type Transaction = Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0];
 
 @Injectable()
 export class RankingsService {
@@ -77,7 +80,36 @@ export class RankingsService {
         loserRank.winStreak,
       );
 
-      // 3. Update ranks
+      // 3. Update ranks with shield logic
+      const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
+      
+      let isWinnerShieldActive = false;
+      if (scope === 'PUBLIC') {
+        const publicWinnerRank = winnerRank as typeof schema.userRanks.$inferSelect;
+        isWinnerShieldActive = !!publicWinnerRank.shieldActive;
+        for (const boundary of boundaries) {
+          if (winnerRank.eloPoints < boundary && winnerResult.newElo >= boundary) {
+            isWinnerShieldActive = true;
+          }
+        }
+      }
+
+      let finalLoserElo = loserResult.newElo;
+      let isLoserShieldActive = false;
+      if (scope === 'PUBLIC') {
+        const publicLoserRank = loserRank as typeof schema.userRanks.$inferSelect;
+        isLoserShieldActive = !!publicLoserRank.shieldActive;
+        for (const boundary of boundaries) {
+          if (loserRank.eloPoints >= boundary && loserResult.newElo < boundary) {
+            if (publicLoserRank.shieldActive) {
+              finalLoserElo = boundary;
+              isLoserShieldActive = false; // shield broken
+              break;
+            }
+          }
+        }
+      }
+
       await this.rankingsRepository.updateUserRank(
         tx,
         winnerRank.id,
@@ -86,6 +118,7 @@ export class RankingsService {
           matchesPlayed: winnerRank.matchesPlayed + 1,
           matchesWon: winnerRank.matchesWon + 1,
           winStreak: winnerResult.newWinStreak,
+          shieldActive: isWinnerShieldActive,
         },
         scope,
       );
@@ -94,10 +127,11 @@ export class RankingsService {
         tx,
         loserRank.id,
         {
-          eloPoints: loserResult.newElo,
+          eloPoints: finalLoserElo,
           matchesPlayed: loserRank.matchesPlayed + 1,
           matchesWon: loserRank.matchesWon,
           winStreak: 0,
+          shieldActive: isLoserShieldActive,
         },
         scope,
       );
@@ -108,6 +142,7 @@ export class RankingsService {
       }
 
       // 4. Record history
+      const adjustedLoserChangedPoints = finalLoserElo - loserRank.eloPoints;
       await this.rankingsRepository.insertEloHistory(tx, [
         {
           userId: dto.winnerId,
@@ -124,14 +159,18 @@ export class RankingsService {
           matchId: dto.matchId,
           reason: 'MATCH_LOSS',
           previousElo: loserRank.eloPoints,
-          newElo: loserResult.newElo,
-          changedPoints: loserResult.changedPoints,
+          newElo: finalLoserElo,
+          changedPoints: adjustedLoserChangedPoints,
         },
       ]);
 
       return {
         winner: winnerResult,
-        loser: loserResult,
+        loser: {
+          ...loserResult,
+          newElo: finalLoserElo,
+          changedPoints: adjustedLoserChangedPoints,
+        },
       };
     });
   }
@@ -213,6 +252,17 @@ export class RankingsService {
           rank.winStreak,
         );
 
+        const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
+        let isWinnerShieldActive = false;
+        if (scope === 'PUBLIC') {
+          isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
+          for (const boundary of boundaries) {
+            if (rank.eloPoints < boundary && result.newElo >= boundary) {
+              isWinnerShieldActive = true;
+            }
+          }
+        }
+
         await this.rankingsRepository.updateUserRank(
           tx,
           rank.id,
@@ -221,6 +271,7 @@ export class RankingsService {
             matchesPlayed: rank.matchesPlayed + 1,
             matchesWon: rank.matchesWon + 1,
             winStreak: result.newWinStreak,
+            shieldActive: isWinnerShieldActive,
           },
           scope,
         );
@@ -246,14 +297,32 @@ export class RankingsService {
           rank.winStreak,
         );
 
+        const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
+        let finalLoserElo = result.newElo;
+        let isLoserShieldActive = false;
+        if (scope === 'PUBLIC') {
+          const publicRank = rank as typeof schema.userRanks.$inferSelect;
+          isLoserShieldActive = !!publicRank.shieldActive;
+          for (const boundary of boundaries) {
+            if (rank.eloPoints >= boundary && result.newElo < boundary) {
+              if (publicRank.shieldActive) {
+                finalLoserElo = boundary;
+                isLoserShieldActive = false; // shield broken
+                break;
+              }
+            }
+          }
+        }
+
         await this.rankingsRepository.updateUserRank(
           tx,
           rank.id,
           {
-            eloPoints: result.newElo,
+            eloPoints: finalLoserElo,
             matchesPlayed: rank.matchesPlayed + 1,
             matchesWon: rank.matchesWon,
             winStreak: 0,
+            shieldActive: isLoserShieldActive,
           },
           scope,
         );
@@ -264,8 +333,8 @@ export class RankingsService {
           matchId,
           reason: 'MATCH_LOSS',
           previousElo: rank.eloPoints,
-          newElo: result.newElo,
-          changedPoints: result.changedPoints,
+          newElo: finalLoserElo,
+          changedPoints: finalLoserElo - rank.eloPoints,
         });
       }
 
@@ -290,135 +359,117 @@ export class RankingsService {
   }
 
   async recalculateUserRankTier(
-    tx: any,
+    tx: Transaction,
     userId: string,
     categoryId: string,
     matchType: string,
   ) {
-    const rank = await tx
-      .select()
-      .from(schema.userRanks)
-      .where(
-        and(
-          eq(schema.userRanks.userId, userId),
-          eq(schema.userRanks.categoryId, categoryId),
-          eq(schema.userRanks.matchType, matchType),
-          isNull(schema.userRanks.communityId),
-        ),
-      )
-      .limit(1)
-      .then((rows: any) => rows[0]);
-
-    if (!rank) return;
-
-    const profile = await tx
-      .select({ provinceCode: schema.profiles.provinceCode })
-      .from(schema.profiles)
-      .where(eq(schema.profiles.userId, userId))
-      .limit(1)
-      .then((rows: any) => rows[0]);
-    const provinceCode = profile?.provinceCode || null;
-
     const tiers = await tx
       .select()
       .from(schema.eloTiers)
       .where(eq(schema.eloTiers.categoryId, categoryId));
 
-    const tierDLow = tiers.find((t: any) => t.name === 'Tier D (Low)');
-    const tierDHigh = tiers.find((t: any) => t.name === 'Tier D (High)');
-    const tierCLow = tiers.find((t: any) => t.name === 'Tier C (Low)');
-    const tierCHigh = tiers.find((t: any) => t.name === 'Tier C (High)');
-    const tierB = tiers.find((t: any) => t.name === 'Tier B');
-    const tierA = tiers.find((t: any) => t.name === 'Tier A');
-    const tierS = tiers.find((t: any) => t.name === 'Tier S');
+    const tierDLow = tiers.find((t) => t.name === 'Tier D (Low)');
+    const tierDHigh = tiers.find((t) => t.name === 'Tier D (High)');
+    const tierCLow = tiers.find((t) => t.name === 'Tier C (Low)');
+    const tierCHigh = tiers.find((t) => t.name === 'Tier C (High)');
+    const tierBLow = tiers.find((t) => t.name === 'Tier B (Low)');
+    const tierBHigh = tiers.find((t) => t.name === 'Tier B (High)');
+    const tierALow = tiers.find((t) => t.name === 'Tier A (Low)');
+    const tierAHigh = tiers.find((t) => t.name === 'Tier A (High)');
+    const tierS = tiers.find((t) => t.name === 'Tier S');
 
-    if (rank.eloPoints >= 2200 && provinceCode) {
-      const topRanks = await tx
-        .select({
-          rankId: schema.userRanks.id,
-          userId: schema.userRanks.userId,
-          eloPoints: schema.userRanks.eloPoints,
-          updatedAt: schema.userRanks.updatedAt,
-        })
-        .from(schema.userRanks)
-        .innerJoin(
-          schema.profiles,
-          eq(schema.userRanks.userId, schema.profiles.userId),
-        )
-        .where(
-          and(
-            eq(schema.userRanks.categoryId, categoryId),
-            eq(schema.userRanks.matchType, matchType),
-            isNull(schema.userRanks.communityId),
-            eq(schema.profiles.provinceCode, provinceCode),
-            sql`${schema.userRanks.eloPoints} >= 2200`,
-          ),
-        )
-        .orderBy(desc(schema.userRanks.eloPoints), schema.userRanks.updatedAt);
+    // 1. Find the top 1 global player for S-Rank validation (only 1 user can be Tier S)
+    const [topRank] = await tx
+      .select({
+        id: schema.userRanks.id,
+        userId: schema.userRanks.userId,
+        eloPoints: schema.userRanks.eloPoints,
+      })
+      .from(schema.userRanks)
+      .where(
+        and(
+          eq(schema.userRanks.categoryId, categoryId),
+          eq(schema.userRanks.matchType, matchType),
+          isNull(schema.userRanks.communityId),
+        ),
+      )
+      .orderBy(desc(schema.userRanks.eloPoints), schema.userRanks.updatedAt)
+      .limit(1);
 
-      if (topRanks.length > 0) {
-        const topRank = topRanks[0];
-        if (tierS) {
-          await tx
-            .update(schema.userRanks)
-            .set({ tierId: tierS.id })
-            .where(eq(schema.userRanks.id, topRank.rankId));
-        }
+    // 2. Identify Tier S user
+    const tierSUserId = (topRank && topRank.eloPoints >= 1800) ? topRank.userId : null;
 
-        for (let i = 1; i < topRanks.length; i++) {
-          if (tierA) {
-            await tx
-              .update(schema.userRanks)
-              .set({ tierId: tierA.id })
-              .where(eq(schema.userRanks.id, topRanks[i].rankId));
-          }
-        }
-      }
-    } else {
-      const elo = rank.eloPoints;
-      let targetTier: any = null;
+    // 3. Update all Tier S assignments
+    if (tierS) {
+      if (tierSUserId) {
+        // Assign Tier S to top player
+        await tx
+          .update(schema.userRanks)
+          .set({ tierId: tierS.id })
+          .where(eq(schema.userRanks.userId, tierSUserId));
 
-      if (elo >= 1900 && tierA) targetTier = tierA;
-      else if (elo >= 1700 && tierB) targetTier = tierB;
-      else if (elo >= 1500 && tierCHigh) targetTier = tierCHigh;
-      else if (elo >= 1300 && tierCLow) targetTier = tierCLow;
-      else if (elo >= 1100 && tierDHigh) targetTier = tierDHigh;
-      else if (tierDLow) targetTier = tierDLow;
-
-      await tx
-        .update(schema.userRanks)
-        .set({ tierId: targetTier ? targetTier.id : null })
-        .where(eq(schema.userRanks.id, rank.id));
-
-      if (provinceCode) {
-        const otherTopRanks = await tx
-          .select({
-            rankId: schema.userRanks.id,
-            eloPoints: schema.userRanks.eloPoints,
-          })
-          .from(schema.userRanks)
-          .innerJoin(
-            schema.profiles,
-            eq(schema.userRanks.userId, schema.profiles.userId),
-          )
+        // Downgrade any other player currently holding Tier S to Tier A (High)
+        await tx
+          .update(schema.userRanks)
+          .set({ tierId: tierAHigh ? tierAHigh.id : null })
           .where(
             and(
               eq(schema.userRanks.categoryId, categoryId),
               eq(schema.userRanks.matchType, matchType),
               isNull(schema.userRanks.communityId),
-              eq(schema.profiles.provinceCode, provinceCode),
-              sql`${schema.userRanks.eloPoints} >= 2200`,
-            ),
-          )
-          .orderBy(desc(schema.userRanks.eloPoints), schema.userRanks.updatedAt)
-          .limit(1);
+              eq(schema.userRanks.tierId, tierS.id),
+              sql`${schema.userRanks.userId} != ${tierSUserId}`
+            )
+          );
+      } else {
+        // Nobody is Tier S, downgrade anyone holding it to Tier A (High)
+        await tx
+          .update(schema.userRanks)
+          .set({ tierId: tierAHigh ? tierAHigh.id : null })
+          .where(
+            and(
+              eq(schema.userRanks.categoryId, categoryId),
+              eq(schema.userRanks.matchType, matchType),
+              isNull(schema.userRanks.communityId),
+              eq(schema.userRanks.tierId, tierS.id)
+            )
+          );
+      }
+    }
 
-        if (otherTopRanks.length > 0 && tierS) {
-          await tx
-            .update(schema.userRanks)
-            .set({ tierId: tierS.id })
-            .where(eq(schema.userRanks.id, otherTopRanks[0].rankId));
-        }
+    // 4. Calculate for the target user (if they are not the Tier S user)
+    if (userId !== tierSUserId) {
+      const [rank] = await tx
+        .select()
+        .from(schema.userRanks)
+        .where(
+          and(
+            eq(schema.userRanks.userId, userId),
+            eq(schema.userRanks.categoryId, categoryId),
+            eq(schema.userRanks.matchType, matchType),
+            isNull(schema.userRanks.communityId),
+          ),
+        )
+        .limit(1);
+
+      if (rank) {
+        const elo = rank.eloPoints;
+        let targetTier: typeof schema.eloTiers.$inferSelect | null = null;
+
+        if (elo >= 1700 && tierAHigh) targetTier = tierAHigh;
+        else if (elo >= 1600 && tierALow) targetTier = tierALow;
+        else if (elo >= 1500 && tierBHigh) targetTier = tierBHigh;
+        else if (elo >= 1400 && tierBLow) targetTier = tierBLow;
+        else if (elo >= 1300 && tierCHigh) targetTier = tierCHigh;
+        else if (elo >= 1200 && tierCLow) targetTier = tierCLow;
+        else if (elo >= 1100 && tierDHigh) targetTier = tierDHigh;
+        else if (tierDLow) targetTier = tierDLow;
+
+        await tx
+          .update(schema.userRanks)
+          .set({ tierId: targetTier ? targetTier.id : null })
+          .where(eq(schema.userRanks.id, rank.id));
       }
     }
   }
@@ -445,5 +496,329 @@ export class RankingsService {
         );
       }
     });
+  }
+
+  async recalculateEloChain(
+    tx: Transaction,
+    playerIds: string[],
+    fromTime: Date,
+    categoryId: string,
+    matchType: string,
+  ) {
+    const subsequentMatches = await tx
+      .select({
+        match: schema.matches,
+        stage: schema.tournamentStages,
+        tournament: schema.tournaments,
+      })
+      .from(schema.matches)
+      .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
+      .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+      .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+      .innerJoin(schema.tournamentRosters, or(
+         eq(schema.matches.participant1Id, schema.tournamentRosters.participantId),
+         eq(schema.matches.participant2Id, schema.tournamentRosters.participantId)
+      ))
+      .where(
+        and(
+          eq(schema.tournaments.categoryId, categoryId),
+          eq(schema.tournaments.matchType, matchType),
+          eq(schema.matches.status, 'COMPLETED'),
+          sql`${schema.matches.completedAt} >= ${fromTime}`
+        )
+      )
+      .orderBy(asc(schema.matches.completedAt));
+
+    const uniqueMatchIds = new Set<string>();
+    const matchesToRecalculate: typeof subsequentMatches = [];
+    for (const m of subsequentMatches) {
+      if (!uniqueMatchIds.has(m.match.id)) {
+        uniqueMatchIds.add(m.match.id);
+        matchesToRecalculate.push(m);
+      }
+    }
+
+    const affectedPlayers = new Set<string>(playerIds);
+    const playerStates = new Map<string, {
+      elo: number;
+      matchesPlayed: number;
+      matchesWon: number;
+      winStreak: number;
+      shieldActive: boolean;
+    }>();
+
+    const getPlayerState = async (userId: string, completedAt: Date) => {
+      if (playerStates.has(userId)) {
+        return playerStates.get(userId)!;
+      }
+
+      const [lastLog] = await tx
+        .select()
+        .from(schema.eloHistoryLogs)
+        .where(
+          and(
+            eq(schema.eloHistoryLogs.userId, userId),
+            eq(schema.eloHistoryLogs.categoryId, categoryId),
+            sql`${schema.eloHistoryLogs.createdAt} < ${completedAt}`
+          )
+        )
+        .orderBy(desc(schema.eloHistoryLogs.createdAt))
+        .limit(1);
+
+      const startingElo = lastLog?.newElo ?? 1000;
+
+      const playedRes = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.matches)
+        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
+        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+        .innerJoin(schema.tournamentRosters, or(
+          eq(schema.matches.participant1Id, schema.tournamentRosters.participantId),
+          eq(schema.matches.participant2Id, schema.tournamentRosters.participantId)
+        ))
+        .where(
+          and(
+            eq(schema.tournamentRosters.userId, userId),
+            eq(schema.tournaments.categoryId, categoryId),
+            eq(schema.tournaments.matchType, matchType),
+            eq(schema.matches.status, 'COMPLETED'),
+            sql`${schema.matches.completedAt} < ${completedAt}`
+          )
+        );
+      const matchesPlayed = Number(playedRes[0]?.count || 0);
+
+      const wonRes = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.matches)
+        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
+        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+        .innerJoin(schema.tournamentRosters, eq(schema.matches.winnerId, schema.tournamentRosters.participantId))
+        .where(
+          and(
+            eq(schema.tournamentRosters.userId, userId),
+            eq(schema.tournaments.categoryId, categoryId),
+            eq(schema.tournaments.matchType, matchType),
+            eq(schema.matches.status, 'COMPLETED'),
+            sql`${schema.matches.completedAt} < ${completedAt}`
+          )
+        );
+      const matchesWon = Number(wonRes[0]?.count || 0);
+
+      const priorMatches = await tx
+        .select({
+          winnerId: schema.matches.winnerId,
+          p1Id: schema.matches.participant1Id,
+          p2Id: schema.matches.participant2Id,
+          participantId: schema.tournamentRosters.participantId
+        })
+        .from(schema.matches)
+        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
+        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+        .innerJoin(schema.tournamentRosters, or(
+          eq(schema.matches.participant1Id, schema.tournamentRosters.participantId),
+          eq(schema.matches.participant2Id, schema.tournamentRosters.participantId)
+        ))
+        .where(
+          and(
+            eq(schema.tournamentRosters.userId, userId),
+            eq(schema.tournaments.categoryId, categoryId),
+            eq(schema.tournaments.matchType, matchType),
+            eq(schema.matches.status, 'COMPLETED'),
+            sql`${schema.matches.completedAt} < ${completedAt}`
+          )
+        )
+        .orderBy(desc(schema.matches.completedAt));
+
+      let winStreak = 0;
+      for (const pm of priorMatches) {
+        if (pm.winnerId === pm.participantId) {
+          winStreak++;
+        } else {
+          break;
+        }
+      }
+
+      let shieldActive = false;
+      if (lastLog) {
+        const prev = lastLog.previousElo;
+        const curr = lastLog.newElo;
+        const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
+        for (const boundary of boundaries) {
+          if (prev < boundary && curr >= boundary) {
+            shieldActive = true;
+          }
+        }
+      }
+
+      const state = { elo: startingElo, matchesPlayed, matchesWon, winStreak, shieldActive };
+      playerStates.set(userId, state);
+      return state;
+    };
+
+    for (const item of matchesToRecalculate) {
+      const match = item.match;
+      const completedAt = match.completedAt || match.updatedAt;
+
+      const p1Id = match.participant1Id;
+      const p2Id = match.participant2Id;
+      if (!p1Id || !p2Id || !match.winnerId) continue;
+
+      const winnerParticipantId = match.winnerId;
+
+      const winnerRosters = await tx
+        .select({ userId: schema.tournamentRosters.userId })
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, winnerParticipantId));
+
+      const loserParticipantId = winnerParticipantId === p1Id ? p2Id : p1Id;
+      const loserRosters = await tx
+        .select({ userId: schema.tournamentRosters.userId })
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, loserParticipantId));
+
+      const winnerUserIds: string[] = winnerRosters.map(r => r.userId);
+      const loserUserIds: string[] = loserRosters.map(r => r.userId);
+
+      const isMatchAffected = [...winnerUserIds, ...loserUserIds].some(uid => affectedPlayers.has(uid));
+      if (!isMatchAffected) continue;
+
+      for (const uid of [...winnerUserIds, ...loserUserIds]) {
+        await getPlayerState(uid, completedAt);
+      }
+
+      const winnerStates = winnerUserIds.map(uid => playerStates.get(uid)!);
+      const loserStates = loserUserIds.map(uid => playerStates.get(uid)!);
+
+      const avgWinnerElo = winnerStates.reduce((sum, s) => sum + s.elo, 0) / winnerStates.length;
+      const avgLoserElo = loserStates.reduce((sum, s) => sum + s.elo, 0) / loserStates.length;
+
+      for (let i = 0; i < winnerUserIds.length; i++) {
+        const uid = winnerUserIds[i];
+        const state = winnerStates[i];
+
+        const result = this.eloEngineService.calculateElo(
+          state.elo,
+          avgLoserElo,
+          true,
+          state.matchesPlayed,
+          state.winStreak
+        );
+
+        const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
+        let isWinnerShieldActive = state.shieldActive;
+        for (const boundary of boundaries) {
+          if (state.elo < boundary && result.newElo >= boundary) {
+            isWinnerShieldActive = true;
+          }
+        }
+
+        await tx
+          .delete(schema.eloHistoryLogs)
+          .where(
+            and(
+              eq(schema.eloHistoryLogs.matchId, match.id),
+              eq(schema.eloHistoryLogs.userId, uid)
+            )
+          );
+
+        await tx.insert(schema.eloHistoryLogs).values({
+          userId: uid,
+          categoryId,
+          matchId: match.id,
+          reason: 'MATCH_WIN',
+          previousElo: state.elo,
+          newElo: result.newElo,
+          changedPoints: result.changedPoints,
+          createdAt: completedAt,
+        });
+
+        state.elo = result.newElo;
+        state.matchesPlayed += 1;
+        state.matchesWon += 1;
+        state.winStreak = result.newWinStreak;
+        state.shieldActive = isWinnerShieldActive;
+
+        affectedPlayers.add(uid);
+      }
+
+      for (let i = 0; i < loserUserIds.length; i++) {
+        const uid = loserUserIds[i];
+        const state = loserStates[i];
+
+        const result = this.eloEngineService.calculateElo(
+          state.elo,
+          avgWinnerElo,
+          false,
+          state.matchesPlayed,
+          state.winStreak
+        );
+
+        const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
+        let finalLoserElo = result.newElo;
+        let isLoserShieldActive = state.shieldActive;
+        for (const boundary of boundaries) {
+          if (state.elo >= boundary && result.newElo < boundary) {
+            if (state.shieldActive) {
+              finalLoserElo = boundary;
+              isLoserShieldActive = false;
+              break;
+            }
+          }
+        }
+
+        await tx
+          .delete(schema.eloHistoryLogs)
+          .where(
+            and(
+              eq(schema.eloHistoryLogs.matchId, match.id),
+              eq(schema.eloHistoryLogs.userId, uid)
+            )
+          );
+
+        await tx.insert(schema.eloHistoryLogs).values({
+          userId: uid,
+          categoryId,
+          matchId: match.id,
+          reason: 'MATCH_LOSS',
+          previousElo: state.elo,
+          newElo: finalLoserElo,
+          changedPoints: finalLoserElo - state.elo,
+          createdAt: completedAt,
+        });
+
+        state.elo = finalLoserElo;
+        state.matchesPlayed += 1;
+        state.winStreak = 0;
+        state.shieldActive = isLoserShieldActive;
+
+        affectedPlayers.add(uid);
+      }
+    }
+
+    for (const [uid, state] of playerStates.entries()) {
+      await tx
+        .update(schema.userRanks)
+        .set({
+          eloPoints: state.elo,
+          matchesPlayed: state.matchesPlayed,
+          matchesWon: state.matchesWon,
+          winStreak: state.winStreak,
+          shieldActive: state.shieldActive,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.userRanks.userId, uid),
+            eq(schema.userRanks.categoryId, categoryId),
+            eq(schema.userRanks.matchType, matchType),
+            isNull(schema.userRanks.communityId)
+          )
+        );
+
+      await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
+    }
   }
 }

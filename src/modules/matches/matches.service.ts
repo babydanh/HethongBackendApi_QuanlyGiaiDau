@@ -5,6 +5,7 @@ import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import { RankingsService } from '../rankings/rankings.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface RoundConfig {
   bestOf?: number;
@@ -25,6 +26,7 @@ export class MatchesService {
     private readonly matchesRepository: MatchesRepository,
     private readonly liveScoreGateway: LiveScoreGateway,
     private readonly rankingsService: RankingsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(query: QueryMatchDto) {
@@ -136,6 +138,10 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
+    if (!existing.participant1Id || !existing.participant2Id) {
+      throw new BadRequestException('Trận đấu chưa xác định đủ đối thủ, không thể nhập điểm.');
+    }
+
     let p1SetsWon = updateMatchScoreDto.p1SetsWon;
     let p2SetsWon = updateMatchScoreDto.p2SetsWon;
     const scoreDetails = updateMatchScoreDto.scoreDetails;
@@ -188,6 +194,12 @@ export class MatchesService {
   async updateStatus(id: string, updateMatchStatusDto: UpdateMatchStatusDto) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
+
+    if (updateMatchStatusDto.status === 'ONGOING') {
+      if (!existing.participant1Id || !existing.participant2Id) {
+        throw new BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
+      }
+    }
 
     if (updateMatchStatusDto.status === 'COMPLETED') {
       // Validate that we have a winner
@@ -254,6 +266,28 @@ export class MatchesService {
       this.liveScoreGateway.broadcastMatchStatus(id, updatedMatch);
       this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
 
+      // Send notifications to both team's members
+      try {
+        const participantIds: string[] = [];
+        if (existing.participant1Id) participantIds.push(existing.participant1Id);
+        if (existing.participant2Id) participantIds.push(existing.participant2Id);
+
+        if (participantIds.length > 0) {
+          const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+          for (const roster of rosters) {
+            await this.notificationsService.sendNotification({
+              receiverId: roster.userId,
+              type: 'MATCH_COMPLETED',
+              title: 'Trận đấu đã hoàn thành',
+              content: `Trận đấu của bạn tại giải ${existing.tournament?.name || ''} đã có kết quả. Xem ngay!`,
+              redirectUrl: `/tournaments/${existing.tournamentId}`,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to send MATCH_COMPLETED notifications:', err);
+      }
+
       return updatedMatch;
     } else {
       // ONGOING or SCHEDULED
@@ -271,13 +305,33 @@ export class MatchesService {
 
   async updateSchedule(
     id: string,
-    data: { courtId?: string; refereeId?: string; scheduledAt?: string },
+    data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string },
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
     const updatedMatch = await this.matchesRepository.updateSchedule(id, data);
     this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
+
+    if (data.refereeId && data.refereeId !== existing.refereeId) {
+      try {
+        const matchName = `${existing.participant1?.teamName || 'TBD'} vs ${existing.participant2?.teamName || 'TBD'}`;
+        const scheduledTime = data.scheduledAt 
+          ? new Date(data.scheduledAt).toLocaleString('vi-VN') 
+          : (existing.scheduledAt ? new Date(existing.scheduledAt).toLocaleString('vi-VN') : 'chưa xác định');
+
+        await this.notificationsService.sendNotification({
+          receiverId: data.refereeId,
+          type: 'REFEREE_ASSIGNED',
+          title: 'Phân công trọng tài bắt chính',
+          content: `Bạn đã được phân công bắt chính trận đấu ${matchName} vào lúc ${scheduledTime}.`,
+          redirectUrl: `/tournaments/${existing.tournamentId}`,
+        });
+      } catch (err) {
+        console.error('Failed to send referee assignment notification:', err);
+      }
+    }
+
     return updatedMatch;
   }
 }

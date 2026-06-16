@@ -8,6 +8,7 @@ import { UsersRepository } from './users.repository';
 import { QueryUserDto } from './dto/query-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { CreateReportDto } from './dto/create-report.dto';
 import { ERROR_MESSAGES } from '../../common/constants/error-messages';
 import * as schema from '../../database/schema';
 import { CloudinaryService } from '../upload/cloudinary.service';
@@ -30,8 +31,9 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
     }
-    delete (user as any).passwordHash;
-    return user;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { passwordHash, ...userWithoutPassword } = user;
+    return userWithoutPassword;
   }
 
   async getProfile(userId: string) {
@@ -98,6 +100,41 @@ export class UsersService {
     return this.findOne(userId);
   }
 
+  async uploadCover(userId: string, file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    // Get current user to check old cover
+    const currentUser = await this.findOne(userId);
+    const oldCoverUrl = currentUser.profile?.coverUrl;
+    
+    // Upload to Cloudinary
+    const result = await this.cloudinaryService.uploadFile(file);
+    const coverUrl = result.secure_url;
+    
+    // If old cover was from Cloudinary, delete it
+    if (oldCoverUrl && oldCoverUrl.includes('res.cloudinary.com')) {
+      try {
+        const parts = oldCoverUrl.split('/');
+        const filename = parts.pop()?.split('.')[0]; 
+        const folder = parts.pop(); 
+        const parentFolder = parts.pop(); 
+        if (parentFolder && folder && filename) {
+          const publicId = `${parentFolder}/${folder}/${filename}`;
+          await this.cloudinaryService.deleteFile(publicId);
+        }
+      } catch (err) {
+        console.error('Failed to delete old cover:', err);
+      }
+    }
+    
+    // Update Database
+    await this.usersRepository.updateProfile(userId, { coverUrl });
+    
+    return this.findOne(userId);
+  }
+
   async changePassword(userId: string, changePasswordDto: ChangePasswordDto) {
     const user = await this.usersRepository.findById(userId);
     if (!user) {
@@ -131,5 +168,28 @@ export class UsersService {
     await this.findOne(id);
     await this.usersRepository.softDelete(id);
     return { message: 'User deleted successfully' };
+  }
+
+  async getPublicProfile(id: string) {
+    const profile = await this.usersRepository.getPublicProfile(id);
+    if (!profile) {
+      throw new NotFoundException('User profile not found');
+    }
+    return profile;
+  }
+
+  async createReport(reporterId: string, dto: CreateReportDto) {
+    const [report] = await this.usersRepository.createReport(
+      reporterId,
+      dto.targetType,
+      dto.targetId,
+      dto.reason,
+      dto.evidenceUrls || [],
+    );
+    return report;
+  }
+
+  async searchUsers(query: string) {
+    return this.usersRepository.searchUsers(query);
   }
 }

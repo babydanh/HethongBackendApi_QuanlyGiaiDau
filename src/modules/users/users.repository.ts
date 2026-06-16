@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, or, and, ilike, desc, asc, isNull } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -15,7 +15,10 @@ export class UsersRepository {
     const { page, limit, search, order } = query;
     const offset = (page! - 1) * limit!;
 
-    let whereClause = isNull(schema.users.deletedAt);
+    let whereClause = and(
+      isNull(schema.users.deletedAt),
+      eq(schema.users.isMock, false),
+    )!;
     if (search) {
       whereClause = and(
         or(
@@ -23,6 +26,7 @@ export class UsersRepository {
           ilike(schema.profiles.fullName, `%${search}%`),
         ),
         isNull(schema.users.deletedAt),
+        eq(schema.users.isMock, false),
       )!;
     }
 
@@ -39,9 +43,20 @@ export class UsersRepository {
         createdAt: schema.users.createdAt,
         fullName: schema.profiles.fullName,
         avatarUrl: schema.profiles.avatarUrl,
+        isVerified: schema.profiles.isVerified,
+        banType: schema.userBans.banType,
+        banReason: schema.userBans.reason,
+        banExpiresAt: schema.userBans.expiresAt,
       })
       .from(schema.users)
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .leftJoin(
+        schema.userBans,
+        and(
+          eq(schema.users.id, schema.userBans.userId),
+          eq(schema.userBans.isActive, true),
+        ),
+      )
       .where(whereClause)
       .limit(limit!)
       .offset(offset)
@@ -56,8 +71,25 @@ export class UsersRepository {
 
     const total = countResult.length;
 
+    const mappedData = data.map((row) => ({
+      id: row.id,
+      email: row.email,
+      isEmailVerified: row.isEmailVerified,
+      createdAt: row.createdAt,
+      profile: {
+        fullName: row.fullName || '',
+        avatarUrl: row.avatarUrl || undefined,
+        isVerified: row.isVerified || false,
+      },
+      activeBan: row.banType ? {
+        banType: row.banType as 'WARN' | 'SOFT_BAN' | 'HARD_BAN',
+        reason: row.banReason || '',
+        expiresAt: row.banExpiresAt ? row.banExpiresAt.toISOString() : undefined,
+      } : undefined,
+    }));
+
     return {
-      data,
+      data: mappedData,
       meta: {
         total,
         page,
@@ -76,16 +108,30 @@ export class UsersRepository {
         isEmailVerified: schema.users.isEmailVerified,
         createdAt: schema.users.createdAt,
         profile: schema.profiles,
-        role: schema.roles.name,
       })
       .from(schema.users)
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .leftJoin(schema.userToRoles, eq(schema.users.id, schema.userToRoles.userId))
-      .leftJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
       .where(eq(schema.users.id, id))
       .limit(1);
 
-    return result[0];
+    const user = result[0];
+    if (!user) return null;
+
+    const userRoles = await this.db
+      .select({
+        roleName: schema.roles.name,
+      })
+      .from(schema.userToRoles)
+      .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+      .where(eq(schema.userToRoles.userId, id));
+
+    const rolesList = userRoles.map((r) => r.roleName);
+
+    return {
+      ...user,
+      role: rolesList[0] || 'PLAYER',
+      roles: rolesList,
+    };
   }
 
 
@@ -114,5 +160,97 @@ export class UsersRepository {
       .set({ deletedAt: new Date() })
       .where(eq(schema.users.id, id))
       .returning();
+  }
+
+  async getPublicProfile(userId: string) {
+    // 1. Fetch user & profile
+    const result = await this.db
+      .select({
+        id: schema.users.id,
+        createdAt: schema.users.createdAt,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+        coverUrl: schema.profiles.coverUrl,
+        gender: schema.profiles.gender,
+        bio: schema.profiles.bio,
+        isVerified: schema.profiles.isVerified,
+      })
+      .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        and(
+          eq(schema.users.id, userId),
+          isNull(schema.users.deletedAt)
+        )
+      )
+      .limit(1);
+
+    const user = result[0];
+    if (!user) return null;
+
+    // 2. Fetch user ranks with category name
+    const ranks = await this.db
+      .select({
+        categoryId: schema.userRanks.categoryId,
+        categoryName: schema.categories.name,
+        matchType: schema.userRanks.matchType,
+        eloPoints: schema.userRanks.eloPoints,
+        matchesPlayed: schema.userRanks.matchesPlayed,
+        matchesWon: schema.userRanks.matchesWon,
+        winStreak: schema.userRanks.winStreak,
+      })
+      .from(schema.userRanks)
+      .innerJoin(schema.categories, eq(schema.userRanks.categoryId, schema.categories.id))
+      .where(
+        and(
+          eq(schema.userRanks.userId, userId),
+          isNull(schema.userRanks.communityId) // Global ranks only
+        )
+      );
+
+    return {
+      ...user,
+      ranks,
+    };
+  }
+
+  async createReport(reporterId: string, targetType: 'USER' | 'TOURNAMENT', targetId: string, reason: string, evidenceUrls: string[]) {
+    return await this.db
+      .insert(schema.reports)
+      .values({
+        reporterId,
+        targetType,
+        targetId,
+        reason,
+        evidenceUrls,
+        status: 'PENDING',
+      })
+      .returning();
+  }
+
+  async searchUsers(queryStr: string) {
+    const cleanQuery = queryStr.trim();
+    return this.db
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+        phoneNumber: schema.profiles.phoneNumber,
+      })
+      .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        and(
+          isNull(schema.users.deletedAt),
+          eq(schema.users.isMock, false),
+          or(
+            ilike(schema.users.email, `%${cleanQuery}%`),
+            ilike(schema.profiles.fullName, `%${cleanQuery}%`),
+            eq(schema.profiles.phoneNumber, cleanQuery),
+          ),
+        ),
+      )
+      .limit(10);
   }
 }

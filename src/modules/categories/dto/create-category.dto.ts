@@ -42,5 +42,5 @@ export class CreateCategoryDto {
   })
   @IsObject()
   @IsOptional()
-  categoryConfig?: Record<string, any>;
+  categoryConfig?: Record<string, unknown>;
 }

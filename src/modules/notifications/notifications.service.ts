@@ -29,4 +29,8 @@ export class NotificationsService {
   async markAsRead(id: string) {
     return this.notificationsRepository.markAsRead(id);
   }
+
+  async markAllAsRead(userId: string) {
+    return this.notificationsRepository.markAllAsRead(userId);
+  }
 }

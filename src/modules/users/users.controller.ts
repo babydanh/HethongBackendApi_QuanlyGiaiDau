@@ -26,8 +26,10 @@ import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUserDto } from './dto/query-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { CreateReportDto } from './dto/create-report.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { UserRole } from '../../common/constants/enums';
 
 @ApiTags('users')
@@ -52,11 +54,27 @@ export class UsersController {
     return this.usersService.findAll({ search: q, page: 1, limit: 10 });
   }
 
+  @Get('search')
+  @ApiOperation({ summary: 'Tìm kiếm người dùng qua email hoặc số điện thoại' })
+  @ApiResponse({ status: 200, description: 'Danh sách người dùng khớp từ khóa' })
+  async search(@Query('q') q: string) {
+    if (!q || q.trim().length < 2) return [];
+    return this.usersService.searchUsers(q);
+  }
+
   @Get('profile')
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'Return user profile' })
   async getProfile(@CurrentUser() user: { id: string }) {
     return this.usersService.getProfile(user.id);
+  }
+
+  @Public()
+  @Get(':id/public')
+  @ApiOperation({ summary: 'Lấy thông tin hồ sơ công khai của người dùng' })
+  @ApiResponse({ status: 200, description: 'Trả về hồ sơ công khai của người dùng' })
+  async getPublicProfile(@Param('id') id: string) {
+    return this.usersService.getPublicProfile(id);
   }
 
   @Get(':id')
@@ -96,6 +114,25 @@ export class UsersController {
     return this.usersService.uploadAvatar(user.id, file);
   }
 
+  @Post('profile/cover')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload user profile cover photo' })
+  @ApiResponse({ status: 201, description: 'Cover photo uploaded and profile updated' })
+  async uploadCover(
+    @CurrentUser() user: { id: string },
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+          new FileTypeValidator({ fileType: '.(png|jpeg|jpg|webp)' }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.usersService.uploadCover(user.id, file);
+  }
+
   @Patch('change-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Change current user password' })
@@ -114,5 +151,14 @@ export class UsersController {
   @ApiResponse({ status: 204, description: 'User deleted' })
   async remove(@Param('id') id: string) {
     return this.usersService.remove(id);
+  }
+
+  @Post('reports')
+  @ApiOperation({ summary: 'Gửi báo cáo vi phạm (Người dùng tố cáo)' })
+  async createReport(
+    @CurrentUser() user: { id: string },
+    @Body() dto: CreateReportDto,
+  ) {
+    return this.usersService.createReport(user.id, dto);
   }
 }

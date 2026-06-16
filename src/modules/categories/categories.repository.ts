@@ -14,12 +14,12 @@ export class CategoriesRepository {
   // --- CATEGORY QUERIES ---
 
   async findAllCategories(query: QueryCategoryDto) {
-    let whereClause = undefined;
+    let whereClause: ReturnType<typeof or> | undefined = undefined;
     if (query.search) {
       whereClause = or(
         ilike(schema.categories.name, `%${query.search}%`),
         ilike(schema.categories.slug, `%${query.search}%`),
-      ) as any;
+      );
     }
 
     return await this.db.select().from(schema.categories).where(whereClause);

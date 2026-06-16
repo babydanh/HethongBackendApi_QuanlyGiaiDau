@@ -17,7 +17,7 @@ export class RankingsRepository {
   }
 
   async getLeaderboard(query: QueryRankingDto) {
-    const { page = 1, limit = 50, categoryId, matchType, communityId, scope = 'PUBLIC' } = query;
+    const { page = 1, limit = 50, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode } = query;
     const offset = (page - 1) * limit;
 
     if (scope === 'COMMUNITY') {
@@ -28,6 +28,10 @@ export class RankingsRepository {
         eq(schema.communityRankings.categoryId, categoryId),
         eq(schema.communityRankings.communityId, communityId),
       ];
+
+      if (provinceCode) {
+        conditions.push(eq(schema.profiles.provinceCode, provinceCode));
+      }
 
       const whereClause = and(...conditions);
 
@@ -71,6 +75,9 @@ export class RankingsRepository {
       ];
       if (matchType) {
         conditions.push(eq(schema.userRanks.matchType, matchType));
+      }
+      if (provinceCode) {
+        conditions.push(eq(schema.profiles.provinceCode, provinceCode));
       }
 
       const whereClause = and(...conditions);
@@ -299,7 +306,7 @@ export class RankingsRepository {
   async updateUserRank(
     tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
     id: string,
-    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number },
+    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean },
     scope: 'PUBLIC' | 'COMMUNITY',
   ) {
     if (scope === 'COMMUNITY') {
@@ -322,6 +329,7 @@ export class RankingsRepository {
           matchesPlayed: data.matchesPlayed,
           matchesWon: data.matchesWon,
           winStreak: data.winStreak,
+          ...(data.shieldActive !== undefined && { shieldActive: data.shieldActive }),
           updatedAt: new Date(),
         })
         .where(eq(schema.userRanks.id, id))

@@ -41,4 +41,9 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   provinceCode?: string;
+
+  @ApiPropertyOptional({ example: 'https://example.com/cover.png' })
+  @IsString()
+  @IsOptional()
+  coverUrl?: string;
 }

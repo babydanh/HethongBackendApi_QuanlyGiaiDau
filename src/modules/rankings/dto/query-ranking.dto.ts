@@ -39,4 +39,9 @@ export class QueryRankingDto {
   @IsOptional()
   @IsUUID()
   communityId?: string;
+
+  @ApiPropertyOptional({ example: '79', description: 'Lọc theo mã tỉnh/thành phố (Khu vực)' })
+  @IsOptional()
+  @IsString()
+  provinceCode?: string;
 }

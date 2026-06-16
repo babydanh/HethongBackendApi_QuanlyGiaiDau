@@ -228,7 +228,7 @@ export class CommunitiesRepository {
         status,
         joinAnswers,
         invitedBy,
-      } as any)
+      } as typeof schema.communityMembers.$inferInsert)
       .returning();
     return member;
   }
@@ -239,7 +239,7 @@ export class CommunitiesRepository {
       .set({ 
         status,
         ...(approvedBy ? { approvedBy, approvedAt: new Date() } : {})
-      } as any)
+      } as Partial<typeof schema.communityMembers.$inferSelect>)
       .where(
         and(
           eq(schema.communityMembers.communityId, communityId),
@@ -387,7 +387,10 @@ export class CommunitiesRepository {
 
   // --- TOURNAMENTS ---
   async getTournaments(communityId: string, status?: string) {
-    let condition = eq(schema.tournaments.communityId, communityId);
+    let condition = and(
+      eq(schema.tournaments.communityId, communityId),
+      isNull(schema.tournaments.deletedAt)
+    ) as SQL;
     if (status && status !== 'ALL') {
       condition = and(condition, eq(schema.tournaments.status, status)) as SQL;
     }

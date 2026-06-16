@@ -21,4 +21,10 @@ export class NotificationsController {
   async markAsRead(@Param('id', ParseUUIDPipe) id: string) {
     return this.notificationsService.markAsRead(id);
   }
+
+  @Patch('read-all')
+  @ApiOperation({ summary: 'Đánh dấu tất cả thông báo là đã đọc' })
+  async markAllAsRead(@CurrentUser() user: JwtPayload) {
+    return this.notificationsService.markAllAsRead(user.sub);
+  }
 }

@@ -69,6 +69,17 @@ export class SeriesController {
   ) {
     return this.seriesService.getStandings(id, query);
   }
+
+  @Public()
+  @Get(':id/legs/:legId/categories/:categoryId/finals-qualifiers')
+  @ApiOperation({ summary: 'Lấy danh sách VĐV đủ điều kiện tham gia vòng Chung kết tổng chặng' })
+  async getFinalsQualifiers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('legId', ParseUUIDPipe) legId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+  ) {
+    return this.seriesService.calculateTourFinalsQualifiers(id, legId, categoryId);
+  }
 }
 
 // ─── ORGANIZER/ADMIN ENDPOINTS ──────────────────────────────────
@@ -159,5 +170,14 @@ export class OrganizerSeriesController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.seriesService.unlinkTournament(id, eventId, user.sub, [user.role]);
+  }
+
+  @Post(':id/reset-season')
+  @ApiOperation({ summary: 'Reset điểm tích lũy của chuỗi giải đấu cho mùa giải mới' })
+  async resetSeason(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.seriesService.resetSeason(id, user.sub, [user.role]);
   }
 }

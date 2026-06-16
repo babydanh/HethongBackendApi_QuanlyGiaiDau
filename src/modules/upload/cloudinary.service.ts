@@ -44,7 +44,7 @@ export class CloudinaryService {
     });
   }
 
-  deleteFile(publicId: string): Promise<any> {
+  deleteFile(publicId: string): Promise<unknown> {
     return new Promise((resolve, reject) => {
       cloudinary.uploader.destroy(publicId, (error, result) => {
         if (error) {

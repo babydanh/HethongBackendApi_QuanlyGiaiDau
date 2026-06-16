@@ -43,4 +43,12 @@ export class NotificationsRepository {
       .returning();
     return updated;
   }
+
+  async markAllAsRead(userId: string) {
+    return this.db
+      .update(schema.notifications)
+      .set({ isRead: true })
+      .where(eq(schema.notifications.receiverId, userId))
+      .returning();
+  }
 }

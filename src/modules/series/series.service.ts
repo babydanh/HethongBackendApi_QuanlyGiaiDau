@@ -5,15 +5,10 @@ import { UpdateSeriesDto } from './dto/update-series.dto';
 import { QuerySeriesDto } from './dto/query-series.dto';
 import { CreateLegDto, LinkEventDto } from './dto/leg.dto';
 import { ExclusionRuleException } from './exceptions/exclusion-rule.exception';
+import { eq, and, desc } from 'drizzle-orm';
+import * as schema from '../../database/schema';
 
-export interface PsrPointConfig {
-  pointsByRank: Record<number, number>;
-  directEntryThreshold: number;
-  wildcardCount: number;
-  exclusionRule: boolean;
-  exclusionScope: 'CATEGORY' | 'ALL';
-  description: string;
-}
+import { PsrPointConfig } from './interfaces/psr-point-config.interface';
 
 @Injectable()
 export class SeriesService {
@@ -244,10 +239,12 @@ export class SeriesService {
 
       // Find points mapping
       let basePoints = 0;
-      for (const k of sortedRankKeys) {
-        if (rank >= k) {
-          basePoints = pointsByRank[k];
-          break;
+      if (!ranking.isWalkover) {
+        for (const k of sortedRankKeys) {
+          if (rank >= k) {
+            basePoints = pointsByRank[k];
+            break;
+          }
         }
       }
 
@@ -276,5 +273,237 @@ export class SeriesService {
         isDirectEntry,
       );
     }
+  }
+
+  async resetSeason(seriesId: string, userId: string, userRoles: string[]) {
+    const series = await this.seriesRepository.findById(seriesId);
+    if (!series) {
+      throw new NotFoundException('Series not found');
+    }
+
+    const isOwner = series.organizerId === userId;
+    const isAdmin = userRoles.includes('ADMIN');
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException('You do not have permission to reset this series season.');
+    }
+
+    await this.seriesRepository.resetSeason(seriesId);
+    return { success: true, message: 'Season reset successfully.' };
+  }
+
+  async inviteStaff(
+    seriesId: string,
+    userId: string,
+    inviteeEmailOrPhone: string,
+    role: 'CO_ORGANIZER' | 'REFEREE' | 'CLERK',
+    userRoles: string[]
+  ) {
+    const series = await this.seriesRepository.findById(seriesId);
+    if (!series) {
+      throw new NotFoundException('Không tìm thấy chuỗi giải đấu.');
+    }
+
+    const isAuthorized = userRoles.includes('ADMIN') || series.organizerId === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền mời nhân sự cho chuỗi giải đấu này.');
+    }
+
+    const user = await this.seriesRepository.findUserByEmailOrPhone(inviteeEmailOrPhone);
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy tài khoản người chơi với email hoặc số điện thoại này.');
+    }
+
+    const email = user.email || null;
+    const phone = user.phone || null;
+
+    const managers = await this.seriesRepository.findManagers(seriesId);
+    if (managers.some((m) => m.manager.userId === user.id)) {
+      throw new BadRequestException('Người dùng này đã là quản trị viên hoặc nhân sự của chuỗi giải đấu.');
+    }
+
+    const invitations = await this.seriesRepository.findInvitations(seriesId);
+    if (
+      invitations.some(
+        (inv) =>
+          inv.status === 'PENDING' &&
+          ((email && inv.email === email) || (phone && inv.phone === phone))
+      )
+    ) {
+      throw new BadRequestException('Đã có một lời mời đang chờ xử lý dành cho người dùng này.');
+    }
+
+    return this.seriesRepository.createInvitation(seriesId, email, phone, role);
+  }
+
+  async listInvitations(seriesId: string, userId: string, userRoles: string[]) {
+    const series = await this.seriesRepository.findById(seriesId);
+    if (!series) {
+      throw new NotFoundException('Không tìm thấy chuỗi giải đấu.');
+    }
+
+    const isAuthorized = userRoles.includes('ADMIN') || series.organizerId === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền xem danh sách lời mời của chuỗi giải đấu này.');
+    }
+
+    return this.seriesRepository.findInvitations(seriesId);
+  }
+
+  async acceptInvitation(
+    invitationId: string,
+    currentUser: { email?: string; phoneNumber?: string; sub?: string; id?: string },
+  ) {
+    const invitation = await this.seriesRepository.findInvitationById(invitationId);
+    if (!invitation) {
+      throw new NotFoundException('Không tìm thấy lời mời.');
+    }
+
+    if (invitation.status !== 'PENDING') {
+      throw new BadRequestException('Lời mời này đã được xử lý hoặc không còn hiệu lực.');
+    }
+
+    const matchesEmail = invitation.email && currentUser.email === invitation.email;
+    const matchesPhone = invitation.phone && currentUser.phoneNumber === invitation.phone;
+    if (!matchesEmail && !matchesPhone) {
+      throw new ForbiddenException('Tài khoản của bạn không khớp với thông tin trên lời mời.');
+    }
+
+    const currentUserId = currentUser.sub || currentUser.id;
+    if (!currentUserId) {
+      throw new ForbiddenException('Không tìm thấy thông tin định danh người dùng.');
+    }
+
+    const db = this.seriesRepository.getDbInstance();
+    return await db.transaction(async (tx) => {
+      await tx
+        .update(schema.seriesInvitations)
+        .set({ status: 'ACCEPTED' })
+        .where(eq(schema.seriesInvitations.id, invitationId));
+
+      const [manager] = await tx
+        .insert(schema.seriesManagers)
+        .values({
+          seriesId: invitation.seriesId,
+          userId: currentUserId,
+          role: invitation.role,
+        })
+        .returning();
+
+      return manager;
+    });
+  }
+
+  async rejectInvitation(
+    invitationId: string,
+    currentUser: { email?: string; phoneNumber?: string; sub?: string; id?: string },
+  ) {
+    const invitation = await this.seriesRepository.findInvitationById(invitationId);
+    if (!invitation) {
+      throw new NotFoundException('Không tìm thấy lời mời.');
+    }
+
+    if (invitation.status !== 'PENDING') {
+      throw new BadRequestException('Lời mời này đã được xử lý hoặc không còn hiệu lực.');
+    }
+
+    const matchesEmail = invitation.email && currentUser.email === invitation.email;
+    const matchesPhone = invitation.phone && currentUser.phoneNumber === invitation.phone;
+    if (!matchesEmail && !matchesPhone) {
+      throw new ForbiddenException('Tài khoản của bạn không khớp với thông tin trên lời mời.');
+    }
+
+    return this.seriesRepository.updateInvitationStatus(invitationId, 'REJECTED');
+  }
+
+  async revokeManager(seriesId: string, managerUserId: string, userId: string, userRoles: string[]) {
+    const series = await this.seriesRepository.findById(seriesId);
+    if (!series) {
+      throw new NotFoundException('Không tìm thấy chuỗi giải đấu.');
+    }
+
+    const isAuthorized = userRoles.includes('ADMIN') || series.organizerId === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền thu hồi nhân sự của chuỗi giải đấu này.');
+    }
+
+    if (series.organizerId === managerUserId) {
+      throw new BadRequestException('Không thể thu hồi quyền của Chủ sở hữu chuỗi giải đấu.');
+    }
+
+    return this.seriesRepository.removeManager(seriesId, managerUserId);
+  }
+
+  async listManagers(seriesId: string) {
+    const series = await this.seriesRepository.findById(seriesId);
+    if (!series) {
+      throw new NotFoundException('Không tìm thấy chuỗi giải đấu.');
+    }
+
+    return this.seriesRepository.findManagers(seriesId);
+  }
+
+  async calculateTourFinalsQualifiers(seriesId: string, legId: string, categoryId: string) {
+    const leg = await this.seriesRepository.findLegById(legId);
+    if (!leg || leg.seriesId !== seriesId) {
+      throw new NotFoundException('Không tìm thấy chặng đấu trong chuỗi này.');
+    }
+
+    const series = await this.seriesRepository.findById(seriesId);
+    if (!series) {
+      throw new NotFoundException('Không tìm thấy chuỗi giải đấu.');
+    }
+
+    const rules = (leg.rulesOverride || series.rules) as PsrPointConfig;
+    const minStagesRequired = rules.minStagesRequired || 1;
+
+    const db = this.seriesRepository.getDbInstance();
+    const standings = await db
+      .select({
+        standing: schema.seriesStandings,
+        user: {
+          id: schema.users.id,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+          email: schema.users.email,
+        }
+      })
+      .from(schema.seriesStandings)
+      .innerJoin(schema.users, eq(schema.seriesStandings.userId, schema.users.id))
+      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        and(
+          eq(schema.seriesStandings.legId, legId),
+          eq(schema.seriesStandings.categoryId, categoryId)
+        )
+      )
+      .orderBy(desc(schema.seriesStandings.totalPsrPoints));
+
+    const events = await this.seriesRepository.findEventsByLegId(legId);
+    const directEntryThreshold = rules?.directEntryThreshold || 2;
+    const totalEventDirectSlots = events.length * directEntryThreshold;
+
+    const validDirectQualifiers = standings.filter(
+      (s) => s.standing.directEntry && s.standing.eventsPlayed >= minStagesRequired
+    );
+
+    const actualDirectQualifiersCount = validDirectQualifiers.length;
+    const unusedSlots = Math.max(0, totalEventDirectSlots - actualDirectQualifiersCount);
+    const finalWildcardSlots = leg.wildcardSlots + unusedSlots;
+
+    const wildcardQualifiers = standings
+      .filter((s) => !s.standing.directEntry && s.standing.eventsPlayed >= minStagesRequired)
+      .slice(0, finalWildcardSlots);
+
+    return {
+      directQualifiers: validDirectQualifiers,
+      wildcardQualifiers,
+      rollDownDetails: {
+        totalEventDirectSlots,
+        actualDirectQualifiers: actualDirectQualifiersCount,
+        unusedSlots,
+        initialWildcardSlots: leg.wildcardSlots,
+        finalWildcardSlots,
+      }
+    };
   }
 }

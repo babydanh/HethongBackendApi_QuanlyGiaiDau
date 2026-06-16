@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql, and, isNotNull } from 'drizzle-orm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
 
@@ -11,6 +11,15 @@ export class PaymentsRepository {
   constructor(
     @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
   ) {}
+
+  async getConfigValue(key: string, defaultValue: string): Promise<string> {
+    const [existing] = await this.db
+      .select()
+      .from(schema.systemConfigs)
+      .where(eq(schema.systemConfigs.key, key))
+      .limit(1);
+    return existing ? existing.value : defaultValue;
+  }
 
   async createPayment(userId: string, data: CreatePaymentDto) {
     const [record] = await this.db
@@ -34,6 +43,22 @@ export class PaymentsRepository {
       .where(eq(schema.payments.id, id))
       .limit(1);
     return record || null;
+  }
+
+  async findTournamentById(id: string) {
+    const [record] = await this.db
+      .select()
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, id))
+      .limit(1);
+    return record || null;
+  }
+
+  async setTournamentStatus(tournamentId: string, status: string) {
+    return this.db
+      .update(schema.tournaments)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(schema.tournaments.id, tournamentId));
   }
 
   async updatePaymentStatus(
@@ -91,6 +116,7 @@ export class PaymentsRepository {
     data: PayoutRequestDto,
     totalCollected: number,
     platformFeeRetained: number,
+    holdUntil: Date | null,
   ) {
     return await this.db.transaction(async (tx) => {
       const [record] = await tx
@@ -105,6 +131,7 @@ export class PaymentsRepository {
           bankAccountName: data.bankAccountName,
           bankAccountNumber: data.bankAccountNumber,
           status: 'PENDING',
+          holdUntil: holdUntil,
         })
         .returning();
 
@@ -274,6 +301,33 @@ export class PaymentsRepository {
       totalPlatformFee: totalPaymentsResult?.totalPlatformFee || '0.00',
       totalPayoutProcessed: totalPayoutResult?.totalPayout || '0.00',
     };
+  }
+
+  async getUserRoles(userId: string): Promise<string[]> {
+    const userRolesList = await this.db
+      .select({
+        slug: schema.roles.slug,
+      })
+      .from(schema.userToRoles)
+      .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+      .where(eq(schema.userToRoles.userId, userId));
+    return userRolesList.map((r) => r.slug);
+  }
+
+  async getTotalCollected(tournamentId: string): Promise<number> {
+    const [result] = await this.db
+      .select({
+        sum: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
+      })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.status, 'COMPLETED'),
+          isNotNull(schema.payments.participantId),
+        ),
+      );
+    return parseFloat(result?.sum || '0');
   }
 }
 

@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../database/schema';
-import { eq, ilike, and, sql, desc, or } from 'drizzle-orm';
+import { eq, ilike, and, sql, desc, or, inArray } from 'drizzle-orm';
 import { CreateSeriesDto } from './dto/create-series.dto';
 import { UpdateSeriesDto } from './dto/update-series.dto';
 import { QuerySeriesDto } from './dto/query-series.dto';
@@ -13,6 +13,10 @@ export class SeriesRepository {
   constructor(
     @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
   ) {}
+
+  getDbInstance() {
+    return this.db;
+  }
 
   async create(userId: string, data: CreateSeriesDto) {
     const [record] = await this.db
@@ -477,21 +481,161 @@ export class SeriesRepository {
     }
 
     // Now for each participant, fetch their rosters (users)
-    const results: { userId: string; participantId: string; rank: number }[] = [];
+    const results: { userId: string; participantId: string; rank: number; isWalkover: boolean }[] = [];
     for (const r of rankings) {
       const rosters = await this.db
         .select()
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, r.participantId));
+
+      const participantMatches = completedMatches.filter(m => 
+        (m.match.participant1Id === r.participantId || m.match.participant2Id === r.participantId) &&
+        !m.match.isBye &&
+        !(m.match.scoreDetails as Record<string, unknown>)?.walkover &&
+        !(m.match.scoreDetails as Record<string, unknown>)?.isWalkover
+      );
+      const isWalkover = participantMatches.length === 0;
+
       for (const rost of rosters) {
         results.push({
           userId: rost.userId,
           participantId: r.participantId,
-          rank: r.rank
+          rank: r.rank,
+          isWalkover
         });
       }
     }
 
     return results;
+  }
+
+  async resetSeason(seriesId: string) {
+    await this.db.transaction(async (tx) => {
+      // Find all legs for this series
+      const legs = await tx
+        .select({ id: schema.seriesLegs.id })
+        .from(schema.seriesLegs)
+        .where(eq(schema.seriesLegs.seriesId, seriesId));
+
+      const legIds = legs.map((l) => l.id);
+      if (legIds.length === 0) return;
+
+      // Reset standings for all legs
+      await tx
+        .update(schema.seriesStandings)
+        .set({
+          totalPsrPoints: 0,
+          eventsPlayed: 0,
+          bestRank: null,
+          directEntry: false,
+          wildcardEntry: false,
+          lockedOut: false,
+          qualifiedEventId: null,
+          updatedAt: new Date(),
+        })
+        .where(inArray(schema.seriesStandings.legId, legIds));
+    });
+  }
+
+  async findUserByEmailOrPhone(emailOrPhone: string) {
+    const [result] = await this.db
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        phone: schema.profiles.phoneNumber,
+      })
+      .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        or(
+          eq(schema.users.email, emailOrPhone),
+          eq(schema.profiles.phoneNumber, emailOrPhone)
+        )
+      )
+      .limit(1);
+    return result || null;
+  }
+
+  async createInvitation(seriesId: string, email: string | null, phone: string | null, role: string) {
+    const [record] = await this.db
+      .insert(schema.seriesInvitations)
+      .values({
+        seriesId,
+        email,
+        phone,
+        role,
+        status: 'PENDING',
+      })
+      .returning();
+    return record;
+  }
+
+  async findInvitations(seriesId: string) {
+    return this.db
+      .select()
+      .from(schema.seriesInvitations)
+      .where(eq(schema.seriesInvitations.seriesId, seriesId))
+      .orderBy(desc(schema.seriesInvitations.createdAt));
+  }
+
+  async findInvitationById(id: string) {
+    const [record] = await this.db
+      .select()
+      .from(schema.seriesInvitations)
+      .where(eq(schema.seriesInvitations.id, id))
+      .limit(1);
+    return record || null;
+  }
+
+  async updateInvitationStatus(id: string, status: 'ACCEPTED' | 'REJECTED') {
+    const [record] = await this.db
+      .update(schema.seriesInvitations)
+      .set({ status })
+      .where(eq(schema.seriesInvitations.id, id))
+      .returning();
+    return record;
+  }
+
+  async addManager(seriesId: string, userId: string, role: string) {
+    const [record] = await this.db
+      .insert(schema.seriesManagers)
+      .values({
+        seriesId,
+        userId,
+        role,
+      })
+      .returning();
+    return record;
+  }
+
+  async removeManager(seriesId: string, userId: string) {
+    const [record] = await this.db
+      .delete(schema.seriesManagers)
+      .where(
+        and(
+          eq(schema.seriesManagers.seriesId, seriesId),
+          eq(schema.seriesManagers.userId, userId)
+        )
+      )
+      .returning();
+    return record;
+  }
+
+  async findManagers(seriesId: string) {
+    return this.db
+      .select({
+        manager: schema.seriesManagers,
+        user: {
+          id: schema.users.id,
+          email: schema.users.email,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        }
+      })
+      .from(schema.seriesManagers)
+      .innerJoin(schema.users, eq(schema.seriesManagers.userId, schema.users.id))
+      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(eq(schema.seriesManagers.seriesId, seriesId))
+      .orderBy(desc(schema.seriesManagers.createdAt));
   }
 }
