@@ -1,6 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PaymentsRepository } from './payments.repository';
-import { BracketGeneratorService } from '../tournaments/bracket-generator.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
 import { WebhookDto } from './dto/webhook.dto';
@@ -10,16 +9,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 export class PaymentsService {
   constructor(
     private readonly paymentsRepository: PaymentsRepository,
-    private readonly bracketGeneratorService: BracketGeneratorService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
   async createPaymentLink(userId: string, data: CreatePaymentDto) {
     const payment = await this.paymentsRepository.createPayment(userId, data);
-    
-    // Todo: Tích hợp SDK VNPay/MoMo tại đây để generate URL thực tế.
-    // Tạm thời mock URL cho MVP:
-    const mockUrl = `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_TxnRef=${payment.id}&vnp_Amount=${data.amount * 100}`;
+    const mockUrl = `/payments/result?paymentId=${payment.id}&vnp_ResponseCode=00`;
     
     return {
       paymentId: payment.id,
@@ -91,12 +86,6 @@ export class PaymentsService {
             await this.paymentsRepository.setTournamentStatus(payment.tournamentId, nextStatus);
           } catch (err) {
             console.error(`Failed to set tournament status to ${tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN'} on publish fee payment:`, err);
-          }
-        } else {
-          try {
-            await this.bracketGeneratorService.generateSingleElimination(payment.tournamentId, payment.userId);
-          } catch (err) {
-            console.error('Failed to auto-generate bracket on platform fee payment:', err);
           }
         }
       }
@@ -208,4 +197,3 @@ export class PaymentsService {
     return this.paymentsRepository.getAdminStats();
   }
 }
-

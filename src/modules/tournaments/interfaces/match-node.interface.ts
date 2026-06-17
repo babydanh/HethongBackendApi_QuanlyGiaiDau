@@ -14,4 +14,6 @@ export interface MatchNode {
   p1SetsWon: number;
   p2SetsWon: number;
   totalSetsPlayed: number;
+  tournamentId: string;
+  stageId: string;
 }

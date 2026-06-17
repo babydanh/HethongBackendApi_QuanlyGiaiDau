@@ -159,12 +159,6 @@ export class CreateTournamentDto {
   @Max(100)
   platformFeePercentage?: number;
 
-  @ApiPropertyOptional({ example: 10000, description: 'Lệ phí sàn tính trên mỗi VĐV đăng ký' })
-  @IsNumber()
-  @IsOptional()
-  @Min(0)
-  platformFeePerPlayer?: number;
-
   @ApiPropertyOptional({
     example: '2026-10-15T00:00:00Z',
     description: 'Ngày bắt đầu',

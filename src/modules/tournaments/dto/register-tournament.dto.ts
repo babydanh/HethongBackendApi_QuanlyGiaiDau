@@ -17,4 +17,14 @@ export class RegisterTournamentDto {
   @IsString()
   @IsOptional()
   partnerEmailOrPhone?: string;
+
+  @ApiPropertyOptional({ description: 'ID hình thức thi đấu muốn đăng ký' })
+  @IsUUID('4')
+  @IsOptional()
+  divisionId?: string;
+
+  @ApiPropertyOptional({ description: 'ID hình thức thi đấu muốn đăng ký' })
+  @IsUUID('4')
+  @IsOptional()
+  tournamentDivisionId?: string;
 }

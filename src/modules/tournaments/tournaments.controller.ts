@@ -21,6 +21,8 @@ import { UpdateStageDto } from './dto/update-stage.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
+import { CreateDivisionDto } from './dto/create-division.dto';
+import { UpdateDivisionDto } from './dto/update-division.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -32,6 +34,13 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 @Controller('tournaments')
 export class TournamentsController {
   constructor(private readonly tournamentsService: TournamentsService) {}
+
+  private getSystemRoles(user: JwtPayload): string[] {
+    if (Array.isArray(user.roles) && user.roles.length > 0) {
+      return user.roles;
+    }
+    return user.role ? [user.role] : [];
+  }
 
   @Public()
   @Get('fees')
@@ -103,6 +112,13 @@ export class TournamentsController {
     return this.tournamentsService.findParentById(id);
   }
 
+  @Public()
+  @Get('parent/:id/aggregation')
+  @ApiOperation({ summary: 'Lấy thống kê tổng hợp của giải đấu cha' })
+  async getParentAggregation(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tournamentsService.getParentWithAggregation(id);
+  }
+
   @Patch('parent/:id')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật thông tin giải đấu cha' })
@@ -111,7 +127,7 @@ export class TournamentsController {
     @Body() updateParentTournamentDto: UpdateParentTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.updateParent(id, user.sub, updateParentTournamentDto, [user.role]);
+    return this.tournamentsService.updateParent(id, user.sub, updateParentTournamentDto, this.getSystemRoles(user));
   }
 
   @Delete('parent/:id')
@@ -121,7 +137,69 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.removeParent(id, user.sub, [user.role]);
+    return this.tournamentsService.removeParent(id, user.sub, this.getSystemRoles(user));
+  }
+
+  @Public()
+  @Get(':id/divisions')
+  @ApiOperation({ summary: 'Lấy danh sách bảng/nội dung thi đấu của giải' })
+  async findDivisions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tournamentsService.getDivisionsForTournament(id);
+  }
+
+  @Post(':id/divisions')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo bảng/nội dung thi đấu cho giải' })
+  async createDivision(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() createDivisionDto: CreateDivisionDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    console.log('🔍 createDivision body:', JSON.stringify(createDivisionDto));
+    return this.tournamentsService.createDivision(id, createDivisionDto, user.sub, this.getSystemRoles(user));
+  }
+
+  @Patch('divisions/:divisionId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật bảng/nội dung thi đấu' })
+  async updateDivision(
+    @Param('divisionId', ParseUUIDPipe) divisionId: string,
+    @Body() updateDivisionDto: UpdateDivisionDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateDivision(divisionId, updateDivisionDto, user.sub, this.getSystemRoles(user));
+  }
+
+  @Patch(':id/divisions/:divisionId/config')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Bật/tắt và cập nhật cấu hình riêng của hình thức thi đấu' })
+  async updateDivisionConfig(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('divisionId', ParseUUIDPipe) divisionId: string,
+    @Body() updateDivisionDto: UpdateDivisionDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateDivisionConfig(id, divisionId, updateDivisionDto, user.sub, this.getSystemRoles(user));
+  }
+
+  @Get(':id/divisions/:divisionId/participants')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách người chơi theo hình thức thi đấu' })
+  async findDivisionParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('divisionId', ParseUUIDPipe) divisionId: string,
+  ) {
+    return this.tournamentsService.getParticipantsByDivision(id, divisionId);
+  }
+
+  @Delete('divisions/:divisionId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xóa bảng/nội dung thi đấu' })
+  async removeDivision(
+    @Param('divisionId', ParseUUIDPipe) divisionId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.deleteDivision(divisionId, user.sub, this.getSystemRoles(user));
   }
 
   @Public()
@@ -168,7 +246,7 @@ export class TournamentsController {
     @Body() createTournamentDto: CreateTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.create(user.sub, createTournamentDto, [user.role]);
+    return this.tournamentsService.create(user.sub, createTournamentDto, this.getSystemRoles(user));
   }
 
   @Patch(':id')
@@ -179,7 +257,7 @@ export class TournamentsController {
     @Body() updateTournamentDto: UpdateTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.update(id, user.sub, updateTournamentDto, [user.role]);
+    return this.tournamentsService.update(id, user.sub, updateTournamentDto, this.getSystemRoles(user));
   }
 
   @Delete(':id')
@@ -189,7 +267,7 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.remove(id, user.sub, [user.role]);
+    return this.tournamentsService.remove(id, user.sub, this.getSystemRoles(user));
   }
 
 
@@ -199,9 +277,10 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Sinh nhánh đấu tự động (Bracket Generation)' })
   async generateBracket(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.generateBracket(id, user.sub, [user.role]);
+    return this.tournamentsService.generateBracket(id, user.sub, this.getSystemRoles(user), divisionId);
   }
 
   @Post(':id/publish')
@@ -211,7 +290,18 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.publish(id, user.sub, [user.role]);
+    return this.tournamentsService.publish(id, user.sub, this.getSystemRoles(user));
+  }
+
+  @Patch(':id/seeds')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật hạt giống hàng loạt cho các đội/VĐV' })
+  async updateSeeds(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('seeds') seeds: { participantId: string; seed: number }[],
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateSeeds(id, seeds, user.sub, this.getSystemRoles(user));
   }
 
   @Post(':id/lock')
@@ -221,7 +311,7 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.lock(id, user.sub, [user.role]);
+    return this.tournamentsService.lock(id, user.sub, this.getSystemRoles(user));
   }
 
   @Post(':id/register')
@@ -275,7 +365,7 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.regenerateInviteCode(id, user.sub, [user.role]);
+    return this.tournamentsService.regenerateInviteCode(id, user.sub, this.getSystemRoles(user));
   }
 
   @Public()
@@ -293,7 +383,7 @@ export class TournamentsController {
     @Body() uploadGalleryDto: UploadGalleryDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.addGalleryImage(id, user.sub, uploadGalleryDto.url, [user.role]);
+    return this.tournamentsService.addGalleryImage(id, user.sub, uploadGalleryDto.url, this.getSystemRoles(user));
   }
 
   @Delete(':id/gallery/:index')
@@ -304,21 +394,34 @@ export class TournamentsController {
     @Param('index', ParseIntPipe) index: number,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.removeGalleryImage(id, user.sub, index, [user.role]);
+    return this.tournamentsService.removeGalleryImage(id, user.sub, index, this.getSystemRoles(user));
   }
 
   @Public()
   @Get(':id/participants')
   @ApiOperation({ summary: 'Lấy danh sách VĐV đăng ký tham gia kèm rosters' })
-  async findParticipants(@Param('id', ParseUUIDPipe) id: string) {
-    return this.tournamentsService.findParticipants(id);
+  async findParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('divisionId') divisionId?: string,
+  ) {
+    return this.tournamentsService.findParticipants(id, divisionId);
+  }
+
+  @Public()
+  @Get(':id/referees')
+  @ApiOperation({ summary: 'Lấy danh sách trọng tài của giải đấu' })
+  async findReferees(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tournamentsService.findReferees(id);
   }
 
   @Public()
   @Get(':id/bracket')
   @ApiOperation({ summary: 'Lấy full bracket data' })
-  async findBracket(@Param('id', ParseUUIDPipe) id: string) {
-    return this.tournamentsService.findBracket(id);
+  async findBracket(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('divisionId') divisionId?: string,
+  ) {
+    return this.tournamentsService.findBracket(id, divisionId);
   }
 
   @Patch('stages/:id')
@@ -329,7 +432,7 @@ export class TournamentsController {
     @Body() updateStageDto: UpdateStageDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.updateStage(id, user.sub, updateStageDto, [user.role]);
+    return this.tournamentsService.updateStage(id, user.sub, updateStageDto, this.getSystemRoles(user));
   }
 
   @Post(':id/mock-participants')
@@ -339,8 +442,9 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body('names') names: string[],
     @CurrentUser() user: JwtPayload,
+    @Body('divisionId') divisionId?: string
   ) {
-    return this.tournamentsService.seedMockParticipants(id, user.sub, names, [user.role]);
+    return this.tournamentsService.seedMockParticipants(id, user.sub, names, this.getSystemRoles(user), divisionId);
   }
 
   @Delete(':id/mock-participants')
@@ -348,9 +452,10 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Xóa toàn bộ VĐV giả lập' })
   async clearMockParticipants(
     @Param('id', ParseUUIDPipe) id: string,
+    @Query('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.clearMockParticipants(id, user.sub, [user.role]);
+    return this.tournamentsService.clearMockParticipants(id, user.sub, this.getSystemRoles(user), divisionId);
   }
 
   @Patch(':id/participants/:participantId')
@@ -362,7 +467,7 @@ export class TournamentsController {
     @Body('status') status: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.updateParticipantStatus(id, participantId, status, user.sub, [user.role]);
+    return this.tournamentsService.updateParticipantStatus(id, participantId, status, user.sub, this.getSystemRoles(user));
   }
 
   @Post(':id/reserve-slots')
@@ -375,7 +480,7 @@ export class TournamentsController {
     @Body('partnerEmailOrPhone') partnerEmailOrPhone: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.assignReservedSlot(id, userEmailOrPhone, teamName, user.sub, [user.role], partnerEmailOrPhone);
+    return this.tournamentsService.assignReservedSlot(id, userEmailOrPhone, teamName, user.sub, this.getSystemRoles(user), partnerEmailOrPhone);
   }
 
   @Post(':id/participants/:participantId/kick')
@@ -387,7 +492,7 @@ export class TournamentsController {
     @Body('reason') reason: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.kickParticipant(id, participantId, user.sub, reason, [user.role]);
+    return this.tournamentsService.kickParticipant(id, participantId, user.sub, reason, this.getSystemRoles(user));
   }
 
   @Post(':id/cancel')
@@ -397,6 +502,6 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.cancelTournament(id, user.sub, [user.role]);
+    return this.tournamentsService.cancelTournament(id, user.sub, this.getSystemRoles(user));
   }
 }

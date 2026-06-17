@@ -1,7 +1,7 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+﻿import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, and, lte } from 'drizzle-orm';
 
@@ -10,7 +10,7 @@ export class TournamentSchedulerService {
   private readonly logger = new Logger(TournamentSchedulerService.name);
 
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -51,3 +51,5 @@ export class TournamentSchedulerService {
     }
   }
 }
+
+

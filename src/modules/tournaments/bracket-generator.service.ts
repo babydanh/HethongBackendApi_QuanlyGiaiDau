@@ -1,18 +1,18 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { MatchNode } from './interfaces/match-node.interface';
 
 @Injectable()
 export class BracketGeneratorService {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
-  async generateSingleElimination(tournamentId: string, userId: string) {
+  async generateSingleElimination(tournamentId: string, userId: string, divisionId?: string) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -27,7 +27,20 @@ export class BracketGeneratorService {
       const participants = await tx
         .select()
         .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.tournamentId, tournamentId));
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              )
+            : and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ),
+        );
 
       const numParticipants = participants.length;
       if (numParticipants < 2) {
@@ -39,7 +52,14 @@ export class BracketGeneratorService {
       // 3. Xóa các Stage/Group/Matches cũ (nếu có) để tạo lại
       await tx
         .delete(schema.tournamentStages)
-        .where(eq(schema.tournamentStages.tournamentId, tournamentId));
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentStages.tournamentId, tournamentId),
+                eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              )
+            : eq(schema.tournamentStages.tournamentId, tournamentId),
+        );
 
       // 4. Tạo Stage & Group mới
       const [stage] = await tx
@@ -49,6 +69,7 @@ export class BracketGeneratorService {
           name: 'Elimination Stage',
           type: 'SINGLE_ELIMINATION',
           order: 1,
+          tournamentDivisionId: divisionId ?? null,
         })
         .returning();
 
@@ -89,6 +110,8 @@ export class BracketGeneratorService {
             p1SetsWon: 0,
             p2SetsWon: 0,
             totalSetsPlayed: 0,
+            tournamentId,
+            stageId: stage.id,
           });
         }
         matchNodesByRound.set(r, roundMatches);
@@ -164,7 +187,7 @@ export class BracketGeneratorService {
     });
   }
 
-  async generateDoubleElimination(tournamentId: string, userId: string) {
+  async generateDoubleElimination(tournamentId: string, userId: string, divisionId?: string) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -179,7 +202,20 @@ export class BracketGeneratorService {
       const participants = await tx
         .select()
         .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.tournamentId, tournamentId));
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              )
+            : and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ),
+        );
 
       const numParticipants = participants.length;
       if (numParticipants < 2) {
@@ -191,7 +227,14 @@ export class BracketGeneratorService {
       // 3. Xóa các Stage/Group/Matches cũ (nếu có) để tạo lại
       await tx
         .delete(schema.tournamentStages)
-        .where(eq(schema.tournamentStages.tournamentId, tournamentId));
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentStages.tournamentId, tournamentId),
+                eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              )
+            : eq(schema.tournamentStages.tournamentId, tournamentId),
+        );
 
       // 4. Tạo Stage & Groups
       const [stage] = await tx
@@ -201,6 +244,7 @@ export class BracketGeneratorService {
           name: 'Elimination Stage',
           type: 'DOUBLE_ELIMINATION',
           order: 1,
+          tournamentDivisionId: divisionId ?? null,
         })
         .returning();
 
@@ -257,6 +301,8 @@ export class BracketGeneratorService {
             p1SetsWon: 0,
             p2SetsWon: 0,
             totalSetsPlayed: 0,
+            tournamentId,
+            stageId: stage.id,
           });
         }
         winnersMatchesByRound.set(r, roundMatches);
@@ -283,6 +329,8 @@ export class BracketGeneratorService {
             p1SetsWon: 0,
             p2SetsWon: 0,
             totalSetsPlayed: 0,
+            tournamentId,
+            stageId: stage.id,
           });
         }
         losersMatchesByRound.set(1, r1Matches);
@@ -307,6 +355,8 @@ export class BracketGeneratorService {
               p1SetsWon: 0,
               p2SetsWon: 0,
               totalSetsPlayed: 0,
+              tournamentId,
+              stageId: stage.id,
             });
           }
           losersMatchesByRound.set(2 * r - 2, round2r2Matches);
@@ -331,6 +381,8 @@ export class BracketGeneratorService {
                 p1SetsWon: 0,
                 p2SetsWon: 0,
                 totalSetsPlayed: 0,
+                tournamentId,
+                stageId: stage.id,
               });
             }
             losersMatchesByRound.set(2 * r - 1, round2r1Matches);
@@ -355,6 +407,8 @@ export class BracketGeneratorService {
         p1SetsWon: 0,
         p2SetsWon: 0,
         totalSetsPlayed: 0,
+        tournamentId,
+        stageId: stage.id,
       };
 
       // 6. Thiết lập liên kết nextMatchId và loserNextMatchId
@@ -556,7 +610,7 @@ export class BracketGeneratorService {
     });
   }
 
-  async generateRoundRobin(tournamentId: string, userId: string) {
+  async generateRoundRobin(tournamentId: string, userId: string, divisionId?: string) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -571,7 +625,20 @@ export class BracketGeneratorService {
       const participants = await tx
         .select()
         .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.tournamentId, tournamentId));
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              )
+            : and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ),
+        );
 
       const numParticipants = participants.length;
       if (numParticipants < 2) {
@@ -583,7 +650,14 @@ export class BracketGeneratorService {
       // 3. Xóa các Stage/Group/Matches cũ (nếu có) để tạo lại
       await tx
         .delete(schema.tournamentStages)
-        .where(eq(schema.tournamentStages.tournamentId, tournamentId));
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentStages.tournamentId, tournamentId),
+                eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              )
+            : eq(schema.tournamentStages.tournamentId, tournamentId),
+        );
 
       // 4. Tạo Stage & Group mới
       const [stage] = await tx
@@ -593,6 +667,7 @@ export class BracketGeneratorService {
           name: 'Group Stage',
           type: 'ROUND_ROBIN',
           order: 1,
+          tournamentDivisionId: divisionId ?? null,
         })
         .returning();
 
@@ -665,6 +740,8 @@ export class BracketGeneratorService {
                 totalSetsPlayed: 0,
                 nextMatchId: null,
                 loserNextMatchId: null,
+                tournamentId,
+                stageId: stage.id,
                 updatedAt: new Date(),
               });
             }
@@ -737,3 +814,5 @@ export class BracketGeneratorService {
     }
   }
 }
+
+

@@ -17,6 +17,14 @@ export class CreatePaymentDto {
   @IsOptional()
   participantId?: string;
 
+  @ApiPropertyOptional({
+    example: 'uuid-division',
+    description: 'ID hình thức thi đấu liên quan đến thanh toán',
+  })
+  @IsUUID()
+  @IsOptional()
+  divisionId?: string;
+
   @ApiProperty({
     example: 500000,
     description: 'Số tiền cần thanh toán',

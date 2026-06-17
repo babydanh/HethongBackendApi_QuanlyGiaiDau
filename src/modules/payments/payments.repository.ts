@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+﻿import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, desc, sql, and, isNotNull } from 'drizzle-orm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -9,7 +9,7 @@ import { PayoutRequestDto } from './dto/payout-request.dto';
 @Injectable()
 export class PaymentsRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async getConfigValue(key: string, defaultValue: string): Promise<string> {
@@ -28,6 +28,7 @@ export class PaymentsRepository {
         userId,
         tournamentId: data.tournamentId,
         participantId: data.participantId,
+        divisionId: data.divisionId,
         amount: data.amount.toString(),
         status: 'PENDING',
         paymentGateway: data.paymentGateway || 'VNPAY',
@@ -92,18 +93,11 @@ export class PaymentsRepository {
           reason: reason || 'SYSTEM_UPDATE',
         });
 
-        if (status === 'COMPLETED') {
-          if (oldPayment.participantId) {
-            await tx
-              .update(schema.tournamentParticipants)
-              .set({ isPaid: true })
-              .where(eq(schema.tournamentParticipants.id, oldPayment.participantId));
-          } else {
-            await tx
-              .update(schema.tournaments)
-              .set({ status: 'UPCOMING', updatedAt: new Date() })
-              .where(eq(schema.tournaments.id, oldPayment.tournamentId));
-          }
+        if (status === 'COMPLETED' && oldPayment.participantId) {
+          await tx
+            .update(schema.tournamentParticipants)
+            .set({ isPaid: true })
+            .where(eq(schema.tournamentParticipants.id, oldPayment.participantId));
         }
       }
 
@@ -330,4 +324,5 @@ export class PaymentsRepository {
     return parseFloat(result?.sum || '0');
   }
 }
+
 
