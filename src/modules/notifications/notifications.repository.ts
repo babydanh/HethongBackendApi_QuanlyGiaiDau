@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+﻿import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, desc } from 'drizzle-orm';
 import { CreateNotificationDto } from './dto/create-notification.dto';
@@ -8,7 +8,7 @@ import { CreateNotificationDto } from './dto/create-notification.dto';
 @Injectable()
 export class NotificationsRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async createNotification(data: CreateNotificationDto) {
@@ -52,3 +52,5 @@ export class NotificationsRepository {
       .returning();
   }
 }
+
+

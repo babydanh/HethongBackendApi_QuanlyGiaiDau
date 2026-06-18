@@ -1,5 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+﻿import { Injectable, Inject } from '@nestjs/common';
+import type { AppDb } from '../../database/db.types';
 import { eq, or, and, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
@@ -7,7 +7,7 @@ import * as schema from '../../database/schema';
 @Injectable()
 export class ChallengesRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async create(data: {
@@ -133,3 +133,5 @@ export class ChallengesRepository {
     return records[0] || null;
   }
 }
+
+

@@ -57,3 +57,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Graphify
 graphify-out/
+
+# TypeScript build cache
+tsconfig.build.tsbuildinfo
+
+# Scratch folder
+scratch/
+

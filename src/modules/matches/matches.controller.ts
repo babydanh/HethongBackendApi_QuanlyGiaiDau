@@ -40,27 +40,28 @@ export class MatchesController {
 
   @Patch(':id/score')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.PLAYER, UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
   async updateScore(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateMatchScoreDto: UpdateMatchScoreDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.updateScore(id, user.sub, updateMatchScoreDto);
+    return this.matchesService.updateScore(id, user, updateMatchScoreDto);
   }
 
   @Patch(':id/status')
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.PLAYER, UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Cập nhật trạng thái trận đấu (ONGOING, COMPLETED)',
   })
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateMatchStatusDto: UpdateMatchStatusDto,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.updateStatus(id, updateMatchStatusDto);
+    return this.matchesService.updateStatus(id, user, updateMatchStatusDto);
   }
 
   @Patch(':id/schedule')
@@ -72,5 +73,17 @@ export class MatchesController {
     @Body() updateMatchScheduleDto: UpdateMatchScheduleDto,
   ) {
     return this.matchesService.updateSchedule(id, updateMatchScheduleDto);
+  }
+
+  @Patch(':id/assign-referee')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Phân công trọng tài cho trận đấu' })
+  async assignReferee(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { refereeId: string },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.matchesService.assignReferee(id, body.refereeId, user);
   }
 }

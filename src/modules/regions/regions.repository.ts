@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+﻿import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, ilike, SQL, or, and } from 'drizzle-orm';
 import { QueryRegionDto, QueryDistrictDto, QueryWardDto } from './dto/query-region.dto';
@@ -8,7 +8,7 @@ import { QueryRegionDto, QueryDistrictDto, QueryWardDto } from './dto/query-regi
 @Injectable()
 export class RegionsRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async findProvinces(query: QueryRegionDto) {
@@ -58,3 +58,5 @@ export class RegionsRepository {
     return this.db.select().from(schema.wards).where(conditions).orderBy(schema.wards.code);
   }
 }
+
+

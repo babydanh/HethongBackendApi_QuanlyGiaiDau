@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+﻿import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, ilike, and, sql, desc, or, inArray } from 'drizzle-orm';
 import { CreateSeriesDto } from './dto/create-series.dto';
@@ -11,7 +11,7 @@ import { CreateLegDto, LinkEventDto } from './dto/leg.dto';
 @Injectable()
 export class SeriesRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   getDbInstance() {
@@ -639,3 +639,5 @@ export class SeriesRepository {
       .orderBy(desc(schema.seriesManagers.createdAt));
   }
 }
+
+

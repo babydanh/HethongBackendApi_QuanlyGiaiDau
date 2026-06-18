@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+﻿import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, ilike, sql, SQL, or, count } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
@@ -12,7 +12,7 @@ import { CreateVenueCourtDto } from './dto/create-venue-court.dto';
 @Injectable()
 export class VenuesRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly auditService: AuditService,
   ) {}
 
@@ -146,3 +146,5 @@ export class VenuesRepository {
     return deleted;
   }
 }
+
+

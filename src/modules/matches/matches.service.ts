@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { MatchesRepository } from './matches.repository';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
@@ -6,6 +6,7 @@ import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 interface RoundConfig {
   bestOf?: number;
@@ -132,11 +133,19 @@ export class MatchesService {
 
   async updateScore(
     id: string,
-    userId: string,
+    user: JwtPayload,
     updateMatchScoreDto: UpdateMatchScoreDto,
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
+
+    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isReferee = existing.refereeId === user.sub;
+    const isAdmin = user.role === 'ADMIN';
+
+    if (!isAdmin && !isCreator && !isReferee) {
+      throw new ForbiddenException('Bạn không có quyền nhập điểm cho trận đấu này');
+    }
 
     if (!existing.participant1Id || !existing.participant2Id) {
       throw new BadRequestException('Trận đấu chưa xác định đủ đối thủ, không thể nhập điểm.');
@@ -178,7 +187,7 @@ export class MatchesService {
       }
     }
 
-    const updatedMatch = await this.matchesRepository.updateScore(id, userId, {
+    const updatedMatch = await this.matchesRepository.updateScore(id, user.sub, {
       p1SetsWon,
       p2SetsWon,
       scoreDetails,
@@ -191,9 +200,21 @@ export class MatchesService {
     return updatedMatch;
   }
 
-  async updateStatus(id: string, updateMatchStatusDto: UpdateMatchStatusDto) {
+  async updateStatus(
+    id: string,
+    user: JwtPayload,
+    updateMatchStatusDto: UpdateMatchStatusDto,
+  ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
+
+    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isReferee = existing.refereeId === user.sub;
+    const isAdmin = user.role === 'ADMIN';
+
+    if (!isAdmin && !isCreator && !isReferee) {
+      throw new ForbiddenException('Bạn không có quyền thay đổi trạng thái trận đấu này');
+    }
 
     if (updateMatchStatusDto.status === 'ONGOING') {
       if (!existing.participant1Id || !existing.participant2Id) {
@@ -242,6 +263,7 @@ export class MatchesService {
         const tournament = existing.tournament;
         const scope = tournament.tournamentType === 'CLUB' ? 'COMMUNITY' : 'PUBLIC';
         const loserId = (winnerId === existing.participant1Id) ? existing.participant2Id : existing.participant1Id;
+        const divisionId = existing.participant1?.tournamentDivisionId || existing.participant2?.tournamentDivisionId || undefined;
 
         if (winnerId && loserId) {
           try {
@@ -253,12 +275,24 @@ export class MatchesService {
               tournament.matchType,
               scope,
               tournament.communityId || undefined,
+              (tournament as unknown as Record<string, unknown>).genderRestriction as string | undefined,
+              divisionId,
             );
           } catch (err) {
             console.error('Failed to update ELO after match completion:', err.message);
-            // We don't rollback the match completion since the match is physically played,
-            // but logging is critical.
           }
+        }
+      }
+
+      // Check if all matches in the tournament are completed, and if so, transition tournament to COMPLETED
+      if (existing.tournamentId) {
+        try {
+          const allCompleted = await this.matchesRepository.checkAllMatchesCompleted(existing.tournamentId);
+          if (allCompleted) {
+            await this.matchesRepository.updateTournamentStatus(existing.tournamentId, 'COMPLETED');
+          }
+        } catch (err) {
+          console.error('Failed to auto-complete tournament:', err.message);
         }
       }
 
@@ -310,6 +344,13 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
+    if (data.refereeId) {
+      const isAccepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, data.refereeId);
+      if (!isAccepted) {
+        throw new BadRequestException('Trọng tài được chọn chưa xác nhận tham gia giải đấu này (status ACCEPTED)');
+      }
+    }
+
     const updatedMatch = await this.matchesRepository.updateSchedule(id, data);
     this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
 
@@ -333,5 +374,26 @@ export class MatchesService {
     }
 
     return updatedMatch;
+  }
+
+  async assignReferee(id: string, refereeId: string, user: JwtPayload) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isAdmin = user.role === 'ADMIN';
+
+    if (!isAdmin && !isCreator) {
+      throw new ForbiddenException('Bạn không có quyền phân công trọng tài cho trận đấu này');
+    }
+
+    if (refereeId) {
+      const isAccepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, refereeId);
+      if (!isAccepted) {
+        throw new BadRequestException('Trọng tài được chọn chưa xác nhận tham gia giải đấu này (status ACCEPTED)');
+      }
+    }
+
+    return this.updateSchedule(id, { refereeId });
   }
 }

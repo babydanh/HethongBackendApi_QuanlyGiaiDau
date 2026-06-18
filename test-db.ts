@@ -1,13 +1,10 @@
 import 'dotenv/config';
-import { Client } from 'pg';
+import { createPostgresClientFromEnv } from './src/database/postgres-client';
 
 async function testConnection() {
-  const client = new Client({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || '5432'),
-    user: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
+  const sql = createPostgresClientFromEnv({
+    max: 1,
+    ssl: undefined,
   });
 
   try {
@@ -16,11 +13,11 @@ async function testConnection() {
     console.log(`Database: ${process.env.DB_DATABASE}`);
     console.log(`User: ${process.env.DB_USERNAME}`);
     
-    await client.connect();
+    await sql`SELECT 1`;
     console.log('✅ KẾT NỐI THÀNH CÔNG!');
     
-    const res = await client.query('SELECT NOW()');
-    console.log('🕒 Thời gian trên Server DB:', res.rows[0].now);
+    const res = await sql`SELECT NOW() as now`;
+    console.log('🕒 Thời gian trên Server DB:', res[0]?.now);
     
   } catch (err: any) {
     console.error('❌ KẾT NỐI THẤT BẠI!');
@@ -34,7 +31,7 @@ async function testConnection() {
       console.error('Lỗi chi tiết:', err.message);
     }
   } finally {
-    await client.end();
+    await sql.end();
   }
 }
 

@@ -1,5 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+﻿import { Injectable, Inject } from '@nestjs/common';
+import type { AppDb } from '../../database/db.types';
 import { eq, ilike, or } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
@@ -8,7 +8,7 @@ import { QueryCategoryDto } from './dto/query-category.dto';
 @Injectable()
 export class CategoriesRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   // --- CATEGORY QUERIES ---
@@ -117,3 +117,5 @@ export class CategoriesRepository {
     return tier;
   }
 }
+
+

@@ -1,13 +1,13 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, BadRequestException } from '@nestjs/common';
 import { RankingsRepository } from './rankings.repository';
 import { EloEngineService } from './elo-engine.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
+import { eq, and, isNull, desc, sql, or, asc, gte, lt } from 'drizzle-orm';
+import type { AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, isNull, desc, sql, or, asc } from 'drizzle-orm';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-type Transaction = Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0];
+type Transaction = AppTx;
 
 @Injectable()
 export class RankingsService {
@@ -52,6 +52,7 @@ export class RankingsService {
         scope,
         dto.communityId,
         true,
+        dto.genderRestriction,
       );
       const loserRank = await this.rankingsRepository.getOrCreateUserRank(
         tx,
@@ -61,6 +62,7 @@ export class RankingsService {
         scope,
         dto.communityId,
         true,
+        dto.genderRestriction,
       );
 
       // 2. Calculate ELO
@@ -184,6 +186,8 @@ export class RankingsService {
     matchType: string,
     scope: 'PUBLIC' | 'COMMUNITY',
     communityId?: string,
+    genderRestriction?: string,
+    divisionId?: string,
   ) {
     const db = this.rankingsRepository.getDbInstance();
 
@@ -206,6 +210,259 @@ export class RankingsService {
     const loserUserIds = loserRosters.map((r) => r.userId);
 
     return await db.transaction(async (tx) => {
+      if (matchType === 'DOUBLES' && winnerUserIds.length === 2 && loserUserIds.length === 2) {
+        // 1. Sort IDs to make unique pair key
+        const wId1 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[0] : winnerUserIds[1];
+        const wId2 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[1] : winnerUserIds[0];
+        const lId1 = loserUserIds[0] < loserUserIds[1] ? loserUserIds[0] : loserUserIds[1];
+        const lId2 = loserUserIds[0] < loserUserIds[1] ? loserUserIds[1] : loserUserIds[0];
+
+        // 2. Lock individual ranks to prevent concurrent updates
+        type UserRank = typeof schema.userRanks.$inferSelect | typeof schema.communityRankings.$inferSelect;
+        const winnerRanksList: UserRank[] = [];
+        for (const uid of winnerUserIds) {
+          const r = await this.rankingsRepository.getOrCreateUserRank(tx, uid, categoryId, matchType, scope, communityId, true, genderRestriction);
+          winnerRanksList.push(r);
+        }
+        const loserRanksList: UserRank[] = [];
+        for (const uid of loserUserIds) {
+          const r = await this.rankingsRepository.getOrCreateUserRank(tx, uid, categoryId, matchType, scope, communityId, true, genderRestriction);
+          loserRanksList.push(r);
+        }
+
+        // 3. Get or Create Pair ELO records
+        let [winnerPair] = await tx
+          .select()
+          .from(schema.pairRanks)
+          .where(
+            and(
+              eq(schema.pairRanks.user1Id, wId1),
+              eq(schema.pairRanks.user2Id, wId2),
+              eq(schema.pairRanks.categoryId, categoryId)
+            )
+          )
+          .limit(1);
+
+        if (!winnerPair) {
+          const avgElo = (winnerRanksList[0].eloPoints + winnerRanksList[1].eloPoints) / 2;
+          [winnerPair] = await tx
+            .insert(schema.pairRanks)
+            .values({
+              user1Id: wId1,
+              user2Id: wId2,
+              categoryId,
+              eloPoints: Math.round(avgElo),
+              matchesPlayed: 0,
+              matchesWon: 0,
+              winStreak: 0,
+            })
+            .returning();
+        }
+
+        let [loserPair] = await tx
+          .select()
+          .from(schema.pairRanks)
+          .where(
+            and(
+              eq(schema.pairRanks.user1Id, lId1),
+              eq(schema.pairRanks.user2Id, lId2),
+              eq(schema.pairRanks.categoryId, categoryId)
+            )
+          )
+          .limit(1);
+
+        if (!loserPair) {
+          const avgElo = (loserRanksList[0].eloPoints + loserRanksList[1].eloPoints) / 2;
+          [loserPair] = await tx
+            .insert(schema.pairRanks)
+            .values({
+              user1Id: lId1,
+              user2Id: lId2,
+              categoryId,
+              eloPoints: Math.round(avgElo),
+              matchesPlayed: 0,
+              matchesWon: 0,
+              winStreak: 0,
+            })
+            .returning();
+        }
+
+        // 4. Calculate ELO changes for the pairs
+        const winnerPairResult = this.eloEngineService.calculateElo(
+          winnerPair.eloPoints,
+          loserPair.eloPoints,
+          true,
+          winnerPair.matchesPlayed,
+          winnerPair.winStreak,
+        );
+
+        const loserPairResult = this.eloEngineService.calculateElo(
+          loserPair.eloPoints,
+          winnerPair.eloPoints,
+          false,
+          loserPair.matchesPlayed,
+          loserPair.winStreak,
+        );
+
+        // 5. Update pair ranks
+        await tx
+          .update(schema.pairRanks)
+          .set({
+            eloPoints: winnerPairResult.newElo,
+            matchesPlayed: winnerPair.matchesPlayed + 1,
+            matchesWon: winnerPair.matchesWon + 1,
+            winStreak: winnerPairResult.newWinStreak,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.pairRanks.id, winnerPair.id));
+
+        await tx
+          .update(schema.pairRanks)
+          .set({
+            eloPoints: loserPairResult.newElo,
+            matchesPlayed: loserPair.matchesPlayed + 1,
+            winStreak: 0,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.pairRanks.id, loserPair.id));
+
+        const winnerDelta = winnerPairResult.changedPoints;
+        const loserDelta = loserPairResult.changedPoints;
+
+        // 6. Calculate scaled deltas for individual winners
+        const wElo1 = winnerRanksList[0].eloPoints;
+        const wElo2 = winnerRanksList[1].eloPoints;
+        const wDiff = Math.abs(wElo1 - wElo2);
+        const wScale1 = Math.max(0.2, Math.min(1.8, 1 - wDiff / 800));
+        const wScale2 = Math.max(0.2, Math.min(1.8, 1 + wDiff / 800));
+
+        const w1Delta = Math.round(winnerDelta * (wElo1 >= wElo2 ? wScale1 : wScale2));
+        const w2Delta = Math.round(winnerDelta * (wElo2 >= wElo1 ? wScale1 : wScale2));
+
+        // 7. Calculate scaled deltas for individual losers
+        const lElo1 = loserRanksList[0].eloPoints;
+        const lElo2 = loserRanksList[1].eloPoints;
+        const lDiff = Math.abs(lElo1 - lElo2);
+        const lScale1 = Math.max(0.2, Math.min(1.8, 1 - lDiff / 800));
+        const lScale2 = Math.max(0.2, Math.min(1.8, 1 + lDiff / 800));
+
+        const l1Delta = Math.round(loserDelta * (lElo1 >= lElo2 ? lScale2 : lScale1));
+        const l2Delta = Math.round(loserDelta * (lElo2 >= lElo1 ? lScale2 : lScale1));
+
+        const logs: (typeof schema.eloHistoryLogs.$inferInsert)[] = [];
+
+        // 8. Update Winner 1 & 2 user ranks
+        const winnersToUpdate = [
+          { rank: winnerRanksList[0], delta: w1Delta },
+          { rank: winnerRanksList[1], delta: w2Delta },
+        ];
+
+        for (const { rank, delta } of winnersToUpdate) {
+          const newElo = rank.eloPoints + delta;
+          const boundaries = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800];
+          let isWinnerShieldActive = false;
+          if (scope === 'PUBLIC') {
+            isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
+            for (const boundary of boundaries) {
+              if (rank.eloPoints < boundary && newElo >= boundary) {
+                isWinnerShieldActive = true;
+              }
+            }
+          }
+
+          await this.rankingsRepository.updateUserRank(
+            tx,
+            rank.id,
+            {
+              eloPoints: newElo,
+              matchesPlayed: rank.matchesPlayed + 1,
+              matchesWon: rank.matchesWon + 1,
+              winStreak: rank.winStreak + 1,
+              shieldActive: isWinnerShieldActive,
+            },
+            scope,
+          );
+
+          logs.push({
+            userId: rank.userId,
+            categoryId,
+            matchId,
+            reason: 'MATCH_WIN',
+            previousElo: rank.eloPoints,
+            newElo,
+            changedPoints: delta,
+          });
+        }
+
+        // 9. Update Loser 1 & 2 user ranks
+        const losersToUpdate = [
+          { rank: loserRanksList[0], delta: l1Delta },
+          { rank: loserRanksList[1], delta: l2Delta },
+        ];
+
+        for (const { rank, delta } of losersToUpdate) {
+          const newElo = rank.eloPoints + delta;
+          const boundaries = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800];
+          let finalLoserElo = newElo;
+          let isLoserShieldActive = false;
+          if (scope === 'PUBLIC') {
+            const publicRank = rank as typeof schema.userRanks.$inferSelect;
+            isLoserShieldActive = !!publicRank.shieldActive;
+            for (const boundary of boundaries) {
+              if (rank.eloPoints >= boundary && newElo < boundary) {
+                if (publicRank.shieldActive) {
+                  finalLoserElo = boundary;
+                  isLoserShieldActive = false;
+                  break;
+                }
+              }
+            }
+          }
+
+          await this.rankingsRepository.updateUserRank(
+            tx,
+            rank.id,
+            {
+              eloPoints: finalLoserElo,
+              matchesPlayed: rank.matchesPlayed + 1,
+              matchesWon: rank.matchesWon,
+              winStreak: 0,
+              shieldActive: isLoserShieldActive,
+            },
+            scope,
+          );
+
+          logs.push({
+            userId: rank.userId,
+            categoryId,
+            matchId,
+            reason: 'MATCH_LOSS',
+            previousElo: rank.eloPoints,
+            newElo: finalLoserElo,
+            changedPoints: finalLoserElo - rank.eloPoints,
+          });
+        }
+
+        // 10. Record history and tiers
+        await this.rankingsRepository.insertEloHistory(tx, logs);
+
+        if (scope === 'PUBLIC') {
+          for (const uid of winnerUserIds) {
+            await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
+          }
+          for (const uid of loserUserIds) {
+            await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
+          }
+        }
+
+        return {
+          success: true,
+          winnerPlayerCount: winnerRanksList.length,
+          loserPlayerCount: loserRanksList.length,
+          doublesMode: true,
+        };
+      }
+
       // 2. Fetch and Lock existing rank records for all players
       type UserRank = typeof schema.userRanks.$inferSelect | typeof schema.communityRankings.$inferSelect;
       const winnerRanks: UserRank[] = [];
@@ -369,14 +626,14 @@ export class RankingsService {
       .from(schema.eloTiers)
       .where(eq(schema.eloTiers.categoryId, categoryId));
 
-    const tierDLow = tiers.find((t) => t.name === 'Tier D (Low)');
-    const tierDHigh = tiers.find((t) => t.name === 'Tier D (High)');
-    const tierCLow = tiers.find((t) => t.name === 'Tier C (Low)');
-    const tierCHigh = tiers.find((t) => t.name === 'Tier C (High)');
-    const tierBLow = tiers.find((t) => t.name === 'Tier B (Low)');
-    const tierBHigh = tiers.find((t) => t.name === 'Tier B (High)');
-    const tierALow = tiers.find((t) => t.name === 'Tier A (Low)');
-    const tierAHigh = tiers.find((t) => t.name === 'Tier A (High)');
+    const tierDLow = tiers.find((t) => t.name === 'Low Tier D');
+    const tierDHigh = tiers.find((t) => t.name === 'High Tier D');
+    const tierCLow = tiers.find((t) => t.name === 'Low Tier C');
+    const tierCHigh = tiers.find((t) => t.name === 'High Tier C');
+    const tierBLow = tiers.find((t) => t.name === 'Low Tier B');
+    const tierBHigh = tiers.find((t) => t.name === 'High Tier B');
+    const tierALow = tiers.find((t) => t.name === 'Low Tier A');
+    const tierAHigh = tiers.find((t) => t.name === 'High Tier A');
     const tierS = tiers.find((t) => t.name === 'Tier S');
 
     // 1. Find the top 1 global player for S-Rank validation (only 1 user can be Tier S)
@@ -397,7 +654,7 @@ export class RankingsService {
       .orderBy(desc(schema.userRanks.eloPoints), schema.userRanks.updatedAt)
       .limit(1);
 
-    // 2. Identify Tier S user
+    // 2. Identify Tier S user (min 1800 ELO under the new system)
     const tierSUserId = (topRank && topRank.eloPoints >= 1800) ? topRank.userId : null;
 
     // 3. Update all Tier S assignments
@@ -524,7 +781,7 @@ export class RankingsService {
           eq(schema.tournaments.categoryId, categoryId),
           eq(schema.tournaments.matchType, matchType),
           eq(schema.matches.status, 'COMPLETED'),
-          sql`${schema.matches.completedAt} >= ${fromTime}`
+          gte(schema.matches.completedAt, fromTime)
         )
       )
       .orderBy(asc(schema.matches.completedAt));
@@ -559,7 +816,7 @@ export class RankingsService {
           and(
             eq(schema.eloHistoryLogs.userId, userId),
             eq(schema.eloHistoryLogs.categoryId, categoryId),
-            sql`${schema.eloHistoryLogs.createdAt} < ${completedAt}`
+            lt(schema.eloHistoryLogs.createdAt, completedAt)
           )
         )
         .orderBy(desc(schema.eloHistoryLogs.createdAt))
@@ -583,7 +840,7 @@ export class RankingsService {
             eq(schema.tournaments.categoryId, categoryId),
             eq(schema.tournaments.matchType, matchType),
             eq(schema.matches.status, 'COMPLETED'),
-            sql`${schema.matches.completedAt} < ${completedAt}`
+            lt(schema.matches.completedAt, completedAt)
           )
         );
       const matchesPlayed = Number(playedRes[0]?.count || 0);
@@ -601,7 +858,7 @@ export class RankingsService {
             eq(schema.tournaments.categoryId, categoryId),
             eq(schema.tournaments.matchType, matchType),
             eq(schema.matches.status, 'COMPLETED'),
-            sql`${schema.matches.completedAt} < ${completedAt}`
+            lt(schema.matches.completedAt, completedAt)
           )
         );
       const matchesWon = Number(wonRes[0]?.count || 0);
@@ -627,7 +884,7 @@ export class RankingsService {
             eq(schema.tournaments.categoryId, categoryId),
             eq(schema.tournaments.matchType, matchType),
             eq(schema.matches.status, 'COMPLETED'),
-            sql`${schema.matches.completedAt} < ${completedAt}`
+            lt(schema.matches.completedAt, completedAt)
           )
         )
         .orderBy(desc(schema.matches.completedAt));
@@ -822,3 +1079,4 @@ export class RankingsService {
     }
   }
 }
+

@@ -107,7 +107,7 @@ export class OrganizerSeriesController {
     @Body() data: UpdateSeriesDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.update(id, user.sub, data, [user.role]);
+    return this.seriesService.update(id, user.sub, data, [user.role!]);
   }
 
   @Delete(':id')
@@ -116,7 +116,7 @@ export class OrganizerSeriesController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.remove(id, user.sub, [user.role]);
+    return this.seriesService.remove(id, user.sub, [user.role!]);
   }
 
   @Post(':id/legs')
@@ -126,7 +126,7 @@ export class OrganizerSeriesController {
     @Body() data: CreateLegDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.createLeg(id, user.sub, data, [user.role]);
+    return this.seriesService.createLeg(id, user.sub, data, [user.role!]);
   }
 
   @Patch(':id/legs/:legId')
@@ -137,7 +137,7 @@ export class OrganizerSeriesController {
     @Body() data: Partial<CreateLegDto> & { status?: 'UPCOMING' | 'ONGOING' | 'COMPLETED' },
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.updateLeg(id, legId, user.sub, data, [user.role]);
+    return this.seriesService.updateLeg(id, legId, user.sub, data, [user.role!]);
   }
 
   @Delete(':id/legs/:legId')
@@ -147,7 +147,7 @@ export class OrganizerSeriesController {
     @Param('legId', ParseUUIDPipe) legId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.deleteLeg(id, legId, user.sub, [user.role]);
+    return this.seriesService.deleteLeg(id, legId, user.sub, [user.role!]);
   }
 
   @Post(':id/legs/:legId/events')
@@ -158,7 +158,7 @@ export class OrganizerSeriesController {
     @Body() data: LinkEventDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.linkTournament(id, legId, user.sub, data, [user.role]);
+    return this.seriesService.linkTournament(id, legId, user.sub, data, [user.role!]);
   }
 
   @Delete(':id/legs/:legId/events/:eventId')
@@ -169,7 +169,7 @@ export class OrganizerSeriesController {
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.unlinkTournament(id, eventId, user.sub, [user.role]);
+    return this.seriesService.unlinkTournament(id, eventId, user.sub, [user.role!]);
   }
 
   @Post(':id/reset-season')
@@ -178,6 +178,6 @@ export class OrganizerSeriesController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.resetSeason(id, user.sub, [user.role]);
+    return this.seriesService.resetSeason(id, user.sub, [user.role!]);
   }
 }

@@ -1,33 +1,26 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import * as dotenv from 'dotenv';
 import { categories, eloTiers } from '../schema/categories.schema';
 import { eq, and } from 'drizzle-orm';
+import { createPostgresClientFromEnv } from '../postgres-client';
 
 dotenv.config();
 
 const tierDefinitions = [
-  { name: 'Tier D (Low)', minElo: 1000, maxElo: 1099 },
-  { name: 'Tier D (High)', minElo: 1100, maxElo: 1199 },
-  { name: 'Tier C (Low)', minElo: 1200, maxElo: 1299 },
-  { name: 'Tier C (High)', minElo: 1300, maxElo: 1399 },
-  { name: 'Tier B (Low)', minElo: 1400, maxElo: 1499 },
-  { name: 'Tier B (High)', minElo: 1500, maxElo: 1599 },
-  { name: 'Tier A (Low)', minElo: 1600, maxElo: 1699 },
-  { name: 'Tier A (High)', minElo: 1700, maxElo: 1799 },
+  { name: 'Low Tier D', minElo: 0, maxElo: 1099 },
+  { name: 'High Tier D', minElo: 1100, maxElo: 1199 },
+  { name: 'Low Tier C', minElo: 1200, maxElo: 1299 },
+  { name: 'High Tier C', minElo: 1300, maxElo: 1399 },
+  { name: 'Low Tier B', minElo: 1400, maxElo: 1499 },
+  { name: 'High Tier B', minElo: 1500, maxElo: 1599 },
+  { name: 'Low Tier A', minElo: 1600, maxElo: 1699 },
+  { name: 'High Tier A', minElo: 1700, maxElo: 1799 },
   { name: 'Tier S', minElo: 1800, maxElo: 99999 },
 ];
 
 async function run() {
-  const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || '5432'),
-    user: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
-    ssl: { rejectUnauthorized: false },
-  });
-  const db = drizzle(pool);
+  const sql = createPostgresClientFromEnv();
+  const db = drizzle(sql);
 
   console.log('--- ELO Tiers Seeding Started ---');
 
@@ -81,7 +74,7 @@ async function run() {
     const message = err instanceof Error ? err.message : String(err);
     console.error('❌ ELO Tiers Seeding Failed:', message);
   } finally {
-    pool.end();
+    await sql.end();
   }
 }
 

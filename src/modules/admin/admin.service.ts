@@ -1,6 +1,6 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNull, aliasedTable } from 'drizzle-orm';
 import { EloEngineService } from '../rankings/elo-engine.service';
@@ -10,7 +10,7 @@ import { OriginalMatchValues } from './interfaces/original-match-values.interfac
 @Injectable()
 export class AdminService {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly eloEngine: EloEngineService,
     private readonly rankingsService: RankingsService,
   ) {}
@@ -152,10 +152,10 @@ export class AdminService {
     const conditions: SQL[] = [eq(schema.payments.status, 'COMPLETED')];
 
     if (startDate) {
-      conditions.push(sql`${schema.payments.paidAt} >= ${new Date(startDate)}`);
+      conditions.push(gte(schema.payments.paidAt, new Date(startDate)));
     }
     if (endDate) {
-      conditions.push(sql`${schema.payments.paidAt} <= ${new Date(endDate)}`);
+      conditions.push(lte(schema.payments.paidAt, new Date(endDate)));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -761,9 +761,7 @@ export class AdminService {
           matchType: schema.tournaments.matchType,
         })
         .from(schema.tournaments)
-        .innerJoin(schema.tournamentStages, eq(schema.tournaments.id, schema.tournamentStages.tournamentId))
-        .innerJoin(schema.tournamentGroups, eq(schema.tournamentStages.id, schema.tournamentGroups.stageId))
-        .where(eq(schema.tournamentGroups.id, match.groupId))
+        .where(eq(schema.tournaments.id, match.tournamentId))
         .limit(1);
 
       if (!tournament) {
@@ -1114,4 +1112,6 @@ export class AdminService {
       .orderBy(desc(schema.verificationTickets.createdAt));
   }
 }
+
+
 

@@ -1,7 +1,7 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, and, or, count, SQL, inArray, isNull, sql } from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
@@ -12,7 +12,7 @@ import { AuditService } from '../audit/audit.service';
 @Injectable()
 export class MatchesRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly auditService: AuditService,
   ) {}
 
@@ -20,6 +20,7 @@ export class MatchesRepository {
     const { page = 1, limit = 10, groupId, status, userId } = query;
     const offset = (page - 1) * limit;
     const tId = query.tournamentId || query.tournament_id;
+    const divisionId = query.divisionId || query.division_id;
 
     const conditions: SQL[] = [];
     
@@ -59,11 +60,14 @@ export class MatchesRepository {
       );
     }
 
-    if (tId) {
+    if (tId || divisionId) {
       const stages = await this.db
         .select({ id: schema.tournamentStages.id })
         .from(schema.tournamentStages)
-        .where(eq(schema.tournamentStages.tournamentId, tId));
+        .where(and(
+          ...(tId ? [eq(schema.tournamentStages.tournamentId, tId)] : []),
+          ...(divisionId ? [eq(schema.tournamentStages.tournamentDivisionId, divisionId)] : []),
+        ));
       const stageIds = stages.map(s => s.id);
       
       if (stageIds.length === 0) {
@@ -114,7 +118,7 @@ export class MatchesRepository {
     for (const match of data) {
       if (match.participant1Id) participantIds.add(match.participant1Id);
       if (match.participant2Id) participantIds.add(match.participant2Id);
-      groupIdsForMatches.add(match.groupId);
+      if (match.groupId) groupIdsForMatches.add(match.groupId);
     }
 
     const participantsMap = new Map<string, { id: string; teamName: string; seed: number | null; members: { userId: string; fullName: string | null }[] }>();
@@ -176,7 +180,7 @@ export class MatchesRepository {
     const enrichedData = data.map(match => {
       const p1 = match.participant1Id ? participantsMap.get(match.participant1Id) : null;
       const p2 = match.participant2Id ? participantsMap.get(match.participant2Id) : null;
-      const groupStage = groupsMap.get(match.groupId);
+      const groupStage = match.groupId ? groupsMap.get(match.groupId) : null;
 
       return {
         ...match,
@@ -216,32 +220,37 @@ export class MatchesRepository {
     const [group] = await this.db
       .select({
         name: schema.tournamentGroups.name,
-        stageId: schema.tournamentGroups.stageId,
-        tournamentId: schema.tournamentStages.tournamentId,
+        stageId: schema.tournamentStages.id,
+        tournamentId: schema.tournaments.id,
         tournamentName: schema.tournaments.name,
         tournamentType: schema.tournaments.tournamentType,
         communityId: schema.tournaments.communityId,
         categoryId: schema.tournaments.categoryId,
         matchType: schema.tournaments.matchType,
+        genderRestriction: schema.tournaments.genderRestriction,
         createdBy: schema.tournaments.createdBy,
         stageType: schema.tournamentStages.type,
         roundConfig: schema.tournamentStages.roundConfig,
         sportRules: schema.tournaments.sportRules,
         tournamentConfig: schema.tournaments.tournamentConfig,
       })
-      .from(schema.tournamentGroups)
-      .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+      .from(schema.tournamentStages)
       .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-      .where(eq(schema.tournamentGroups.id, match.groupId))
+      .leftJoin(schema.tournamentGroups, eq(schema.tournamentGroups.id, match.groupId!))
+      .where(eq(schema.tournamentStages.id, match.stageId))
       .limit(1);
 
     // Get details for participant 1 & 2
-    let participant1: { id: string; teamName: string } | null = null;
-    let participant2: { id: string; teamName: string } | null = null;
+    let participant1: { id: string; teamName: string; tournamentDivisionId: string | null } | null = null;
+    let participant2: { id: string; teamName: string; tournamentDivisionId: string | null } | null = null;
 
     if (match.participant1Id) {
       const [p1] = await this.db
-        .select({ id: schema.tournamentParticipants.id, teamName: schema.tournamentParticipants.teamName })
+        .select({ 
+          id: schema.tournamentParticipants.id, 
+          teamName: schema.tournamentParticipants.teamName,
+          tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
+        })
         .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, match.participant1Id))
         .limit(1);
@@ -250,7 +259,11 @@ export class MatchesRepository {
 
     if (match.participant2Id) {
       const [p2] = await this.db
-        .select({ id: schema.tournamentParticipants.id, teamName: schema.tournamentParticipants.teamName })
+        .select({ 
+          id: schema.tournamentParticipants.id, 
+          teamName: schema.tournamentParticipants.teamName,
+          tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
+        })
         .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, match.participant2Id))
         .limit(1);
@@ -351,7 +364,7 @@ export class MatchesRepository {
       matchOrder: number;
       participant1Id: string | null;
       participant2Id: string | null;
-      groupId: string;
+      groupId?: string | null;
       isRoundRobin: boolean;
       p1SetsWon: number;
       p2SetsWon: number;
@@ -470,7 +483,7 @@ export class MatchesRepository {
             .from(schema.matches)
             .where(
               and(
-                eq(schema.matches.groupId, existing.groupId),
+                eq(schema.matches.groupId, existing.groupId!),
                 eq(schema.matches.roundNumber, 2)
               )
             )
@@ -482,7 +495,7 @@ export class MatchesRepository {
               .insert(schema.matches)
               .values({
                 id: gf2Id,
-                groupId: existing.groupId,
+                groupId: existing.groupId as any,
                 roundNumber: 2, // GF Round 2 (Reset Match)
                 matchOrder: 1,
                 bracketBranch: 'GRAND_FINALS',
@@ -492,6 +505,8 @@ export class MatchesRepository {
                 p1SetsWon: 0,
                 p2SetsWon: 0,
                 totalSetsPlayed: 0,
+                tournamentId: existing.tournamentId,
+                stageId: existing.stageId,
                 updatedAt: new Date(),
               })
               .returning();
@@ -516,7 +531,7 @@ export class MatchesRepository {
           })
           .from(schema.tournamentGroups)
           .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-          .where(eq(schema.tournamentGroups.id, existing.groupId))
+          .where(eq(schema.tournamentGroups.id, existing.groupId!))
           .limit(1);
 
         let winPoints = 3;
@@ -555,7 +570,7 @@ export class MatchesRepository {
             .from(schema.groupStandings)
             .where(
               and(
-                eq(schema.groupStandings.groupId, existing.groupId),
+                eq(schema.groupStandings.groupId, existing.groupId!),
                 eq(schema.groupStandings.participantId, pId)
               )
             )
@@ -578,7 +593,7 @@ export class MatchesRepository {
             await tx
               .insert(schema.groupStandings)
               .values({
-                groupId: existing.groupId,
+                groupId: existing.groupId as any,
                 participantId: pId,
                 played: 1,
                 won: isWinner ? 1 : 0,
@@ -626,5 +641,41 @@ export class MatchesRepository {
 
     return updated;
   }
+
+  async checkAllMatchesCompleted(tournamentId: string): Promise<boolean> {
+    const activeMatches = await this.db
+      .select({ count: count() })
+      .from(schema.matches)
+      .where(
+        and(
+          eq(schema.matches.tournamentId, tournamentId),
+          sql`${schema.matches.status} != 'COMPLETED'`,
+          isNull(schema.matches.deletedAt)
+        )
+      );
+    return Number(activeMatches[0]?.count || 0) === 0;
+  }
+
+  async updateTournamentStatus(tournamentId: string, status: string) {
+    await this.db
+      .update(schema.tournaments)
+      .set({ status: status as any, updatedAt: new Date() })
+      .where(eq(schema.tournaments.id, tournamentId));
+  }
+
+  async isRefereeAccepted(tournamentId: string, refereeId: string): Promise<boolean> {
+    const result = await this.db
+      .select({ count: count() })
+      .from(schema.tournamentReferees)
+      .where(
+        and(
+          eq(schema.tournamentReferees.tournamentId, tournamentId),
+          eq(schema.tournamentReferees.userId, refereeId),
+          eq(schema.tournamentReferees.status, 'ACCEPTED')
+        )
+      );
+    return Number(result[0]?.count || 0) > 0;
+  }
 }
+
 

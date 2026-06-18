@@ -1,5 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+﻿import { Injectable, Inject } from '@nestjs/common';
+import type { AppDb } from '../../database/db.types';
 import { eq, and } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
@@ -7,7 +7,7 @@ import * as schema from '../../database/schema';
 @Injectable()
 export class AuthRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async findUserByEmail(email: string) {
@@ -152,3 +152,5 @@ export class AuthRepository {
     });
   }
 }
+
+

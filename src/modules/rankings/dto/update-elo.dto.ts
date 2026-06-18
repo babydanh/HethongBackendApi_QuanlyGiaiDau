@@ -39,4 +39,9 @@ export class UpdateEloDto {
   @IsOptional()
   @IsUUID()
   communityId?: string;
+
+  @ApiPropertyOptional({ example: 'MALE', description: 'Gender restriction (MALE/FEMALE/MIXED)' })
+  @IsOptional()
+  @IsString()
+  genderRestriction?: string;
 }

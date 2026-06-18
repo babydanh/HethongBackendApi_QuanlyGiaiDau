@@ -50,6 +50,22 @@ export class QueryMatchDto {
   tournament_id?: string;
 
   @ApiPropertyOptional({
+    example: 'uuid-division',
+    description: 'Lọc theo phân hạng / nội dung thi đấu',
+  })
+  @IsOptional()
+  @IsUUID()
+  divisionId?: string;
+
+  @ApiPropertyOptional({
+    example: 'uuid-division',
+    description: 'Lọc theo phân hạng / nội dung thi đấu (snake_case)',
+  })
+  @IsOptional()
+  @IsUUID()
+  division_id?: string;
+
+  @ApiPropertyOptional({
     example: 'uuid-user',
     description: 'Lọc theo User ID tham gia trận đấu',
   })

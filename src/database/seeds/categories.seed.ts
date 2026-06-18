@@ -1,17 +1,12 @@
 import 'dotenv/config';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
+import { createPostgresClientFromEnv } from '../postgres-client';
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || '5432'),
-  user: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_DATABASE,
+const sql = createPostgresClientFromEnv({
+  ssl: undefined,
 });
-
-const db = drizzle(pool, { schema });
+const db = drizzle(sql, { schema });
 
 async function main() {
   console.log('Seeding categories and elo_tiers...');
@@ -275,10 +270,11 @@ async function main() {
   }
 
   console.log('Seeding complete!');
-  process.exit(0);
+  await sql.end();
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error('Error seeding data:', err);
+  await sql.end();
   process.exit(1);
 });

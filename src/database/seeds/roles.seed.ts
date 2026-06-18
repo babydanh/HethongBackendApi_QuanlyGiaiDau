@@ -1,37 +1,33 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import * as dotenv from 'dotenv';
 import { roles } from '../schema/users.schema';
+import { createPostgresClientFromEnv } from '../postgres-client';
 
 dotenv.config();
 
 async function run() {
-  const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || '5432'),
-    user: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
-    ssl: { rejectUnauthorized: false },
-  });
-  const db = drizzle(pool);
+  const sql = createPostgresClientFromEnv();
+  const db = drizzle(sql);
 
-  console.log('Seeding roles...');
-  await db
-    .insert(roles)
-    .values([
-      { name: 'ADMIN', slug: 'admin', description: 'Administrator' },
-      {
-        name: 'ORGANIZER',
-        slug: 'organizer',
-        description: 'Tournament Organizer',
-      },
-      { name: 'PLAYER', slug: 'player', description: 'Player' },
-    ])
-    .onConflictDoNothing();
+  try {
+    console.log('Seeding roles...');
+    await db
+      .insert(roles)
+      .values([
+        { name: 'ADMIN', slug: 'admin', description: 'Administrator' },
+        {
+          name: 'ORGANIZER',
+          slug: 'organizer',
+          description: 'Tournament Organizer',
+        },
+        { name: 'PLAYER', slug: 'player', description: 'Player' },
+      ])
+      .onConflictDoNothing();
 
-  console.log('Roles seeded!');
-  pool.end();
+    console.log('Roles seeded!');
+  } finally {
+    await sql.end();
+  }
 }
 
 run().catch(console.error);

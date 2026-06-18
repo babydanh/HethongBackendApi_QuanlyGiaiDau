@@ -1,15 +1,15 @@
-import { Injectable, Inject } from '@nestjs/common';
+﻿import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 
 // Helper type for transaction
-export type Transaction = Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0];
+export type Transaction = AppTx;
 
 @Injectable()
 export class AuditService {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async logCreate(
@@ -76,3 +76,4 @@ export class AuditService {
     });
   }
 }
+

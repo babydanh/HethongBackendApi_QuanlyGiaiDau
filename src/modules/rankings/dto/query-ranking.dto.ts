@@ -44,4 +44,9 @@ export class QueryRankingDto {
   @IsOptional()
   @IsString()
   provinceCode?: string;
+
+  @ApiPropertyOptional({ example: 'MALE', description: 'Lọc theo giới tính (MALE/FEMALE/MIXED)', enum: ['MALE', 'FEMALE', 'MIXED'] })
+  @IsOptional()
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
+  genderRestriction?: string;
 }

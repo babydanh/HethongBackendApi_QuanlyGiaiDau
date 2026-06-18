@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+﻿import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { CreateRoomDto } from './dto/create-room.dto';
@@ -9,7 +9,7 @@ import { CreateMessageDto } from './dto/create-message.dto';
 @Injectable()
 export class ChatRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async getUserRooms(userId: string) {
@@ -167,3 +167,5 @@ export class ChatRepository {
     return result;
   }
 }
+
+

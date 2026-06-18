@@ -58,7 +58,7 @@ export class OrganizerSeriesStaffController {
       user.sub,
       body.emailOrPhone,
       body.role,
-      [user.role],
+      [user.role!],
     );
   }
 
@@ -68,7 +68,7 @@ export class OrganizerSeriesStaffController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.listInvitations(id, user.sub, [user.role]);
+    return this.seriesService.listInvitations(id, user.sub, [user.role!]);
   }
 
   @Get(':id/managers')
@@ -84,6 +84,6 @@ export class OrganizerSeriesStaffController {
     @Param('userId', ParseUUIDPipe) userIdToRevoke: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.seriesService.revokeManager(id, userIdToRevoke, user.sub, [user.role]);
+    return this.seriesService.revokeManager(id, userIdToRevoke, user.sub, [user.role!]);
   }
 }

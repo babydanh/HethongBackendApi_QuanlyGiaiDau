@@ -1,5 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+﻿import { Injectable, Inject } from '@nestjs/common';
+import type { AppDb } from '../../database/db.types';
 import { eq, or, and, ilike, desc, asc, isNull, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
@@ -8,7 +8,7 @@ import { QueryUserDto } from './dto/query-user.dto';
 @Injectable()
 export class UsersRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   async findAll(query: QueryUserDto) {
@@ -254,3 +254,5 @@ export class UsersRepository {
       .limit(10);
   }
 }
+
+

@@ -1,6 +1,6 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, desc, and, isNull, SQL, sql } from 'drizzle-orm';
 import { QueryRankingDto } from './dto/query-ranking.dto';
@@ -8,7 +8,7 @@ import { QueryRankingDto } from './dto/query-ranking.dto';
 @Injectable()
 export class RankingsRepository {
   constructor(
-    @Inject(PG_CONNECTION) private readonly db: NodePgDatabase<typeof schema>,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
   // Get public db instance (useful for starting transaction in service)
@@ -76,6 +76,9 @@ export class RankingsRepository {
       if (matchType) {
         conditions.push(eq(schema.userRanks.matchType, matchType));
       }
+      // if (query.genderRestriction) {
+      //   conditions.push(eq(schema.userRanks.genderRestriction, query.genderRestriction));
+      // }
       if (provinceCode) {
         conditions.push(eq(schema.profiles.provinceCode, provinceCode));
       }
@@ -88,6 +91,7 @@ export class RankingsRepository {
           userId: schema.userRanks.userId,
           categoryId: schema.userRanks.categoryId,
           matchType: schema.userRanks.matchType,
+          // genderRestriction: schema.userRanks.genderRestriction,
           eloPoints: schema.userRanks.eloPoints,
           matchesPlayed: schema.userRanks.matchesPlayed,
           matchesWon: schema.userRanks.matchesWon,
@@ -236,13 +240,14 @@ export class RankingsRepository {
   }
 
   async getOrCreateUserRank(
-    tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
+    tx: AppTx,
     userId: string,
     categoryId: string,
     matchType: string,
     scope: 'PUBLIC' | 'COMMUNITY',
     communityId?: string,
     forUpdate: boolean = false,
+    genderRestriction?: string,
   ) {
     if (scope === 'COMMUNITY') {
       if (!communityId) throw new BadRequestException('communityId is required for COMMUNITY scope');
@@ -278,6 +283,9 @@ export class RankingsRepository {
         eq(schema.userRanks.categoryId, categoryId),
         eq(schema.userRanks.matchType, matchType),
         isNull(schema.userRanks.communityId),
+        // genderRestriction
+        //   ? eq(schema.userRanks.genderRestriction, genderRestriction)
+        //   : isNull(schema.userRanks.genderRestriction),
       ];
 
       const existing = forUpdate
@@ -292,6 +300,7 @@ export class RankingsRepository {
           userId,
           categoryId,
           matchType,
+          // genderRestriction: genderRestriction || null,
           eloPoints: 1000,
           matchesPlayed: 0,
           matchesWon: 0,
@@ -304,7 +313,7 @@ export class RankingsRepository {
   }
 
   async updateUserRank(
-    tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
+    tx: AppTx,
     id: string,
     data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean },
     scope: 'PUBLIC' | 'COMMUNITY',
@@ -338,7 +347,7 @@ export class RankingsRepository {
   }
 
   async insertEloHistory(
-    tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
+    tx: AppTx,
     logs: (typeof schema.eloHistoryLogs.$inferInsert)[],
   ) {
     return tx.insert(schema.eloHistoryLogs).values(logs);
@@ -362,7 +371,7 @@ export class RankingsRepository {
   }
 
   async updateUserRankTier(
-    tx: Parameters<Parameters<NodePgDatabase<typeof schema>['transaction']>[0]>[0],
+    tx: AppTx,
     rankId: string,
     tierId: string | null,
   ) {
@@ -372,3 +381,4 @@ export class RankingsRepository {
       .where(eq(schema.userRanks.id, rankId));
   }
 }
+

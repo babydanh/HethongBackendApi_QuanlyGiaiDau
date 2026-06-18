@@ -173,7 +173,6 @@ export class ChallengesService {
         matchType: 'DOUBLES',
         maxParticipants: 16,
         entryFee: 0,
-        platformFeePerPlayer: 0,
         sportRules: { setsToWin: 2 },
         tournamentConfig: { bracketType: 'SINGLE_ELIMINATION', maxTeams: 16 },
       },

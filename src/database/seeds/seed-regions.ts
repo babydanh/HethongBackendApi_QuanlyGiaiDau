@@ -1,21 +1,13 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
+import { createPostgresClientFromEnv } from '../postgres-client';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
-const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  user: process.env.DB_USERNAME || 'postgres',
-  password: process.env.DB_PASSWORD || 'your_password',
-  database: process.env.DB_DATABASE || 'tournament_db',
-  ssl: { rejectUnauthorized: false },
-});
-
-const db = drizzle(pool, { schema });
+const sql = createPostgresClientFromEnv();
+const db = drizzle(sql, { schema });
 
 async function seed() {
   console.log('Seeding regions...');
@@ -66,7 +58,7 @@ async function seed() {
   } catch (error) {
     console.error('Error seeding regions:', error);
   } finally {
-    await pool.end();
+    await sql.end();
   }
 }
 
