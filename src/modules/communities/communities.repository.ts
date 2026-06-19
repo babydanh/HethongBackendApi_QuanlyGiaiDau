@@ -239,7 +239,7 @@ export class CommunitiesRepository {
       .set({ 
         status,
         ...(approvedBy ? { approvedBy, approvedAt: new Date() } : {})
-      } as Partial<typeof schema.communityMembers.$inferSelect>)
+      })
       .where(
         and(
           eq(schema.communityMembers.communityId, communityId),

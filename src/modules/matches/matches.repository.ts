@@ -659,7 +659,7 @@ export class MatchesRepository {
   async updateTournamentStatus(tournamentId: string, status: string) {
     await this.db
       .update(schema.tournaments)
-      .set({ status: status as any, updatedAt: new Date() })
+      .set({ status: status, updatedAt: new Date() })
       .where(eq(schema.tournaments.id, tournamentId));
   }
 
