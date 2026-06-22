@@ -23,6 +23,7 @@ import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
+import { AddRefereeDto } from './dto/add-referee.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -278,9 +279,10 @@ export class TournamentsController {
   async generateBracket(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('divisionId') divisionId: string | undefined,
+    @Body('seedingType') seedingType: 'SEEDED' | 'RANDOM' | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.generateBracket(id, user.sub, this.getSystemRoles(user), divisionId);
+    return this.tournamentsService.generateBracket(id, user.sub, this.getSystemRoles(user), divisionId, seedingType);
   }
 
   @Post(':id/publish')
@@ -412,6 +414,17 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Lấy danh sách trọng tài của giải đấu' })
   async findReferees(@Param('id', ParseUUIDPipe) id: string) {
     return this.tournamentsService.findReferees(id);
+  }
+
+  @Post(':id/referees')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Mời trọng tài tham gia giải đấu bằng Email/Gmail' })
+  async addReferee(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AddRefereeDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addReferee(id, body.email, user.sub, this.getSystemRoles(user));
   }
 
   @Public()

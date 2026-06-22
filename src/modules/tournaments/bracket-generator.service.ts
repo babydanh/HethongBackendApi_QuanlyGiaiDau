@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -12,7 +12,12 @@ export class BracketGeneratorService {
     @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
-  async generateSingleElimination(tournamentId: string, userId: string, divisionId?: string) {
+  async generateSingleElimination(
+    tournamentId: string,
+    userId: string,
+    divisionId?: string,
+    seedingType?: 'SEEDED' | 'RANDOM',
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -130,9 +135,19 @@ export class BracketGeneratorService {
       }
 
       // 6. Xếp đội vào Round 1
-      const sortedParticipants = [...participants].sort(
-        (a, b) => (a.seed || 999) - (b.seed || 999),
-      );
+      const sortedParticipants = [...participants];
+      if (seedingType === 'RANDOM') {
+        for (let i = sortedParticipants.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const temp = sortedParticipants[i];
+          sortedParticipants[i] = sortedParticipants[j];
+          sortedParticipants[j] = temp;
+        }
+      } else {
+        sortedParticipants.sort(
+          (a, b) => (a.seed || 999) - (b.seed || 999),
+        );
+      }
 
       // Tạo thứ tự hạt giống theo tiêu chuẩn tournament (Standard Seeding Order)
       const seedingOrder = this.getSeedingOrder(powerOf2);
@@ -187,7 +202,12 @@ export class BracketGeneratorService {
     });
   }
 
-  async generateDoubleElimination(tournamentId: string, userId: string, divisionId?: string) {
+  async generateDoubleElimination(
+    tournamentId: string,
+    userId: string,
+    divisionId?: string,
+    seedingType?: 'SEEDED' | 'RANDOM',
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -453,9 +473,19 @@ export class BracketGeneratorService {
       }
 
       // 7. Xếp đội hạt giống vào Winners Round 1
-      const sortedParticipants = [...participants].sort(
-        (a, b) => (a.seed || 999) - (b.seed || 999),
-      );
+      const sortedParticipants = [...participants];
+      if (seedingType === 'RANDOM') {
+        for (let i = sortedParticipants.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const temp = sortedParticipants[i];
+          sortedParticipants[i] = sortedParticipants[j];
+          sortedParticipants[j] = temp;
+        }
+      } else {
+        sortedParticipants.sort(
+          (a, b) => (a.seed || 999) - (b.seed || 999),
+        );
+      }
       const seedingOrder = this.getSeedingOrder(powerOf2);
       const slots = new Array(powerOf2).fill(null);
       for (let i = 0; i < powerOf2; i++) {
@@ -489,34 +519,38 @@ export class BracketGeneratorService {
         const m = matchMap.get(mId);
         if (!m || m.status === 'COMPLETED') return;
 
+        // A match is only ready for BYE propagation if it is in Round 1 (Winners),
+        // or if all incoming matches that feed into it have completed.
+        const incomingMatches = allMatchesList.filter(
+          (src) => src.nextMatchId === m.id || src.loserNextMatchId === m.id
+        );
+        const allIncomingCompleted = incomingMatches.every(
+          (src) => src.status === 'COMPLETED'
+        );
+
+        if (!allIncomingCompleted) return;
+
         const p1 = m.participant1Id;
         const p2 = m.participant2Id;
 
-        const isRound1Winners = m.bracketBranch === 'MAIN' && m.roundNumber === 1;
-        const isRound1Losers = m.bracketBranch === 'LOSERS' && m.roundNumber === 1;
-
-        const isReadyForBye = isRound1Winners || isRound1Losers || (p1 === null || p2 === null);
-
-        if (isReadyForBye) {
-          if (!p1 && !p2) {
-            m.status = 'COMPLETED';
-            m.winnerId = null;
-            m.isBye = true;
-            advanceWinnerInMemory(m);
-            advanceLoserInMemory(m);
-          } else if (p1 && !p2) {
-            m.status = 'COMPLETED';
-            m.winnerId = p1;
-            m.isBye = true;
-            advanceWinnerInMemory(m);
-            advanceLoserInMemory(m);
-          } else if (!p1 && p2) {
-            m.status = 'COMPLETED';
-            m.winnerId = p2;
-            m.isBye = true;
-            advanceWinnerInMemory(m);
-            advanceLoserInMemory(m);
-          }
+        if (!p1 && !p2) {
+          m.status = 'COMPLETED';
+          m.winnerId = null;
+          m.isBye = true;
+          advanceWinnerInMemory(m);
+          advanceLoserInMemory(m);
+        } else if (p1 && !p2) {
+          m.status = 'COMPLETED';
+          m.winnerId = p1;
+          m.isBye = true;
+          advanceWinnerInMemory(m);
+          advanceLoserInMemory(m);
+        } else if (!p1 && p2) {
+          m.status = 'COMPLETED';
+          m.winnerId = p2;
+          m.isBye = true;
+          advanceWinnerInMemory(m);
+          advanceLoserInMemory(m);
         }
       };
 
@@ -610,7 +644,12 @@ export class BracketGeneratorService {
     });
   }
 
-  async generateRoundRobin(tournamentId: string, userId: string, divisionId?: string) {
+  async generateRoundRobin(
+    tournamentId: string,
+    userId: string,
+    divisionId?: string,
+    seedingType?: 'SEEDED' | 'RANDOM',
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -700,6 +739,14 @@ export class BracketGeneratorService {
       const legs = (config.roundRobinLegs as number) || 1;
 
       const list = participants.map(p => p.id);
+      if (seedingType === 'RANDOM') {
+        for (let i = list.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const temp = list[i];
+          list[i] = list[j];
+          list[j] = temp;
+        }
+      }
       if (list.length % 2 !== 0) {
         list.push(null as unknown as string);
       }

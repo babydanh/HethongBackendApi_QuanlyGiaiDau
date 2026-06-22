@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -2176,6 +2176,34 @@ export class TournamentsRepository {
         .delete(schema.tournamentRosters)
         .where(inArray(schema.tournamentRosters.participantId, partIds));
 
+      // Clear match participant references to prevent foreign key constraint violations
+      await tx
+        .update(schema.matches)
+        .set({ participant1Id: null })
+        .where(inArray(schema.matches.participant1Id, partIds));
+
+      await tx
+        .update(schema.matches)
+        .set({ participant2Id: null })
+        .where(inArray(schema.matches.participant2Id, partIds));
+
+      await tx
+        .update(schema.matches)
+        .set({ winnerId: null })
+        .where(inArray(schema.matches.winnerId, partIds));
+
+      // Clear bracket stages, groups and matches for the tournament/division to clear the bracket
+      await tx
+        .delete(schema.tournamentStages)
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentStages.tournamentId, tournamentId),
+                eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              )
+            : eq(schema.tournamentStages.tournamentId, tournamentId),
+        );
+
       await tx
         .delete(schema.tournamentParticipants)
         .where(inArray(schema.tournamentParticipants.id, partIds));
@@ -2804,6 +2832,49 @@ export class TournamentsRepository {
       console.error(`Failed to get participants for division ${divisionId}:`, error);
       throw error;
     }
+  }
+
+  async findUserByEmail(email: string) {
+    const [user] = await this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.email, email))
+      .limit(1);
+    return user;
+  }
+
+  async addReferee(tournamentId: string, userId: string, assignedBy: string) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.tournamentReferees)
+      .where(
+        and(
+          eq(schema.tournamentReferees.tournamentId, tournamentId),
+          eq(schema.tournamentReferees.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      if (existing.status !== 'ACCEPTED') {
+        await this.db
+          .update(schema.tournamentReferees)
+          .set({ status: 'ACCEPTED', assignedBy, assignedAt: new Date() })
+          .where(eq(schema.tournamentReferees.id, existing.id));
+      }
+      return existing;
+    }
+
+    const [referee] = await this.db
+      .insert(schema.tournamentReferees)
+      .values({
+        tournamentId,
+        userId,
+        assignedBy,
+        status: 'ACCEPTED',
+      })
+      .returning();
+    return referee;
   }
 }
 

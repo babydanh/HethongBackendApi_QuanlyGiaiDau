@@ -348,7 +348,13 @@ export class TournamentsService {
     return this.tournamentsRepository.softDeleteParent(id, userId);
   }
 
-  async generateBracket(id: string, userId: string, systemRoles: string[] = [], divisionId?: string) {
+  async generateBracket(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+    divisionId?: string,
+    seedingType?: 'SEEDED' | 'RANDOM',
+  ) {
     const existing = await this.tournamentsRepository.findById(id);
     if (!existing) throw new NotFoundException('Tournament not found');
 
@@ -403,11 +409,11 @@ export class TournamentsService {
     const bracketType = division?.bracketType || (config.bracketType as string) || 'SINGLE_ELIMINATION';
 
     if (bracketType === 'DOUBLE_ELIMINATION') {
-      return this.bracketGeneratorService.generateDoubleElimination(id, userId, divisionId);
+      return this.bracketGeneratorService.generateDoubleElimination(id, userId, divisionId, seedingType);
     } else if (bracketType === 'ROUND_ROBIN') {
-      return this.bracketGeneratorService.generateRoundRobin(id, userId, divisionId);
+      return this.bracketGeneratorService.generateRoundRobin(id, userId, divisionId, seedingType);
     } else {
-      return this.bracketGeneratorService.generateSingleElimination(id, userId, divisionId);
+      return this.bracketGeneratorService.generateSingleElimination(id, userId, divisionId, seedingType);
     }
   }
 
@@ -748,6 +754,35 @@ export class TournamentsService {
       throw new BadRequestException('Tournament is not in DRAFT status');
     }
 
+    // Ràng buộc thông tin cơ bản trước khi công bố
+    if (!existing.description || existing.description.trim() === '') {
+      throw new BadRequestException('Vui lòng nhập mô tả chi tiết của giải đấu trước khi công bố.');
+    }
+
+    if (!existing.bannerUrl || existing.bannerUrl.trim() === '') {
+      throw new BadRequestException('Vui lòng tải lên ảnh bìa (banner) giải đấu trước khi công bố.');
+    }
+
+    if (!existing.startDate) {
+      throw new BadRequestException('Vui lòng cấu hình ngày bắt đầu giải đấu trước khi công bố.');
+    }
+
+    if (!existing.endDate) {
+      throw new BadRequestException('Vui lòng cấu hình ngày kết thúc giải đấu trước khi công bố.');
+    }
+
+    if (!existing.registrationStartDate) {
+      throw new BadRequestException('Vui lòng cấu hình ngày bắt đầu đăng ký trước khi công bố.');
+    }
+
+    if (!existing.registrationEndDate) {
+      throw new BadRequestException('Vui lòng cấu hình ngày kết thúc đăng ký trước khi công bố.');
+    }
+
+    if (!existing.venueId) {
+      throw new BadRequestException('Vui lòng cấu hình địa điểm thi đấu (sân đấu) trước khi công bố.');
+    }
+
     if (existing.entryFee === undefined || existing.entryFee === null) {
       throw new BadRequestException('Vui lòng cấu hình lệ phí tham gia trước khi công bố giải đấu.');
     }
@@ -794,9 +829,16 @@ export class TournamentsService {
     const totalPlayers = participants.reduce((sum, p) => sum + (p.members?.length || 0), 0);
     const entryFee = Number(existing.entryFee || 0);
     const platformFeePercentage = Number(existing.platformFeePercentage || 0);
-    const totalPlatformFee = totalPlayers * entryFee * (platformFeePercentage / 100);
+    
+    // 2-tier charging fee structure:
+    // If entryFee >= 100k, charge platformFeePercentage (default 5%) of the entry fee.
+    // If entryFee < 100k (including free tournaments), charge flat 5k.
+    const feePerPlayer = entryFee >= 100000 
+      ? Math.round(entryFee * (platformFeePercentage / 100))
+      : 5000;
+    const totalPlatformFee = totalPlayers * feePerPlayer;
 
-    const isClubOrFree = existing.tournamentType === 'CLUB' || entryFee === 0 || totalPlatformFee === 0;
+    const isClubOrFree = existing.tournamentType === 'CLUB' || totalPlatformFee === 0;
     const targetStatus = isClubOrFree ? 'UPCOMING' : 'REGISTRATION_CLOSED';
 
     const updated = await this.tournamentsRepository.update(id, userId, { status: targetStatus });
@@ -1282,5 +1324,33 @@ export class TournamentsService {
       console.error(`Failed to update parent aggregation for ${parentId}:`, error);
       throw error;
     }
+  }
+
+  async addReferee(
+    id: string,
+    email: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    const isAuthorized =
+      systemRoles.includes('ADMIN') ||
+      systemRoles.includes('ORGANIZER') ||
+      tournament.createdBy === userId;
+
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền mời trọng tài cho giải đấu này');
+    }
+
+    const userToInvite = await this.tournamentsRepository.findUserByEmail(email);
+    if (!userToInvite) {
+      throw new NotFoundException('Không tìm thấy tài khoản hệ thống với email đã nhập');
+    }
+
+    return this.tournamentsRepository.addReferee(id, userToInvite.id, userId);
   }
 }

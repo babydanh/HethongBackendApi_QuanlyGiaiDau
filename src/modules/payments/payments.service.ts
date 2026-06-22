@@ -13,6 +13,41 @@ export class PaymentsService {
   ) {}
 
   async createPaymentLink(userId: string, data: CreatePaymentDto) {
+    if (!data.participantId) {
+      const tournament = await this.paymentsRepository.findTournamentById(data.tournamentId);
+      if (!tournament) {
+        throw new NotFoundException('Không tìm thấy giải đấu');
+      }
+
+      if (!tournament.description || tournament.description.trim() === '') {
+        throw new BadRequestException('Vui lòng nhập mô tả chi tiết của giải đấu trước khi thanh toán công bố.');
+      }
+
+      if (!tournament.bannerUrl || tournament.bannerUrl.trim() === '') {
+        throw new BadRequestException('Vui lòng tải lên ảnh bìa (banner) giải đấu trước khi thanh toán công bố.');
+      }
+
+      if (!tournament.startDate) {
+        throw new BadRequestException('Vui lòng cấu hình ngày bắt đầu giải đấu trước khi thanh toán công bố.');
+      }
+
+      if (!tournament.endDate) {
+        throw new BadRequestException('Vui lòng cấu hình ngày kết thúc giải đấu trước khi thanh toán công bố.');
+      }
+
+      if (!tournament.registrationStartDate) {
+        throw new BadRequestException('Vui lòng cấu hình ngày bắt đầu đăng ký trước khi thanh toán công bố.');
+      }
+
+      if (!tournament.registrationEndDate) {
+        throw new BadRequestException('Vui lòng cấu hình ngày kết thúc đăng ký trước khi thanh toán công bố.');
+      }
+
+      if (!tournament.venueId) {
+        throw new BadRequestException('Vui lòng cấu hình địa điểm thi đấu (sân đấu) trước khi thanh toán công bố.');
+      }
+    }
+
     const payment = await this.paymentsRepository.createPayment(userId, data);
     const mockUrl = `/payments/result?paymentId=${payment.id}&vnp_ResponseCode=00`;
     
@@ -65,27 +100,36 @@ export class PaymentsService {
         // Find the tournament to check its type and ranked flag
         const tournament = await this.paymentsRepository.findTournamentById(payment.tournamentId);
         
-        // Get expected fees from system configs
-        let expectedFee = 0;
-        if (tournament) {
-          if (tournament.tournamentType === 'PUBLIC') {
-            const configKey = tournament.isRanked 
-              ? 'TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED' 
-              : 'TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED';
-            expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, tournament.isRanked ? '100000' : '50000'));
-          } else {
-            const configKey = 'TOURNAMENT_PUBLISH_FEE_CLUB';
-            expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, '0'));
-          }
-        }
-
-        // If the payment matches the publishing fee, publish it
-        if (parseFloat(payment.amount) === expectedFee) {
+        if (tournament && tournament.status === 'REGISTRATION_CLOSED') {
+          // This is the platform fee payment for a closed/locked tournament
           try {
-            const nextStatus = tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
-            await this.paymentsRepository.setTournamentStatus(payment.tournamentId, nextStatus);
+            await this.paymentsRepository.setTournamentStatus(payment.tournamentId, 'UPCOMING');
           } catch (err) {
-            console.error(`Failed to set tournament status to ${tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN'} on publish fee payment:`, err);
+            console.error('Failed to set tournament status to UPCOMING on platform fee payment:', err);
+          }
+        } else {
+          // Get expected fees from system configs
+          let expectedFee = 0;
+          if (tournament) {
+            if (tournament.tournamentType === 'PUBLIC') {
+              const configKey = tournament.isRanked 
+                ? 'TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED' 
+                : 'TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED';
+              expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, tournament.isRanked ? '100000' : '50000'));
+            } else {
+              const configKey = 'TOURNAMENT_PUBLISH_FEE_CLUB';
+              expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, '0'));
+            }
+          }
+
+          // If the payment matches the publishing fee, publish it
+          if (parseFloat(payment.amount) === expectedFee) {
+            try {
+              const nextStatus = tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
+              await this.paymentsRepository.setTournamentStatus(payment.tournamentId, nextStatus);
+            } catch (err) {
+              console.error(`Failed to set tournament status to ${tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN'} on publish fee payment:`, err);
+            }
           }
         }
       }

@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
@@ -625,7 +625,7 @@ export class MatchesRepository {
 
   async updateSchedule(
     id: string,
-    data: { courtName?: string | null; courtAddress?: string | null; refereeId?: string | null; scheduledAt?: string | null },
+    data: { courtName?: string | null; courtAddress?: string | null; refereeId?: string | null; scheduledAt?: string | null; matchConfig?: Record<string, any> | null },
   ) {
     const [updated] = await this.db
       .update(schema.matches)
@@ -634,6 +634,7 @@ export class MatchesRepository {
         courtAddress: data.courtAddress || null,
         refereeId: data.refereeId || null,
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
+        ...(data.matchConfig !== undefined && { matchConfig: data.matchConfig || {} }),
         updatedAt: new Date(),
       })
       .where(eq(schema.matches.id, id))

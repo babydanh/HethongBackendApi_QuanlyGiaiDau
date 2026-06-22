@@ -25,15 +25,15 @@ export class CreateTournamentDto {
   @IsIn(['CLUB', 'PUBLIC'])
   tournamentType: 'CLUB' | 'PUBLIC';
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'DOUBLES',
     description: 'Hình thức thi đấu: SINGLES, DOUBLES, MIXED_DOUBLES',
     enum: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'],
   })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
-  matchType: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+  matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
 
   @ApiPropertyOptional({ example: 'https://...', description: 'Banner giải đấu' })
   @IsString()
@@ -132,12 +132,13 @@ export class CreateTournamentDto {
   @IsOptional()
   description?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: { format: 'Singles', setsToWin: 2 },
     description: 'Cấu hình luật chơi thể thao',
   })
   @IsObject()
-  sportRules: Record<string, unknown>;
+  @IsOptional()
+  sportRules?: Record<string, unknown>;
 
   @ApiProperty({
     example: { bracketType: 'SINGLE_ELIMINATION', maxTeams: 16 },

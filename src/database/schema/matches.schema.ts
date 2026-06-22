@@ -85,6 +85,7 @@ export const matches = pgTable(
       .default(sql`'{}'::text[]`)
       .notNull(),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+    matchConfig: jsonb('match_config').default('{}').notNull(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     updatedAt: timestamp('updated_at', { withTimezone: true })

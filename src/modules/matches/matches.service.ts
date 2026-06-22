@@ -30,6 +30,46 @@ export class MatchesService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private resolveMatchConfig(match: any) {
+    const stageConfig = match.stage?.roundConfig || {};
+    const roundOverride = stageConfig.rounds?.[match.roundNumber?.toString()] || {};
+    const matchOverride = match.matchConfig || {};
+
+    const setsToWin = matchOverride.setsToWin ?? matchOverride.sets_to_win
+      ?? roundOverride.setsToWin ?? roundOverride.sets_to_win
+      ?? stageConfig.setsToWin ?? stageConfig.sets_to_win ?? 2;
+
+    const bestOf = matchOverride.bestOf ?? (matchOverride.setsToWin ? (matchOverride.setsToWin * 2 - 1) : undefined)
+      ?? roundOverride.bestOf ?? (roundOverride.sets_to_win ? (roundOverride.sets_to_win * 2 - 1) : undefined)
+      ?? stageConfig.bestOf ?? (stageConfig.sets_to_win ? (stageConfig.sets_to_win * 2 - 1) : undefined)
+      ?? (setsToWin * 2 - 1);
+
+    const pointsPerSet = matchOverride.pointsPerSet ?? matchOverride.points_per_set
+      ?? roundOverride.pointsPerSet ?? roundOverride.points_per_set
+      ?? stageConfig.pointsPerSet ?? stageConfig.points_per_set ?? 21;
+
+    const deuceEnabled = matchOverride.deuceEnabled ?? matchOverride.deuce_enabled
+      ?? roundOverride.deuceEnabled ?? roundOverride.deuce_enabled
+      ?? stageConfig.deuceEnabled ?? stageConfig.deuce_enabled ?? true;
+
+    const tiebreakAt = matchOverride.tiebreakAt ?? matchOverride.tiebreak_at
+      ?? roundOverride.tiebreakAt ?? roundOverride.tiebreak_at
+      ?? stageConfig.tiebreakAt ?? stageConfig.tiebreak_at ?? 20;
+
+    const maxPoints = matchOverride.maxPoints ?? matchOverride.max_points
+      ?? roundOverride.maxPoints ?? roundOverride.max_points
+      ?? stageConfig.maxPoints ?? stageConfig.max_points ?? 30;
+
+    return {
+      bestOf,
+      setsToWin,
+      pointsPerSet,
+      deuceEnabled: deuceEnabled !== false,
+      tiebreakAt,
+      maxPoints,
+    };
+  }
+
   async findAll(query: QueryMatchDto) {
     return this.matchesRepository.findAll(query);
   }
@@ -43,12 +83,12 @@ export class MatchesService {
   }
 
   // Helper method to validate set score details
-  private validateScoreDetails(scoreDetails: Record<string, unknown>, roundConfig: RoundConfig) {
-    const bestOf = roundConfig?.bestOf || (roundConfig?.sets_to_win ? (roundConfig.sets_to_win * 2 - 1) : 3);
-    const pointsPerSet = roundConfig?.pointsPerSet || roundConfig?.points_per_set || 21;
-    const deuceEnabled = roundConfig?.deuceEnabled !== false && roundConfig?.deuce_enabled !== false;
-    const tiebreakAt = roundConfig?.tiebreakAt || roundConfig?.tiebreak_at || 20;
-    const maxPoints = roundConfig?.maxPoints || roundConfig?.max_points || 30;
+  private validateScoreDetails(scoreDetails: Record<string, unknown>, resolvedConfig: ReturnType<typeof MatchesService.prototype.resolveMatchConfig>) {
+    const bestOf = resolvedConfig.bestOf;
+    const pointsPerSet = resolvedConfig.pointsPerSet;
+    const deuceEnabled = resolvedConfig.deuceEnabled;
+    const tiebreakAt = resolvedConfig.tiebreakAt;
+    const maxPoints = resolvedConfig.maxPoints;
 
     if (!scoreDetails || typeof scoreDetails !== 'object') {
       throw new BadRequestException('scoreDetails must be an object containing set scores (e.g. { set1: "21-19" }).');
@@ -158,9 +198,9 @@ export class MatchesService {
 
     // 1. Validate score details if provided
     if (scoreDetails) {
-      // Find round config from stage
-      const roundConfig = (existing.stage?.roundConfig as RoundConfig) || {};
-      const validation = this.validateScoreDetails(scoreDetails, roundConfig);
+      // Resolve config hierarchy (Stage -> Round -> Match)
+      const resolvedConfig = this.resolveMatchConfig(existing);
+      const validation = this.validateScoreDetails(scoreDetails, resolvedConfig);
 
       // Verify sets won align with scoreDetails
       if (p1SetsWon !== undefined && p1SetsWon !== validation.p1SetsWon) {
@@ -227,9 +267,8 @@ export class MatchesService {
       let winnerId = existing.winnerId;
       if (!winnerId) {
         // Try to determine winner based on sets won
-        const roundConfig = (existing.stage?.roundConfig as RoundConfig) || {};
-        const bestOf = roundConfig.bestOf || (roundConfig.sets_to_win ? (roundConfig.sets_to_win * 2 - 1) : 3);
-        const setsToWin = Math.ceil(bestOf / 2);
+        const resolvedConfig = this.resolveMatchConfig(existing);
+        const setsToWin = resolvedConfig.setsToWin;
 
         if (existing.p1SetsWon >= setsToWin) {
           winnerId = existing.participant1Id;
@@ -339,7 +378,7 @@ export class MatchesService {
 
   async updateSchedule(
     id: string,
-    data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string },
+    data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string; matchConfig?: Record<string, any> },
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
@@ -370,6 +409,41 @@ export class MatchesService {
         });
       } catch (err) {
         console.error('Failed to send referee assignment notification:', err);
+      }
+    }
+
+    // Trigger notification when scheduling/updating time or court info
+    const isScheduleChanged = 
+      (data.scheduledAt && data.scheduledAt !== (existing.scheduledAt ? new Date(existing.scheduledAt).toISOString() : null)) ||
+      (data.courtName && data.courtName !== existing.courtName) ||
+      (data.courtAddress && data.courtAddress !== existing.courtAddress);
+
+    if (isScheduleChanged) {
+      try {
+        const participantIds: string[] = [];
+        if (existing.participant1Id) participantIds.push(existing.participant1Id);
+        if (existing.participant2Id) participantIds.push(existing.participant2Id);
+
+        if (participantIds.length > 0) {
+          const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+          
+          const scheduledTime = data.scheduledAt 
+            ? new Date(data.scheduledAt).toLocaleString('vi-VN') 
+            : (existing.scheduledAt ? new Date(existing.scheduledAt).toLocaleString('vi-VN') : 'chưa xác định');
+          const court = data.courtName || existing.courtName || 'Chưa xếp sân';
+
+          for (const roster of rosters) {
+            await this.notificationsService.sendNotification({
+              receiverId: roster.userId,
+              type: 'MATCH_SCHEDULED',
+              title: 'Cập nhật lịch thi đấu mới',
+              content: `Trận đấu của bạn tại giải ${existing.tournament?.name || ''} đã được xếp lịch vào lúc ${scheduledTime} tại sân ${court}. Vui lòng kiểm tra và có mặt đúng giờ.`,
+              redirectUrl: `/tournaments/${existing.tournamentId}?tab=bracket`,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to send MATCH_SCHEDULED notifications:', err);
       }
     }
 
