@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { BullModule } from '@nestjs/bullmq';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
@@ -11,6 +12,7 @@ import { DatabaseModule } from './database/database.module';
 import { envValidationSchema } from './config/env.validation';
 import databaseConfig from './config/database.config';
 import authConfig from './config/auth.config';
+import aiConfig from './config/ai.config';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -29,14 +31,30 @@ import { RegionsModule } from './modules/regions/regions.module';
 import { ChallengesModule } from './modules/communities/challenges.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { SeriesModule } from './modules/series/series.module';
+import { RedisModule } from './providers/redis/redis.module';
+import { MailModule } from './providers/mail/mail.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, authConfig],
+      load: [databaseConfig, authConfig, aiConfig],
       validationSchema: envValidationSchema,
     }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: Number(configService.get<number>('REDIS_PORT')) || 6379,
+          password: configService.get<string>('REDIS_PASSWORD') || undefined,
+        },
+      }),
+    }),
+    RedisModule,
+    MailModule,
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     ScheduleModule.forRoot(),
     DatabaseModule,
@@ -58,6 +76,7 @@ import { SeriesModule } from './modules/series/series.module';
     ChallengesModule,
     AdminModule,
     SeriesModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [

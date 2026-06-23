@@ -4,9 +4,10 @@ import { RankingsController } from './rankings.controller';
 import { RankingsRepository } from './rankings.repository';
 import { EloEngineService } from './elo-engine.service';
 import { DatabaseModule } from '../../database/database.module';
+import { RedisModule } from '../../providers/redis/redis.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, RedisModule],
   controllers: [RankingsController],
   providers: [RankingsService, RankingsRepository, EloEngineService],
   exports: [RankingsService, EloEngineService],

@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { NotificationsRepository } from './notifications.repository';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateNotificationDto } from './dto/create-notification.dto';
+import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { NotificationsGateway } from './notifications.gateway';
+import { NotificationsRepository } from './notifications.repository';
 
 @Injectable()
 export class NotificationsService {
@@ -12,22 +13,29 @@ export class NotificationsService {
 
   async sendNotification(data: CreateNotificationDto) {
     const notification = await this.notificationsRepository.createNotification(data);
-    
-    // Ép kiểu sang Record<string, unknown> để pass rule
-    this.notificationsGateway.pushNotification(
-      data.receiverId,
-      notification,
-    );
+
+    this.notificationsGateway.pushNotification(data.receiverId, notification);
 
     return notification;
   }
 
-  async getMyNotifications(userId: string) {
-    return this.notificationsRepository.getNotificationsByUser(userId);
+  async getMyNotifications(userId: string, query: QueryNotificationsDto) {
+    return this.notificationsRepository.getNotificationsByUser(userId, query);
   }
 
-  async markAsRead(id: string) {
-    return this.notificationsRepository.markAsRead(id);
+  async getUnreadCount(userId: string) {
+    const count = await this.notificationsRepository.getUnreadCountByUser(userId);
+    return { count };
+  }
+
+  async markAsRead(id: string, userId: string) {
+    const notification = await this.notificationsRepository.markAsRead(id, userId);
+
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
+    }
+
+    return notification;
   }
 
   async markAllAsRead(userId: string) {

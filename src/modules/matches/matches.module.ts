@@ -6,9 +6,10 @@ import { DatabaseModule } from '../../database/database.module';
 import { LiveScoreGateway } from './live-score.gateway';
 import { AuthModule } from '../auth/auth.module';
 import { RankingsModule } from '../rankings/rankings.module';
+import { RedisModule } from '../../providers/redis/redis.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, RankingsModule],
+  imports: [DatabaseModule, AuthModule, RankingsModule, RedisModule],
   controllers: [MatchesController],
   providers: [MatchesService, MatchesRepository, LiveScoreGateway],
   exports: [MatchesService],

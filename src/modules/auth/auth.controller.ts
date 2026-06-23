@@ -16,6 +16,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
 import { Public } from '../../common/decorators/public.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from './interfaces/jwt-payload.interface';
 import { JwtRefreshAuthGuard } from '../../common/guards/jwt-refresh-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
@@ -99,25 +100,41 @@ export class AuthController {
       }
     }
     
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-    };
-    
-    // Clear cookies
-    res.clearCookie('accessToken', cookieOptions);
-    res.clearCookie('refreshToken', cookieOptions);
+    const paths = ['/', '/api/v1/auth', '/api/v1/auth/google'];
+    paths.forEach((p) => {
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        path: p,
+      };
+      res.clearCookie('accessToken', cookieOptions);
+      res.clearCookie('refreshToken', cookieOptions);
+    });
     
     return { message: 'Logged out successfully' };
   }
 
   private setTokensCookies(res: Response, accessToken: string, refreshToken: string) {
+    // Clear old path-fragmented cookies to prevent them from hijacking future requests
+    const oldPaths = ['/api/v1/auth', '/api/v1/auth/google'];
+    oldPaths.forEach((p) => {
+      const clearOpts = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        path: p,
+      };
+      res.clearCookie('accessToken', clearOpts);
+      res.clearCookie('refreshToken', clearOpts);
+    });
+
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 15 * 60 * 1000, // 15 mins
+      path: '/',
     });
 
     res.cookie('refreshToken', refreshToken, {
@@ -125,6 +142,7 @@ export class AuthController {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/',
     });
   }
 
@@ -210,5 +228,33 @@ export class AuthController {
     const userAgent = req.headers['user-agent'];
     const ipAddress = req.ip;
     return await this.authService.googleMobileLogin(body.idToken, userAgent, ipAddress);
+  }
+
+  @Post('verify-email/request')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Yêu cầu gửi email kích thực (Mock)' })
+  async requestEmailVerification(@CurrentUser() user: JwtPayload) {
+    return await this.authService.requestEmailVerification(user.sub);
+  }
+
+  @Post('verify-email/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Xác thực kích hoạt email bằng token' })
+  async confirmEmailVerification(@CurrentUser() user: JwtPayload, @Body() body: { token: string }) {
+    return await this.authService.confirmEmailVerification(user.sub, body.token);
+  }
+
+  @Post('verify-phone/request')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Yêu cầu gửi OTP SMS kích thực số điện thoại (Mock)' })
+  async requestPhoneVerification(@CurrentUser() user: JwtPayload, @Body() body: { phoneNumber?: string }) {
+    return await this.authService.requestPhoneVerification(user.sub, body.phoneNumber);
+  }
+
+  @Post('verify-phone/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Xác thực OTP số điện thoại' })
+  async confirmPhoneVerification(@CurrentUser() user: JwtPayload, @Body() body: { code: string }) {
+    return await this.authService.confirmPhoneVerification(user.sub, body.code);
   }
 }

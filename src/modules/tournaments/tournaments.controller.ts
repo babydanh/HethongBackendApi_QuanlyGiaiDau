@@ -346,8 +346,9 @@ export class TournamentsController {
   async withdraw(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
+    @Body() bankData?: { bankName?: string; bankAccountNumber?: string; bankAccountName?: string },
   ) {
-    return this.tournamentsService.withdraw(id, user.sub);
+    return this.tournamentsService.withdraw(id, user.sub, bankData);
   }
 
   @Get(':id/my-registration')
@@ -491,9 +492,18 @@ export class TournamentsController {
     @Body('userEmailOrPhone') userEmailOrPhone: string,
     @Body('teamName') teamName: string,
     @Body('partnerEmailOrPhone') partnerEmailOrPhone: string | undefined,
+    @Body('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.assignReservedSlot(id, userEmailOrPhone, teamName, user.sub, this.getSystemRoles(user), partnerEmailOrPhone);
+    return this.tournamentsService.assignReservedSlot(
+      id,
+      userEmailOrPhone,
+      teamName,
+      user.sub,
+      this.getSystemRoles(user),
+      partnerEmailOrPhone,
+      divisionId,
+    );
   }
 
   @Post(':id/participants/:participantId/kick')

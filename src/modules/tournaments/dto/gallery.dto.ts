@@ -3,8 +3,8 @@ import { IsNotEmpty, IsString, IsUrl } from 'class-validator';
 
 export class UploadGalleryDto {
   @ApiProperty({
-    example: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
-    description: 'Cloudinary URL of the gallery image',
+    example: 'https://storage.example.com/image/upload/sample.jpg',
+    description: 'Public URL of the gallery image returned by the storage provider',
   })
   @IsString()
   @IsNotEmpty()

@@ -7,19 +7,12 @@ import { LiveScoreGateway } from './live-score.gateway';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
-
-interface RoundConfig {
-  bestOf?: number;
-  pointsPerSet?: number;
-  deuceEnabled?: boolean;
-  tiebreakAt?: number;
-  maxPoints?: number;
-  sets_to_win?: number;
-  points_per_set?: number;
-  deuce_enabled?: boolean;
-  tiebreak_at?: number;
-  max_points?: number;
-}
+import {
+  buildMatchCompletedNotification,
+  buildMatchScheduledNotification,
+  buildRefereeAssignedNotification,
+} from '../notifications/notification-builder';
+import { RedisService } from '../../providers/redis/redis.service';
 
 @Injectable()
 export class MatchesService {
@@ -28,8 +21,10 @@ export class MatchesService {
     private readonly liveScoreGateway: LiveScoreGateway,
     private readonly rankingsService: RankingsService,
     private readonly notificationsService: NotificationsService,
+    private readonly redisService: RedisService,
   ) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private resolveMatchConfig(match: any) {
     const stageConfig = match.stage?.roundConfig || {};
     const roundOverride = stageConfig.rounds?.[match.roundNumber?.toString()] || {};
@@ -78,6 +73,19 @@ export class MatchesService {
     const match = await this.matchesRepository.findById(id);
     if (!match) {
       throw new NotFoundException('Match not found');
+    }
+    if (match.status === 'ONGOING') {
+      try {
+        const live = await this.redisService.hgetall(`match:live:${id}`);
+        if (live && Object.keys(live).length > 0) {
+          if (live.p1SetsWon !== undefined) match.p1SetsWon = Number(live.p1SetsWon);
+          if (live.p2SetsWon !== undefined) match.p2SetsWon = Number(live.p2SetsWon);
+          if (live.scoreDetails) match.scoreDetails = JSON.parse(live.scoreDetails);
+          if (live.winnerId) match.winnerId = live.winnerId;
+        }
+      } catch (err) {
+        console.error('Failed to get live score from Redis:', err);
+      }
     }
     return match;
   }
@@ -234,6 +242,22 @@ export class MatchesService {
       winnerId,
     });
 
+    // Cache live score in Redis if match is active/ongoing
+    if (existing.status === 'ONGOING' || existing.status === 'SCHEDULED') {
+      try {
+        const cacheKey = `match:live:${id}`;
+        if (p1SetsWon !== undefined) await this.redisService.hset(cacheKey, 'p1SetsWon', String(p1SetsWon));
+        if (p2SetsWon !== undefined) await this.redisService.hset(cacheKey, 'p2SetsWon', String(p2SetsWon));
+        if (scoreDetails) await this.redisService.hset(cacheKey, 'scoreDetails', JSON.stringify(scoreDetails));
+        if (winnerId) await this.redisService.hset(cacheKey, 'winnerId', winnerId);
+        
+        // TTL 24 hours
+        await this.redisService.getClient().expire(cacheKey, 86400);
+      } catch (err) {
+        console.error('Failed to cache live score to Redis:', err);
+      }
+    }
+
     // Broadcast score real-time
     this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
 
@@ -297,12 +321,18 @@ export class MatchesService {
         scoreDetails: existing.scoreDetails as Record<string, string> | null | undefined,
       });
 
+      // Clear the live score cache in Redis
+      try {
+        await this.redisService.del(`match:live:${id}`);
+      } catch (err) {
+        console.error('Failed to delete live score cache:', err);
+      }
+
       // Trigger ELO Calculation (Async but we await it to catch errors or complete sequentially)
       if (existing.tournament) {
         const tournament = existing.tournament;
         const scope = tournament.tournamentType === 'CLUB' ? 'COMMUNITY' : 'PUBLIC';
         const loserId = (winnerId === existing.participant1Id) ? existing.participant2Id : existing.participant1Id;
-        const divisionId = existing.participant1?.tournamentDivisionId || existing.participant2?.tournamentDivisionId || undefined;
 
         if (winnerId && loserId) {
           try {
@@ -315,7 +345,6 @@ export class MatchesService {
               scope,
               tournament.communityId || undefined,
               (tournament as unknown as Record<string, unknown>).genderRestriction as string | undefined,
-              divisionId,
             );
           } catch (err) {
             console.error('Failed to update ELO after match completion:', err.message);
@@ -348,13 +377,17 @@ export class MatchesService {
         if (participantIds.length > 0) {
           const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
           for (const roster of rosters) {
-            await this.notificationsService.sendNotification({
-              receiverId: roster.userId,
-              type: 'MATCH_COMPLETED',
-              title: 'Trận đấu đã hoàn thành',
-              content: `Trận đấu của bạn tại giải ${existing.tournament?.name || ''} đã có kết quả. Xem ngay!`,
-              redirectUrl: `/tournaments/${existing.tournamentId}`,
-            });
+            await this.notificationsService.sendNotification(
+              buildMatchCompletedNotification({
+                receiverId: roster.userId,
+                tournamentId: existing.tournamentId,
+                tournamentName: existing.tournament?.name || 'giải đấu',
+                divisionId:
+                  existing.participant1?.tournamentDivisionId ||
+                  existing.participant2?.tournamentDivisionId ||
+                  undefined,
+              }),
+            );
           }
         }
       } catch (err) {
@@ -400,13 +433,18 @@ export class MatchesService {
           ? new Date(data.scheduledAt).toLocaleString('vi-VN') 
           : (existing.scheduledAt ? new Date(existing.scheduledAt).toLocaleString('vi-VN') : 'chưa xác định');
 
-        await this.notificationsService.sendNotification({
-          receiverId: data.refereeId,
-          type: 'REFEREE_ASSIGNED',
-          title: 'Phân công trọng tài bắt chính',
-          content: `Bạn đã được phân công bắt chính trận đấu ${matchName} vào lúc ${scheduledTime}.`,
-          redirectUrl: `/tournaments/${existing.tournamentId}`,
-        });
+        await this.notificationsService.sendNotification(
+          buildRefereeAssignedNotification({
+            receiverId: data.refereeId,
+            tournamentId: existing.tournamentId,
+            matchName,
+            scheduledTime,
+            divisionId:
+              existing.participant1?.tournamentDivisionId ||
+              existing.participant2?.tournamentDivisionId ||
+              undefined,
+          }),
+        );
       } catch (err) {
         console.error('Failed to send referee assignment notification:', err);
       }
@@ -433,13 +471,19 @@ export class MatchesService {
           const court = data.courtName || existing.courtName || 'Chưa xếp sân';
 
           for (const roster of rosters) {
-            await this.notificationsService.sendNotification({
-              receiverId: roster.userId,
-              type: 'MATCH_SCHEDULED',
-              title: 'Cập nhật lịch thi đấu mới',
-              content: `Trận đấu của bạn tại giải ${existing.tournament?.name || ''} đã được xếp lịch vào lúc ${scheduledTime} tại sân ${court}. Vui lòng kiểm tra và có mặt đúng giờ.`,
-              redirectUrl: `/tournaments/${existing.tournamentId}?tab=bracket`,
-            });
+            await this.notificationsService.sendNotification(
+              buildMatchScheduledNotification({
+                receiverId: roster.userId,
+                tournamentId: existing.tournamentId,
+                tournamentName: existing.tournament?.name || 'giải đấu',
+                scheduledTime,
+                court,
+                divisionId:
+                  existing.participant1?.tournamentDivisionId ||
+                  existing.participant2?.tournamentDivisionId ||
+                  undefined,
+              }),
+            );
           }
         }
       } catch (err) {

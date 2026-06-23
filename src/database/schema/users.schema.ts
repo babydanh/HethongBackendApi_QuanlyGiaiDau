@@ -17,6 +17,7 @@ export const users = pgTable('users', {
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: text('password_hash'),
   isEmailVerified: boolean('is_email_verified').default(false).notNull(),
+  isPhoneVerified: boolean('is_phone_verified').default(false).notNull(),
   isMock: boolean('is_mock').default(false).notNull(),
   acceptedTosAt: timestamp('accepted_tos_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true })
@@ -87,11 +88,15 @@ export const profiles = pgTable('profiles', {
   phoneNumber: varchar('phone_number', { length: 20 }),
   dateOfBirth: date('date_of_birth'),
   gender: varchar('gender', { length: 20 }),
+  isGenderLocked: boolean('is_gender_locked').default(false).notNull(),
   address: text('address'),
   bio: text('bio'),
   provinceCode: varchar('province_code', { length: 20 })
     .references(() => provinces.code, { onDelete: 'set null' }),
   isVerified: boolean('is_verified').default(false).notNull(),
+  bankName: varchar('bank_name', { length: 100 }),
+  bankAccountNumber: varchar('bank_account_number', { length: 50 }),
+  bankAccountName: varchar('bank_account_name', { length: 255 }),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -121,5 +126,23 @@ export const organizerReviews = pgTable('organizer_reviews', {
   rating: integer('rating').notNull(),
   comment: text('comment'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const userChangeRequests = pgTable('user_change_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  requestType: varchar('request_type', { length: 50 }).notNull(), // 'GENDER', 'EMAIL'
+  oldValue: text('old_value').notNull(),
+  newValue: text('new_value').notNull(),
+  status: varchar('status', { length: 50 }).default('PENDING').notNull(), // 'PENDING', 'APPROVED', 'REJECTED'
+  adminNote: text('admin_note'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 

@@ -169,6 +169,20 @@
       "when": 1781667485791,
       "tag": "0023_rainy_naoko",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1782188450287,
+      "tag": "0024_add_verification_and_locks",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1782205729263,
+      "tag": "0025_plain_morgan_stark",
+      "breakpoints": true
     }
   ]
 }

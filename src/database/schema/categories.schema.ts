@@ -9,6 +9,7 @@ import {
   timestamp,
   check,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
@@ -55,7 +56,7 @@ export const userRanks = pgTable(
     communityId: uuid('community_id')
       .references(() => communities.id, { onDelete: 'cascade' }),
     matchType: varchar('match_type', { length: 50 }).notNull(),
-    // genderRestriction: varchar('gender_restriction', { length: 20 }), // TODO: Add migration
+    genderRestriction: varchar('gender_restriction', { length: 20 }),
     eloPoints: integer('elo_points').default(1000).notNull(),
     tierId: uuid('tier_id').references(() => eloTiers.id, {
       onDelete: 'set null',
@@ -74,12 +75,12 @@ export const userRanks = pgTable(
       'wins_lte_played',
       sql`${table.matchesWon} <= ${table.matchesPlayed}`,
     ),
-    userCategoryRankUnique: unique('user_category_rank_unique_idx').on(
-      table.userId,
-      table.categoryId,
-      table.matchType,
-      table.communityId
-    ),
+    userCategoryRankNullGenderIdx: uniqueIndex('user_category_rank_null_gender_idx')
+      .on(table.userId, table.categoryId, table.matchType, table.communityId)
+      .where(sql`${table.genderRestriction} IS NULL`),
+    userCategoryRankWithGenderIdx: uniqueIndex('user_category_rank_with_gender_idx')
+      .on(table.userId, table.categoryId, table.matchType, table.genderRestriction, table.communityId)
+      .where(sql`${table.genderRestriction} IS NOT NULL`),
   }),
 );
 

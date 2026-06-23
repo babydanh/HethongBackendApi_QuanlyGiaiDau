@@ -1,4 +1,4 @@
-﻿import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { RankingsRepository } from './rankings.repository';
 import { EloEngineService } from './elo-engine.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
@@ -6,6 +6,7 @@ import { UpdateEloDto } from './dto/update-elo.dto';
 import { eq, and, isNull, desc, sql, or, asc, gte, lt } from 'drizzle-orm';
 import type { AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
+import { RedisService } from '../../providers/redis/redis.service';
 
 type Transaction = AppTx;
 
@@ -14,10 +15,41 @@ export class RankingsService {
   constructor(
     private readonly rankingsRepository: RankingsRepository,
     private readonly eloEngineService: EloEngineService,
+    private readonly redisService: RedisService,
   ) {}
 
+  private async invalidateLeaderboardCache(categoryId: string) {
+    try {
+      const client = this.redisService.getClient();
+      const keys = await client.keys(`leaderboard:cat:${categoryId}:*`);
+      if (keys.length > 0) {
+        await client.del(...keys);
+      }
+    } catch (err) {
+      console.error('Failed to invalidate ELO cache:', err);
+    }
+  }
+
   async getLeaderboard(query: QueryRankingDto) {
-    return this.rankingsRepository.getLeaderboard(query);
+    const cacheKey = `leaderboard:cat:${query.categoryId}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}`;
+    try {
+      const cached = await this.redisService.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (err) {
+      console.error('Failed to get leaderboard cache:', err);
+    }
+
+    const data = await this.rankingsRepository.getLeaderboard(query);
+
+    try {
+      await this.redisService.set(cacheKey, JSON.stringify(data), 300); // 5 mins TTL
+    } catch (err) {
+      console.error('Failed to set leaderboard cache:', err);
+    }
+
+    return data;
   }
 
   async getUserRankings(userId: string) {
@@ -42,7 +74,7 @@ export class RankingsService {
     const db = this.rankingsRepository.getDbInstance();
     const scope = dto.communityId ? 'COMMUNITY' : 'PUBLIC';
     
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // 1. Lock records
       const winnerRank = await this.rankingsRepository.getOrCreateUserRank(
         tx,
@@ -175,6 +207,9 @@ export class RankingsService {
         },
       };
     });
+
+    await this.invalidateLeaderboardCache(dto.categoryId);
+    return result;
   }
 
   // Automatic match result processor
@@ -187,7 +222,6 @@ export class RankingsService {
     scope: 'PUBLIC' | 'COMMUNITY',
     communityId?: string,
     genderRestriction?: string,
-    divisionId?: string,
   ) {
     const db = this.rankingsRepository.getDbInstance();
 
@@ -209,7 +243,7 @@ export class RankingsService {
     const winnerUserIds = winnerRosters.map((r) => r.userId);
     const loserUserIds = loserRosters.map((r) => r.userId);
 
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       if (matchType === 'DOUBLES' && winnerUserIds.length === 2 && loserUserIds.length === 2) {
         // 1. Sort IDs to make unique pair key
         const wId1 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[0] : winnerUserIds[1];
@@ -613,6 +647,9 @@ export class RankingsService {
         loserPlayerCount: loserRanks.length,
       };
     });
+
+    await this.invalidateLeaderboardCache(categoryId);
+    return result;
   }
 
   async recalculateUserRankTier(
@@ -1077,6 +1114,7 @@ export class RankingsService {
 
       await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
     }
+    await this.invalidateLeaderboardCache(categoryId);
   }
 }
 

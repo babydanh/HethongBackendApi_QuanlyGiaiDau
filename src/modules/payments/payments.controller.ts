@@ -58,6 +58,17 @@ export class PaymentsController {
     return this.paymentsService.findAllTransactions();
   }
 
+  @Post('admin/payments/:id/confirm-refund')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xác nhận đã hoàn tiền thủ công cho giao dịch rút giải (Chỉ ADMIN)' })
+  async confirmRefund(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.paymentsService.confirmRefund(user.sub, id);
+  }
+
   @Post('create-link')
   @ApiBearerAuth()
   @Roles(UserRole.PLAYER, UserRole.ORGANIZER)

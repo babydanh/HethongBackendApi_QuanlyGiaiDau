@@ -161,4 +161,51 @@ export class UsersController {
   ) {
     return this.usersService.createReport(user.id, dto);
   }
+
+  @Post('delete-account')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Người chơi tự xóa tài khoản cá nhân' })
+  async deleteAccount(
+    @CurrentUser() user: { id: string },
+    @Body() body: { password: string },
+  ) {
+    return this.usersService.deleteAccount(user.id, body);
+  }
+
+  @Post('change-requests')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gửi yêu cầu thay đổi giới tính / email nhạy cảm' })
+  async createChangeRequest(
+    @CurrentUser() user: { id: string },
+    @Body() body: { requestType: 'GENDER' | 'EMAIL'; newValue: string },
+  ) {
+    return this.usersService.createChangeRequest(user.id, body.requestType, body.newValue);
+  }
+
+  @Get('admin/change-requests')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu đổi giới tính/email (Admin)' })
+  async findChangeRequests(@Query('status') status?: string) {
+    return this.usersService.findChangeRequests(status);
+  }
+
+  @Patch('admin/change-requests/:id/approve')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Duyệt yêu cầu đổi giới tính/email (Admin)' })
+  async approveChangeRequest(
+    @Param('id') id: string,
+    @Body() body: { adminNote?: string },
+  ) {
+    return this.usersService.approveChangeRequest(id, body.adminNote);
+  }
+
+  @Patch('admin/change-requests/:id/reject')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Từ chối yêu cầu đổi giới tính/email (Admin)' })
+  async rejectChangeRequest(
+    @Param('id') id: string,
+    @Body() body: { adminNote?: string },
+  ) {
+    return this.usersService.rejectChangeRequest(id, body.adminNote);
+  }
 }

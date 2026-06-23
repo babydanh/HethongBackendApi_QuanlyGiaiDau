@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -6,6 +6,20 @@ import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNu
 import { EloEngineService } from '../rankings/elo-engine.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { OriginalMatchValues } from './interfaces/original-match-values.interface';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildTournamentDeleteApprovedNotification,
+  buildTournamentDeleteRejectedNotification,
+  buildTournamentCancelledNotification,
+  buildTournamentPublishApprovedNotification,
+  buildTournamentPublishRejectedNotification,
+  buildTournamentSuspendedNotification,
+  buildTournamentUnsuspendedNotification,
+  buildVerificationApprovedNotification,
+  buildVerificationRejectedNotification,
+  buildUserBannedNotification,
+  buildUserUnbannedNotification,
+} from '../notifications/notification-builder';
 
 @Injectable()
 export class AdminService {
@@ -13,6 +27,7 @@ export class AdminService {
     @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly eloEngine: EloEngineService,
     private readonly rankingsService: RankingsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async getMetrics(groupBy: 'day' | 'week' | 'month' | 'year' = 'month') {
@@ -314,7 +329,11 @@ export class AdminService {
     if (!ticket) throw new NotFoundException('Verification ticket not found');
     if (ticket.status !== 'PENDING') throw new BadRequestException('Ticket is already processed');
 
-    return await this.db.transaction(async (tx) => {
+    const notification = buildVerificationApprovedNotification({
+      receiverId: ticket.userId,
+    });
+
+    const updatedTicket = await this.db.transaction(async (tx) => {
       const [updatedTicket] = await tx
         .update(schema.verificationTickets)
         .set({
@@ -372,6 +391,9 @@ export class AdminService {
 
       return updatedTicket;
     });
+
+    await this.notificationsService.sendNotification(notification);
+    return updatedTicket;
   }
 
   async rejectVerificationTicket(ticketId: string, adminId: string, rejectReason: string) {
@@ -403,6 +425,13 @@ export class AdminService {
       oldValues: ticket,
       newValues: updatedTicket,
     });
+
+    await this.notificationsService.sendNotification(
+      buildVerificationRejectedNotification({
+        receiverId: ticket.userId,
+        reason: rejectReason,
+      }),
+    );
 
     return updatedTicket;
   }
@@ -442,6 +471,14 @@ export class AdminService {
       newValues: banRecord,
     });
 
+    await this.notificationsService.sendNotification(
+      buildUserBannedNotification({
+        receiverId: userId,
+        reason,
+        banType,
+      }),
+    );
+
     return banRecord;
   }
 
@@ -469,6 +506,14 @@ export class AdminService {
         recordId: ban.id,
         newValues: { userId, isActive: false },
       });
+    }
+
+    if (bans.length > 0) {
+      await this.notificationsService.sendNotification(
+        buildUserUnbannedNotification({
+          receiverId: userId,
+        }),
+      );
     }
 
     return { success: true, bansUnbanned: bans.length };
@@ -936,6 +981,14 @@ export class AdminService {
       .where(eq(schema.tournaments.id, tournamentId))
       .returning();
 
+    await this.notificationsService.sendNotification(
+      buildTournamentSuspendedNotification({
+        receiverId: tournament.createdBy,
+        tournamentId,
+        tournamentName: tournament.name,
+      }),
+    );
+
     return updatedTournament;
   }
 
@@ -958,6 +1011,14 @@ export class AdminService {
       })
       .where(eq(schema.tournaments.id, tournamentId))
       .returning();
+
+    await this.notificationsService.sendNotification(
+      buildTournamentUnsuspendedNotification({
+        receiverId: tournament.createdBy,
+        tournamentId,
+        tournamentName: tournament.name,
+      }),
+    );
 
     return updatedTournament;
   }
@@ -986,6 +1047,14 @@ export class AdminService {
       .where(eq(schema.tournaments.id, tournamentId))
       .returning();
 
+    await this.notificationsService.sendNotification(
+      buildTournamentPublishApprovedNotification({
+        receiverId: tournament.createdBy,
+        tournamentId,
+        tournamentName: tournament.name,
+      }),
+    );
+
     return updatedTournament;
   }
 
@@ -1013,6 +1082,14 @@ export class AdminService {
       .where(eq(schema.tournaments.id, tournamentId))
       .returning();
 
+    await this.notificationsService.sendNotification(
+      buildTournamentPublishRejectedNotification({
+        receiverId: tournament.createdBy,
+        tournamentId,
+        tournamentName: tournament.name,
+      }),
+    );
+
     return updatedTournament;
   }
 
@@ -1035,6 +1112,139 @@ export class AdminService {
       })
       .where(eq(schema.tournaments.id, tournamentId))
       .returning();
+
+    await this.notificationsService.sendNotification(
+      buildTournamentCancelledNotification({
+        receiverId: tournament.createdBy,
+        tournamentId,
+        tournamentName: tournament.name,
+      }),
+    );
+
+    return updatedTournament;
+  }
+
+  async approveDeleteTournament(tournamentId: string, adminId: string) {
+    const [tournament] = await this.db
+      .select()
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1);
+
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    if (tournament.status !== 'PENDING_DELETE') {
+      throw new BadRequestException('Tournament deletion is not pending approval');
+    }
+
+    const deletedTournament = await this.db.transaction(async (tx) => {
+      const [deleted] = await tx
+        .update(schema.tournaments)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(schema.tournaments.id, tournamentId))
+        .returning();
+
+      const stages = await tx
+        .select({ id: schema.tournamentStages.id })
+        .from(schema.tournamentStages)
+        .where(eq(schema.tournamentStages.tournamentId, tournamentId));
+      const stageIds = stages.map((s) => s.id);
+
+      if (stageIds.length > 0) {
+        const groups = await tx
+          .select({ id: schema.tournamentGroups.id })
+          .from(schema.tournamentGroups)
+          .where(inArray(schema.tournamentGroups.stageId, stageIds));
+        const groupIds = groups.map((g) => g.id);
+
+        if (groupIds.length > 0) {
+          await tx
+            .update(schema.matches)
+            .set({ deletedAt: new Date(), updatedAt: new Date() })
+            .where(inArray(schema.matches.groupId, groupIds));
+        }
+      }
+
+      if (tournament.parentId) {
+        const siblings = await tx
+          .select()
+          .from(schema.tournaments)
+          .where(
+            and(
+              eq(schema.tournaments.parentId, tournament.parentId),
+              isNull(schema.tournaments.deletedAt),
+            ),
+          );
+        if (siblings.length === 0) {
+          await tx
+            .update(schema.parentTournaments)
+            .set({ deletedAt: new Date(), updatedAt: new Date() })
+            .where(eq(schema.parentTournaments.id, tournament.parentId));
+        }
+      }
+
+      return deleted;
+    });
+
+    await this.notificationsService.sendNotification(
+      buildTournamentDeleteApprovedNotification({
+        receiverId: tournament.createdBy,
+        tournamentName: tournament.name,
+      }),
+    );
+
+    return deletedTournament;
+  }
+
+  async rejectDeleteTournament(tournamentId: string, adminId: string) {
+    const [tournament] = await this.db
+      .select()
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1);
+
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    if (tournament.status !== 'PENDING_DELETE') {
+      throw new BadRequestException('Tournament deletion is not pending approval');
+    }
+
+    const [updatedTournament] = await this.db
+      .update(schema.tournaments)
+      .set({
+        status: 'REGISTRATION_OPEN',
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.tournaments.id, tournamentId))
+      .returning();
+
+    await this.notificationsService.sendNotification(
+      buildTournamentDeleteRejectedNotification({
+        receiverId: tournament.createdBy,
+        tournamentId,
+        tournamentName: tournament.name,
+      }),
+    );
+
+    if (tournament.parentId) {
+      await this.db
+        .update(schema.tournaments)
+        .set({
+          status: 'REGISTRATION_OPEN',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.tournaments.parentId, tournament.parentId),
+            eq(schema.tournaments.status, 'PENDING_DELETE'),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        );
+    }
 
     return updatedTournament;
   }

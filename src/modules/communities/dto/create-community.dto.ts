@@ -104,4 +104,11 @@ export class CreateCommunityDto {
   @ApiPropertyOptional({ description: 'Giới hạn thành viên' })
   @IsOptional()
   maxMembers?: number;
+
+  @ApiPropertyOptional({
+    type: Object,
+    description: 'Liên kết mạng xã hội (facebook, zalo, instagram, v.v.)',
+  })
+  @IsOptional()
+  socialLinks?: Record<string, string>;
 }

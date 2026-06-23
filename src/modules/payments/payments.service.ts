@@ -4,6 +4,12 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildOrganizerPaymentCompletedNotification,
+  buildParticipantPaymentCompletedNotification,
+  buildPayoutReviewedNotification,
+  buildTournamentPublishApprovedNotification,
+} from '../notifications/notification-builder';
 
 @Injectable()
 export class PaymentsService {
@@ -49,7 +55,16 @@ export class PaymentsService {
     }
 
     const payment = await this.paymentsRepository.createPayment(userId, data);
-    const mockUrl = `/payments/result?paymentId=${payment.id}&vnp_ResponseCode=00`;
+    
+    // Build description for mock gateway display
+    const tournament = await this.paymentsRepository.findTournamentById(data.tournamentId);
+    const tournamentName = tournament?.name ?? 'Giải đấu thể thao';
+    const description = data.participantId
+      ? `Lệ phí tham gia: ${tournamentName}`
+      : `Phí công bố giải đấu: ${tournamentName}`;
+
+    const gatewayParam = data.paymentGateway ?? 'VNPAY';
+    const mockUrl = `/payments/mock-gateway?paymentId=${payment.id}&gateway=${gatewayParam}&amount=${payment.amount}&description=${encodeURIComponent(description)}`;
     
     return {
       paymentId: payment.id,
@@ -84,13 +99,24 @@ export class PaymentsService {
       const tournament = await this.paymentsRepository.findTournamentById(payment.tournamentId);
       if (payment.participantId && tournament) {
         try {
-          await this.notificationsService.sendNotification({
-            receiverId: payment.userId,
-            type: 'TOURNAMENT_REGISTER_SUCCESS',
-            title: 'Đăng ký giải đấu thành công',
-            content: `Bạn đã đăng ký thành công giải đấu ${tournament.name}.`,
-            redirectUrl: `/tournaments/${tournament.id}`,
-          });
+          await this.notificationsService.sendNotification(
+            buildParticipantPaymentCompletedNotification({
+              receiverId: payment.userId,
+              tournamentId: tournament.id,
+              tournamentName: tournament.name,
+              divisionId: payment.divisionId,
+            }),
+          );
+          if (tournament.createdBy !== payment.userId) {
+                await this.notificationsService.sendNotification(
+                  buildOrganizerPaymentCompletedNotification({
+                    receiverId: tournament.createdBy,
+                    tournamentId: tournament.id,
+                    tournamentName: tournament.name,
+                    divisionId: payment.divisionId,
+                  }),
+                );
+          }
         } catch (err) {
           console.error('Failed to send notification for payment completion:', err);
         }
@@ -127,6 +153,15 @@ export class PaymentsService {
             try {
               const nextStatus = tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
               await this.paymentsRepository.setTournamentStatus(payment.tournamentId, nextStatus);
+              if (tournament) {
+                await this.notificationsService.sendNotification(
+                  buildTournamentPublishApprovedNotification({
+                    receiverId: tournament.createdBy,
+                    tournamentId: tournament.id,
+                    tournamentName: tournament.name,
+                  }),
+                );
+              }
             } catch (err) {
               console.error(`Failed to set tournament status to ${tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN'} on publish fee payment:`, err);
             }
@@ -223,10 +258,29 @@ export class PaymentsService {
     note?: string,
   ) {
     try {
-      return await this.paymentsRepository.updatePayoutStatus(id, status, adminId, {
+      const payout = await this.paymentsRepository.findPayoutById(id);
+      if (!payout) {
+        throw new NotFoundException('Payout request not found');
+      }
+
+      const updatedPayout = await this.paymentsRepository.updatePayoutStatus(id, status, adminId, {
         transactionProofUrl: proofUrl,
         note,
       });
+
+      const tournament = await this.paymentsRepository.findTournamentById(payout.tournamentId);
+      if (tournament) {
+        await this.notificationsService.sendNotification(
+          buildPayoutReviewedNotification({
+            receiverId: payout.organizerId,
+            tournamentId: payout.tournamentId,
+            tournamentName: tournament.name,
+            approved: status === 'APPROVED',
+          }),
+        );
+      }
+
+      return updatedPayout;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to update payout status';
       throw new BadRequestException(message);
@@ -239,5 +293,16 @@ export class PaymentsService {
 
   async getStats() {
     return this.paymentsRepository.getAdminStats();
+  }
+
+  async confirmRefund(adminId: string, paymentId: string) {
+    try {
+      const updated = await this.paymentsRepository.confirmRefund(paymentId);
+      // Gửi thông báo/email cho VĐV nếu cần (mock hoặc notify)
+      return updated;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to confirm refund';
+      throw new BadRequestException(message);
+    }
   }
 }

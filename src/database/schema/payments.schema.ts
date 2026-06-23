@@ -36,6 +36,9 @@ export const payments = pgTable(
     refundStatus: varchar('refund_status', { length: 50 }),
     refundedAmount: numeric('refunded_amount', { precision: 12, scale: 2 }).default('0.00'),
     paymentGateway: varchar('payment_gateway', { length: 50 }),
+    refundBankName: varchar('refund_bank_name', { length: 100 }),
+    refundAccountNumber: varchar('refund_account_number', { length: 50 }),
+    refundAccountName: varchar('refund_account_name', { length: 255 }),
     transactionReference: varchar('transaction_reference', {
       length: 255,
     }).unique(),

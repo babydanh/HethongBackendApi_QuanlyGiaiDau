@@ -499,6 +499,29 @@ export class TournamentsRepository {
         .where(eq(schema.tournaments.id, id))
         .returning();
 
+      // Gender Lock Logic when status transitions to COMPLETED
+      if (data.status === 'COMPLETED' && oldRecord.status !== 'COMPLETED') {
+        const participantsRoster = await tx
+          .select({ userId: schema.tournamentRosters.userId })
+          .from(schema.tournamentRosters)
+          .innerJoin(
+            schema.tournamentParticipants,
+            eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+          )
+          .where(eq(schema.tournamentParticipants.tournamentId, id));
+
+        const userIdsToLock = [
+          ...new Set(participantsRoster.map((r) => r.userId).filter((uid): uid is string => !!uid)),
+        ];
+
+        if (userIdsToLock.length > 0) {
+          await tx
+            .update(schema.profiles)
+            .set({ isGenderLocked: true, updatedAt: new Date() })
+            .where(inArray(schema.profiles.userId, userIdsToLock));
+        }
+      }
+
       // Escrow / Payout Logic when status transitions to REGISTRATION_CLOSED
       if (data.status === 'REGISTRATION_CLOSED' && oldRecord.status !== 'REGISTRATION_CLOSED') {
         const isPaidPublic = oldRecord.tournamentType === 'PUBLIC' && parseFloat(oldRecord.entryFee || '0') > 0;
@@ -515,25 +538,8 @@ export class TournamentsRepository {
           const totalCollected = parseFloat(resultPayments.total);
 
           if (totalCollected > 0) {
-            const participants = await tx
-              .select()
-              .from(schema.tournamentParticipants)
-              .where(
-                and(
-                  eq(schema.tournamentParticipants.tournamentId, id),
-                  ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
-                )
-              );
-            
-            const participantIds = participants.map(p => p.id);
-            let totalPlayers = 0;
-            if (participantIds.length > 0) {
-              const [rostersCount] = await tx
-                .select({ count: count() })
-                .from(schema.tournamentRosters)
-                .where(inArray(schema.tournamentRosters.participantId, participantIds));
-              totalPlayers = rostersCount.count;
-            }
+
+
 
             const platformFeeRetained = totalCollected * (parseFloat(oldRecord.platformFeePercentage || '0') / 100);
             const amountRequested = totalCollected - platformFeeRetained;
@@ -668,6 +674,28 @@ export class TournamentsRepository {
     });
   }
 
+  async countActiveParticipants(tournamentId: string): Promise<number> {
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(schema.tournamentParticipants)
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+          ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+        ),
+      );
+    return result?.count || 0;
+  }
+
+  async updateStatus(id: string, status: string) {
+    return this.db
+      .update(schema.tournaments)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(schema.tournaments.id, id))
+      .returning();
+  }
+
   async registerParticipant(tournamentId: string, userId: string, data: RegisterTournamentDto, inviteCode?: string) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
@@ -722,9 +750,13 @@ export class TournamentsRepository {
         }
       }
 
-      // 2. Kiểm tra trạng thái - phải mở đăng ký (REGISTRATION_OPEN hoặc UPCOMING)
+      // 2. Kiểm tra trạng thái - phải mở đăng ký (REGISTRATION_OPEN hoặc UPCOMING) hoặc cho phép nếu DRAFT đi kèm inviteCode trùng khớp
       if (tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
-        throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký.');
+        if (tournament.status === 'DRAFT' && inviteCode && tournament.inviteCode === inviteCode) {
+          // Cho phép đăng ký sớm bằng mã mời khi giải vẫn là DRAFT
+        } else {
+          throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký.');
+        }
       }
 
       // 3. Kiểm tra thời hạn đăng ký
@@ -736,8 +768,11 @@ export class TournamentsRepository {
         throw new BadRequestException('Thời gian đăng ký đã kết thúc.');
       }
 
-      // 4. Kiểm tra mã mời nếu giải PRIVATE
-      if (tournament.visibility === 'PRIVATE') {
+      // 4. Kiểm tra mã mời nếu giải PRIVATE hoặc ở chế độ INVITE_ONLY
+      const tConfig = (tournament.tournamentConfig || {}) as Record<string, any>;
+      const regMode = tConfig.registrationMode || 'OPEN';
+
+      if (regMode === 'INVITE_ONLY' || tournament.visibility === 'PRIVATE') {
         if (!inviteCode || tournament.inviteCode !== inviteCode) {
           throw new BadRequestException('Mã mời giải đấu không hợp lệ hoặc thiếu.');
         }
@@ -986,7 +1021,9 @@ export class TournamentsRepository {
         : parseFloat(tournament.entryFee || '0');
 
       const teamInviteToken = isDoubles ? Math.random().toString(36).substring(2, 14).toUpperCase() : null;
-      const teamStatus = isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
+      const teamStatus = regMode === 'APPROVAL'
+        ? 'PENDING'
+        : isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
       // Bypass payment check for testing
       const isPaid = true; // entryFeeAmount === 0;
 
@@ -1221,17 +1258,21 @@ export class TournamentsRepository {
           role: 'MAIN',
         });
 
-      // 6. Cập nhật trạng thái đội hoàn tất
+      // 6. Cập nhật trạng thái đội hoàn tất (hoặc giữ PENDING nếu cần duyệt)
       const entryFeeAmount = division?.entryFee
         ? parseFloat(division.entryFee)
         : parseFloat(tournament.entryFee || '0');
       // Bypass payment check for testing
       const isPaid = true; // entryFeeAmount === 0;
 
+      const tCfg = (tournament.tournamentConfig || {}) as Record<string, any>;
+      const regMode = tCfg.registrationMode || 'OPEN';
+      const targetStatus = regMode === 'APPROVAL' ? 'PENDING' : 'COMPLETE';
+
       const [updatedParticipant] = await tx
         .update(schema.tournamentParticipants)
         .set({
-          teamStatus: 'COMPLETE',
+          teamStatus: targetStatus,
           isPaid,
         })
         .where(eq(schema.tournamentParticipants.id, participantId))
@@ -1265,7 +1306,11 @@ export class TournamentsRepository {
     });
   }
 
-  async withdraw(tournamentId: string, userId: string) {
+  async withdraw(
+    tournamentId: string,
+    userId: string,
+    bankData?: { bankName?: string; bankAccountNumber?: string; bankAccountName?: string },
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Tìm participant mà user đang tham gia
       const userRoster = await tx
@@ -1287,6 +1332,14 @@ export class TournamentsRepository {
 
       const participantId = userRoster[0].participantId;
 
+      const [oldParticipant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .limit(1);
+
+      if (!oldParticipant) throw new NotFoundException('Participant not found');
+
       // 2. Kiểm tra giải đấu chưa bắt đầu
       const [tournament] = await tx
         .select()
@@ -1300,35 +1353,58 @@ export class TournamentsRepository {
         throw new BadRequestException('Giải đấu đã bắt đầu hoặc kết thúc, không thể rút lui.');
       }
 
-      // 3. Cập nhật trạng thái
-      const [oldParticipant] = await tx
+      // 2.5 Lấy bank details từ request body hoặc từ profile của user
+      const [profile] = await tx
         .select()
-        .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.id, participantId))
+        .from(schema.profiles)
+        .where(eq(schema.profiles.userId, userId))
         .limit(1);
 
+      const finalBankName = bankData?.bankName || profile?.bankName;
+      const finalBankAccountNumber = bankData?.bankAccountNumber || profile?.bankAccountNumber;
+      const finalBankAccountName = bankData?.bankAccountName || profile?.bankAccountName;
+
+      if (oldParticipant.isPaid) {
+        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
+        if (entryFeeAmount > 0) {
+          if (!finalBankName?.trim() || !finalBankAccountNumber?.trim() || !finalBankAccountName?.trim()) {
+            throw new BadRequestException(
+              'Vui lòng nhập đầy đủ thông tin tài khoản ngân hàng để nhận lại tiền hoàn lệ phí.',
+            );
+          }
+        }
+      }
+
+      // 3. Cập nhật trạng thái
       const [updatedParticipant] = await tx
         .update(schema.tournamentParticipants)
         .set({ teamStatus: 'WITHDRAWN', teamInviteToken: null }) // clear invite code or invite tokens if any
         .where(eq(schema.tournamentParticipants.id, participantId))
         .returning();
 
-      // 4. Nếu đã thanh toán, thực hiện hoàn tiền (mock refund log)
+
+      // 4. Nếu đã thanh toán, thực hiện hoàn tiền (chuyển sang trạng thái PENDING_REFUND và lưu thông tin bank)
       let refundAmount: string | null = null;
       if (oldParticipant.isPaid) {
         const entryFeeAmount = parseFloat(tournament.entryFee || '0');
         if (entryFeeAmount > 0) {
-          // Tạo một transaction refund trong bảng payments với trạng thái COMPLETED
+          // Cập nhật trạng thái hoàn tiền trên bản ghi payment gốc
           await tx
-            .insert(schema.payments)
-            .values({
-              userId: oldParticipant.registeredBy,
-              tournamentId,
-              participantId,
-              amount: `-${entryFeeAmount}`,
-              status: 'COMPLETED',
-              paymentGateway: 'REFUND',
-            });
+            .update(schema.payments)
+            .set({
+              refundStatus: 'PENDING_REFUND',
+              refundedAmount: '0.00',
+              refundBankName: finalBankName,
+              refundAccountNumber: finalBankAccountNumber,
+              refundAccountName: finalBankAccountName,
+            })
+            .where(
+              and(
+                eq(schema.payments.tournamentId, tournamentId),
+                eq(schema.payments.participantId, participantId),
+                eq(schema.payments.status, 'COMPLETED')
+              )
+            );
           refundAmount = entryFeeAmount.toString();
         }
       }
@@ -1336,13 +1412,13 @@ export class TournamentsRepository {
       await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, oldParticipant, updatedParticipant);
 
       return {
-        message: 'Đã rút khỏi giải đấu thành công.',
+        message: 'Đã rút khỏi giải đấu thành công. Yêu cầu hoàn tiền đang được Ban tổ chức xử lý.',
         refundAmount,
       };
     });
   }
 
-  async kickParticipant(tournamentId: string, participantId: string, userId: string, reason?: string) {
+  async kickParticipant(tournamentId: string, participantId: string, userId: string) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -1375,15 +1451,18 @@ export class TournamentsRepository {
         const entryFeeAmount = parseFloat(tournament.entryFee || '0');
         if (entryFeeAmount > 0) {
           await tx
-            .insert(schema.payments)
-            .values({
-              userId: participant.registeredBy,
-              tournamentId,
-              participantId,
-              amount: `-${entryFeeAmount}`,
-              status: 'COMPLETED',
-              paymentGateway: 'REFUND',
-            });
+            .update(schema.payments)
+            .set({
+              refundStatus: 'REFUNDED',
+              refundedAmount: entryFeeAmount.toString(),
+            })
+            .where(
+              and(
+                eq(schema.payments.tournamentId, tournamentId),
+                eq(schema.payments.participantId, participantId),
+                eq(schema.payments.status, 'COMPLETED')
+              )
+            );
           refundAmount = entryFeeAmount.toString();
         }
       }
@@ -1573,6 +1652,7 @@ export class TournamentsRepository {
       teamName: string;
       seed: number | null;
       isPaid: boolean;
+      tournamentDivisionId: string | null;
       registeredAt: Date;
       registeredBy: {
         id: string | null;
@@ -1589,6 +1669,7 @@ export class TournamentsRepository {
         teamName: schema.tournamentParticipants.teamName,
         seed: schema.tournamentParticipants.seed,
         isPaid: schema.tournamentParticipants.isPaid,
+        tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
         teamStatus: schema.tournamentParticipants.teamStatus,
         registeredAt: schema.tournamentParticipants.registeredAt,
         registeredBy: {
@@ -2256,7 +2337,13 @@ export class TournamentsRepository {
     return user;
   }
 
-  async assignReservedSlot(tournamentId: string, userId: string, teamName: string, partnerId?: string) {
+  async assignReservedSlot(
+    tournamentId: string,
+    userId: string,
+    teamName: string,
+    partnerId?: string,
+    divisionId?: string,
+  ) {
     return await this.db.transaction(async (tx) => {
       const tournament = await tx
         .select()
@@ -2267,13 +2354,35 @@ export class TournamentsRepository {
 
       if (!tournament) throw new BadRequestException('Tournament not found');
 
-      const isDoubles = tournament.matchType === 'DOUBLES' || tournament.matchType === 'MIXED_DOUBLES';
+      let divisionMatchType = tournament.matchType;
+      if (divisionId) {
+        const division = await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(
+            and(
+              eq(schema.tournamentDivisions.id, divisionId),
+              eq(schema.tournamentDivisions.tournamentId, tournamentId),
+            ),
+          )
+          .limit(1)
+          .then((res) => res[0]);
+
+        if (!division) {
+          throw new BadRequestException('Hình thức thi đấu không hợp lệ.');
+        }
+
+        divisionMatchType = division.matchType;
+      }
+
+      const isDoubles = divisionMatchType === 'DOUBLES' || divisionMatchType === 'MIXED_DOUBLES';
       const teamStatus = isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
 
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
         .values({
           tournamentId,
+          tournamentDivisionId: divisionId ?? null,
           registeredBy: userId,
           teamName: teamName || 'Guest Team',
           isPaid: true,
@@ -2329,7 +2438,7 @@ export class TournamentsRepository {
     return result[0] || null;
   }
 
-  async cancelTournament(tournamentId: string, userId: string) {
+  async cancelTournament(tournamentId: string) {
     return await this.db.transaction(async (tx) => {
       // 1. Update tournament status to CANCELLED
       const [updatedTournament] = await tx
@@ -2356,15 +2465,18 @@ export class TournamentsRepository {
           const entryFeeAmount = parseFloat(updatedTournament.entryFee || '0');
           if (entryFeeAmount > 0) {
             await tx
-              .insert(schema.payments)
-              .values({
-                userId: participant.registeredBy,
-                tournamentId,
-                participantId: participant.id,
-                amount: `-${entryFeeAmount}`,
-                status: 'COMPLETED',
-                paymentGateway: 'REFUND',
-              });
+              .update(schema.payments)
+              .set({
+                refundStatus: 'REFUNDED',
+                refundedAmount: entryFeeAmount.toString(),
+              })
+              .where(
+                and(
+                  eq(schema.payments.tournamentId, tournamentId),
+                  eq(schema.payments.participantId, participant.id),
+                  eq(schema.payments.status, 'COMPLETED')
+                )
+              );
           }
         }
       }
@@ -2460,7 +2572,9 @@ export class TournamentsRepository {
     };
   }
 
-  async cancelPendingRegistrationsIfFull(tournamentId: string): Promise<string[]> {
+  async cancelPendingRegistrationsIfFull(
+    tournamentId: string,
+  ): Promise<Array<{ leaderId: string; divisionId: string | null }>> {
     return await this.db.transaction(async (tx) => {
       const [tournament] = await tx
         .select({
@@ -2496,7 +2610,7 @@ export class TournamentsRepository {
 
         if (pendingParts.length === 0) return [];
 
-        const canceledLeaderIds: string[] = [];
+        const canceledLeaders: Array<{ leaderId: string; divisionId: string | null }> = [];
         const entryFeeAmount = parseFloat(tournament.entryFee || '0');
 
         for (const p of pendingParts) {
@@ -2507,28 +2621,41 @@ export class TournamentsRepository {
 
           if (entryFeeAmount > 0 && p.isPaid) {
             await tx
-              .insert(schema.payments)
-              .values({
-                userId: p.registeredBy,
-                tournamentId,
-                participantId: p.id,
-                amount: `-${entryFeeAmount}`,
-                status: 'COMPLETED',
-                paymentGateway: 'REFUND',
-              });
+              .update(schema.payments)
+              .set({
+                refundStatus: 'REFUNDED',
+                refundedAmount: entryFeeAmount.toString(),
+              })
+              .where(
+                and(
+                  eq(schema.payments.tournamentId, tournamentId),
+                  eq(schema.payments.participantId, p.id),
+                  eq(schema.payments.status, 'COMPLETED')
+                )
+              );
           }
 
-          canceledLeaderIds.push(p.registeredBy);
+          canceledLeaders.push({
+            leaderId: p.registeredBy,
+            divisionId: p.tournamentDivisionId,
+          });
         }
-        return canceledLeaderIds;
+        return canceledLeaders;
       }
       return [];
     });
   }
 
-  async processPendingRegistrationsTimeout(): Promise<{ leaderId: string; tournamentId: string; tournamentName: string }[]> {
+  async processPendingRegistrationsTimeout(): Promise<
+    Array<{
+      leaderId: string;
+      tournamentId: string;
+      tournamentName: string;
+      divisionId: string | null;
+    }>
+  > {
     return await this.db.transaction(async (tx) => {
-      const timeoutThreshold = new Date(Date.now() - 30 * 60 * 1000); // 30 mins ago
+      const timeoutThreshold = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
 
       const expiredParts = await tx
         .select({
@@ -2546,7 +2673,12 @@ export class TournamentsRepository {
 
       if (expiredParts.length === 0) return [];
 
-      const results: { leaderId: string; tournamentId: string; tournamentName: string }[] = [];
+      const results: Array<{
+        leaderId: string;
+        tournamentId: string;
+        tournamentName: string;
+        divisionId: string | null;
+      }> = [];
 
       for (const { participant, tournament } of expiredParts) {
         await tx
@@ -2557,21 +2689,25 @@ export class TournamentsRepository {
         const entryFeeAmount = parseFloat(tournament.entryFee || '0');
         if (entryFeeAmount > 0 && participant.isPaid) {
           await tx
-            .insert(schema.payments)
-            .values({
-              userId: participant.registeredBy,
-              tournamentId: tournament.id,
-              participantId: participant.id,
-              amount: `-${entryFeeAmount}`,
-              status: 'COMPLETED',
-              paymentGateway: 'REFUND',
-            });
+            .update(schema.payments)
+            .set({
+              refundStatus: 'REFUNDED',
+              refundedAmount: entryFeeAmount.toString(),
+            })
+            .where(
+              and(
+                eq(schema.payments.tournamentId, tournament.id),
+                eq(schema.payments.participantId, participant.id),
+                eq(schema.payments.status, 'COMPLETED')
+              )
+            );
         }
 
         results.push({
           leaderId: participant.registeredBy,
           tournamentId: tournament.id,
           tournamentName: tournament.name,
+          divisionId: participant.tournamentDivisionId,
         });
       }
 

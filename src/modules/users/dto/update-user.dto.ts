@@ -1,4 +1,4 @@
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, Matches, IsDateString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateUserDto {
@@ -12,13 +12,16 @@ export class UpdateUserDto {
   @IsOptional()
   avatarUrl?: string;
 
-  @ApiPropertyOptional({ example: '+0987654321' })
+  @ApiPropertyOptional({ example: '0987654321' })
   @IsString()
   @IsOptional()
+  @Matches(/^(?:\+84|0[3|5|7|8|9])\d{8}$/, {
+    message: 'Số điện thoại không hợp lệ. Phải là số điện thoại Việt Nam (ví dụ: 0987654321 hoặc +84987654321)',
+  })
   phoneNumber?: string;
 
   @ApiPropertyOptional({ example: '2000-01-01' })
-  @IsString()
+  @IsDateString({}, { message: 'Ngày sinh không hợp lệ (Định dạng đúng: YYYY-MM-DD)' })
   @IsOptional()
   dateOfBirth?: string;
 
@@ -46,4 +49,19 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   coverUrl?: string;
+
+  @ApiPropertyOptional({ example: 'Vietcombank', description: 'Tên ngân hàng nhận tiền hoàn' })
+  @IsString()
+  @IsOptional()
+  bankName?: string;
+
+  @ApiPropertyOptional({ example: '0071001234567', description: 'Số tài khoản ngân hàng' })
+  @IsString()
+  @IsOptional()
+  bankAccountNumber?: string;
+
+  @ApiPropertyOptional({ example: 'NGUYEN VAN A', description: 'Tên chủ tài khoản ngân hàng' })
+  @IsString()
+  @IsOptional()
+  bankAccountName?: string;
 }

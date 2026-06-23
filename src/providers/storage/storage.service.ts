@@ -4,8 +4,8 @@ import { v2 as cloudinary, UploadApiErrorResponse, UploadApiResponse } from 'clo
 import * as streamifier from 'streamifier';
 
 @Injectable()
-export class CloudinaryService {
-  private readonly logger = new Logger(CloudinaryService.name);
+export class StorageService {
+  private readonly logger = new Logger(StorageService.name);
 
   constructor(private configService: ConfigService) {
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
@@ -13,7 +13,7 @@ export class CloudinaryService {
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
 
     if (!cloudName || !apiKey || !apiSecret) {
-      this.logger.warn('Cloudinary config is missing! Avatar upload might fail.');
+      this.logger.warn('Storage provider config is missing! Upload might fail.');
     }
 
     cloudinary.config({
@@ -27,14 +27,14 @@ export class CloudinaryService {
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
-          folder: folder,
+          folder,
         },
         (error, result) => {
           if (error) {
-            return reject(new Error(error.message || 'Cloudinary upload failed'));
+            return reject(new Error(error.message || 'Storage upload failed'));
           }
           if (!result) {
-            return reject(new Error('Cloudinary returned an empty result'));
+            return reject(new Error('Storage provider returned an empty result'));
           }
           resolve(result);
         },
@@ -48,7 +48,7 @@ export class CloudinaryService {
     return new Promise((resolve, reject) => {
       cloudinary.uploader.destroy(publicId, (error, result) => {
         if (error) {
-          return reject(new Error(error.message || 'Cloudinary delete failed'));
+          return reject(new Error(error.message || 'Storage delete failed'));
         }
         resolve(result);
       });

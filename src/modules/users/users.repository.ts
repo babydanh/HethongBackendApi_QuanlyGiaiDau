@@ -1,6 +1,6 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, sql } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -106,6 +106,7 @@ export class UsersRepository {
         email: schema.users.email,
         passwordHash: schema.users.passwordHash,
         isEmailVerified: schema.users.isEmailVerified,
+        isPhoneVerified: schema.users.isPhoneVerified,
         createdAt: schema.users.createdAt,
         profile: schema.profiles,
       })
@@ -143,6 +144,22 @@ export class UsersRepository {
       .update(schema.profiles)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(schema.profiles.userId, userId))
+      .returning();
+  }
+
+  async verifyEmail(userId: string) {
+    return await this.db
+      .update(schema.users)
+      .set({ isEmailVerified: true, updatedAt: new Date() })
+      .where(eq(schema.users.id, userId))
+      .returning();
+  }
+
+  async verifyPhone(userId: string) {
+    return await this.db
+      .update(schema.users)
+      .set({ isPhoneVerified: true, updatedAt: new Date() })
+      .where(eq(schema.users.id, userId))
       .returning();
   }
 
@@ -252,6 +269,58 @@ export class UsersRepository {
         ),
       )
       .limit(10);
+  }
+
+  async createChangeRequest(userId: string, requestType: 'GENDER' | 'EMAIL', oldValue: string, newValue: string) {
+    return await this.db
+      .insert(schema.userChangeRequests)
+      .values({
+        userId,
+        requestType,
+        oldValue,
+        newValue,
+        status: 'PENDING',
+      })
+      .returning();
+  }
+
+  async findChangeRequests(status?: string) {
+    const whereClause = status ? eq(schema.userChangeRequests.status, status) : undefined;
+    return await this.db
+      .select({
+        id: schema.userChangeRequests.id,
+        userId: schema.userChangeRequests.userId,
+        requestType: schema.userChangeRequests.requestType,
+        oldValue: schema.userChangeRequests.oldValue,
+        newValue: schema.userChangeRequests.newValue,
+        status: schema.userChangeRequests.status,
+        adminNote: schema.userChangeRequests.adminNote,
+        createdAt: schema.userChangeRequests.createdAt,
+        userEmail: schema.users.email,
+        userFullName: schema.profiles.fullName,
+      })
+      .from(schema.userChangeRequests)
+      .innerJoin(schema.users, eq(schema.userChangeRequests.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(whereClause)
+      .orderBy(desc(schema.userChangeRequests.createdAt));
+  }
+
+  async findChangeRequestById(id: string) {
+    const result = await this.db
+      .select()
+      .from(schema.userChangeRequests)
+      .where(eq(schema.userChangeRequests.id, id))
+      .limit(1);
+    return result[0] ?? null;
+  }
+
+  async updateChangeRequestStatus(id: string, status: 'APPROVED' | 'REJECTED', adminNote?: string) {
+    return await this.db
+      .update(schema.userChangeRequests)
+      .set({ status, adminNote, updatedAt: new Date() })
+      .where(eq(schema.userChangeRequests.id, id))
+      .returning();
   }
 }
 

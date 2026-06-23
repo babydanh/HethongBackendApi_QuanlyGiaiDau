@@ -209,7 +209,11 @@ export class CommunitiesService {
     
     if (existing) {
       if (existing.status === 'BANNED') throw new ForbiddenException('You are banned from this community');
-      throw new ConflictException('You are already a member or have a pending request');
+      if (existing.status === 'JOINED' || existing.status === 'PENDING') {
+        throw new ConflictException('You are already a member or have a pending request');
+      }
+      // Delete old rejected record to insert a clean new request
+      await this.communitiesRepository.removeMember(id, userId);
     }
 
     if (community.joinMode === 'INVITE_ONLY') {

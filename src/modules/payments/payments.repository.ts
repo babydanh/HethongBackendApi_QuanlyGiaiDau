@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -42,6 +42,15 @@ export class PaymentsRepository {
       .select()
       .from(schema.payments)
       .where(eq(schema.payments.id, id))
+      .limit(1);
+    return record || null;
+  }
+
+  async findPayoutById(id: string) {
+    const [record] = await this.db
+      .select()
+      .from(schema.organizerPayouts)
+      .where(eq(schema.organizerPayouts.id, id))
       .limit(1);
     return record || null;
   }
@@ -322,6 +331,44 @@ export class PaymentsRepository {
         ),
       );
     return parseFloat(result?.sum || '0');
+  }
+
+  async confirmRefund(paymentId: string) {
+    return await this.db.transaction(async (tx) => {
+      const [oldPayment] = await tx
+        .select()
+        .from(schema.payments)
+        .where(eq(schema.payments.id, paymentId))
+        .limit(1);
+
+      if (!oldPayment) {
+        throw new Error('Không tìm thấy giao dịch thanh toán.');
+      }
+
+      if (oldPayment.refundStatus === 'REFUNDED') {
+        throw new Error('Giao dịch đã được hoàn tiền trước đó.');
+      }
+
+      // Cập nhật trạng thái hoàn tiền trên payment
+      const [updated] = await tx
+        .update(schema.payments)
+        .set({
+          refundStatus: 'REFUNDED',
+          refundedAmount: oldPayment.amount, // Hoàn đầy đủ số tiền đã đóng
+        })
+        .where(eq(schema.payments.id, paymentId))
+        .returning();
+
+      // Thêm log status log
+      await tx.insert(schema.paymentStatusLogs).values({
+        paymentId,
+        previousStatus: oldPayment.status,
+        newStatus: 'REFUNDED',
+        reason: 'ADMIN_CONFIRM_REFUND',
+      });
+
+      return updated;
+    });
   }
 }
 

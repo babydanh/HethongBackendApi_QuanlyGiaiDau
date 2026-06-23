@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
 import { eq, and, sql, ilike, SQL, isNull, count } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
@@ -25,6 +25,16 @@ export class CommunitiesRepository {
     if (query.region) {
       conditions.push(ilike(schema.communities.locationAddress, `%${query.region}%`));
     }
+    if (query.provinceCode) {
+      conditions.push(eq(schema.communities.provinceCode, query.provinceCode));
+    }
+    if (query.categoryId) {
+      const subquery = this.db
+        .select({ communityId: schema.communitySports.communityId })
+        .from(schema.communitySports)
+        .where(eq(schema.communitySports.categoryId, query.categoryId));
+      conditions.push(sql`${schema.communities.id} IN ${subquery}`);
+    }
 
     if (query.lat !== undefined && query.lng !== undefined) {
       const radiusMeters = (query.radiusKm || 10) * 1000;
@@ -49,7 +59,60 @@ export class CommunitiesRepository {
       }
     }
 
-    return await dbQuery;
+    const communitiesList = await dbQuery;
+
+    if (communitiesList.length === 0) {
+      return [];
+    }
+
+    const communityIds = communitiesList.map((c) => c.id);
+
+    // 1. Fetch categories for each community
+    const sportsLinks = await this.db
+      .select({
+        communityId: schema.communitySports.communityId,
+        category: schema.categories,
+      })
+      .from(schema.communitySports)
+      .innerJoin(schema.categories, eq(schema.communitySports.categoryId, schema.categories.id))
+      .where(sql`${schema.communitySports.communityId} IN ${communityIds}`);
+
+    const categoriesMap: Record<string, any[]> = {};
+    sportsLinks.forEach((link) => {
+      if (!categoriesMap[link.communityId]) {
+        categoriesMap[link.communityId] = [];
+      }
+      categoriesMap[link.communityId].push(link.category);
+    });
+
+    // 2. Fetch member counts for each community
+    const membersCount = await this.db
+      .select({
+        communityId: schema.communityMembers.communityId,
+        count: sql<number>`count(${schema.communityMembers.id})`,
+      })
+      .from(schema.communityMembers)
+      .where(
+        and(
+          sql`${schema.communityMembers.communityId} IN ${communityIds}`,
+          eq(schema.communityMembers.status, 'JOINED')
+        )
+      )
+      .groupBy(schema.communityMembers.communityId);
+
+    const membersCountMap: Record<string, number> = {};
+    membersCount.forEach((mc) => {
+      membersCountMap[mc.communityId] = Number(mc.count);
+    });
+
+    // Map them together
+    return communitiesList.map((community) => ({
+      ...community,
+      categories: categoriesMap[community.id] || [],
+      _count: {
+        members: membersCountMap[community.id] || 0,
+      },
+    })) as any;
   }
 
   async findMyCommunities(userId: string) {
@@ -82,7 +145,24 @@ export class CommunitiesRepository {
         ),
       )
       .limit(1);
-    return records[0];
+    if (records.length === 0) {
+      return null;
+    }
+    const community = records[0];
+
+    // Fetch categories for this community
+    const sportsLinks = await this.db
+      .select({
+        category: schema.categories,
+      })
+      .from(schema.communitySports)
+      .innerJoin(schema.categories, eq(schema.communitySports.categoryId, schema.categories.id))
+      .where(eq(schema.communitySports.communityId, id));
+
+    return {
+      ...community,
+      categories: sportsLinks.map((link) => link.category),
+    };
   }
 
   async create(

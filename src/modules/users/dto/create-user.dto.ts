@@ -4,6 +4,7 @@ import {
   IsString,
   MinLength,
   IsOptional,
+  Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -29,8 +30,11 @@ export class CreateUserDto {
   @IsOptional()
   avatarUrl?: string;
 
-  @ApiPropertyOptional({ example: '+1234567890' })
+  @ApiPropertyOptional({ example: '0912345678' })
   @IsString()
   @IsOptional()
+  @Matches(/^(?:\+84|0[3|5|7|8|9])\d{8}$/, {
+    message: 'Số điện thoại không hợp lệ. Phải là số điện thoại Việt Nam (ví dụ: 0912345678 hoặc +84912345678)',
+  })
   phoneNumber?: string;
 }

@@ -64,4 +64,14 @@ export class QueryCommunityDto {
   @IsString()
   @IsOptional()
   region?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc theo ID môn thể thao' })
+  @IsString()
+  @IsOptional()
+  categoryId?: string;
+
+  @ApiPropertyOptional({ description: 'Lọc theo mã tỉnh thành' })
+  @IsString()
+  @IsOptional()
+  provinceCode?: string;
 }

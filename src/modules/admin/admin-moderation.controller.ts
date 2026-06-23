@@ -111,6 +111,24 @@ export class AdminModerationController {
     return this.adminService.banTournament(id, admin.sub);
   }
 
+  @Post('tournaments/:id/approve-delete')
+  @ApiOperation({ summary: 'Duyệt yêu cầu xóa giải đấu (Chỉ ADMIN)' })
+  async approveDeleteTournament(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.adminService.approveDeleteTournament(id, admin.sub);
+  }
+
+  @Post('tournaments/:id/reject-delete')
+  @ApiOperation({ summary: 'Từ chối yêu cầu xóa giải đấu (Chỉ ADMIN)' })
+  async rejectDeleteTournament(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.adminService.rejectDeleteTournament(id, admin.sub);
+  }
+
   @Get('tournaments')
   @ApiOperation({ summary: 'Lấy danh sách giải đấu để quản lý (Chỉ ADMIN)' })
   @ApiQuery({ name: 'page', required: false, type: Number })

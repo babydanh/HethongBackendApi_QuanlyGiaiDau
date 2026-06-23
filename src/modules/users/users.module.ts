@@ -9,6 +9,6 @@ import { RankingsModule } from '../rankings/rankings.module';
   imports: [UploadModule, RankingsModule],
   controllers: [UsersController],
   providers: [UsersService, UsersRepository],
-  exports: [UsersService],
+  exports: [UsersService, UsersRepository],
 })
 export class UsersModule {}
