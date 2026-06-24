@@ -189,6 +189,11 @@ export class PaymentsService {
       throw new NotFoundException('Tournament not found');
     }
 
+    // Chi cho rut tien khi giai da bat dau hoac da ket thuc
+    if (tournament.status !== 'IN_PROGRESS' && tournament.status !== 'COMPLETED') {
+      throw new BadRequestException('Chỉ có thể rút tiền khi giải đang thi đấu hoặc đã kết thúc.');
+    }
+
     // 2. Fetch platform fee percentage from config
     let configKey = 'PLATFORM_FEE_PERCENTAGE_CLUB';
     let defaultPct = '0';

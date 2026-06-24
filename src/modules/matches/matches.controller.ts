@@ -3,6 +3,8 @@ import {
   Get,
   Body,
   Patch,
+  Post,
+  Delete,
   Param,
   Query,
   ParseUUIDPipe,
@@ -12,6 +14,7 @@ import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { UpdateMatchScheduleDto } from './dto/update-match-schedule.dto';
+import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -36,6 +39,24 @@ export class MatchesController {
   @ApiOperation({ summary: 'Lấy chi tiết trận đấu' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.matchesService.findOne(id);
+  }
+
+  @Public()
+  @Get(':id/comments')
+  @ApiOperation({ summary: 'Lấy danh sách bình luận trận đấu' })
+  async getComments(@Param('id', ParseUUIDPipe) id: string) {
+    return await this.matchesService.getComments(id);
+  }
+
+  @Post(':id/comments')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo bình luận trận đấu' })
+  async createComment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() createMatchCommentDto: CreateMatchCommentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.matchesService.createComment(id, user, createMatchCommentDto);
   }
 
   @Patch(':id/score')
@@ -85,5 +106,36 @@ export class MatchesController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.matchesService.assignReferee(id, body.refereeId, user);
+  }
+
+  @Post(':id/mute-user')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Mute/block người dùng trong trận đấu' })
+  async muteUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { userId: string; type: 'MUTE' | 'BAN'; reason?: string },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.matchesService.muteUser(id, body.userId, body.type, body.reason, user);
+  }
+
+  @Delete(':id/unmute-user/:userId')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Bỏ mute/unban người dùng trong trận đấu' })
+  async unmuteUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.matchesService.unmuteUser(id, userId);
+  }
+
+  @Get(':id/muted-users')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Danh sách người dùng bị mute/ban' })
+  async getMutedUsers(@Param('id', ParseUUIDPipe) id: string) {
+    return this.matchesService.getMutedUsers(id);
   }
 }

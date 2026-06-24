@@ -33,6 +33,11 @@ export function createPostgresClient(
     idle_timeout: 20,
     connect_timeout: 10,
     onnotice: () => {},
+    // Required for Supabase Transaction Pooler — sets search_path so that
+    // tables resolve correctly without needing schema prefix in every query.
+    connection: {
+      search_path: 'public',
+    },
     ...overrides,
   });
 }

@@ -3,6 +3,18 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
+// Supabase pooler requires the schema to be specified in the URL
+// Build connection URL with explicit search_path to avoid "schema undefined" error
+const host = process.env.DB_HOST || 'localhost';
+const port = process.env.DB_PORT || '5432';
+const user = process.env.DB_USERNAME || 'postgres';
+const password = process.env.DB_PASSWORD || 'your_password';
+const database = process.env.DB_DATABASE || 'tournament_db';
+
+// Encode password in case it contains special characters like @
+const encodedPassword = encodeURIComponent(password);
+const connectionString = `postgresql://${user}:${encodedPassword}@${host}:${port}/${database}?sslmode=require`;
+
 export default defineConfig({
   schema: './src/database/schema/index.ts',
   out: './src/database/migrations',
@@ -16,13 +28,6 @@ export default defineConfig({
     '!raster_overviews',
   ],
   dbCredentials: {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432', 10),
-    user: process.env.DB_USERNAME || 'postgres',
-    password: process.env.DB_PASSWORD || 'your_password',
-    database: process.env.DB_DATABASE || 'tournament_db',
-    ssl: {
-      rejectUnauthorized: false,
-    },
+    url: connectionString,
   },
 });

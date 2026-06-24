@@ -736,7 +736,23 @@ export class BracketGeneratorService {
 
       // 6. Xếp lịch thi đấu vòng tròn (Circle Method)
       const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-      const legs = (config.roundRobinLegs as number) || 1;
+
+      // Đọc số lượt đấu: ưu tiên division.roundConfig.roundsToPlay → tournament config → mặc định 1
+      let legs = 1;
+      if (divisionId) {
+        const divisions = await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.id, divisionId))
+          .limit(1);
+        const div = divisions[0];
+        if (div) {
+          const divConfig = div.roundConfig as Record<string, unknown> | null;
+          const rtp = divConfig?.roundsToPlay;
+          if (typeof rtp === 'number' && rtp > 0 && rtp <= 20) legs = rtp;
+        }
+      }
+      if (!legs || legs < 1) legs = (config.roundRobinLegs as number) || 1;
 
       const list = participants.map(p => p.id);
       if (seedingType === 'RANDOM') {

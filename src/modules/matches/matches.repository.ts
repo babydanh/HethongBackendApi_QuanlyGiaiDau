@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, or, count, SQL, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, or, count, SQL, inArray, notInArray, isNull, sql } from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
@@ -291,6 +291,61 @@ export class MatchesRepository {
       participant1,
       participant2,
     };
+  }
+
+  async findCommentsByMatchId(matchId: string, mutedUserIds: string[] = []) {
+    const conditions: SQL[] = [eq(schema.matchComments.matchId, matchId)];
+    if (mutedUserIds.length > 0) {
+      conditions.push(notInArray(schema.matchComments.userId, mutedUserIds));
+    }
+    return this.db
+      .select({
+        id: schema.matchComments.id,
+        matchId: schema.matchComments.matchId,
+        commentText: schema.matchComments.commentText,
+        createdAt: schema.matchComments.createdAt,
+        user: {
+          id: schema.users.id,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        },
+      })
+      .from(schema.matchComments)
+      .leftJoin(schema.users, eq(schema.matchComments.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(and(...conditions))
+      .orderBy(sql`${schema.matchComments.createdAt} desc`);
+  }
+
+  async createComment(matchId: string, userId: string, commentText: string) {
+    const [created] = await this.db
+      .insert(schema.matchComments)
+      .values({
+        matchId,
+        userId,
+        commentText,
+      })
+      .returning();
+
+    const [comment] = await this.db
+      .select({
+        id: schema.matchComments.id,
+        matchId: schema.matchComments.matchId,
+        commentText: schema.matchComments.commentText,
+        createdAt: schema.matchComments.createdAt,
+        user: {
+          id: schema.users.id,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        },
+      })
+      .from(schema.matchComments)
+      .leftJoin(schema.users, eq(schema.matchComments.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(eq(schema.matchComments.id, created.id))
+      .limit(1);
+
+    return comment;
   }
 
   async updateScore(id: string, userId: string, data: UpdateMatchScoreDto) {
@@ -676,6 +731,82 @@ export class MatchesRepository {
         )
       );
     return Number(result[0]?.count || 0) > 0;
+  }
+
+  // ──────── Mute / Ban comment users ────────
+
+  async getMutedUserIds(matchId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: schema.matchMutedUsers.userId })
+      .from(schema.matchMutedUsers)
+      .where(eq(schema.matchMutedUsers.matchId, matchId));
+    return rows.map((r) => r.userId);
+  }
+
+  async getMutedUsers(matchId: string) {
+    return this.db
+      .select({
+        id: schema.matchMutedUsers.id,
+        userId: schema.matchMutedUsers.userId,
+        type: schema.matchMutedUsers.type,
+        reason: schema.matchMutedUsers.reason,
+        expiresAt: schema.matchMutedUsers.expiresAt,
+        createdAt: schema.matchMutedUsers.createdAt,
+        mutedBy: schema.matchMutedUsers.mutedBy,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.matchMutedUsers)
+      .leftJoin(schema.profiles, eq(schema.matchMutedUsers.userId, schema.profiles.userId))
+      .where(eq(schema.matchMutedUsers.matchId, matchId));
+  }
+
+  async muteUser(
+    matchId: string,
+    userId: string,
+    type: 'MUTE' | 'BAN',
+    reason: string | null,
+    mutedBy: string,
+  ) {
+    // Upsert: if already muted, update type/reason
+    const [existing] = await this.db
+      .select()
+      .from(schema.matchMutedUsers)
+      .where(
+        and(
+          eq(schema.matchMutedUsers.matchId, matchId),
+          eq(schema.matchMutedUsers.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await this.db
+        .update(schema.matchMutedUsers)
+        .set({ type, reason, mutedBy })
+        .where(eq(schema.matchMutedUsers.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await this.db
+      .insert(schema.matchMutedUsers)
+      .values({ matchId, userId, type, reason, mutedBy })
+      .returning();
+    return created;
+  }
+
+  async unmuteUser(matchId: string, userId: string) {
+    const [deleted] = await this.db
+      .delete(schema.matchMutedUsers)
+      .where(
+        and(
+          eq(schema.matchMutedUsers.matchId, matchId),
+          eq(schema.matchMutedUsers.userId, userId),
+        ),
+      )
+      .returning();
+    return deleted;
   }
 }
 

@@ -24,6 +24,7 @@ import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { AddRefereeDto } from './dto/add-referee.dto';
+import { AddStaffMemberDto } from './dto/add-staff-member.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -211,8 +212,8 @@ export class TournamentsController {
     @Query('invite') inviteCode?: string,
     @Req() req?: Request,
   ) {
-    const userId = this.getUserIdFromRequest(req);
-    return this.tournamentsService.findOne(id, userId, inviteCode);
+    const authInfo = this.getAuthInfoFromRequest(req);
+    return this.tournamentsService.findOne(id, authInfo.userId, inviteCode, authInfo.roles);
   }
 
   @Public()
@@ -225,18 +226,24 @@ export class TournamentsController {
     return this.tournamentsService.validateInvite(id, inviteCode);
   }
 
-  private getUserIdFromRequest(request: Request | undefined): string | null {
-    if (!request || !request.headers) return null;
+  private getAuthInfoFromRequest(request: Request | undefined): { userId: string | null; roles: string[] } {
+    if (!request || !request.headers) return { userId: null, roles: [] };
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return null;
+      return { userId: null, roles: [] };
     }
     const token = authHeader.split(' ')[1];
     try {
       const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('ascii'));
-      return payload.sub || null;
+      let roles: string[] = [];
+      if (Array.isArray(payload.roles)) {
+        roles = payload.roles;
+      } else if (payload.role) {
+        roles = [payload.role];
+      }
+      return { userId: payload.sub || null, roles };
     } catch {
-      return null;
+      return { userId: null, roles: [] };
     }
   }
 
@@ -526,5 +533,60 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.cancelTournament(id, user.sub, this.getSystemRoles(user));
+  }
+
+  @Post(':id/playoff')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tao tran Play-off cho Round Robin' })
+  async createPlayoffMatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('stageId') stageId: string,
+    @Body('participant1Id') participant1Id: string,
+    @Body('participant2Id') participant2Id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.createPlayoffMatch(
+      id, { stageId, participant1Id, participant2Id }, user.sub, this.getSystemRoles(user),
+    );
+  }
+
+  @Post(':id/stages/:stageId/finalize')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Ket thuc som stage (cancel cac tran con lai)' })
+  async finalizeStage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('stageId', ParseUUIDPipe) stageId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.finalizeStage(id, stageId, user.sub, this.getSystemRoles(user));
+  }
+
+  @Public()
+  @Get(':id/staff')
+  @ApiOperation({ summary: 'Lay danh sach nhan su (BTC, trong tai, khach xem)' })
+  async findStaff(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tournamentsService.findStaffByTournament(id);
+  }
+
+  @Post(':id/staff')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Them nhan su (CO_ORGANIZER, REFEREE, SPECTATOR)' })
+  async addStaffMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AddStaffMemberDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addStaffMember(id, body.email, body.role, user.sub, this.getSystemRoles(user));
+  }
+
+  @Delete(':id/staff/:userId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xoa nhan su khoi giai' })
+  async removeStaffMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) staffUserId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.removeStaffMember(id, staffUserId, user.sub, this.getSystemRoles(user));
   }
 }

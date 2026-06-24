@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException, NotFoundException } from '@nes
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt } from 'drizzle-orm';
+import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt, like, isNull } from 'drizzle-orm';
 import { AuditService, Transaction } from '../audit/audit.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -233,7 +233,12 @@ export class TournamentsRepository {
       .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
       .leftJoin(schema.users, eq(schema.tournaments.createdBy, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .where(eq(schema.tournaments.id, id))
+      .where(
+        and(
+          eq(schema.tournaments.id, id),
+          isNull(schema.tournaments.deletedAt)
+        )
+      )
       .limit(1);
 
     if (result.length === 0) return null;
@@ -668,6 +673,11 @@ export class TournamentsRepository {
             .where(inArray(schema.matches.groupId, groupIds));
         }
       }
+
+      // Delete any notifications referencing this tournament
+      await tx
+        .delete(schema.notifications)
+        .where(like(schema.notifications.redirectUrl, `%/${id}%`));
 
       await this.auditService.logDelete(tx, userId, 'tournaments', id, oldRecord);
       return deleted;
@@ -2124,6 +2134,13 @@ export class TournamentsRepository {
 
       if (!oldRecord) return null;
 
+      // Find all child divisions under this parent
+      const divisions = await tx
+        .select({ id: schema.tournaments.id })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.parentId, id));
+      const divisionIds = divisions.map((d) => d.id);
+
       const [deleted] = await tx
         .update(schema.parentTournaments)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -2135,6 +2152,18 @@ export class TournamentsRepository {
         .update(schema.tournaments)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(schema.tournaments.parentId, id));
+
+      // Delete notifications for the parent tournament
+      await tx
+        .delete(schema.notifications)
+        .where(like(schema.notifications.redirectUrl, `%/${id}%`));
+
+      // Delete notifications for each child division
+      for (const divId of divisionIds) {
+        await tx
+          .delete(schema.notifications)
+          .where(like(schema.notifications.redirectUrl, `%/${divId}%`));
+      }
 
       await this.auditService.logDelete(tx, userId, 'parent_tournaments', id, oldRecord);
       return deleted;
@@ -2730,6 +2759,57 @@ export class TournamentsRepository {
       .where(eq(schema.tournamentReferees.tournamentId, tournamentId));
   }
 
+  // ──────── Staff ────────
+
+  async addStaffMember(tournamentId: string, userId: string, role: string, createdBy: string) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.tournamentStaff)
+      .where(
+        and(
+          eq(schema.tournamentStaff.tournamentId, tournamentId),
+          eq(schema.tournamentStaff.userId, userId),
+        ),
+      )
+      .limit(1);
+    if (existing) return existing;
+    const [record] = await this.db
+      .insert(schema.tournamentStaff)
+      .values({ tournamentId, userId, role, createdBy })
+      .returning();
+    return record;
+  }
+
+  async removeStaffMember(tournamentId: string, userId: string) {
+    const [record] = await this.db
+      .delete(schema.tournamentStaff)
+      .where(
+        and(
+          eq(schema.tournamentStaff.tournamentId, tournamentId),
+          eq(schema.tournamentStaff.userId, userId),
+        ),
+      )
+      .returning();
+    return record;
+  }
+
+  async findStaffByTournament(tournamentId: string, role?: string) {
+    const conditions: SQL[] = [eq(schema.tournamentStaff.tournamentId, tournamentId)];
+    if (role) conditions.push(eq(schema.tournamentStaff.role, role));
+    return this.db
+      .select({
+        userId: schema.tournamentStaff.userId,
+        role: schema.tournamentStaff.role,
+        fullName: schema.profiles.fullName,
+        email: schema.users.email,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.tournamentStaff)
+      .innerJoin(schema.users, eq(schema.tournamentStaff.userId, schema.users.id))
+      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(and(...conditions));
+  }
+
   async updateSeeds(tournamentId: string, seeds: { participantId: string; seed: number }[]) {
     return await this.db.transaction(async (tx) => {
       for (const item of seeds) {
@@ -3012,5 +3092,77 @@ export class TournamentsRepository {
       .returning();
     return referee;
   }
-}
 
+  // ──────── Finalize stage ────────
+
+  async cancelScheduledMatchesInStage(stageId: string) {
+    const result = await this.db
+      .update(schema.matches)
+      .set({ status: 'CANCELLED', updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.matches.stageId, stageId),
+          ne(schema.matches.status, 'COMPLETED'),
+        ),
+      );
+    return result;
+  }
+
+  // ──────── Playoff methods ────────
+
+  async getGroupByStageId(stageId: string) {
+    const [group] = await this.db
+      .select()
+      .from(schema.tournamentGroups)
+      .where(eq(schema.tournamentGroups.stageId, stageId))
+      .limit(1);
+    return group || null;
+  }
+
+  async createPlayoffMatch(data: {
+    tournamentId: string;
+    stageId: string;
+    groupId: string;
+    participant1Id: string;
+    participant2Id: string;
+    roundNumber: number;
+    matchOrder: number;
+  }) {
+    const { randomUUID } = await import('crypto');
+    const [match] = await this.db
+      .insert(schema.matches)
+      .values({
+        id: randomUUID(),
+        tournamentId: data.tournamentId,
+        stageId: data.stageId,
+        groupId: data.groupId,
+        participant1Id: data.participant1Id,
+        participant2Id: data.participant2Id,
+        roundNumber: data.roundNumber,
+        matchOrder: data.matchOrder,
+        bracketBranch: 'PLAYOFF',
+        status: 'SCHEDULED',
+        isBye: false,
+        p1SetsWon: 0,
+        p2SetsWon: 0,
+        totalSetsPlayed: 0,
+        nextMatchId: null,
+        loserNextMatchId: null,
+        winnerId: null,
+        updatedAt: new Date(),
+      })
+      .returning();
+    return match;
+  }
+
+  async getMaxRoundAndMatchOrder(stageId: string) {
+    const result = await this.db
+      .select({
+        maxRound: sql<number>`COALESCE(MAX(${schema.matches.roundNumber}), 0)`,
+        maxOrder: sql<number>`COALESCE(MAX(${schema.matches.matchOrder}), 0)`,
+      })
+      .from(schema.matches)
+      .where(eq(schema.matches.stageId, stageId));
+    return result[0] || { maxRound: 0, maxOrder: 0 };
+  }
+}

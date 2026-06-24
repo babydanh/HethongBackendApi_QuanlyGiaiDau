@@ -72,7 +72,7 @@ export class AdminModerationController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.adminService.suspendTournament(id, admin.sub);
+    return this.adminService.suspendTournament(id);
   }
 
   @Post('tournaments/:id/unsuspend')
@@ -81,7 +81,7 @@ export class AdminModerationController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.adminService.unsuspendTournament(id, admin.sub);
+    return this.adminService.unsuspendTournament(id);
   }
 
   @Post('tournaments/:id/approve')
@@ -90,7 +90,7 @@ export class AdminModerationController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.adminService.approveTournament(id, admin.sub);
+    return this.adminService.approveTournament(id);
   }
 
   @Post('tournaments/:id/reject')
@@ -99,16 +99,15 @@ export class AdminModerationController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.adminService.rejectTournament(id, admin.sub);
+    return this.adminService.rejectTournament(id);
   }
 
   @Post('tournaments/:id/ban')
   @ApiOperation({ summary: 'Hủy/Cấm vĩnh viễn giải đấu (Chỉ ADMIN)' })
   async banTournament(
-    @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.adminService.banTournament(id, admin.sub);
+    return this.adminService.banTournament(id);
   }
 
   @Post('tournaments/:id/approve-delete')
@@ -117,7 +116,7 @@ export class AdminModerationController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.adminService.approveDeleteTournament(id, admin.sub);
+    return this.adminService.approveDeleteTournament(id);
   }
 
   @Post('tournaments/:id/reject-delete')
@@ -126,7 +125,7 @@ export class AdminModerationController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.adminService.rejectDeleteTournament(id, admin.sub);
+    return this.adminService.rejectDeleteTournament(id);
   }
 
   @Get('tournaments')

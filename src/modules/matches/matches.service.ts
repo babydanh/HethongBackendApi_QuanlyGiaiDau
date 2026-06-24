@@ -3,9 +3,11 @@ import { MatchesRepository } from './matches.repository';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
+import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MuteActionDto } from './dto/mute-action.dto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import {
   buildMatchCompletedNotification,
@@ -23,6 +25,10 @@ export class MatchesService {
     private readonly notificationsService: NotificationsService,
     private readonly redisService: RedisService,
   ) {}
+
+  private isAdmin(user: JwtPayload) {
+    return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private resolveMatchConfig(match: any) {
@@ -189,7 +195,7 @@ export class MatchesService {
 
     const isCreator = existing.tournament?.createdBy === user.sub;
     const isReferee = existing.refereeId === user.sub;
-    const isAdmin = user.role === 'ADMIN';
+    const isAdmin = this.isAdmin(user);
 
     if (!isAdmin && !isCreator && !isReferee) {
       throw new ForbiddenException('Bạn không có quyền nhập điểm cho trận đấu này');
@@ -274,7 +280,7 @@ export class MatchesService {
 
     const isCreator = existing.tournament?.createdBy === user.sub;
     const isReferee = existing.refereeId === user.sub;
-    const isAdmin = user.role === 'ADMIN';
+    const isAdmin = this.isAdmin(user);
 
     if (!isAdmin && !isCreator && !isReferee) {
       throw new ForbiddenException('Bạn không có quyền thay đổi trạng thái trận đấu này');
@@ -409,6 +415,37 @@ export class MatchesService {
     }
   }
 
+  async getComments(id: string) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) {
+      throw new NotFoundException('Match not found');
+    }
+
+    const mutedUserIds = await this.matchesRepository.getMutedUserIds(id);
+    return this.matchesRepository.findCommentsByMatchId(id, mutedUserIds);
+  }
+
+  async createComment(
+    id: string,
+    user: JwtPayload,
+    createMatchCommentDto: CreateMatchCommentDto,
+  ) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) {
+      throw new NotFoundException('Match not found');
+    }
+
+    const comment = await this.matchesRepository.createComment(
+      id,
+      user.sub,
+      createMatchCommentDto.commentText.trim(),
+    );
+
+    this.liveScoreGateway.broadcastComment(id, comment);
+
+    return comment;
+  }
+
   async updateSchedule(
     id: string,
     data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string; matchConfig?: Record<string, any> },
@@ -513,5 +550,47 @@ export class MatchesService {
     }
 
     return this.updateSchedule(id, { refereeId });
+  }
+
+  async muteUser(
+    id: string,
+    targetUserId: string,
+    type: 'MUTE' | 'BAN',
+    reason: string | undefined,
+    user: JwtPayload,
+  ) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isAdmin = this.isAdmin(user);
+    if (!isAdmin && !isCreator) {
+      throw new ForbiddenException('Bạn không có quyền quản lý bình luận trận đấu này');
+    }
+
+    await this.matchesRepository.muteUser(id, targetUserId, type, reason ?? null, user.sub);
+    this.liveScoreGateway.broadcastComment(id, {
+      type: 'MUTE_UPDATE',
+      userId: targetUserId,
+      action: type,
+    });
+
+    return { message: type === 'BAN' ? 'Đã cấm người dùng này' : 'Đã mute người dùng này' };
+  }
+
+  async unmuteUser(id: string, targetUserId: string) {
+    await this.matchesRepository.unmuteUser(id, targetUserId);
+    this.liveScoreGateway.broadcastComment(id, {
+      type: 'MUTE_UPDATE',
+      userId: targetUserId,
+      action: 'UNMUTE',
+    });
+    return { message: 'Đã bỏ cấm/mute người dùng' };
+  }
+
+  async getMutedUsers(id: string) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+    return this.matchesRepository.getMutedUsers(id);
   }
 }

@@ -2,7 +2,7 @@ import { Injectable, Inject, NotFoundException, BadRequestException } from '@nes
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNull, aliasedTable } from 'drizzle-orm';
+import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNull, aliasedTable, like } from 'drizzle-orm';
 import { EloEngineService } from '../rankings/elo-engine.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { OriginalMatchValues } from './interfaces/original-match-values.interface';
@@ -105,20 +105,80 @@ export class AdminService {
         )
       );
 
-    // 3. Users
-    const [usersTotal] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.users);
-    const [usersCurrent] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.users).where(sql`${schema.users.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)}`);
-    const [usersPrev] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.users).where(and(sql`${schema.users.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)} * 2`, sql`${schema.users.createdAt} < now() - interval ${sql.raw(`'${intervalStr}'`)}`));
+    // 3. Users (Exclude Mock Users)
+    const [usersTotal] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.users)
+      .where(eq(schema.users.isMock, false));
+    const [usersCurrent] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.isMock, false),
+          sql`${schema.users.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)}`
+        )
+      );
+    const [usersPrev] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.isMock, false),
+          sql`${schema.users.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)} * 2`,
+          sql`${schema.users.createdAt} < now() - interval ${sql.raw(`'${intervalStr}'`)}`
+        )
+      );
 
-    // 4. Communities
-    const [communitiesTotal] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.communities);
-    const [communitiesCurrent] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.communities).where(sql`${schema.communities.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)}`);
-    const [communitiesPrev] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.communities).where(and(sql`${schema.communities.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)} * 2`, sql`${schema.communities.createdAt} < now() - interval ${sql.raw(`'${intervalStr}'`)}`));
+    // 4. Communities (Exclude Soft Deleted)
+    const [communitiesTotal] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.communities)
+      .where(isNull(schema.communities.deletedAt));
+    const [communitiesCurrent] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.communities)
+      .where(
+        and(
+          isNull(schema.communities.deletedAt),
+          sql`${schema.communities.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)}`
+        )
+      );
+    const [communitiesPrev] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.communities)
+      .where(
+        and(
+          isNull(schema.communities.deletedAt),
+          sql`${schema.communities.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)} * 2`,
+          sql`${schema.communities.createdAt} < now() - interval ${sql.raw(`'${intervalStr}'`)}`
+        )
+      );
 
-    // 5. Tournaments
-    const [tournamentsTotal] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.tournaments);
-    const [tournamentsCurrent] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.tournaments).where(sql`${schema.tournaments.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)}`);
-    const [tournamentsPrev] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.tournaments).where(and(sql`${schema.tournaments.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)} * 2`, sql`${schema.tournaments.createdAt} < now() - interval ${sql.raw(`'${intervalStr}'`)}`));
+    // 5. Tournaments (Exclude Soft Deleted)
+    const [tournamentsTotal] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tournaments)
+      .where(isNull(schema.tournaments.deletedAt));
+    const [tournamentsCurrent] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tournaments)
+      .where(
+        and(
+          isNull(schema.tournaments.deletedAt),
+          sql`${schema.tournaments.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)}`
+        )
+      );
+    const [tournamentsPrev] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tournaments)
+      .where(
+        and(
+          isNull(schema.tournaments.deletedAt),
+          sql`${schema.tournaments.createdAt} >= now() - interval ${sql.raw(`'${intervalStr}'`)} * 2`,
+          sql`${schema.tournaments.createdAt} < now() - interval ${sql.raw(`'${intervalStr}'`)}`
+        )
+      );
 
     // Calculate growth percentages
     const calcGrowth = (curr: number, prev: number) => {
@@ -961,7 +1021,7 @@ export class AdminService {
     return updatedReport;
   }
 
-  async suspendTournament(tournamentId: string, _adminId: string) {
+  async suspendTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -972,10 +1032,22 @@ export class AdminService {
       throw new NotFoundException('Tournament not found');
     }
 
+    if (tournament.status === 'SUSPENDED' || tournament.status === 'CANCELLED') {
+      throw new BadRequestException('Tournament is already suspended or cancelled');
+    }
+
+    // Save previous status inside tournamentConfig JSON
+    const currentConfig = (tournament.tournamentConfig || {}) as Record<string, any>;
+    const updatedConfig = {
+      ...currentConfig,
+      previousStatus: tournament.status,
+    };
+
     const [updatedTournament] = await this.db
       .update(schema.tournaments)
       .set({
         status: 'SUSPENDED',
+        tournamentConfig: updatedConfig,
         updatedAt: new Date(),
       })
       .where(eq(schema.tournaments.id, tournamentId))
@@ -992,7 +1064,7 @@ export class AdminService {
     return updatedTournament;
   }
 
-  async unsuspendTournament(tournamentId: string, _adminId: string) {
+  async unsuspendTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1003,10 +1075,18 @@ export class AdminService {
       throw new NotFoundException('Tournament not found');
     }
 
+    if (tournament.status !== 'SUSPENDED') {
+      throw new BadRequestException('Tournament is not suspended');
+    }
+
+    // Restore previous status from tournamentConfig
+    const config = (tournament.tournamentConfig || {}) as Record<string, any>;
+    const restoreStatus = config.previousStatus || 'UPCOMING';
+
     const [updatedTournament] = await this.db
       .update(schema.tournaments)
       .set({
-        status: 'ONGOING',
+        status: restoreStatus,
         updatedAt: new Date(),
       })
       .where(eq(schema.tournaments.id, tournamentId))
@@ -1023,7 +1103,7 @@ export class AdminService {
     return updatedTournament;
   }
 
-  async approveTournament(tournamentId: string, _adminId: string) {
+  async approveTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1058,7 +1138,7 @@ export class AdminService {
     return updatedTournament;
   }
 
-  async rejectTournament(tournamentId: string, _adminId: string) {
+  async rejectTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1093,7 +1173,7 @@ export class AdminService {
     return updatedTournament;
   }
 
-  async banTournament(tournamentId: string, _adminId: string) {
+  async banTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1104,10 +1184,18 @@ export class AdminService {
       throw new NotFoundException('Tournament not found');
     }
 
+    // Save previous status inside tournamentConfig JSON
+    const currentConfig = (tournament.tournamentConfig || {}) as Record<string, any>;
+    const updatedConfig = {
+      ...currentConfig,
+      previousStatus: tournament.status,
+    };
+
     const [updatedTournament] = await this.db
       .update(schema.tournaments)
       .set({
         status: 'CANCELLED',
+        tournamentConfig: updatedConfig,
         updatedAt: new Date(),
       })
       .where(eq(schema.tournaments.id, tournamentId))
@@ -1124,7 +1212,7 @@ export class AdminService {
     return updatedTournament;
   }
 
-  async approveDeleteTournament(tournamentId: string, adminId: string) {
+  async approveDeleteTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1167,6 +1255,11 @@ export class AdminService {
         }
       }
 
+      // Delete any notifications referencing this tournament
+      await tx
+        .delete(schema.notifications)
+        .where(like(schema.notifications.redirectUrl, `%/${tournamentId}%`));
+
       if (tournament.parentId) {
         const siblings = await tx
           .select()
@@ -1182,6 +1275,11 @@ export class AdminService {
             .update(schema.parentTournaments)
             .set({ deletedAt: new Date(), updatedAt: new Date() })
             .where(eq(schema.parentTournaments.id, tournament.parentId));
+
+          // Delete notifications referencing the parent tournament too
+          await tx
+            .delete(schema.notifications)
+            .where(like(schema.notifications.redirectUrl, `%/${tournament.parentId}%`));
         }
       }
 
@@ -1198,7 +1296,7 @@ export class AdminService {
     return deletedTournament;
   }
 
-  async rejectDeleteTournament(tournamentId: string, adminId: string) {
+  async rejectDeleteTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)

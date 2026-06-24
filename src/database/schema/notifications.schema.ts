@@ -40,6 +40,24 @@ export const matchComments = pgTable('match_comments', {
     .notNull(),
 });
 
+export const matchMutedUsers = pgTable('match_muted_users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  matchId: uuid('match_id')
+    .references(() => matches.id, { onDelete: 'cascade' })
+    .notNull(),
+  userId: uuid('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  mutedBy: uuid('muted_by')
+    .references(() => users.id, { onDelete: 'set null' }),
+  reason: text('reason'),
+  type: varchar('type', { length: 20 }).default('MUTE').notNull(), // MUTE | BAN
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export const matchReactions = pgTable('match_reactions', {
   id: uuid('id').primaryKey().defaultRandom(),
   matchId: uuid('match_id')
