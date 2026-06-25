@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { MatchesRepository } from './matches.repository';
+import { MATCH_OPERATION_ACTIONS, MatchOperationAction, OperateMatchDto } from './dto/operate-match.dto';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
@@ -7,7 +8,6 @@ import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { MuteActionDto } from './dto/mute-action.dto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import {
   buildMatchCompletedNotification,
@@ -28,6 +28,126 @@ export class MatchesService {
 
   private isAdmin(user: JwtPayload) {
     return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
+  }
+
+  private resolveOperationalWinner(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+    winnerId?: string,
+  ) {
+    if (!match) {
+      throw new NotFoundException('Match not found');
+    }
+    if (!winnerId) {
+      throw new BadRequestException('Phải chỉ định đội thắng cho quyết định nghiệp vụ này.');
+    }
+    if (winnerId !== match.participant1Id && winnerId !== match.participant2Id) {
+      throw new BadRequestException('Người thắng phải thuộc một trong hai participant của trận.');
+    }
+    return winnerId;
+  }
+
+  private async finalizeCompletedMatch(
+    existing: Awaited<ReturnType<MatchesRepository['findById']>>,
+    matchId: string,
+    winnerId: string,
+    auditUserId: string | null,
+    overrideOutcome?: {
+      p1SetsWon: number;
+      p2SetsWon: number;
+      scoreDetails?: Record<string, unknown> | null;
+    },
+  ) {
+    if (!existing) {
+      throw new NotFoundException('Match not found');
+    }
+
+    const isRoundRobin = existing.stage?.type === 'ROUND_ROBIN';
+
+    const updatedMatch = await this.matchesRepository.completeMatch(matchId, winnerId, {
+      nextMatchId: existing.nextMatchId,
+      loserNextMatchId: existing.loserNextMatchId,
+      matchOrder: existing.matchOrder,
+      participant1Id: existing.participant1Id,
+      participant2Id: existing.participant2Id,
+      groupId: existing.groupId,
+      isRoundRobin,
+      p1SetsWon: overrideOutcome?.p1SetsWon ?? existing.p1SetsWon,
+      p2SetsWon: overrideOutcome?.p2SetsWon ?? existing.p2SetsWon,
+      scoreDetails:
+        overrideOutcome?.scoreDetails ??
+        (existing.scoreDetails as Record<string, unknown> | null | undefined),
+      auditUserId,
+    });
+
+    try {
+      await this.redisService.del(`match:live:${matchId}`);
+    } catch (err) {
+      console.error('Failed to delete live score cache:', err);
+    }
+
+    if (existing.tournament) {
+      const tournament = existing.tournament;
+      const scope = tournament.tournamentType === 'CLUB' ? 'COMMUNITY' : 'PUBLIC';
+      const loserId = winnerId === existing.participant1Id ? existing.participant2Id : existing.participant1Id;
+
+      if (winnerId && loserId) {
+        try {
+          await this.rankingsService.processMatchResult(
+            matchId,
+            winnerId,
+            loserId,
+            tournament.categoryId,
+            tournament.matchType,
+            scope,
+            tournament.communityId || undefined,
+            (tournament as unknown as Record<string, unknown>).genderRestriction as string | undefined,
+          );
+        } catch (err) {
+          console.error('Failed to update ELO after match completion:', err.message);
+        }
+      }
+    }
+
+    if (existing.tournamentId) {
+      try {
+        const allCompleted = await this.matchesRepository.checkAllMatchesCompleted(existing.tournamentId);
+        if (allCompleted) {
+          await this.matchesRepository.updateTournamentStatus(existing.tournamentId, 'COMPLETED');
+        }
+      } catch (err) {
+        console.error('Failed to auto-complete tournament:', err.message);
+      }
+    }
+
+    this.liveScoreGateway.broadcastMatchStatus(matchId, updatedMatch);
+    this.liveScoreGateway.broadcastScoreUpdate(matchId, updatedMatch);
+
+    try {
+      const participantIds: string[] = [];
+      if (existing.participant1Id) participantIds.push(existing.participant1Id);
+      if (existing.participant2Id) participantIds.push(existing.participant2Id);
+
+      if (participantIds.length > 0) {
+        const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+        for (const roster of rosters) {
+          await this.notificationsService.sendNotification(
+            buildMatchCompletedNotification({
+              receiverId: roster.userId,
+              tournamentId: existing.tournamentId,
+              tournamentName: existing.tournament?.name || 'giải đấu',
+              divisionId:
+                existing.participant1?.tournamentDivisionId ||
+                existing.participant2?.tournamentDivisionId ||
+                undefined,
+            }),
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Failed to send MATCH_COMPLETED notifications:', err);
+    }
+
+    return updatedMatch;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -256,7 +376,7 @@ export class MatchesService {
         if (p2SetsWon !== undefined) await this.redisService.hset(cacheKey, 'p2SetsWon', String(p2SetsWon));
         if (scoreDetails) await this.redisService.hset(cacheKey, 'scoreDetails', JSON.stringify(scoreDetails));
         if (winnerId) await this.redisService.hset(cacheKey, 'winnerId', winnerId);
-        
+
         // TTL 24 hours
         await this.redisService.getClient().expire(cacheKey, 86400);
       } catch (err) {
@@ -311,96 +431,7 @@ export class MatchesService {
         throw new BadRequestException('Chưa xác định được người chiến thắng. Vui lòng cập nhật tỉ số trước.');
       }
 
-      // Perform transaction completion, auto-advancing, and standings
-      const isRoundRobin = existing.stage?.type === 'ROUND_ROBIN';
-      
-      const updatedMatch = await this.matchesRepository.completeMatch(id, winnerId, {
-        nextMatchId: existing.nextMatchId,
-        loserNextMatchId: existing.loserNextMatchId,
-        matchOrder: existing.matchOrder,
-        participant1Id: existing.participant1Id,
-        participant2Id: existing.participant2Id,
-        groupId: existing.groupId,
-        isRoundRobin,
-        p1SetsWon: existing.p1SetsWon,
-        p2SetsWon: existing.p2SetsWon,
-        scoreDetails: existing.scoreDetails as Record<string, string> | null | undefined,
-      });
-
-      // Clear the live score cache in Redis
-      try {
-        await this.redisService.del(`match:live:${id}`);
-      } catch (err) {
-        console.error('Failed to delete live score cache:', err);
-      }
-
-      // Trigger ELO Calculation (Async but we await it to catch errors or complete sequentially)
-      if (existing.tournament) {
-        const tournament = existing.tournament;
-        const scope = tournament.tournamentType === 'CLUB' ? 'COMMUNITY' : 'PUBLIC';
-        const loserId = (winnerId === existing.participant1Id) ? existing.participant2Id : existing.participant1Id;
-
-        if (winnerId && loserId) {
-          try {
-            await this.rankingsService.processMatchResult(
-              id,
-              winnerId,
-              loserId,
-              tournament.categoryId,
-              tournament.matchType,
-              scope,
-              tournament.communityId || undefined,
-              (tournament as unknown as Record<string, unknown>).genderRestriction as string | undefined,
-            );
-          } catch (err) {
-            console.error('Failed to update ELO after match completion:', err.message);
-          }
-        }
-      }
-
-      // Check if all matches in the tournament are completed, and if so, transition tournament to COMPLETED
-      if (existing.tournamentId) {
-        try {
-          const allCompleted = await this.matchesRepository.checkAllMatchesCompleted(existing.tournamentId);
-          if (allCompleted) {
-            await this.matchesRepository.updateTournamentStatus(existing.tournamentId, 'COMPLETED');
-          }
-        } catch (err) {
-          console.error('Failed to auto-complete tournament:', err.message);
-        }
-      }
-
-      // Broadcast status and bracket updates real-time
-      this.liveScoreGateway.broadcastMatchStatus(id, updatedMatch);
-      this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
-
-      // Send notifications to both team's members
-      try {
-        const participantIds: string[] = [];
-        if (existing.participant1Id) participantIds.push(existing.participant1Id);
-        if (existing.participant2Id) participantIds.push(existing.participant2Id);
-
-        if (participantIds.length > 0) {
-          const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
-          for (const roster of rosters) {
-            await this.notificationsService.sendNotification(
-              buildMatchCompletedNotification({
-                receiverId: roster.userId,
-                tournamentId: existing.tournamentId,
-                tournamentName: existing.tournament?.name || 'giải đấu',
-                divisionId:
-                  existing.participant1?.tournamentDivisionId ||
-                  existing.participant2?.tournamentDivisionId ||
-                  undefined,
-              }),
-            );
-          }
-        }
-      } catch (err) {
-        console.error('Failed to send MATCH_COMPLETED notifications:', err);
-      }
-
-      return updatedMatch;
+      return this.finalizeCompletedMatch(existing, id, winnerId, user.sub);
     } else {
       // ONGOING or SCHEDULED
       const updatedMatch = await this.matchesRepository.updateStatus(
@@ -413,6 +444,54 @@ export class MatchesService {
 
       return updatedMatch;
     }
+  }
+
+  async operateMatch(
+    id: string,
+    user: JwtPayload,
+    data: OperateMatchDto,
+  ) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isAdmin = this.isAdmin(user);
+    if (!isAdmin && !isCreator) {
+      throw new ForbiddenException('Bạn không có quyền áp dụng quyết định nghiệp vụ cho trận này');
+    }
+
+    const reason = data.reason.trim();
+    const specialResult = {
+      action: data.action,
+      reason,
+      decidedAt: new Date().toISOString(),
+      decidedBy: user.sub,
+    };
+
+    const currentScoreDetails =
+      existing.scoreDetails && typeof existing.scoreDetails === 'object'
+        ? (existing.scoreDetails as Record<string, unknown>)
+        : {};
+
+    const scoreDetails = {
+      ...currentScoreDetails,
+      specialResult,
+    };
+
+    if (!MATCH_OPERATION_ACTIONS.includes(data.action as MatchOperationAction)) {
+      throw new BadRequestException('Hành động nghiệp vụ không hợp lệ.');
+    }
+
+    const winnerId = this.resolveOperationalWinner(existing, data.winnerId);
+    const isParticipant1Winner = winnerId === existing.participant1Id;
+    const nextP1SetsWon = isParticipant1Winner ? Math.max(existing.p1SetsWon, 2) : 0;
+    const nextP2SetsWon = isParticipant1Winner ? 0 : Math.max(existing.p2SetsWon, 2);
+
+    return this.finalizeCompletedMatch(existing, id, winnerId, user.sub, {
+      p1SetsWon: nextP1SetsWon,
+      p2SetsWon: nextP2SetsWon,
+      scoreDetails,
+    });
   }
 
   async getComments(id: string) {
@@ -448,6 +527,7 @@ export class MatchesService {
 
   async updateSchedule(
     id: string,
+    user: JwtPayload,
     data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string; matchConfig?: Record<string, any> },
   ) {
     const existing = await this.matchesRepository.findById(id);
@@ -460,14 +540,16 @@ export class MatchesService {
       }
     }
 
-    const updatedMatch = await this.matchesRepository.updateSchedule(id, data);
-    this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
+    const updatedMatch = await this.matchesRepository.updateSchedule(id, user.sub, data);
+    if (updatedMatch) {
+      this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
+    }
 
     if (data.refereeId && data.refereeId !== existing.refereeId) {
       try {
         const matchName = `${existing.participant1?.teamName || 'TBD'} vs ${existing.participant2?.teamName || 'TBD'}`;
-        const scheduledTime = data.scheduledAt 
-          ? new Date(data.scheduledAt).toLocaleString('vi-VN') 
+        const scheduledTime = data.scheduledAt
+          ? new Date(data.scheduledAt).toLocaleString('vi-VN')
           : (existing.scheduledAt ? new Date(existing.scheduledAt).toLocaleString('vi-VN') : 'chưa xác định');
 
         await this.notificationsService.sendNotification(
@@ -488,7 +570,7 @@ export class MatchesService {
     }
 
     // Trigger notification when scheduling/updating time or court info
-    const isScheduleChanged = 
+    const isScheduleChanged =
       (data.scheduledAt && data.scheduledAt !== (existing.scheduledAt ? new Date(existing.scheduledAt).toISOString() : null)) ||
       (data.courtName && data.courtName !== existing.courtName) ||
       (data.courtAddress && data.courtAddress !== existing.courtAddress);
@@ -501,9 +583,9 @@ export class MatchesService {
 
         if (participantIds.length > 0) {
           const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
-          
-          const scheduledTime = data.scheduledAt 
-            ? new Date(data.scheduledAt).toLocaleString('vi-VN') 
+
+          const scheduledTime = data.scheduledAt
+            ? new Date(data.scheduledAt).toLocaleString('vi-VN')
             : (existing.scheduledAt ? new Date(existing.scheduledAt).toLocaleString('vi-VN') : 'chưa xác định');
           const court = data.courtName || existing.courtName || 'Chưa xếp sân';
 
@@ -549,7 +631,7 @@ export class MatchesService {
       }
     }
 
-    return this.updateSchedule(id, { refereeId });
+    return this.updateSchedule(id, user, { refereeId });
   }
 
   async muteUser(

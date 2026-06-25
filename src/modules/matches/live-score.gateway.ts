@@ -8,6 +8,7 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { Logger } from '@nestjs/common';
 import { MatchBroadcastData } from './interfaces/match-broadcast.interface';
 import { corsOptions } from '../../config/cors.config';
 
@@ -20,11 +21,12 @@ export class LiveScoreGateway
 {
   @WebSocketServer()
   server: Server;
+  private readonly logger = new Logger(LiveScoreGateway.name);
 
   private readonly clientMatchRooms = new Map<string, Set<string>>();
 
   handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+    this.logger.log(`Client connected: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
@@ -35,7 +37,7 @@ export class LiveScoreGateway
       });
       this.clientMatchRooms.delete(client.id);
     }
-    console.log(`Client disconnected: ${client.id}`);
+    this.logger.log(`Client disconnected: ${client.id}`);
   }
 
   @SubscribeMessage('joinMatch')
@@ -49,7 +51,7 @@ export class LiveScoreGateway
     joinedMatchIds.add(matchId);
     this.clientMatchRooms.set(client.id, joinedMatchIds);
     this.broadcastViewerCount(matchId);
-    console.log(`Client ${client.id} joined room ${room}`);
+    this.logger.log(`Client ${client.id} joined room ${room}`);
     return { event: 'joined', data: room };
   }
 
@@ -70,7 +72,7 @@ export class LiveScoreGateway
       }
     }
     this.broadcastViewerCount(matchId);
-    console.log(`Client ${client.id} left room ${room}`);
+    this.logger.log(`Client ${client.id} left room ${room}`);
     return { event: 'left', data: room };
   }
 

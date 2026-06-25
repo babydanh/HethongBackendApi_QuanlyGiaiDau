@@ -1,9 +1,9 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, or, count, SQL, inArray, notInArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, or, count, SQL, inArray, notInArray, isNull, sql, gte, lte, ne } from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
@@ -367,12 +367,13 @@ export class MatchesRepository {
         .where(eq(schema.matches.id, id))
         .returning();
 
+      const existingFlat = existing as unknown as Record<string, unknown>;
       const oldValues = {
-        p1SetsWon: existing.p1SetsWon,
-        p2SetsWon: existing.p2SetsWon,
-        scoreDetails: existing.scoreDetails,
-        winnerId: existing.winnerId,
-        status: existing.status,
+        p1SetsWon: existingFlat['p1SetsWon'],
+        p2SetsWon: existingFlat['p2SetsWon'],
+        scoreDetails: existingFlat['scoreDetails'],
+        winnerId: existingFlat['winnerId'],
+        status: existingFlat['status'],
       };
       const newValues = {
         p1SetsWon: up.p1SetsWon,
@@ -423,7 +424,8 @@ export class MatchesRepository {
       isRoundRobin: boolean;
       p1SetsWon: number;
       p2SetsWon: number;
-      scoreDetails: Record<string, string> | null | undefined;
+      scoreDetails: Record<string, unknown> | null | undefined;
+      auditUserId?: string | null;
     }
   ) {
     return await this.db.transaction(async (tx) => {
@@ -463,7 +465,7 @@ export class MatchesRepository {
           winnerId: updated.winnerId,
           status: updated.status,
         };
-        await this.auditService.logUpdate(tx, null, 'matches', id, oldValues, newValues);
+        await this.auditService.logUpdate(tx, matchDetails.auditUserId ?? null, 'matches', id, oldValues, newValues);
       }
 
       // 2. Auto-advance Winner
@@ -680,22 +682,63 @@ export class MatchesRepository {
 
   async updateSchedule(
     id: string,
+    userId: string | null,
     data: { courtName?: string | null; courtAddress?: string | null; refereeId?: string | null; scheduledAt?: string | null; matchConfig?: Record<string, any> | null },
   ) {
-    const [updated] = await this.db
-      .update(schema.matches)
-      .set({
-        courtName: data.courtName || null,
-        courtAddress: data.courtAddress || null,
-        refereeId: data.refereeId || null,
-        scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
-        ...(data.matchConfig !== undefined && { matchConfig: data.matchConfig || {} }),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.matches.id, id))
-      .returning();
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.matches)
+        .where(eq(schema.matches.id, id))
+        .limit(1);
 
-    return updated;
+      // Kiểm tra scheduling conflict: cùng sân, cùng giải, trong khung ±2h
+      if (data.courtName && data.scheduledAt && existing) {
+        const scheduledDate = new Date(data.scheduledAt);
+        const conflictStart = new Date(scheduledDate.getTime() - 2 * 60 * 60 * 1000);
+        const conflictEnd = new Date(scheduledDate.getTime() + 2 * 60 * 60 * 1000);
+
+        const conflict = await tx
+          .select({ id: schema.matches.id })
+          .from(schema.matches)
+          .where(
+            and(
+              eq(schema.matches.courtName, data.courtName),
+              eq(schema.matches.tournamentId, existing.tournamentId),
+              ne(schema.matches.id, id),
+              isNull(schema.matches.deletedAt),
+              gte(schema.matches.scheduledAt, conflictStart),
+              lte(schema.matches.scheduledAt, conflictEnd),
+            ),
+          )
+          .limit(1);
+
+        if (conflict.length > 0) {
+          throw new BadRequestException(
+            `Sân ${data.courtName} đã có trận đấu khác trong khung giờ này (${conflictStart.toLocaleTimeString('vi-VN')} - ${conflictEnd.toLocaleTimeString('vi-VN')}).`,
+          );
+        }
+      }
+
+      const [updated] = await tx
+        .update(schema.matches)
+        .set({
+          courtName: data.courtName || null,
+          courtAddress: data.courtAddress || null,
+          refereeId: data.refereeId || null,
+          scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
+          ...(data.matchConfig !== undefined && { matchConfig: data.matchConfig || {} }),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.matches.id, id))
+        .returning();
+
+      if (existing && updated) {
+        await this.auditService.logUpdate(tx, userId, 'matches', id, existing, updated);
+      }
+
+      return updated;
+    });
   }
 
   async checkAllMatchesCompleted(tournamentId: string): Promise<boolean> {
@@ -809,5 +852,3 @@ export class MatchesRepository {
     return deleted;
   }
 }
-
-

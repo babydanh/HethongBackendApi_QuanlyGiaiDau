@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { MatchesService } from './matches.service';
 import { QueryMatchDto } from './dto/query-match.dto';
+import { OperateMatchDto } from './dto/operate-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { UpdateMatchScheduleDto } from './dto/update-match-schedule.dto';
@@ -85,6 +86,18 @@ export class MatchesController {
     return this.matchesService.updateStatus(id, user, updateMatchStatusDto);
   }
 
+  @Patch(':id/operation')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
+  async operateMatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() operateMatchDto: OperateMatchDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.matchesService.operateMatch(id, user, operateMatchDto);
+  }
+
   @Patch(':id/schedule')
   @ApiBearerAuth()
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
@@ -92,8 +105,9 @@ export class MatchesController {
   async updateSchedule(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateMatchScheduleDto: UpdateMatchScheduleDto,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.updateSchedule(id, updateMatchScheduleDto);
+    return this.matchesService.updateSchedule(id, user, updateMatchScheduleDto);
   }
 
   @Patch(':id/assign-referee')
