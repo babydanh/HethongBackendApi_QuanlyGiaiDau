@@ -19,6 +19,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from './interfaces/jwt-payload.interface';
 import { JwtRefreshAuthGuard } from '../../common/guards/jwt-refresh-auth.guard';
+import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { OAuthProfileDto } from './dto/oauth-profile.dto';
 
@@ -28,6 +29,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @UseGuards(new RateLimitGuard(5, 60000))
   @Post('register')
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, description: 'User successfully registered' })
@@ -37,6 +39,7 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(new RateLimitGuard(10, 60000))
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login user' })
@@ -230,6 +233,8 @@ export class AuthController {
     return await this.authService.googleMobileLogin(body.idToken, userAgent, ipAddress);
   }
 
+  @Public()
+  @UseGuards(new RateLimitGuard(5, 60000))
   @Post('verify-email/request')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Yêu cầu gửi email kích thực (Mock)' })
@@ -237,6 +242,8 @@ export class AuthController {
     return await this.authService.requestEmailVerification(user.sub);
   }
 
+  @Public()
+  @UseGuards(new RateLimitGuard(10, 60000))
   @Post('verify-email/confirm')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Xác thực kích hoạt email bằng token' })
@@ -244,6 +251,8 @@ export class AuthController {
     return await this.authService.confirmEmailVerification(user.sub, body.token);
   }
 
+  @Public()
+  @UseGuards(new RateLimitGuard(5, 60000))
   @Post('verify-phone/request')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Yêu cầu gửi OTP SMS kích thực số điện thoại (Mock)' })
@@ -251,10 +260,37 @@ export class AuthController {
     return await this.authService.requestPhoneVerification(user.sub, body.phoneNumber);
   }
 
+  @Public()
+  @UseGuards(new RateLimitGuard(10, 60000))
   @Post('verify-phone/confirm')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Xác thực OTP số điện thoại' })
   async confirmPhoneVerification(@CurrentUser() user: JwtPayload, @Body() body: { code: string }) {
     return await this.authService.confirmPhoneVerification(user.sub, body.code);
+  }
+
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đăng xuất tất cả thiết bị' })
+  async logoutAll(@CurrentUser() user: JwtPayload) {
+    return await this.authService.logoutAllSessions(user.sub);
+  }
+
+  @Public()
+  @UseGuards(new RateLimitGuard(5, 60000))
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Yêu cầu đặt lại mật khẩu' })
+  async forgotPassword(@Body() body: { email: string }) {
+    return await this.authService.forgotPassword(body.email);
+  }
+
+  @Public()
+  @UseGuards(new RateLimitGuard(10, 60000))
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đặt lại mật khẩu với token' })
+  async resetPassword(@Body() body: { token: string; password: string }) {
+    return await this.authService.resetPassword(body.token, body.password);
   }
 }

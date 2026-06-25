@@ -2,6 +2,8 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  Inject,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -10,6 +12,10 @@ import * as crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { eq, and, gt, sql } from 'drizzle-orm';
+import { PG_CONNECTION } from '../../database/database.module';
+import type { AppDb } from '../../database/db.types';
+import * as schema from '../../database/schema';
 import { AuthRepository } from './auth.repository';
 import { UsersRepository } from '../users/users.repository';
 import { RegisterDto } from './dto/register.dto';
@@ -22,10 +28,10 @@ import { ERROR_MESSAGES } from '../../common/constants/error-messages';
 @Injectable()
 export class AuthService {
   private readonly googleClient: OAuth2Client;
-  private readonly emailVerificationCodes = new Map<string, { code: string; expiresAt: Date }>();
-  private readonly phoneVerificationCodes = new Map<string, { code: string; expiresAt: Date }>();
+  private readonly logger = new Logger(AuthService.name);
 
   constructor(
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly authRepository: AuthRepository,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -99,13 +105,33 @@ export class AuthService {
     userAgent?: string,
     ipAddress?: string,
   ) {
-    const session =
-      await this.authRepository.findSessionByRefreshToken(refreshToken);
-    if (!session || session.isRevoked || session.expiresAt < new Date()) {
+    // Bước 1: Atomic revoke — đánh dấu token này là revoked ngay lập tức
+    // Nếu có 2 request đến cùng lúc, chỉ 1 cái thành công (affectedRows > 0)
+    const revokeResult = await this.db
+      .update(schema.sessions)
+      .set({ isRevoked: true, revokedAt: new Date() })
+      .where(
+        and(
+          eq(schema.sessions.refreshToken, refreshToken),
+          eq(schema.sessions.isRevoked, false),
+        ),
+      )
+      .returning();
+
+    if (revokeResult.length === 0) {
+      // Token đã được sử dụng (replay detected!) — revoke tất cả sessions của user
+      // Tìm user từ token cũ (dù đã revoked, ta vẫn có thể tra cứu để revoke all)
+      const oldSession = await this.authRepository.findSessionByRefreshToken(refreshToken);
+      if (oldSession) {
+        await this.db
+          .update(schema.sessions)
+          .set({ isRevoked: true, revokedAt: new Date() })
+          .where(eq(schema.sessions.userId, oldSession.userId));
+      }
       throw new UnauthorizedException(ERROR_MESSAGES.TOKEN_INVALID);
     }
 
-    // Verify the token
+    // Bước 2: Verify token
     try {
       const payload: { sub: string; email: string } = this.jwtService.verify(
         refreshToken,
@@ -113,9 +139,6 @@ export class AuthService {
           secret: this.configService.get<string>('auth.jwtRefreshSecret'),
         },
       );
-
-      // Revoke old session to prevent reuse
-      await this.authRepository.revokeSessionByToken(refreshToken);
 
       const roles = await this.authRepository.findUserRoles(payload.sub);
 
@@ -305,10 +328,17 @@ export class AuthService {
     }
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-    this.emailVerificationCodes.set(userId, { code: token, expiresAt });
+
+    // Lưu OTP vào DB thay vì in-memory Map
+    await this.db.insert(schema.otpCodes).values({
+      userId,
+      type: 'EMAIL_VERIFY',
+      code: token,
+      expiresAt,
+    });
 
     const activationLink = `http://localhost:3001/auth/verify-email?token=${token}`;
-    
+
     // Add job to BullMQ queue
     await this.emailQueue.add('send-verification', {
       to: user.email,
@@ -332,11 +362,29 @@ export class AuthService {
   }
 
   async confirmEmailVerification(userId: string, token: string) {
-    const record = this.emailVerificationCodes.get(userId);
-    if (!record || record.code !== token || record.expiresAt < new Date()) {
+    const [record] = await this.db
+      .select()
+      .from(schema.otpCodes)
+      .where(
+        and(
+          eq(schema.otpCodes.userId, userId),
+          eq(schema.otpCodes.type, 'EMAIL_VERIFY'),
+          eq(schema.otpCodes.code, token),
+          eq(schema.otpCodes.isUsed, false),
+          gt(schema.otpCodes.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    if (!record) {
       throw new BadRequestException('Mã kích hoạt không hợp lệ hoặc đã hết hạn');
     }
-    this.emailVerificationCodes.delete(userId);
+
+    await this.db
+      .update(schema.otpCodes)
+      .set({ isUsed: true })
+      .where(eq(schema.otpCodes.id, record.id));
+
     await this.usersRepository.verifyEmail(userId);
     return { success: true, message: 'Email đã được xác thực thành công' };
   }
@@ -353,31 +401,156 @@ export class AuthService {
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
-    this.phoneVerificationCodes.set(userId, { code: otp, expiresAt });
+
+    // Lưu OTP vào DB thay vì in-memory Map
+    await this.db.insert(schema.otpCodes).values({
+      userId,
+      type: 'PHONE_VERIFY',
+      code: otp,
+      expiresAt,
+    });
 
     // Update phone number in profile if it was explicitly provided and differs
     if (phoneNumber && phoneNumber !== user.profile?.phoneNumber) {
       await this.usersRepository.updateProfile(userId, { phoneNumber });
     }
 
-    // Mock send SMS log
-    console.log(
-      `\n[MOCK SMS VERIFICATION] --------------------------------------------------\n` +
-      `Gửi OTP SMS tới số điện thoại: ${targetPhone}\n` +
-      `Mã OTP: ${otp}\n` +
-      `---------------------------------------------------------------------------\n`
-    );
+    // Mock send SMS (production: replace with SMS gateway)
+    this.logger.log(`[MOCK SMS] OTP sent to ${targetPhone}: ${otp}`);
 
     return { message: 'Mã OTP xác thực số điện thoại đã được gửi (Mocked)' };
   }
 
   async confirmPhoneVerification(userId: string, code: string) {
-    const record = this.phoneVerificationCodes.get(userId);
-    if (!record || record.code !== code || record.expiresAt < new Date()) {
+    const [record] = await this.db
+      .select()
+      .from(schema.otpCodes)
+      .where(
+        and(
+          eq(schema.otpCodes.userId, userId),
+          eq(schema.otpCodes.type, 'PHONE_VERIFY'),
+          eq(schema.otpCodes.code, code),
+          eq(schema.otpCodes.isUsed, false),
+          gt(schema.otpCodes.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    if (!record) {
       throw new BadRequestException('Mã OTP không hợp lệ hoặc đã hết hạn');
     }
-    this.phoneVerificationCodes.delete(userId);
+
+    await this.db
+      .update(schema.otpCodes)
+      .set({ isUsed: true })
+      .where(eq(schema.otpCodes.id, record.id));
+
     await this.usersRepository.verifyPhone(userId);
     return { success: true, message: 'Số điện thoại đã được xác thực thành công' };
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.authRepository.findUserByEmail(email);
+    if (!user) {
+      // Không tiết lộ user có tồn tại hay không — trả về success chung
+      return { message: 'Nếu email tồn tại, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu.' };
+    }
+
+    // Rate limit: max 5 lần gửi mail reset password trong 24h
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [recentCount] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.otpCodes)
+      .where(
+        and(
+          eq(schema.otpCodes.userId, user.id),
+          eq(schema.otpCodes.type, 'PASSWORD_RESET'),
+          gt(schema.otpCodes.createdAt, last24h),
+        ),
+      );
+
+    if (recentCount.count >= 5) {
+      return { message: 'Bạn đã yêu cầu quá nhiều lần. Vui lòng thử lại sau 24h.' };
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+    await this.db.insert(schema.otpCodes).values({
+      userId: user.id,
+      type: 'PASSWORD_RESET',
+      code: token,
+      expiresAt,
+    });
+
+    // Gửi email đặt lại mật khẩu qua queue
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/reset-password?token=${token}`;
+    await this.emailQueue.add('send-password-reset', {
+      to: email,
+      subject: 'Đặt lại mật khẩu - VNDC Sport',
+      html: `<div style="font-family:sans-serif;padding:20px;max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;">
+        <h2 style="color:#2563eb;">Đặt lại mật khẩu</h2>
+        <p>Chào bạn,</p>
+        <p>Nhấp vào nút bên dưới để đặt lại mật khẩu (hiệu lực 15 phút):</p>
+        <div style="margin:30px 0;text-align:center;">
+          <a href="${resetLink}" style="background-color:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">
+            Đặt lại mật khẩu
+          </a>
+        </div>
+        <p style="color:#6b7280;font-size:12px;">Nếu bạn không yêu cầu, bỏ qua email này.</p></div>`,
+    });
+
+    return { message: 'Nếu email tồn tại, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu.' };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const now = new Date();
+
+    const [record] = await this.db
+      .select()
+      .from(schema.otpCodes)
+      .where(
+        and(
+          eq(schema.otpCodes.type, 'PASSWORD_RESET'),
+          eq(schema.otpCodes.code, token),
+          eq(schema.otpCodes.isUsed, false),
+          gt(schema.otpCodes.expiresAt, now),
+        ),
+      )
+      .limit(1);
+
+    if (!record) {
+      throw new BadRequestException('Token không hợp lệ hoặc đã hết hạn');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({ passwordHash: hashedPassword })
+        .where(eq(schema.users.id, record.userId));
+
+      await tx
+        .update(schema.otpCodes)
+        .set({ isUsed: true })
+        .where(eq(schema.otpCodes.id, record.id));
+
+      // Revoke all sessions for this user
+      await tx
+        .update(schema.sessions)
+        .set({ isRevoked: true, revokedAt: new Date() })
+        .where(eq(schema.sessions.userId, record.userId));
+    });
+
+    return { message: 'Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại.' };
+  }
+
+  async logoutAllSessions(userId: string) {
+    await this.db
+      .update(schema.sessions)
+      .set({ isRevoked: true, revokedAt: new Date() })
+      .where(eq(schema.sessions.userId, userId));
+    return { success: true };
   }
 }
