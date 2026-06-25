@@ -24,13 +24,9 @@ export class EloEngineService {
     // 2. Actual Score
     const actual = isWin ? 1.0 : 0.0;
 
-    // 3. K-Factor
-    let K = 16;
-    if (matchesPlayed < 10) {
-      K = 40; // Tân binh
-    } else if (matchesPlayed < 30) {
-      K = 24; // Đang ổn định
-    }
+    // 3. K-Factor (continuous formula thay vì step)
+    // matchesPlayed = 0 → K=40, 10→20, 30→10, 100→~3.6
+    const K = Math.max(4, Math.round(40 / (1 + matchesPlayed / 10)));
 
     // 4. Win Streak Bonus (chỉ cho bên thắng)
     let streakMultiplier = 1.0;

@@ -1,18 +1,23 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Inject } from '@nestjs/common';
 import { RankingsRepository } from './rankings.repository';
 import { EloEngineService } from './elo-engine.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
 import { eq, and, isNull, desc, sql, or, asc, gte, lt } from 'drizzle-orm';
-import type { AppTx } from '../../database/db.types';
+import type { AppTx, AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { RedisService } from '../../providers/redis/redis.service';
+import { PG_CONNECTION } from '../../database/database.module';
 
 type Transaction = AppTx;
+
+// ELO Shield: ngưỡng kích hoạt bảo vệ khi user vượt qua mốc ELO nhất định
+const ELO_SHIELD_BOUNDARIES = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800] as const;
 
 @Injectable()
 export class RankingsService {
   constructor(
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly rankingsRepository: RankingsRepository,
     private readonly eloEngineService: EloEngineService,
     private readonly redisService: RedisService,
@@ -31,7 +36,7 @@ export class RankingsService {
   }
 
   async getLeaderboard(query: QueryRankingDto) {
-    const cacheKey = `leaderboard:cat:${query.categoryId}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}`;
+    const cacheKey = `leaderboard:cat:${query.categoryId}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:page:${query.page || 1}:limit:${query.limit || 20}`;
     try {
       const cached = await this.redisService.get(cacheKey);
       if (cached) {
@@ -115,13 +120,11 @@ export class RankingsService {
       );
 
       // 3. Update ranks with shield logic
-      const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
-      
       let isWinnerShieldActive = false;
       if (scope === 'PUBLIC') {
         const publicWinnerRank = winnerRank as typeof schema.userRanks.$inferSelect;
         isWinnerShieldActive = !!publicWinnerRank.shieldActive;
-        for (const boundary of boundaries) {
+        for (const boundary of ELO_SHIELD_BOUNDARIES) {
           if (winnerRank.eloPoints < boundary && winnerResult.newElo >= boundary) {
             isWinnerShieldActive = true;
           }
@@ -133,7 +136,7 @@ export class RankingsService {
       if (scope === 'PUBLIC') {
         const publicLoserRank = loserRank as typeof schema.userRanks.$inferSelect;
         isLoserShieldActive = !!publicLoserRank.shieldActive;
-        for (const boundary of boundaries) {
+        for (const boundary of ELO_SHIELD_BOUNDARIES) {
           if (loserRank.eloPoints >= boundary && loserResult.newElo < boundary) {
             if (publicLoserRank.shieldActive) {
               finalLoserElo = boundary;
@@ -364,6 +367,9 @@ export class RankingsService {
         const loserDelta = loserPairResult.changedPoints;
 
         // 6. Calculate scaled deltas for individual winners
+        // Công thức: stronger player → scale < 1 (ít điểm hơn khi thắng)
+        //            weaker player → scale > 1 (nhiều điểm hơn khi thắng - upset bonus)
+        // VD: chênh 500 ELO → scale1=0.375, scale2=1.625
         const wElo1 = winnerRanksList[0].eloPoints;
         const wElo2 = winnerRanksList[1].eloPoints;
         const wDiff = Math.abs(wElo1 - wElo2);
@@ -374,6 +380,8 @@ export class RankingsService {
         const w2Delta = Math.round(winnerDelta * (wElo2 >= wElo1 ? wScale1 : wScale2));
 
         // 7. Calculate scaled deltas for individual losers
+        // Thua với tư cách strong → mất nhiều điểm hơn (scale > 1)
+        // Thua với tư cách weak → mất ít điểm hơn (scale < 1, kỳ vọng đã thua)
         const lElo1 = loserRanksList[0].eloPoints;
         const lElo2 = loserRanksList[1].eloPoints;
         const lDiff = Math.abs(lElo1 - lElo2);
@@ -393,11 +401,10 @@ export class RankingsService {
 
         for (const { rank, delta } of winnersToUpdate) {
           const newElo = rank.eloPoints + delta;
-          const boundaries = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800];
           let isWinnerShieldActive = false;
           if (scope === 'PUBLIC') {
             isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
-            for (const boundary of boundaries) {
+            for (const boundary of ELO_SHIELD_BOUNDARIES) {
               if (rank.eloPoints < boundary && newElo >= boundary) {
                 isWinnerShieldActive = true;
               }
@@ -436,7 +443,7 @@ export class RankingsService {
 
         for (const { rank, delta } of losersToUpdate) {
           const newElo = rank.eloPoints + delta;
-          const boundaries = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800];
+          const boundaries = ELO_SHIELD_BOUNDARIES;
           let finalLoserElo = newElo;
           let isLoserShieldActive = false;
           if (scope === 'PUBLIC') {
@@ -543,11 +550,10 @@ export class RankingsService {
           rank.winStreak,
         );
 
-        const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
         let isWinnerShieldActive = false;
         if (scope === 'PUBLIC') {
           isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
-          for (const boundary of boundaries) {
+          for (const boundary of ELO_SHIELD_BOUNDARIES) {
             if (rank.eloPoints < boundary && result.newElo >= boundary) {
               isWinnerShieldActive = true;
             }
@@ -588,13 +594,12 @@ export class RankingsService {
           rank.winStreak,
         );
 
-        const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
         let finalLoserElo = result.newElo;
         let isLoserShieldActive = false;
         if (scope === 'PUBLIC') {
           const publicRank = rank as typeof schema.userRanks.$inferSelect;
           isLoserShieldActive = !!publicRank.shieldActive;
-          for (const boundary of boundaries) {
+          for (const boundary of ELO_SHIELD_BOUNDARIES) {
             if (rank.eloPoints >= boundary && result.newElo < boundary) {
               if (publicRank.shieldActive) {
                 finalLoserElo = boundary;
@@ -1115,6 +1120,22 @@ export class RankingsService {
       await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
     }
     await this.invalidateLeaderboardCache(categoryId);
+  }
+
+  /**
+   * Safe version of recalculateEloChain — tự tạo transaction riêng, không blocking.
+   * Dùng khi cần recalculate mà không có sẵn transaction từ caller.
+   * Skill: BE Skill 6 (Domain Logic) — chống O(N²) blocking
+   */
+  async recalculateEloChainSafe(
+    playerIds: string[],
+    fromTime: Date,
+    categoryId: string,
+    matchType: string,
+  ) {
+    await this.db.transaction(async (tx) => {
+      await this.recalculateEloChain(tx, playerIds, fromTime, categoryId, matchType);
+    });
   }
 }
 
