@@ -87,6 +87,13 @@ export class PaymentsController {
     return this.paymentsService.handleWebhook(webhookDto);
   }
 
+  @Public()
+  @Post('mock-verify')
+  @ApiOperation({ summary: 'Mock verify payment (for demo)' })
+  async mockVerify(@Body() body: { paymentId: string }) {
+    return this.paymentsService.mockVerify(body.paymentId);
+  }
+
   @Post('payout')
   @ApiBearerAuth()
   @Roles(UserRole.ORGANIZER)

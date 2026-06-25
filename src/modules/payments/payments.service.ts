@@ -74,6 +74,7 @@ export class PaymentsService {
   }
 
   async handleWebhook(payload: WebhookDto) {
+    // TODO: Verify VNPAY HMAC signature (SecureHash) in production
     const payment = await this.paymentsRepository.findPaymentById(
       payload.transactionReference,
     );
@@ -82,6 +83,7 @@ export class PaymentsService {
       throw new NotFoundException('Payment transaction not found');
     }
 
+    // Idempotency: skip if already completed
     if (payment.status === 'COMPLETED') {
       return { message: 'Payment already completed' };
     }
@@ -180,6 +182,15 @@ export class PaymentsService {
       );
       return { message: 'Payment marked as failed' };
     }
+  }
+
+  async mockVerify(paymentId: string) {
+    return this.handleWebhook({
+      transactionReference: paymentId,
+      responseCode: '00',
+      gatewayTransactionId: `MOCK_TXN_${Date.now()}`,
+      rawPayload: { mock: true, timestamp: new Date().toISOString() },
+    });
   }
 
   async requestPayout(organizerId: string, data: PayoutRequestDto) {
