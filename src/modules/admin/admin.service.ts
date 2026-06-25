@@ -888,10 +888,9 @@ export class AdminService {
       const playerIds = players.map(p => p.userId);
       const fromTime = match.completedAt || match.updatedAt;
 
-      // 7. Recalculate ELO chain
+      // 7. Recalculate ELO chain (dùng safe version, không blocking transaction)
       if (playerIds.length > 0) {
-        await this.rankingsService.recalculateEloChain(
-          tx,
+        await this.rankingsService.recalculateEloChainSafe(
           playerIds,
           fromTime,
           tournament.categoryId,

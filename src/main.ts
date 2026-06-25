@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import cookieParser from 'cookie-parser';
@@ -60,9 +60,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`Application is running on: http://localhost:${port}/api/v1`);
-  console.log(
-    `Scalar API Reference is running on: http://localhost:${port}/api/docs`,
-  );
+  Logger.log(`Application is running on: http://localhost:${port}/api/v1`);
+  Logger.log(`Scalar API Reference is running on: http://localhost:${port}/api/docs`);
 }
 bootstrap();
