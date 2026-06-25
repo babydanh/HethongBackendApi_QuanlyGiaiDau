@@ -30,3 +30,34 @@ export enum PaymentStatus {
   FAILED = 'FAILED',
   REFUNDED = 'REFUNDED',
 }
+
+export enum TeamStatus {
+  PENDING = 'PENDING',
+  COMPLETE = 'COMPLETE',
+  WITHDRAWN = 'WITHDRAWN',
+  KICKED = 'KICKED',
+}
+
+export enum RefundStatus {
+  PENDING_REFUND = 'PENDING_REFUND',
+  REFUNDED = 'REFUNDED',
+  FAILED = 'FAILED',
+}
+
+export enum PaymentGateway {
+  VNPAY = 'VNPAY',
+  MOMO = 'MOMO',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+}
+
+export enum MatchType {
+  SINGLES = 'SINGLES',
+  DOUBLES = 'DOUBLES',
+}
+
+export enum GenderRestriction {
+  ANY = 'ANY',
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
+  MIXED = 'MIXED',
+}
