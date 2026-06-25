@@ -54,9 +54,10 @@ export class BracketGeneratorService {
         );
       }
 
-      // 3. Xóa các Stage/Group/Matches cũ (nếu có) để tạo lại
+      // 3. Soft-delete các Stage/Group/Matches cũ (nếu có) để tạo lại
       await tx
-        .delete(schema.tournamentStages)
+        .update(schema.tournamentStages)
+        .set({ deletedAt: new Date() })
         .where(
           divisionId
             ? and(
@@ -179,10 +180,11 @@ export class BracketGeneratorService {
           round1Matches[i].isBye = true;
           this.advanceWinner(round1Matches[i], matchNodesByRound);
         } else if (!p1 && !p2) {
+          // Both slots empty (BYE) — skip, don't propagate null winner
           round1Matches[i].status = 'COMPLETED';
           round1Matches[i].winnerId = null;
           round1Matches[i].isBye = true;
-          this.advanceWinner(round1Matches[i], matchNodesByRound);
+          // No advanceWinner call — null winner would propagate incorrectly
         }
       }
 
@@ -244,9 +246,10 @@ export class BracketGeneratorService {
         );
       }
 
-      // 3. Xóa các Stage/Group/Matches cũ (nếu có) để tạo lại
+      // 3. Soft-delete các Stage/Group/Matches cũ (nếu có) để tạo lại
       await tx
-        .delete(schema.tournamentStages)
+        .update(schema.tournamentStages)
+        .set({ deletedAt: new Date() })
         .where(
           divisionId
             ? and(
@@ -463,7 +466,7 @@ export class BracketGeneratorService {
               currentRound[i].nextMatchId = gf1.id;
             } else if (nextRound) {
               if (lr % 2 !== 0) {
-                currentRound[i].nextMatchId = nextRound[i].id;
+                currentRound[i].nextMatchId = nextRound[Math.floor(i / 2)]?.id || null;
               } else {
                 currentRound[i].nextMatchId = nextRound[Math.floor(i / 2)].id;
               }
@@ -537,8 +540,7 @@ export class BracketGeneratorService {
           m.status = 'COMPLETED';
           m.winnerId = null;
           m.isBye = true;
-          advanceWinnerInMemory(m);
-          advanceLoserInMemory(m);
+          // Both slots empty — skip propagation, null winner/loser would corrupt bracket
         } else if (p1 && !p2) {
           m.status = 'COMPLETED';
           m.winnerId = p1;
@@ -686,9 +688,10 @@ export class BracketGeneratorService {
         );
       }
 
-      // 3. Xóa các Stage/Group/Matches cũ (nếu có) để tạo lại
+      // 3. Soft-delete các Stage/Group/Matches cũ (nếu có) để tạo lại
       await tx
-        .delete(schema.tournamentStages)
+        .update(schema.tournamentStages)
+        .set({ deletedAt: new Date() })
         .where(
           divisionId
             ? and(
@@ -698,7 +701,11 @@ export class BracketGeneratorService {
             : eq(schema.tournamentStages.tournamentId, tournamentId),
         );
 
-      // 4. Tạo Stage & Group mới
+      // 4. Tạo Stage & Groups (hỗ trợ multi-group)
+      // Chia participants thành nhiều bảng nhỏ (max ~8 đội/bảng)
+      const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+      const maxGroupSize = (config.roundRobinGroupSize as number) || 8;
+
       const [stage] = await tx
         .insert(schema.tournamentStages)
         .values({
@@ -710,33 +717,54 @@ export class BracketGeneratorService {
         })
         .returning();
 
-      const [group] = await tx
-        .insert(schema.tournamentGroups)
-        .values({
-          stageId: stage.id,
-          name: 'Round Robin Group',
-        })
-        .returning();
-
-      // 5. Khởi tạo standings cho tất cả participant
-      for (const p of participants) {
-        await tx.insert(schema.groupStandings).values({
-          groupId: group.id,
-          participantId: p.id,
-          played: 0,
-          won: 0,
-          lost: 0,
-          draws: 0,
-          pointsFor: 0,
-          pointsAgainst: 0,
-          totalPoints: 0,
-          updatedAt: new Date(),
-        });
+      // Phân bố participants vào các bảng (snake draft nếu seeded, random nếu không)
+      const sortedParticipants = [...participants];
+      if (seedingType === 'SEEDED') {
+        sortedParticipants.sort((a, b) => (a.seed || 999) - (b.seed || 999));
+      } else {
+        for (let i = sortedParticipants.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const temp = sortedParticipants[i];
+          sortedParticipants[i] = sortedParticipants[j];
+          sortedParticipants[j] = temp;
+        }
       }
 
-      // 6. Xếp lịch thi đấu vòng tròn (Circle Method)
-      const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+      const numGroups = Math.max(1, Math.ceil(numParticipants / maxGroupSize));
+      const groupParticipants: Array<Array<typeof participants[0]>> = Array.from({ length: numGroups }, () => []);
+      for (let i = 0; i < sortedParticipants.length; i++) {
+        groupParticipants[i % numGroups].push(sortedParticipants[i]);
+      }
 
+      // Tạo groups + standings
+      const groups: Array<{ id: string; name: string }> = [];
+      for (let g = 0; g < numGroups; g++) {
+        const [newGroup] = await tx
+          .insert(schema.tournamentGroups)
+          .values({
+            stageId: stage.id,
+            name: numGroups > 1 ? `Bảng ${String.fromCharCode(65 + g)}` : 'Vòng bảng',
+          })
+          .returning();
+        groups.push(newGroup);
+
+        for (const p of groupParticipants[g]) {
+          await tx.insert(schema.groupStandings).values({
+            groupId: newGroup.id,
+            participantId: p.id,
+            played: 0,
+            won: 0,
+            lost: 0,
+            draws: 0,
+            pointsFor: 0,
+            pointsAgainst: 0,
+            totalPoints: 0,
+            updatedAt: new Date(),
+          });
+        }
+      }
+
+      // 5. Xếp lịch thi đấu vòng tròn (Circle Method) cho từng bảng
       // Đọc số lượt đấu: ưu tiên division.roundConfig.roundsToPlay → tournament config → mặc định 1
       let legs = 1;
       if (divisionId) {
@@ -754,75 +782,67 @@ export class BracketGeneratorService {
       }
       if (!legs || legs < 1) legs = (config.roundRobinLegs as number) || 1;
 
-      const list = participants.map(p => p.id);
-      if (seedingType === 'RANDOM') {
-        for (let i = list.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          const temp = list[i];
-          list[i] = list[j];
-          list[j] = temp;
-        }
-      }
-      if (list.length % 2 !== 0) {
-        list.push(null as unknown as string);
-      }
+      // Xếp lịch vòng tròn (Circle Method) cho từng bảng
+      const allMatchesToInsert: (typeof schema.matches.$inferInsert)[] = [];
+      let globalMatchCounter = 1;
 
-      const N = list.length;
-      const roundsCount = N - 1;
-      const matchesPerRound = N / 2;
-      const matchesToInsert: (typeof schema.matches.$inferInsert)[] = [];
-      let matchCounter = 1;
+      for (let g = 0; g < groups.length; g++) {
+        const group = groups[g];
+        const participantIds = groupParticipants[g].map(p => p.id);
+        const teamList: (string | null)[] = [...participantIds];
+        if (teamList.length < 2) continue;
+        if (teamList.length % 2 !== 0) teamList.push(null);
 
-      for (let leg = 0; leg < legs; leg++) {
-        const teams = [...list];
+        const N = teamList.length;
+        const roundsCount = N - 1;
+        const matchesPerRound = N / 2;
 
-        for (let round = 1; round <= roundsCount; round++) {
-          const currentRoundNumber = leg * roundsCount + round;
+        for (let leg = 0; leg < legs; leg++) {
+          const teams = [...teamList];
 
-          for (let i = 0; i < matchesPerRound; i++) {
-            const home = teams[i];
-            const away = teams[N - 1 - i];
+          for (let round = 1; round <= roundsCount; round++) {
+            const currentRoundNumber = leg * roundsCount + round + (g * roundsCount * legs);
 
-            if (home && away) {
-              const p1 = (leg % 2 === 0) ? home : away;
-              const p2 = (leg % 2 === 0) ? away : home;
-
-              matchesToInsert.push({
-                id: randomUUID(),
-                groupId: group.id,
-                roundNumber: currentRoundNumber,
-                matchOrder: matchCounter++,
-                bracketBranch: 'MAIN',
-                status: 'SCHEDULED',
-                isBye: false,
-                participant1Id: p1,
-                participant2Id: p2,
-                winnerId: null,
-                p1SetsWon: 0,
-                p2SetsWon: 0,
-                totalSetsPlayed: 0,
-                nextMatchId: null,
-                loserNextMatchId: null,
-                tournamentId,
-                stageId: stage.id,
-                updatedAt: new Date(),
-              });
+            for (let i = 0; i < matchesPerRound; i++) {
+              const home = teams[i];
+              const away = teams[N - 1 - i];
+              if (home && away) {
+                allMatchesToInsert.push({
+                  id: randomUUID(),
+                  groupId: group.id,
+                  roundNumber: currentRoundNumber,
+                  matchOrder: globalMatchCounter++,
+                  bracketBranch: 'MAIN',
+                  status: 'SCHEDULED',
+                  isBye: false,
+                  participant1Id: (leg % 2 === 0) ? home : away,
+                  participant2Id: (leg % 2 === 0) ? away : home,
+                  winnerId: null,
+                  p1SetsWon: 0,
+                  p2SetsWon: 0,
+                  totalSetsPlayed: 0,
+                  nextMatchId: null,
+                  loserNextMatchId: null,
+                  tournamentId,
+                  stageId: stage.id,
+                  updatedAt: new Date(),
+                });
+              }
             }
+            const last = teams.pop()!;
+            teams.splice(1, 0, last);
           }
-
-          const last = teams.pop()!;
-          teams.splice(1, 0, last);
         }
       }
 
-      if (matchesToInsert.length > 0) {
-        await tx.insert(schema.matches).values(matchesToInsert);
+      if (allMatchesToInsert.length > 0) {
+        await tx.insert(schema.matches).values(allMatchesToInsert);
       }
 
       return {
         message: 'Round Robin group stage generated successfully',
         stageId: stage.id,
-        totalMatches: matchesToInsert.length,
+        totalMatches: allMatchesToInsert.length,
       };
     });
   }

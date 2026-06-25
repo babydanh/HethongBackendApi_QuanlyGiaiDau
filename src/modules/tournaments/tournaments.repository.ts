@@ -1,8 +1,10 @@
 import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt, like, isNull } from 'drizzle-orm';
+import { TeamStatus, TournamentStatus, PaymentStatus } from '../../common/constants/enums';
+import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt, like, isNull, desc, asc } from 'drizzle-orm';
 import { AuditService, Transaction } from '../audit/audit.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -809,9 +811,14 @@ export class TournamentsRepository {
         return 'DOUBLES';
       };
 
+      type ResolvedDivisionResult = {
+        division: typeof schema.tournamentDivisions.$inferSelect;
+        isWaitlisted: boolean;
+      };
+
       const resolveMatchingDivision = async (
         partnerUserId: string | null,
-      ): Promise<typeof schema.tournamentDivisions.$inferSelect | null> => {
+      ): Promise<ResolvedDivisionResult | null> => {
         const divisions = await tx
           .select()
           .from(schema.tournamentDivisions)
@@ -888,15 +895,26 @@ export class TournamentsRepository {
             );
 
           if (participantCount.count >= selectedDivision.maxParticipants) {
-            throw new BadRequestException(`Hình thức ${selectedDivision.name} đã hết slot.`);
+            return { division: selectedDivision, isWaitlisted: true };
           }
         }
 
-        return selectedDivision;
+        return { division: selectedDivision, isWaitlisted: false };
       };
 
-      // 6. Kiểm tra số lượng tối đa cấp tournament cho backward-compatible.
+      // (resolveMatchingDivision được gọi sau khi partnerId xác định xong — xem step 9 bên dưới)
+
+      // 6. Kiểm tra số lượng tối đa cấp tournament cho backward-compatible (trong transaction với FOR UPDATE)
       if (tournament.maxParticipants) {
+        // Lock hàng tournament để tránh race condition
+        const [lockedTournament] = await tx
+          .select()
+          .from(schema.tournaments)
+          .where(eq(schema.tournaments.id, tournamentId))
+          .for('update');
+
+        if (!lockedTournament) throw new BadRequestException('Giải đấu không tồn tại.');
+
         const [participantCount] = await tx
           .select({ count: count() })
           .from(schema.tournamentParticipants)
@@ -907,7 +925,7 @@ export class TournamentsRepository {
               ne(schema.tournamentParticipants.teamStatus, 'KICKED')
             )
           );
-        
+
         if (participantCount.count >= tournament.maxParticipants) {
           throw new BadRequestException('Giải đấu đã đầy.');
         }
@@ -1025,17 +1043,20 @@ export class TournamentsRepository {
         partnerId = partnerUser.id;
       }
 
-      const selectedDivision = await resolveMatchingDivision(partnerId);
-      const effectiveEntryFeeAmount = selectedDivision?.entryFee
-        ? parseFloat(selectedDivision.entryFee)
-        : parseFloat(tournament.entryFee || '0');
+      const resolvedDivision = await resolveMatchingDivision(partnerId);
+      const selectedDivision = resolvedDivision?.division ?? null;
+      const isWaitlisted = resolvedDivision?.isWaitlisted === true;
+      const effectiveEntryFeeAmount = isWaitlisted
+        ? 0
+        : parseFloat(selectedDivision?.entryFee ?? tournament.entryFee ?? '0');
 
-      const teamInviteToken = isDoubles ? Math.random().toString(36).substring(2, 14).toUpperCase() : null;
-      const teamStatus = regMode === 'APPROVAL'
-        ? 'PENDING'
-        : isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
-      // Bypass payment check for testing
-      const isPaid = true; // entryFeeAmount === 0;
+      const teamInviteToken = isDoubles ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase() : null;
+      const teamStatus = isWaitlisted
+        ? 'WAITLISTED'
+        : regMode === 'APPROVAL'
+          ? 'PENDING'
+          : isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
+      const isPaid = effectiveEntryFeeAmount === 0;
 
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
@@ -1093,7 +1114,8 @@ export class TournamentsRepository {
         paymentUrl,
         teamInviteLink: (isDoubles && !partnerId)
           ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
-          : null
+          : null,
+        isWaitlisted,
       };
     });
   }
@@ -1272,8 +1294,7 @@ export class TournamentsRepository {
       const entryFeeAmount = division?.entryFee
         ? parseFloat(division.entryFee)
         : parseFloat(tournament.entryFee || '0');
-      // Bypass payment check for testing
-      const isPaid = true; // entryFeeAmount === 0;
+      const isPaid = entryFeeAmount === 0;
 
       const tCfg = (tournament.tournamentConfig || {}) as Record<string, any>;
       const regMode = tCfg.registrationMode || 'OPEN';
@@ -1421,6 +1442,9 @@ export class TournamentsRepository {
 
       await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, oldParticipant, updatedParticipant);
 
+      // 5. Promote waitlisted participant nếu có slot trống
+      await this.promoteNextWaitlisted(tx, tournamentId, oldParticipant.tournamentDivisionId ?? undefined);
+
       return {
         message: 'Đã rút khỏi giải đấu thành công. Yêu cầu hoàn tiền đang được Ban tổ chức xử lý.',
         refundAmount,
@@ -1463,8 +1487,8 @@ export class TournamentsRepository {
           await tx
             .update(schema.payments)
             .set({
-              refundStatus: 'REFUNDED',
-              refundedAmount: entryFeeAmount.toString(),
+              refundStatus: 'PENDING_REFUND',
+              refundedAmount: '0.00',
             })
             .where(
               and(
@@ -1561,6 +1585,9 @@ export class TournamentsRepository {
       }
 
       await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, participant, updatedParticipant);
+
+      // Promote waitlisted participant nếu có slot trống
+      await this.promoteNextWaitlisted(tx, tournamentId, participant.tournamentDivisionId ?? undefined);
 
       return {
         message: 'Đội thi đấu đã bị kick và hoàn tiền thành công.',
@@ -1753,6 +1780,242 @@ export class TournamentsRepository {
       ...p,
       members: rostersMap.get(p.id) || [],
     }));
+  }
+
+  async findOpsAuditLogs(
+    tournamentId: string,
+    divisionId?: string,
+    limit: number = 50,
+  ) {
+    const stageRows = divisionId
+      ? await this.db
+          .select({ id: schema.tournamentStages.id })
+          .from(schema.tournamentStages)
+          .where(eq(schema.tournamentStages.tournamentDivisionId, divisionId))
+      : [];
+
+    const stageIds = stageRows.map((row) => row.id);
+
+    const participantRows = await this.db
+      .select({ id: schema.tournamentParticipants.id })
+      .from(schema.tournamentParticipants)
+      .where(
+        divisionId
+          ? and(
+              eq(schema.tournamentParticipants.tournamentId, tournamentId),
+              eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+            )
+          : eq(schema.tournamentParticipants.tournamentId, tournamentId),
+      );
+
+    const matchRows = await this.db
+      .select({ id: schema.matches.id })
+      .from(schema.matches)
+      .where(
+        divisionId
+          ? stageIds.length > 0
+            ? and(
+                eq(schema.matches.tournamentId, tournamentId),
+                inArray(schema.matches.stageId, stageIds),
+              )
+            : and(eq(schema.matches.tournamentId, tournamentId), sql`1 = 0`)
+          : eq(schema.matches.tournamentId, tournamentId),
+      );
+
+    const participantIds = participantRows.map((row) => row.id);
+    const matchIds = matchRows.map((row) => row.id);
+    const auditConditions: SQL[] = [
+      and(eq(schema.auditLogs.tableName, 'tournaments'), eq(schema.auditLogs.recordId, tournamentId)) as SQL,
+    ];
+
+    if (participantIds.length > 0) {
+      auditConditions.push(
+        and(
+          eq(schema.auditLogs.tableName, 'tournament_participants'),
+          inArray(schema.auditLogs.recordId, participantIds),
+        ) as SQL,
+      );
+    }
+
+    if (matchIds.length > 0) {
+      auditConditions.push(
+        and(
+          eq(schema.auditLogs.tableName, 'matches'),
+          inArray(schema.auditLogs.recordId, matchIds),
+        ) as SQL,
+      );
+    }
+
+    return this.db
+      .select({
+        id: schema.auditLogs.id,
+        userId: schema.auditLogs.userId,
+        action: schema.auditLogs.action,
+        tableName: schema.auditLogs.tableName,
+        recordId: schema.auditLogs.recordId,
+        oldValues: schema.auditLogs.oldValues,
+        newValues: schema.auditLogs.newValues,
+        createdAt: schema.auditLogs.createdAt,
+        user: {
+          email: schema.users.email,
+          fullName: schema.profiles.fullName,
+        },
+      })
+      .from(schema.auditLogs)
+      .leftJoin(schema.users, eq(schema.auditLogs.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(or(...auditConditions))
+      .orderBy(desc(schema.auditLogs.createdAt))
+      .limit(limit);
+  }
+
+  async findTournamentDisputes(tournamentId: string, divisionId?: string) {
+    const stageRows = divisionId
+      ? await this.db
+          .select({ id: schema.tournamentStages.id })
+          .from(schema.tournamentStages)
+          .where(eq(schema.tournamentStages.tournamentDivisionId, divisionId))
+      : [];
+
+    const stageIds = stageRows.map((row) => row.id);
+
+    return this.db
+      .select({
+        id: schema.matchDisputes.id,
+        matchId: schema.matchDisputes.matchId,
+        reason: schema.matchDisputes.reason,
+        evidenceUrls: schema.matchDisputes.evidenceUrls,
+        status: schema.matchDisputes.status,
+        resolutionNote: schema.matchDisputes.resolutionNote,
+        createdAt: schema.matchDisputes.createdAt,
+        resolvedAt: schema.matchDisputes.resolvedAt,
+        filedBy: {
+          id: schema.users.id,
+          email: schema.users.email,
+          fullName: schema.profiles.fullName,
+        },
+        match: {
+          id: schema.matches.id,
+          status: schema.matches.status,
+          participant1Id: schema.matches.participant1Id,
+          participant2Id: schema.matches.participant2Id,
+          roundNumber: schema.matches.roundNumber,
+          matchOrder: schema.matches.matchOrder,
+          scheduledAt: schema.matches.scheduledAt,
+        },
+      })
+      .from(schema.matchDisputes)
+      .innerJoin(schema.matches, eq(schema.matchDisputes.matchId, schema.matches.id))
+      .innerJoin(schema.users, eq(schema.matchDisputes.filedBy, schema.users.id))
+      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        divisionId
+          ? stageIds.length > 0
+            ? and(eq(schema.matches.tournamentId, tournamentId), inArray(schema.matches.stageId, stageIds))
+            : and(eq(schema.matches.tournamentId, tournamentId), sql`1 = 0`)
+          : eq(schema.matches.tournamentId, tournamentId),
+      )
+      .orderBy(desc(schema.matchDisputes.createdAt));
+  }
+
+  async createTournamentDispute(
+    tournamentId: string,
+    matchId: string,
+    userId: string,
+    reason: string,
+    evidenceUrls: string[],
+  ) {
+    return this.db.transaction(async (tx) => {
+      const [match] = await tx
+        .select()
+        .from(schema.matches)
+        .where(and(eq(schema.matches.id, matchId), eq(schema.matches.tournamentId, tournamentId)))
+        .limit(1);
+
+      if (!match) {
+        throw new NotFoundException('Không tìm thấy trận đấu thuộc giải này.');
+      }
+
+      const [dispute] = await tx
+        .insert(schema.matchDisputes)
+        .values({
+          matchId,
+          filedBy: userId,
+          reason,
+          evidenceUrls,
+          status: 'OPEN',
+        })
+        .returning();
+
+      await this.auditService.logCreate(tx, userId, 'match_disputes', dispute.id, dispute);
+
+      if (match.status !== 'DISPUTED') {
+        const [updatedMatch] = await tx
+          .update(schema.matches)
+          .set({ status: 'DISPUTED', updatedAt: new Date() })
+          .where(eq(schema.matches.id, match.id))
+          .returning();
+
+        await this.auditService.logUpdate(tx, userId, 'matches', match.id, match, updatedMatch);
+      }
+
+      return dispute;
+    });
+  }
+
+  async resolveTournamentDispute(
+    tournamentId: string,
+    disputeId: string,
+    userId: string,
+    resolutionNote: string,
+    matchStatus?: 'SCHEDULED' | 'ONGOING' | 'COMPLETED' | 'DISPUTED',
+  ) {
+    return this.db.transaction(async (tx) => {
+      const [dispute] = await tx
+        .select()
+        .from(schema.matchDisputes)
+        .where(eq(schema.matchDisputes.id, disputeId))
+        .limit(1);
+
+      if (!dispute) {
+        throw new NotFoundException('Không tìm thấy sự cố/tranh chấp.');
+      }
+
+      const [match] = await tx
+        .select()
+        .from(schema.matches)
+        .where(and(eq(schema.matches.id, dispute.matchId), eq(schema.matches.tournamentId, tournamentId)))
+        .limit(1);
+
+      if (!match) {
+        throw new NotFoundException('Không tìm thấy trận đấu thuộc giải này.');
+      }
+
+      const [updatedDispute] = await tx
+        .update(schema.matchDisputes)
+        .set({
+          status: 'RESOLVED',
+          resolvedBy: userId,
+          resolutionNote,
+          resolvedAt: new Date(),
+        })
+        .where(eq(schema.matchDisputes.id, dispute.id))
+        .returning();
+
+      await this.auditService.logUpdate(tx, userId, 'match_disputes', dispute.id, dispute, updatedDispute);
+
+      if (matchStatus && matchStatus !== match.status) {
+        const [updatedMatch] = await tx
+          .update(schema.matches)
+          .set({ status: matchStatus, updatedAt: new Date() })
+          .where(eq(schema.matches.id, match.id))
+          .returning();
+
+        await this.auditService.logUpdate(tx, userId, 'matches', match.id, match, updatedMatch);
+      }
+
+      return updatedDispute;
+    });
   }
 
   async findBracket(tournamentId: string, divisionId?: string): Promise<{ stages: BracketStage[] }> {
@@ -2496,8 +2759,8 @@ export class TournamentsRepository {
             await tx
               .update(schema.payments)
               .set({
-                refundStatus: 'REFUNDED',
-                refundedAmount: entryFeeAmount.toString(),
+                refundStatus: 'PENDING_REFUND',
+                refundedAmount: '0.00',
               })
               .where(
                 and(
@@ -2652,8 +2915,8 @@ export class TournamentsRepository {
             await tx
               .update(schema.payments)
               .set({
-                refundStatus: 'REFUNDED',
-                refundedAmount: entryFeeAmount.toString(),
+                refundStatus: 'PENDING_REFUND',
+                refundedAmount: '0.00',
               })
               .where(
                 and(
@@ -2720,8 +2983,8 @@ export class TournamentsRepository {
           await tx
             .update(schema.payments)
             .set({
-              refundStatus: 'REFUNDED',
-              refundedAmount: entryFeeAmount.toString(),
+              refundStatus: 'PENDING_REFUND',
+              refundedAmount: '0.00',
             })
             .where(
               and(
@@ -2742,6 +3005,43 @@ export class TournamentsRepository {
 
       return results;
     });
+  }
+
+  /**
+   * Promote first WAITLISTED participant to COMPLETE when a slot opens up.
+   * Skill: BE Skill 6 (Domain Logic) — waitlist tự động
+   */
+  private async promoteNextWaitlisted(
+    tx: Transaction,
+    tournamentId: string,
+    divisionId?: string,
+  ) {
+    const divisionFilter = divisionId
+      ? eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)
+      : undefined;
+
+    const [nextWaitlisted] = await tx
+      .select()
+      .from(schema.tournamentParticipants)
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          eq(schema.tournamentParticipants.teamStatus, 'WAITLISTED'),
+          ...(divisionFilter ? [divisionFilter] : []),
+        ),
+      )
+      .orderBy(asc(schema.tournamentParticipants.registeredAt))
+      .limit(1);
+
+    if (nextWaitlisted) {
+      const [promoted] = await tx
+        .update(schema.tournamentParticipants)
+        .set({ teamStatus: 'COMPLETE' })
+        .where(eq(schema.tournamentParticipants.id, nextWaitlisted.id))
+        .returning();
+      return promoted;
+    }
+    return null;
   }
 
   async findReferees(tournamentId: string) {

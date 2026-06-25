@@ -130,6 +130,7 @@ export const tournamentStages = pgTable('tournament_stages', {
   scheduledDate: date('scheduled_date'),
   notificationNote: text('notification_note'),
   matchSettings: jsonb('match_settings'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
 
 export const tournamentGroups = pgTable('tournament_groups', {
@@ -138,6 +139,7 @@ export const tournamentGroups = pgTable('tournament_groups', {
     .references(() => tournamentStages.id, { onDelete: 'cascade' })
     .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
 
 export const tournamentParticipants = pgTable('tournament_participants', {

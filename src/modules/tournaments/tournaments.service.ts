@@ -13,8 +13,10 @@ import { EloCapViolationException } from './exceptions/elo-cap-violation.excepti
 import * as schema from '../../database/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Cron } from '@nestjs/schedule';
+import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
+import { CreateMatchDisputeDto, ResolveMatchDisputeDto } from './dto/match-dispute.dto';
 import {
   buildOrganizerNewRegistrationNotification,
   buildOrganizerTeamCompletedNotification,
@@ -1069,22 +1071,21 @@ export class TournamentsService {
     // 2-tier charging fee structure:
     // If entryFee >= 100k, charge platformFeePercentage (default 5%) of the entry fee.
     // If entryFee < 100k (including free tournaments), charge flat 5k.
-    const feePerPlayer = entryFee >= 100000 
-      ? Math.round(entryFee * (platformFeePercentage / 100))
-      : 5000;
+    const feePerPlayer = calcPlatformFee(entryFee, platformFeePercentage);
     const totalPlatformFee = totalPlayers * feePerPlayer;
 
     const isClubOrFree = existing.tournamentType === 'CLUB' || totalPlatformFee === 0;
     const targetStatus = isClubOrFree ? 'UPCOMING' : 'REGISTRATION_CLOSED';
 
-    const updated = await this.tournamentsRepository.update(id, userId, { status: targetStatus });
-
+    // Sinh bracket trước, chỉ update status khi bracket generation thành công
     let bracket: { message: string; stageId: string; totalMatches: number } | null = null;
     try {
       bracket = await this.generateBracket(id, userId, systemRoles);
     } catch (err) {
       throw new BadRequestException('Failed to generate tournament bracket: ' + err.message);
     }
+
+    const updated = await this.tournamentsRepository.update(id, userId, { status: targetStatus });
 
     return {
       tournament: this.mapTournamentFormat(updated),
@@ -1447,6 +1448,124 @@ export class TournamentsService {
     return result;
   }
 
+  async getOpsAuditLogs(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[] = [],
+    divisionId?: string,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to view operations audit logs');
+    }
+
+    return this.tournamentsRepository.findOpsAuditLogs(tournamentId, divisionId);
+  }
+
+  async getTournamentDisputes(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[] = [],
+    divisionId?: string,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to view tournament disputes');
+    }
+
+    return this.tournamentsRepository.findTournamentDisputes(tournamentId, divisionId);
+  }
+
+  async createTournamentDispute(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[] = [],
+    data: CreateMatchDisputeDto,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to create tournament disputes');
+    }
+
+    return this.tournamentsRepository.createTournamentDispute(
+      tournamentId,
+      data.matchId,
+      userId,
+      data.reason,
+      data.evidenceUrls ?? [],
+    );
+  }
+
+  async resolveTournamentDispute(
+    tournamentId: string,
+    disputeId: string,
+    userId: string,
+    systemRoles: string[] = [],
+    data: ResolveMatchDisputeDto,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to resolve tournament disputes');
+    }
+
+    return this.tournamentsRepository.resolveTournamentDispute(
+      tournamentId,
+      disputeId,
+      userId,
+      data.resolutionNote,
+      data.matchStatus,
+    );
+  }
+
   async cancelTournament(id: string, userId: string, systemRoles: string[] = []) {
     const tournament = await this.tournamentsRepository.findById(id);
     if (!tournament) throw new NotFoundException('Tournament not found');
@@ -1513,7 +1632,7 @@ export class TournamentsService {
     return isRanked ? fees.feePublicRanked : fees.feePublicUnranked;
   }
 
-  @Cron('0 * * * * *')
+  @Cron('*/5 * * * *')
   async handleRegistrationsTimeout() {
     try {
       const expiredList = await this.tournamentsRepository.processPendingRegistrationsTimeout();
