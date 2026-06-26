@@ -13,12 +13,12 @@ export class UpdateMatchScoreDto {
   p2SetsWon: number;
 
   @ApiPropertyOptional({
-    example: { set1: '6-4', set2: '4-6', set3: '10-8' },
-    description: 'Chi tiết điểm số các hiệp/set',
+    example: { sets: [{ team1Score: 6, team2Score: 4, isFinished: true }] },
+    description: 'Chi tiết điểm số các hiệp/set. Hỗ trợ cả format { sets: [...] } và format legacy { set1: "6-4" }.',
   })
   @IsOptional()
   @IsObject()
-  scoreDetails?: Record<string, string>;
+  scoreDetails?: Record<string, unknown>;
 
   @ApiPropertyOptional({
     example: 'uuid-participant',

@@ -45,8 +45,16 @@ export interface ContactInfo {
 export type TournamentType = 'CLUB' | 'PUBLIC';
 export type MatchType = 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
 export type TournamentStatus = 'DRAFT' | 'UPCOMING' | 'REGISTRATION_OPEN' | 'REGISTRATION_CLOSED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+export type CategoryRuleKind =
+  | 'BADMINTON'
+  | 'TABLE_TENNIS'
+  | 'PICKLEBALL_RALLY'
+  | 'PICKLEBALL_SIDE_OUT'
+  | 'TENNIS';
 
 export interface CategoryConfig {
+  ruleKind?: CategoryRuleKind;
+  allowedRuleKinds?: CategoryRuleKind[];
   defaultSportRules?: SportRules;
   supportedMatchTypes?: ('SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES')[];
   description?: string;

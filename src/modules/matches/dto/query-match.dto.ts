@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt, Min, IsUUID } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsOptional, IsInt, Min, IsUUID, IsBoolean } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export class QueryMatchDto {
   @ApiPropertyOptional({ example: 1, description: 'Trang hiện tại' })
@@ -72,4 +72,12 @@ export class QueryMatchDto {
   @IsOptional()
   @IsUUID()
   userId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Chỉ lấy các trận đấu thuộc giải đấu PUBLIC',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  publicOnly?: boolean;
 }
