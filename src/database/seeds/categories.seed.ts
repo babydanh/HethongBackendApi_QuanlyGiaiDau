@@ -20,6 +20,8 @@ async function main() {
       slug: 'pickleball',
       description: 'Môn thể thao dùng vợt, bóng nhựa đục lỗ',
       categoryConfig: {
+        ruleKind: 'PICKLEBALL_RALLY',
+        allowedRuleKinds: ['PICKLEBALL_RALLY', 'PICKLEBALL_SIDE_OUT'],
         defaultSportRules: {
           setsToWin: 2,
           pointsPerSet: 11,
@@ -37,6 +39,8 @@ async function main() {
       target: schema.categories.slug,
       set: {
         categoryConfig: {
+          ruleKind: 'PICKLEBALL_RALLY',
+          allowedRuleKinds: ['PICKLEBALL_RALLY', 'PICKLEBALL_SIDE_OUT'],
           defaultSportRules: {
             setsToWin: 2,
             pointsPerSet: 11,
@@ -85,6 +89,8 @@ async function main() {
       slug: 'tennis',
       description: 'Môn thể thao quần vợt',
       categoryConfig: {
+        ruleKind: 'TENNIS',
+        allowedRuleKinds: ['TENNIS'],
         defaultSportRules: {
           setsToWin: 2,
           pointsPerSet: 6,
@@ -101,6 +107,8 @@ async function main() {
       target: schema.categories.slug,
       set: {
         categoryConfig: {
+          ruleKind: 'TENNIS',
+          allowedRuleKinds: ['TENNIS'],
           defaultSportRules: {
             setsToWin: 2,
             pointsPerSet: 6,
@@ -152,6 +160,8 @@ async function main() {
       slug: 'badminton',
       description: 'Môn thể thao dùng vợt và quả cầu lông',
       categoryConfig: {
+        ruleKind: 'BADMINTON',
+        allowedRuleKinds: ['BADMINTON'],
         defaultSportRules: {
           setsToWin: 2,
           pointsPerSet: 21,
@@ -168,6 +178,8 @@ async function main() {
       target: schema.categories.slug,
       set: {
         categoryConfig: {
+          ruleKind: 'BADMINTON',
+          allowedRuleKinds: ['BADMINTON'],
           defaultSportRules: {
             setsToWin: 2,
             pointsPerSet: 21,
@@ -214,6 +226,8 @@ async function main() {
       slug: 'table-tennis',
       description: 'Môn thể thao dùng vợt gỗ và quả bóng bàn nhỏ',
       categoryConfig: {
+        ruleKind: 'TABLE_TENNIS',
+        allowedRuleKinds: ['TABLE_TENNIS'],
         defaultSportRules: {
           setsToWin: 3,
           pointsPerSet: 11,
@@ -231,6 +245,8 @@ async function main() {
       target: schema.categories.slug,
       set: {
         categoryConfig: {
+          ruleKind: 'TABLE_TENNIS',
+          allowedRuleKinds: ['TABLE_TENNIS'],
           defaultSportRules: {
             setsToWin: 3,
             pointsPerSet: 11,

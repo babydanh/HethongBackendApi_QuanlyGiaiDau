@@ -44,9 +44,8 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto) {
-    const existingUser = await this.authRepository.findUserByEmail(
-      registerDto.email,
-    );
+    const email = registerDto.email.toLowerCase().trim();
+    const existingUser = await this.authRepository.findUserByEmail(email);
     if (existingUser) {
       throw new BadRequestException(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
@@ -60,7 +59,7 @@ export class AuthService {
     // Note: If role doesn't exist, it should be seeded. For now, assuming it exists.
 
     const newUser = await this.authRepository.createUserWithProfile(
-      { email: registerDto.email, passwordHash: hashedPassword },
+      { email, passwordHash: hashedPassword },
       { fullName: registerDto.fullName, userId: '' }, // userId will be populated in repository
       defaultRole?.id || '',
     );
@@ -70,7 +69,8 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto, userAgent?: string, ipAddress?: string) {
-    const user = await this.authRepository.findUserByEmail(loginDto.email);
+    const email = loginDto.email.toLowerCase().trim();
+    const user = await this.authRepository.findUserByEmail(email);
     if (!user) {
       throw new InvalidCredentialsException();
     }
