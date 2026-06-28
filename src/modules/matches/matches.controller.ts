@@ -57,7 +57,7 @@ export class MatchesController {
     @Body() createMatchCommentDto: CreateMatchCommentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.createComment(id, user, createMatchCommentDto);
+    return await this.matchesService.createComment(id, user, createMatchCommentDto);
   }
 
   @Patch(':id/score')
@@ -69,7 +69,7 @@ export class MatchesController {
     @Body() updateMatchScoreDto: UpdateMatchScoreDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.updateScore(id, user, updateMatchScoreDto);
+    return await this.matchesService.updateScore(id, user, updateMatchScoreDto);
   }
 
   @Patch(':id/status')
@@ -83,19 +83,7 @@ export class MatchesController {
     @Body() updateMatchStatusDto: UpdateMatchStatusDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.updateStatus(id, user, updateMatchStatusDto);
-  }
-
-  @Patch(':id/operation')
-  @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
-  async operateMatch(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() operateMatchDto: OperateMatchDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return this.matchesService.operateMatch(id, user, operateMatchDto);
+    return await this.matchesService.updateStatus(id, user, updateMatchStatusDto);
   }
 
   @Patch(':id/schedule')
@@ -107,7 +95,19 @@ export class MatchesController {
     @Body() updateMatchScheduleDto: UpdateMatchScheduleDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.updateSchedule(id, user, updateMatchScheduleDto);
+    return await this.matchesService.updateSchedule(id, user, updateMatchScheduleDto);
+  }
+
+  @Patch(':id/operation')
+  @ApiBearerAuth()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
+  async operateMatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() operateMatchDto: OperateMatchDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.operateMatch(id, user, operateMatchDto);
   }
 
   @Patch(':id/assign-referee')
@@ -119,7 +119,7 @@ export class MatchesController {
     @Body() body: { refereeId: string },
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.assignReferee(id, body.refereeId, user);
+    return await this.matchesService.assignReferee(id, body.refereeId, user);
   }
 
   @Post(':id/mute-user')
@@ -131,7 +131,7 @@ export class MatchesController {
     @Body() body: { userId: string; type: 'MUTE' | 'BAN'; reason?: string },
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.matchesService.muteUser(id, body.userId, body.type, body.reason, user);
+    return await this.matchesService.muteUser(id, body.userId, body.type, body.reason, user);
   }
 
   @Delete(':id/unmute-user/:userId')
@@ -142,7 +142,7 @@ export class MatchesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('userId', ParseUUIDPipe) userId: string,
   ) {
-    return this.matchesService.unmuteUser(id, userId);
+    return await this.matchesService.unmuteUser(id, userId);
   }
 
   @Get(':id/muted-users')
@@ -150,6 +150,6 @@ export class MatchesController {
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Danh sách người dùng bị mute/ban' })
   async getMutedUsers(@Param('id', ParseUUIDPipe) id: string) {
-    return this.matchesService.getMutedUsers(id);
+    return await this.matchesService.getMutedUsers(id);
   }
 }

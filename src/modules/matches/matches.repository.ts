@@ -17,7 +17,7 @@ export class MatchesRepository {
   ) {}
 
   async findAll(query: QueryMatchDto) {
-    const { page = 1, limit = 10, groupId, status, userId } = query;
+    const { page = 1, limit = 10, groupId, status, userId, publicOnly } = query;
     const offset = (page - 1) * limit;
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
@@ -26,15 +26,28 @@ export class MatchesRepository {
     
     // Enforce soft delete filters
     conditions.push(isNull(schema.matches.deletedAt));
-    conditions.push(
-      sql`exists (
-        select 1 from ${schema.tournamentGroups} g
-        join ${schema.tournamentStages} s on g.stage_id = s.id
-        join ${schema.tournaments} t on s.tournament_id = t.id
-        where g.id = ${schema.matches.groupId}
-        and t.deleted_at is null
-      )`
-    );
+    if (publicOnly) {
+      conditions.push(
+        sql`exists (
+          select 1 from ${schema.tournamentGroups} g
+          join ${schema.tournamentStages} s on g.stage_id = s.id
+          join ${schema.tournaments} t on s.tournament_id = t.id
+          where g.id = ${schema.matches.groupId}
+          and t.deleted_at is null
+          and t.visibility = 'PUBLIC'
+        )`
+      );
+    } else {
+      conditions.push(
+        sql`exists (
+          select 1 from ${schema.tournamentGroups} g
+          join ${schema.tournamentStages} s on g.stage_id = s.id
+          join ${schema.tournaments} t on s.tournament_id = t.id
+          where g.id = ${schema.matches.groupId}
+          and t.deleted_at is null
+        )`
+      );
+    }
 
     if (groupId) {
       conditions.push(eq(schema.matches.groupId, groupId));
@@ -157,22 +170,25 @@ export class MatchesRepository {
       }
     }
 
-    const groupsMap = new Map<string, { id: string; name: string; stageName: string }>();
+    const groupsMap = new Map<string, { id: string; name: string; stageName: string; tournamentName?: string }>();
     if (groupIdsForMatches.size > 0) {
       const groupsData = await this.db
         .select({
           groupId: schema.tournamentGroups.id,
           groupName: schema.tournamentGroups.name,
           stageName: schema.tournamentStages.name,
+          tournamentName: schema.tournaments.name,
         })
         .from(schema.tournamentGroups)
         .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
         .where(inArray(schema.tournamentGroups.id, Array.from(groupIdsForMatches)));
       for (const g of groupsData) {
         groupsMap.set(g.groupId, {
           id: g.groupId,
           name: g.groupName,
           stageName: g.stageName,
+          tournamentName: g.tournamentName,
         });
       }
     }
@@ -191,6 +207,9 @@ export class MatchesRepository {
           stage: {
             name: groupStage.stageName,
           }
+        } : null,
+        tournament: groupStage ? {
+          name: groupStage.tournamentName,
         } : null,
       };
     });
@@ -233,9 +252,13 @@ export class MatchesRepository {
         roundConfig: schema.tournamentStages.roundConfig,
         sportRules: schema.tournaments.sportRules,
         tournamentConfig: schema.tournaments.tournamentConfig,
+        categoryName: schema.categories.name,
+        categorySlug: schema.categories.slug,
+        categoryConfig: schema.categories.categoryConfig,
       })
       .from(schema.tournamentStages)
       .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.tournaments.categoryId))
       .leftJoin(schema.tournamentGroups, eq(schema.tournamentGroups.id, match.groupId!))
       .where(eq(schema.tournamentStages.id, match.stageId))
       .limit(1);
@@ -281,6 +304,9 @@ export class MatchesRepository {
             tournamentType: group.tournamentType,
             communityId: group.communityId,
             categoryId: group.categoryId,
+            categoryName: group.categoryName,
+            categorySlug: group.categorySlug,
+            categoryConfig: group.categoryConfig,
             matchType: group.matchType,
             createdBy: group.createdBy,
             sportRules: group.sportRules,
@@ -683,7 +709,7 @@ export class MatchesRepository {
   async updateSchedule(
     id: string,
     userId: string | null,
-    data: { courtName?: string | null; courtAddress?: string | null; refereeId?: string | null; scheduledAt?: string | null; matchConfig?: Record<string, any> | null },
+    data: { courtName?: string | null; courtAddress?: string | null; refereeId?: string | null; scheduledAt?: string | null; matchConfig?: Record<string, unknown> | null },
   ) {
     return this.db.transaction(async (tx) => {
       const [existing] = await tx

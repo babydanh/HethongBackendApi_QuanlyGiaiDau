@@ -15,6 +15,9 @@ import {
   buildRefereeAssignedNotification,
 } from '../notifications/notification-builder';
 import { RedisService } from '../../providers/redis/redis.service';
+import { resolveEffectiveSportRules } from '../tournaments/utils/sport-rules/resolve-effective-sport-rules';
+import { validateSportRuleConfig } from '../tournaments/utils/sport-rules/validate-sport-rules-config';
+import { validateScoreDetails } from './utils/score-validation/validate-score-details';
 
 @Injectable()
 export class MatchesService {
@@ -150,45 +153,20 @@ export class MatchesService {
     return updatedMatch;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private resolveMatchConfig(match: any) {
-    const stageConfig = match.stage?.roundConfig || {};
-    const roundOverride = stageConfig.rounds?.[match.roundNumber?.toString()] || {};
-    const matchOverride = match.matchConfig || {};
+  private resolveMatchConfig(match: Awaited<ReturnType<MatchesRepository['findById']>>) {
+    if (!match) {
+      throw new NotFoundException('Match not found');
+    }
 
-    const setsToWin = matchOverride.setsToWin ?? matchOverride.sets_to_win
-      ?? roundOverride.setsToWin ?? roundOverride.sets_to_win
-      ?? stageConfig.setsToWin ?? stageConfig.sets_to_win ?? 2;
-
-    const bestOf = matchOverride.bestOf ?? (matchOverride.setsToWin ? (matchOverride.setsToWin * 2 - 1) : undefined)
-      ?? roundOverride.bestOf ?? (roundOverride.sets_to_win ? (roundOverride.sets_to_win * 2 - 1) : undefined)
-      ?? stageConfig.bestOf ?? (stageConfig.sets_to_win ? (stageConfig.sets_to_win * 2 - 1) : undefined)
-      ?? (setsToWin * 2 - 1);
-
-    const pointsPerSet = matchOverride.pointsPerSet ?? matchOverride.points_per_set
-      ?? roundOverride.pointsPerSet ?? roundOverride.points_per_set
-      ?? stageConfig.pointsPerSet ?? stageConfig.points_per_set ?? 21;
-
-    const deuceEnabled = matchOverride.deuceEnabled ?? matchOverride.deuce_enabled
-      ?? roundOverride.deuceEnabled ?? roundOverride.deuce_enabled
-      ?? stageConfig.deuceEnabled ?? stageConfig.deuce_enabled ?? true;
-
-    const tiebreakAt = matchOverride.tiebreakAt ?? matchOverride.tiebreak_at
-      ?? roundOverride.tiebreakAt ?? roundOverride.tiebreak_at
-      ?? stageConfig.tiebreakAt ?? stageConfig.tiebreak_at ?? 20;
-
-    const maxPoints = matchOverride.maxPoints ?? matchOverride.max_points
-      ?? roundOverride.maxPoints ?? roundOverride.max_points
-      ?? stageConfig.maxPoints ?? stageConfig.max_points ?? 30;
-
-    return {
-      bestOf,
-      setsToWin,
-      pointsPerSet,
-      deuceEnabled: deuceEnabled !== false,
-      tiebreakAt,
-      maxPoints,
-    };
+    return resolveEffectiveSportRules({
+      tournamentSportRules: match.tournament?.sportRules as Record<string, unknown> | null | undefined,
+      categoryConfig: match.tournament?.categoryConfig as Record<string, unknown> | null | undefined,
+      categoryName: match.tournament?.categoryName,
+      categorySlug: match.tournament?.categorySlug,
+      stageRoundConfig: match.stage?.roundConfig as Record<string, unknown> | null | undefined,
+      roundNumber: match.roundNumber,
+      matchConfig: match.matchConfig as Record<string, unknown> | null | undefined,
+    });
   }
 
   async findAll(query: QueryMatchDto) {
@@ -214,95 +192,6 @@ export class MatchesService {
       }
     }
     return match;
-  }
-
-  // Helper method to validate set score details
-  private validateScoreDetails(scoreDetails: Record<string, unknown>, resolvedConfig: ReturnType<typeof MatchesService.prototype.resolveMatchConfig>) {
-    const bestOf = resolvedConfig.bestOf;
-    const pointsPerSet = resolvedConfig.pointsPerSet;
-    const deuceEnabled = resolvedConfig.deuceEnabled;
-    const tiebreakAt = resolvedConfig.tiebreakAt;
-    const maxPoints = resolvedConfig.maxPoints;
-
-    if (!scoreDetails || typeof scoreDetails !== 'object') {
-      throw new BadRequestException('scoreDetails must be an object containing set scores (e.g. { set1: "21-19" }).');
-    }
-
-    const setsToWin = Math.ceil(bestOf / 2);
-    let p1SetsWon = 0;
-    let p2SetsWon = 0;
-
-    const setKeys = Object.keys(scoreDetails).sort();
-    if (setKeys.length === 0) {
-      throw new BadRequestException('No set scores provided in scoreDetails.');
-    }
-
-    for (const key of setKeys) {
-      const scoreStr = scoreDetails[key];
-      if (typeof scoreStr !== 'string') {
-        throw new BadRequestException(`Tỉ số set cho key '${key}' phải là chuỗi 'p1-p2'.`);
-      }
-
-      const parts = scoreStr.split('-');
-      if (parts.length !== 2) {
-        throw new BadRequestException(`Tỉ số set '${scoreStr}' không đúng định dạng 'p1-p2'.`);
-      }
-
-      const p1 = parseInt(parts[0], 10);
-      const p2 = parseInt(parts[1], 10);
-      if (isNaN(p1) || isNaN(p2) || p1 < 0 || p2 < 0) {
-        throw new BadRequestException(`Điểm số set '${scoreStr}' phải là số nguyên không âm.`);
-      }
-
-      const maxScore = Math.max(p1, p2);
-      const minScore = Math.min(p1, p2);
-      const diff = maxScore - minScore;
-
-      // Validate points per set
-      if (maxScore < pointsPerSet) {
-        throw new BadRequestException(`Hiệp ${key}: Điểm của người thắng set (${maxScore}) phải đạt tối thiểu là ${pointsPerSet}.`);
-      }
-
-      // Validate deuce
-      if (deuceEnabled) {
-        if (minScore >= tiebreakAt) {
-          if (maxScore < maxPoints) {
-            if (diff !== 2) {
-              throw new BadRequestException(`Hiệp ${key}: Trận đấu đang deuce, người thắng phải thắng cách đúng 2 điểm.`);
-            }
-          } else if (maxScore === maxPoints) {
-            if (diff < 1) {
-              throw new BadRequestException(`Hiệp ${key}: Khi đạt điểm tối đa ${maxPoints}, phải có người thắng.`);
-            }
-          } else {
-            throw new BadRequestException(`Hiệp ${key}: Điểm số không được vượt quá giới hạn tối đa ${maxPoints}.`);
-          }
-        } else {
-          // minScore < tiebreakAt
-          if (maxScore !== pointsPerSet) {
-            throw new BadRequestException(`Hiệp ${key}: Người thắng set phải đạt đúng ${pointsPerSet} điểm.`);
-          }
-        }
-      } else {
-        // deuceEnabled is false
-        if (maxScore !== pointsPerSet) {
-          throw new BadRequestException(`Hiệp ${key}: Deuce bị tắt, điểm của người thắng set phải đạt đúng ${pointsPerSet}.`);
-        }
-      }
-
-      if (p1 > p2) {
-        p1SetsWon++;
-      } else {
-        p2SetsWon++;
-      }
-    }
-
-    return {
-      p1SetsWon,
-      p2SetsWon,
-      setsToWin,
-      totalSets: setKeys.length,
-    };
   }
 
   async updateScore(
@@ -334,7 +223,7 @@ export class MatchesService {
     if (scoreDetails) {
       // Resolve config hierarchy (Stage -> Round -> Match)
       const resolvedConfig = this.resolveMatchConfig(existing);
-      const validation = this.validateScoreDetails(scoreDetails, resolvedConfig);
+      const validation = validateScoreDetails(scoreDetails, resolvedConfig);
 
       // Verify sets won align with scoreDetails
       if (p1SetsWon !== undefined && p1SetsWon !== validation.p1SetsWon) {
@@ -528,7 +417,7 @@ export class MatchesService {
   async updateSchedule(
     id: string,
     user: JwtPayload,
-    data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string; matchConfig?: Record<string, any> },
+    data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string; matchConfig?: Record<string, unknown> },
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
@@ -538,6 +427,21 @@ export class MatchesService {
       if (!isAccepted) {
         throw new BadRequestException('Trọng tài được chọn chưa xác nhận tham gia giải đấu này (status ACCEPTED)');
       }
+    }
+
+    if (data.matchConfig) {
+      const expectedKind = resolveEffectiveSportRules({
+        tournamentSportRules: existing.tournament?.sportRules as Record<string, unknown> | null | undefined,
+        categoryName: existing.tournament?.categoryName,
+        categorySlug: existing.tournament?.categorySlug,
+        stageRoundConfig: existing.stage?.roundConfig as Record<string, unknown> | null | undefined,
+      }).kind;
+
+      validateSportRuleConfig(data.matchConfig, {
+        expectedKind,
+        sourceLabel: 'matchConfig',
+        allowRoundMetadata: true,
+      });
     }
 
     const updatedMatch = await this.matchesRepository.updateSchedule(id, user.sub, data);
