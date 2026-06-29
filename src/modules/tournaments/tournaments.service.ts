@@ -17,6 +17,12 @@ import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { CreateMatchDisputeDto, ResolveMatchDisputeDto } from './dto/match-dispute.dto';
+import { resolveEffectiveSportRules } from './utils/sport-rules/resolve-effective-sport-rules';
+import {
+  inferAllowedSportRuleKinds,
+  inferExpectedSportRuleKind,
+  validateSportRuleConfig,
+} from './utils/sport-rules/validate-sport-rules-config';
 import {
   buildOrganizerNewRegistrationNotification,
   buildOrganizerTeamCompletedNotification,
@@ -43,6 +49,47 @@ export class TournamentsService {
 
   private async sendNotificationBatch(notifications: Array<Promise<unknown>>) {
     await Promise.all(notifications);
+  }
+
+  private readSupportedMatchTypes(categoryConfig: CategoryConfig | null | undefined) {
+    return Array.isArray(categoryConfig?.supportedMatchTypes)
+      ? categoryConfig.supportedMatchTypes
+      : null;
+  }
+
+  private validateMatchTypeAgainstCategory(
+    categoryConfig: CategoryConfig | null | undefined,
+    matchType: string | null | undefined,
+    sourceLabel: string,
+  ) {
+    if (!matchType) {
+      return;
+    }
+
+    const supportedMatchTypes = this.readSupportedMatchTypes(categoryConfig);
+    if (supportedMatchTypes && !supportedMatchTypes.includes(matchType as 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES')) {
+      throw new BadRequestException(
+        `${sourceLabel}: môn này không hỗ trợ hình thức ${matchType}. Cho phép: ${supportedMatchTypes.join(', ')}.`,
+      );
+    }
+  }
+
+  private validateMatchTypeGenderRestriction(
+    matchType: string | null | undefined,
+    genderRestriction: string | null | undefined,
+    sourceLabel: string,
+  ) {
+    if (!matchType) {
+      return;
+    }
+
+    if (matchType === 'MIXED_DOUBLES' && genderRestriction !== 'MIXED') {
+      throw new BadRequestException(`${sourceLabel}: MIXED_DOUBLES phải đi cùng genderRestriction = MIXED.`);
+    }
+
+    if ((matchType === 'SINGLES' || matchType === 'DOUBLES') && genderRestriction === 'MIXED') {
+      throw new BadRequestException(`${sourceLabel}: chỉ MIXED_DOUBLES mới được dùng genderRestriction = MIXED.`);
+    }
   }
 
   private mapTournamentFormat<T extends { format?: string | null; tournamentConfig?: unknown }>(tournament: T): T {
@@ -121,6 +168,28 @@ export class TournamentsService {
         createTournamentDto.sportRules = {};
       }
     }
+
+    const categoryConfig = category.categoryConfig as CategoryConfig | null | undefined;
+    this.validateMatchTypeAgainstCategory(categoryConfig, createTournamentDto.matchType, 'tournament');
+    this.validateMatchTypeGenderRestriction(
+      createTournamentDto.matchType,
+      createTournamentDto.genderRestriction,
+      'tournament',
+    );
+
+    validateSportRuleConfig(createTournamentDto.sportRules, {
+      expectedKind: inferExpectedSportRuleKind({
+        categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+        categoryName: category.name,
+        categorySlug: category.slug,
+      }),
+      allowedKinds: inferAllowedSportRuleKinds({
+        categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+        categoryName: category.name,
+        categorySlug: category.slug,
+      }),
+      sourceLabel: 'sportRules',
+    });
 
     // 2. Validate dates
     if (createTournamentDto.registrationStartDate && createTournamentDto.registrationEndDate) {
@@ -203,6 +272,12 @@ export class TournamentsService {
   async update(id: string, userId: string, updateTournamentDto: UpdateTournamentDto, systemRoles: string[] = []) {
     const existing = await this.tournamentsRepository.findById(id);
     if (!existing) throw new NotFoundException('Tournament not found');
+
+    const categoryId = updateTournamentDto.categoryId ?? existing.categoryId;
+    const category = await this.tournamentsRepository.findCategory(categoryId);
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
 
     // System ADMIN can update anything
     let canUpdate = systemRoles.includes('ADMIN');
@@ -297,6 +372,34 @@ export class TournamentsService {
 
     if (updateTournamentDto.entryFee && existing.tournamentType === 'PUBLIC' && updateTournamentDto.entryFee > 0 && updateTournamentDto.entryFee < 100000) {
       throw new BadRequestException('Minimum entry fee for paid public tournaments is 100,000đ');
+    }
+
+    const categoryConfig = category.categoryConfig as CategoryConfig | null | undefined;
+    this.validateMatchTypeAgainstCategory(
+      categoryConfig,
+      updateTournamentDto.matchType ?? existing.matchType,
+      'tournament',
+    );
+    this.validateMatchTypeGenderRestriction(
+      updateTournamentDto.matchType ?? existing.matchType,
+      updateTournamentDto.genderRestriction ?? existing.genderRestriction,
+      'tournament',
+    );
+
+    if (updateTournamentDto.sportRules) {
+      validateSportRuleConfig(updateTournamentDto.sportRules, {
+        expectedKind: inferExpectedSportRuleKind({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        allowedKinds: inferAllowedSportRuleKinds({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        sourceLabel: 'sportRules',
+      });
     }
 
     const updated = await this.tournamentsRepository.update(id, userId, updateTournamentDto);
@@ -1050,11 +1153,22 @@ export class TournamentsService {
 
     // Kiem tra da co cau hinh mac dinh cho division chua
     const allDivs = await this.tournamentsRepository.getDivisionsByTournament(id);
+    const category = await this.tournamentsRepository.findCategory(existing.categoryId);
     for (const d of allDivs) {
-      const rc = (d.roundConfig || {}) as Record<string, unknown>;
-      if (!rc.setsToWin || !rc.pointsPerSet) {
+      if (!category) {
+        throw new NotFoundException('Category not found');
+      }
+
+      const resolvedRules = resolveEffectiveSportRules({
+        tournamentSportRules: existing.sportRules as Record<string, unknown> | null | undefined,
+        categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+        categoryName: category.name,
+        categorySlug: category.slug,
+        stageRoundConfig: d.roundConfig as Record<string, unknown> | null | undefined,
+      });
+      if (resolvedRules.setsToWin < 1 || resolvedRules.pointsPerSet < 1) {
         throw new BadRequestException(
-          'Vui lòng cấu hình luật thi đấu (số set, điểm/set) cho "' + d.name + '" trước khi chốt danh sách.',
+          'Vui lòng cấu hình luật thi đấu hợp lệ cho "' + d.name + '" trước khi chốt danh sách.',
         );
       }
     }
@@ -1121,6 +1235,28 @@ export class TournamentsService {
 
     if (!isAuthorized) {
       throw new ForbiddenException('You do not have permission to update this stage');
+    }
+
+    if (data.roundConfig) {
+      const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
+      if (!category) {
+        throw new NotFoundException('Category not found');
+      }
+
+        validateSportRuleConfig(data.roundConfig as Record<string, unknown>, {
+          expectedKind: inferExpectedSportRuleKind({
+            categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+            categoryName: category.name,
+            categorySlug: category.slug,
+          }),
+          allowedKinds: inferAllowedSportRuleKinds({
+            categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+            categoryName: category.name,
+            categorySlug: category.slug,
+          }),
+          sourceLabel: 'roundConfig',
+          allowRoundMetadata: true,
+        });
     }
 
     return this.tournamentsRepository.updateStage(stageId, userId, data);
@@ -1743,6 +1879,37 @@ export class TournamentsService {
         throw new BadRequestException('Không thể thêm hình thức thi đấu khi giải đấu đang mở đăng ký');
       }
 
+      const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
+      if (!category) {
+        throw new NotFoundException('Category not found');
+      }
+
+      const categoryConfig = category.categoryConfig as CategoryConfig | null | undefined;
+      this.validateMatchTypeAgainstCategory(categoryConfig, createDivisionDto.matchType, 'division');
+      this.validateMatchTypeGenderRestriction(
+        createDivisionDto.matchType,
+        createDivisionDto.genderRestriction,
+        'division',
+      );
+
+      if (createDivisionDto.roundConfig) {
+        validateSportRuleConfig(createDivisionDto.roundConfig, {
+          expectedKind: inferExpectedSportRuleKind({
+            categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+            categoryName: category.name,
+            categorySlug: category.slug,
+          }),
+          allowedKinds: inferAllowedSportRuleKinds({
+            categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+            categoryName: category.name,
+            categorySlug: category.slug,
+          }),
+          sourceLabel: 'roundConfig',
+          allowRoundStructure: true,
+          allowRoundMetadata: true,
+        });
+      }
+
       return await this.tournamentsRepository.createDivision(
         {
           name: createDivisionDto.name,
@@ -1801,6 +1968,45 @@ export class TournamentsService {
       throw new ForbiddenException('Bạn không có quyền cập nhật bảng thi đấu này');
     }
 
+    const division = await this.tournamentsRepository.findDivisionById(divisionId);
+    if (!division) {
+      throw new NotFoundException('Division not found');
+    }
+
+    const tournament = await this.tournamentsRepository.findById(division.tournamentId);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    const nextMatchType = updateDivisionDto.matchType ?? division.matchType;
+    const nextGenderRestriction = updateDivisionDto.genderRestriction ?? division.genderRestriction;
+    const categoryConfig = category.categoryConfig as CategoryConfig | null | undefined;
+    this.validateMatchTypeAgainstCategory(categoryConfig, nextMatchType, 'division');
+    this.validateMatchTypeGenderRestriction(nextMatchType, nextGenderRestriction, 'division');
+
+    if (updateDivisionDto.roundConfig) {
+      validateSportRuleConfig(updateDivisionDto.roundConfig, {
+        expectedKind: inferExpectedSportRuleKind({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        allowedKinds: inferAllowedSportRuleKinds({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        sourceLabel: 'roundConfig',
+        allowRoundStructure: true,
+        allowRoundMetadata: true,
+      });
+    }
+
     return this.tournamentsRepository.updateDivision(divisionId, updateDivisionDto, userId);
   }
 
@@ -1828,6 +2034,40 @@ export class TournamentsService {
       (tournament.status === 'REGISTRATION_OPEN' || tournament.status === 'REGISTRATION_CLOSED')
     ) {
       throw new BadRequestException('Không thể thay đổi hình thức thi đấu khi giải đấu đang mở đăng ký');
+    }
+
+    const currentDivision = await this.tournamentsRepository.findDivisionById(divisionId);
+    if (!currentDivision) {
+      throw new NotFoundException('Division not found');
+    }
+
+    const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    const nextMatchType = updateDivisionDto.matchType ?? currentDivision.matchType;
+    const nextGenderRestriction = updateDivisionDto.genderRestriction ?? currentDivision.genderRestriction;
+    const categoryConfig = category.categoryConfig as CategoryConfig | null | undefined;
+    this.validateMatchTypeAgainstCategory(categoryConfig, nextMatchType, 'division');
+    this.validateMatchTypeGenderRestriction(nextMatchType, nextGenderRestriction, 'division');
+
+    if (updateDivisionDto.roundConfig) {
+      validateSportRuleConfig(updateDivisionDto.roundConfig, {
+        expectedKind: inferExpectedSportRuleKind({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        allowedKinds: inferAllowedSportRuleKinds({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        sourceLabel: 'roundConfig',
+        allowRoundStructure: true,
+        allowRoundMetadata: true,
+      });
     }
 
     return this.tournamentsRepository.updateDivisionConfig(divisionId, updateDivisionDto, userId);

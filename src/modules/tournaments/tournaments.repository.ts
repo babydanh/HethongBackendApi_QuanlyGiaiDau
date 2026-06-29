@@ -3141,6 +3141,21 @@ export class TournamentsRepository {
     }
   }
 
+  async findDivisionById(id: string) {
+    try {
+      const [division] = await this.db
+        .select()
+        .from(schema.tournamentDivisions)
+        .where(eq(schema.tournamentDivisions.id, id))
+        .limit(1);
+
+      return division ?? null;
+    } catch (error) {
+      console.error(`Failed to get division ${id}:`, error);
+      throw error;
+    }
+  }
+
   async createDivision(division: CreateDivisionDto & { tournamentId: string }, userId: string | null) {
     try {
       return await this.db.transaction(async (tx) => {
