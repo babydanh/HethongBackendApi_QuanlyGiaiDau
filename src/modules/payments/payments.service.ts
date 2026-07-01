@@ -1,4 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PayOS } from '@payos/node';
 import { PaymentsRepository } from './payments.repository';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
@@ -13,10 +15,22 @@ import {
 
 @Injectable()
 export class PaymentsService {
+  private payos: PayOS;
+
   constructor(
     private readonly paymentsRepository: PaymentsRepository,
     private readonly notificationsService: NotificationsService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    const clientId = this.configService.get<string>('PAYOS_CLIENT_ID');
+    const apiKey = this.configService.get<string>('PAYOS_API_KEY');
+    const checksumKey = this.configService.get<string>('PAYOS_CHECKSUM_KEY');
+    if (clientId && apiKey && checksumKey && clientId !== 'your-payos-client-id') {
+      this.payos = new PayOS({ clientId, apiKey, checksumKey });
+    } else {
+      console.warn('PayOS credentials not fully configured in env or are placeholders. Webhook verification/links will fall back to mock mode.');
+    }
+  }
 
   async createPaymentLink(userId: string, data: CreatePaymentDto) {
     if (!data.participantId) {
@@ -56,15 +70,80 @@ export class PaymentsService {
 
     const payment = await this.paymentsRepository.createPayment(userId, data);
     
-    // Build description for mock gateway display
+    // Build description for payment gateway (sanitize to non-accented and max 25 chars for PayOS)
     const tournament = await this.paymentsRepository.findTournamentById(data.tournamentId);
     const tournamentName = tournament?.name ?? 'Giải đấu thể thao';
-    const description = data.participantId
+    let rawDescription = data.participantId
       ? `Lệ phí tham gia: ${tournamentName}`
       : `Phí công bố giải đấu: ${tournamentName}`;
 
     const gatewayParam = data.paymentGateway ?? 'VNPAY';
-    const mockUrl = `/payments/mock-gateway?paymentId=${payment.id}&gateway=${gatewayParam}&amount=${payment.amount}&description=${encodeURIComponent(description)}`;
+
+    // ──────────────────────────────────────────
+    // PayOS Integration Branch
+    // ──────────────────────────────────────────
+    if (gatewayParam.toUpperCase() === 'PAYOS') {
+      // Chuẩn hóa tên giải đấu sang dạng không dấu, viết liền không khoảng trắng hoặc dấu đặc biệt để vừa 25 ký tự PayOS
+      let sanitizedDesc = data.participantId ? 'LP' : 'PCB';
+      const cleanName = tournamentName
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/[^a-zA-Z0-9]/g, '');
+      
+      sanitizedDesc = `${sanitizedDesc}${cleanName}`;
+      if (sanitizedDesc.length > 25) {
+        sanitizedDesc = sanitizedDesc.substring(0, 25);
+      }
+
+      // Tạo orderCode độc nhất kiểu số nguyên nhỏ hơn JS MAX_SAFE_INTEGER
+      const orderCode = parseInt(
+        Date.now().toString().substring(4) + 
+        Math.floor(10 + Math.random() * 90).toString()
+      );
+
+      // Lưu orderCode vào transactionReference trong database để đối chiếu
+      await this.paymentsRepository.updatePaymentTransactionReference(payment.id, orderCode.toString());
+
+      if (this.payos) {
+        try {
+          const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
+          const returnUrl = `${frontendUrl}/tournaments/${data.tournamentId}?payment_status=success&payment_id=${payment.id}`;
+          const cancelUrl = `${frontendUrl}/tournaments/${data.tournamentId}?payment_status=cancel&payment_id=${payment.id}`;
+
+          const paymentBody = {
+            orderCode,
+            amount: Math.round(parseFloat(payment.amount)),
+            description: sanitizedDesc,
+            cancelUrl,
+            returnUrl,
+          };
+
+          const result = await this.payos.paymentRequests.create(paymentBody);
+          return {
+            paymentId: payment.id,
+            paymentUrl: result.checkoutUrl,
+            qrCode: result.qrCode,
+            status: payment.status,
+          };
+        } catch (err) {
+          console.error('Failed to create PayOS payment link:', err);
+          throw new BadRequestException('Không thể tạo liên kết thanh toán PayOS: ' + err.message);
+        }
+      } else {
+        // Fallback sang mock nếu chưa cấu hình thật
+        const mockUrl = `/payments/mock-gateway?paymentId=${payment.id}&gateway=PAYOS&amount=${payment.amount}&description=${encodeURIComponent(rawDescription)}`;
+        return {
+          paymentId: payment.id,
+          paymentUrl: mockUrl,
+          status: payment.status,
+        };
+      }
+    }
+
+    // Default VNPAY/Mock gateway logic
+    const mockUrl = `/payments/mock-gateway?paymentId=${payment.id}&gateway=${gatewayParam}&amount=${payment.amount}&description=${encodeURIComponent(rawDescription)}`;
     
     return {
       paymentId: payment.id,
@@ -73,8 +152,127 @@ export class PaymentsService {
     };
   }
 
-  async handleWebhook(payload: WebhookDto) {
-    // TODO: Verify VNPAY HMAC signature (SecureHash) in production
+  async handleWebhook(payload: any) {
+    // ──────────────────────────────────────────
+    // PayOS Webhook Detection and Handling
+    // ──────────────────────────────────────────
+    if (payload && (payload.data || payload.signature)) {
+      if (!this.payos) {
+        console.warn('PayOS is not configured. Treating PayOS webhook as mock verify.');
+        const orderCodeMock = payload.data?.orderCode;
+        if (orderCodeMock) {
+          const payment = await this.paymentsRepository.findPaymentByReference(orderCodeMock.toString());
+          if (payment) {
+            await this.paymentsRepository.updatePaymentStatus(
+              payment.id,
+              'COMPLETED',
+              payload.data,
+              'PAYOS_MOCK_WEBHOOK',
+            );
+            return { message: 'PayOS mock webhook confirmed successfully' };
+          }
+        }
+        throw new BadRequestException('PayOS is not configured on this server');
+      }
+
+      try {
+        const verifiedData = await this.payos.webhooks.verify(payload);
+        const orderCode = verifiedData.orderCode;
+
+        const payment = await this.paymentsRepository.findPaymentByReference(orderCode.toString());
+        if (!payment) {
+          throw new NotFoundException('Không tìm thấy giao dịch thanh toán PayOS');
+        }
+
+        if (payment.status === 'COMPLETED') {
+          return { message: 'Payment already completed' };
+        }
+
+        // Cập nhật trạng thái thành công
+        await this.paymentsRepository.updatePaymentStatus(
+          payment.id,
+          'COMPLETED',
+          verifiedData as any,
+          'PAYOS_WEBHOOK_CALLBACK',
+        );
+
+        // Gửi thông báo cho VĐV
+        const tournament = await this.paymentsRepository.findTournamentById(payment.tournamentId);
+        if (payment.participantId && tournament) {
+          try {
+            await this.notificationsService.sendNotification(
+              buildParticipantPaymentCompletedNotification({
+                receiverId: payment.userId,
+                tournamentId: tournament.id,
+                tournamentName: tournament.name,
+                divisionId: payment.divisionId,
+              }),
+            );
+            if (tournament.createdBy !== payment.userId) {
+              await this.notificationsService.sendNotification(
+                buildOrganizerPaymentCompletedNotification({
+                  receiverId: tournament.createdBy,
+                  tournamentId: tournament.id,
+                  tournamentName: tournament.name,
+                  divisionId: payment.divisionId,
+                }),
+              );
+            }
+          } catch (err) {
+            console.error('Failed to send notification for payment completion:', err);
+          }
+        }
+
+        if (!payment.participantId) {
+          // Xử lý công bố giải đấu
+          if (tournament && tournament.status === 'REGISTRATION_CLOSED') {
+            try {
+              await this.paymentsRepository.setTournamentStatus(payment.tournamentId, 'UPCOMING');
+            } catch (err) {
+              console.error('Failed to set tournament status to UPCOMING on publish fee:', err);
+            }
+          } else {
+            let expectedFee = 0;
+            if (tournament) {
+              if (tournament.tournamentType === 'PUBLIC') {
+                const configKey = tournament.isRanked 
+                  ? 'TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED' 
+                  : 'TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED';
+                expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, tournament.isRanked ? '100000' : '50000'));
+              } else {
+                const configKey = 'TOURNAMENT_PUBLISH_FEE_CLUB';
+                expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, '0'));
+              }
+            }
+
+            if (parseFloat(payment.amount) === expectedFee) {
+              try {
+                const nextStatus = tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
+                await this.paymentsRepository.setTournamentStatus(payment.tournamentId, nextStatus);
+                if (tournament) {
+                  await this.notificationsService.sendNotification(
+                    buildTournamentPublishApprovedNotification({
+                      receiverId: tournament.createdBy,
+                      tournamentId: tournament.id,
+                      tournamentName: tournament.name,
+                    }),
+                  );
+                }
+              } catch (err) {
+                console.error(`Failed to set tournament status on publish fee payment:`, err);
+              }
+            }
+          }
+        }
+
+        return { message: 'PayOS payment confirmed successfully' };
+      } catch (err) {
+        console.error('PayOS Webhook verification failed:', err);
+        throw new BadRequestException('Xác thực chữ ký webhook PayOS thất bại: ' + err.message);
+      }
+    }
+
+    // Default VNPAY/Mock callback processing logic
     const payment = await this.paymentsRepository.findPaymentById(
       payload.transactionReference,
     );
@@ -83,7 +281,6 @@ export class PaymentsService {
       throw new NotFoundException('Payment transaction not found');
     }
 
-    // Idempotency: skip if already completed
     if (payment.status === 'COMPLETED') {
       return { message: 'Payment already completed' };
     }

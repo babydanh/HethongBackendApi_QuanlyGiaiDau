@@ -46,6 +46,22 @@ export class PaymentsRepository {
     return record || null;
   }
 
+  async findPaymentByReference(ref: string) {
+    const [record] = await this.db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.transactionReference, ref))
+      .limit(1);
+    return record || null;
+  }
+
+  async updatePaymentTransactionReference(id: string, ref: string) {
+    return this.db
+      .update(schema.payments)
+      .set({ transactionReference: ref })
+      .where(eq(schema.payments.id, id));
+  }
+
   async findPayoutById(id: string) {
     const [record] = await this.db
       .select()
