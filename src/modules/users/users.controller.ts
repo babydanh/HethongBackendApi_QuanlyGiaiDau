@@ -54,6 +54,7 @@ export class UsersController {
     return this.usersService.findAll({ search: q, page: 1, limit: 10 });
   }
 
+  @Public()
   @Get('search')
   @ApiOperation({ summary: 'Tìm kiếm người dùng qua email hoặc số điện thoại' })
   @ApiResponse({ status: 200, description: 'Danh sách người dùng khớp từ khóa' })
