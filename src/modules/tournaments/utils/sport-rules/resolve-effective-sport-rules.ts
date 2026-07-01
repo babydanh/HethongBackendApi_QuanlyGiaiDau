@@ -49,7 +49,7 @@ const SPORT_DEFAULTS: Record<SportRuleKind, SportDefaults> = {
     setsToWin: 1,
     pointsPerSet: 11,
     mustWinByTwo: true,
-    maxPoints: 11,
+    maxPoints: 15,
     tiebreakAt: 10,
     tiebreakPoints: 11,
   },
