@@ -23,5 +23,8 @@ export const envValidationSchema = Joi.object({
   OPENROUTER_API_KEY: Joi.string().allow('').optional().default(''),
   OPENROUTER_BASE_URL: Joi.string().uri().default('https://openrouter.ai/api/v1'),
   AI_MODEL: Joi.string().default('meta-llama/llama-3-8b-instruct:free'),
+  PAYOS_CLIENT_ID: Joi.string().allow('').optional().default(''),
+  PAYOS_API_KEY: Joi.string().allow('').optional().default(''),
+  PAYOS_CHECKSUM_KEY: Joi.string().allow('').optional().default(''),
 });
 
