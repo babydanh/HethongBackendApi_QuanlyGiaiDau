@@ -77,20 +77,25 @@ export class LiveScoreGateway
   }
 
   broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData) {
+    if (!this.server) return;
     this.server.to(`match:${matchId}`).emit('score:update', matchData);
   }
 
   broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData) {
+    if (!this.server) return;
     this.server.to(`match:${matchId}`).emit('match:status', matchData);
   }
 
   broadcastViewerCount(matchId: string) {
+    if (!this.server) return;
     const room = `match:${matchId}`;
-    const viewerCount = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    const rooms = this.server.sockets?.adapter?.rooms;
+    const viewerCount = rooms?.get(room)?.size ?? 0;
     this.server.to(room).emit('viewer:count', { matchId, viewerCount });
   }
 
   broadcastComment(matchId: string, comment: unknown) {
+    if (!this.server) return;
     this.server.to(`match:${matchId}`).emit('comment:new', comment);
   }
 }

@@ -5,6 +5,7 @@ export interface NormalizedScoreEntry {
   p1: number;
   p2: number;
   scoreStr: string;
+  isFinished: boolean;
 }
 
 export interface ScoreValidationSummary {

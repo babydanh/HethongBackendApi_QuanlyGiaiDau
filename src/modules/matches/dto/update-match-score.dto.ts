@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, Min, IsObject, IsOptional, IsUUID } from 'class-validator';
+import { IsInt, Min, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class UpdateMatchScoreDto {
   @ApiProperty({ example: 2, description: 'Số set thắng của Participant 1' })
@@ -27,4 +27,13 @@ export class UpdateMatchScoreDto {
   @IsOptional()
   @IsUUID()
   winnerId?: string;
+
+  @ApiPropertyOptional({
+    example: 'Trọng tài xác nhận set cuối đánh tie-break rút gọn theo điều lệ sân.',
+    description: 'Lý do override khi cần chốt tỉ số không bám hoàn toàn theo preset luật mặc định.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  overrideReason?: string;
 }

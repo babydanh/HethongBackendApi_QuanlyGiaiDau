@@ -169,6 +169,46 @@ export class MatchesService {
     });
   }
 
+  private validateBasicOverrideScoreDetails(scoreDetails: Record<string, unknown>) {
+    const rawSets = scoreDetails.sets;
+    if (!Array.isArray(rawSets)) {
+      throw new BadRequestException('Override score yêu cầu scoreDetails.sets là một mảng hợp lệ.');
+    }
+
+    let p1SetsWon = 0;
+    let p2SetsWon = 0;
+
+    rawSets.forEach((setValue, index) => {
+      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) {
+        throw new BadRequestException(`set ${index + 1} không hợp lệ.`);
+      }
+
+      const setRecord = setValue as Record<string, unknown>;
+      const team1Score = Number(setRecord.team1Score);
+      const team2Score = Number(setRecord.team2Score);
+
+      if (
+        !Number.isFinite(team1Score) ||
+        !Number.isFinite(team2Score) ||
+        team1Score < 0 ||
+        team2Score < 0
+      ) {
+        throw new BadRequestException(`set ${index + 1} có điểm số không hợp lệ.`);
+      }
+
+      if (team1Score > team2Score) {
+        p1SetsWon += 1;
+      } else if (team2Score > team1Score) {
+        p2SetsWon += 1;
+      }
+    });
+
+    return {
+      p1SetsWon,
+      p2SetsWon,
+    };
+  }
+
   async findAll(query: QueryMatchDto) {
     return this.matchesRepository.findAll(query);
   }
@@ -218,42 +258,79 @@ export class MatchesService {
     let p2SetsWon = updateMatchScoreDto.p2SetsWon;
     const scoreDetails = updateMatchScoreDto.scoreDetails;
     let winnerId = updateMatchScoreDto.winnerId;
+    const overrideReason = updateMatchScoreDto.overrideReason?.trim();
 
     // 1. Validate score details if provided
     if (scoreDetails) {
-      // Resolve config hierarchy (Stage -> Round -> Match)
-      const resolvedConfig = this.resolveMatchConfig(existing);
-      const validation = validateScoreDetails(scoreDetails, resolvedConfig);
+      if (overrideReason) {
+        const validation = this.validateBasicOverrideScoreDetails(scoreDetails);
 
-      // Verify sets won align with scoreDetails
-      if (p1SetsWon !== undefined && p1SetsWon !== validation.p1SetsWon) {
-        throw new BadRequestException(`p1SetsWon (${p1SetsWon}) không khớp với tỉ số chi tiết (${validation.p1SetsWon}).`);
-      }
-      if (p2SetsWon !== undefined && p2SetsWon !== validation.p2SetsWon) {
-        throw new BadRequestException(`p2SetsWon (${p2SetsWon}) không khớp với tỉ số chi tiết (${validation.p2SetsWon}).`);
-      }
-
-      p1SetsWon = validation.p1SetsWon;
-      p2SetsWon = validation.p2SetsWon;
-
-      // Suggest winner automatically
-      if (p1SetsWon >= validation.setsToWin) {
-        if (winnerId && winnerId !== existing.participant1Id) {
-          throw new BadRequestException('WinnerId không khớp với kết quả set thắng.');
+        if (p1SetsWon !== validation.p1SetsWon || p2SetsWon !== validation.p2SetsWon) {
+          throw new BadRequestException(
+            `Override score vẫn phải khớp số set/game thắng thực tế (${validation.p1SetsWon}-${validation.p2SetsWon}).`,
+          );
         }
-        winnerId = existing.participant1Id || undefined;
-      } else if (p2SetsWon >= validation.setsToWin) {
-        if (winnerId && winnerId !== existing.participant2Id) {
-          throw new BadRequestException('WinnerId không khớp với kết quả set thắng.');
+      } else {
+        // Resolve config hierarchy (Stage -> Round -> Match)
+        const resolvedConfig = this.resolveMatchConfig(existing);
+        const validation = validateScoreDetails(scoreDetails, resolvedConfig);
+
+        // Verify sets won align with scoreDetails
+        if (p1SetsWon !== undefined && p1SetsWon !== validation.p1SetsWon) {
+          throw new BadRequestException(`p1SetsWon (${p1SetsWon}) không khớp với tỉ số chi tiết (${validation.p1SetsWon}).`);
         }
-        winnerId = existing.participant2Id || undefined;
+        if (p2SetsWon !== undefined && p2SetsWon !== validation.p2SetsWon) {
+          throw new BadRequestException(`p2SetsWon (${p2SetsWon}) không khớp với tỉ số chi tiết (${validation.p2SetsWon}).`);
+        }
+
+        p1SetsWon = validation.p1SetsWon;
+        p2SetsWon = validation.p2SetsWon;
+
+        // Suggest winner automatically
+        if (p1SetsWon >= validation.setsToWin) {
+          if (winnerId && winnerId !== existing.participant1Id) {
+            throw new BadRequestException('WinnerId không khớp với kết quả set thắng.');
+          }
+          winnerId = existing.participant1Id || undefined;
+        } else if (p2SetsWon >= validation.setsToWin) {
+          if (winnerId && winnerId !== existing.participant2Id) {
+            throw new BadRequestException('WinnerId không khớp với kết quả set thắng.');
+          }
+          winnerId = existing.participant2Id || undefined;
+        }
       }
     }
+
+    if (winnerId) {
+      if (winnerId !== existing.participant1Id && winnerId !== existing.participant2Id) {
+        throw new BadRequestException('WinnerId không thuộc một trong hai participant của trận.');
+      }
+
+      if (winnerId === existing.participant1Id && p1SetsWon <= p2SetsWon) {
+        throw new BadRequestException('Đội 1 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.');
+      }
+
+      if (winnerId === existing.participant2Id && p2SetsWon <= p1SetsWon) {
+        throw new BadRequestException('Đội 2 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.');
+      }
+    }
+
+    const nextScoreDetails =
+      overrideReason && scoreDetails
+        ? {
+            ...scoreDetails,
+            scoreOverride: {
+              reason: overrideReason,
+              decidedAt: new Date().toISOString(),
+              decidedBy: user.sub,
+            },
+          }
+        : scoreDetails;
 
     const updatedMatch = await this.matchesRepository.updateScore(id, user.sub, {
       p1SetsWon,
       p2SetsWon,
-      scoreDetails,
+      scoreDetails: nextScoreDetails,
       winnerId,
     });
 
@@ -263,7 +340,7 @@ export class MatchesService {
         const cacheKey = `match:live:${id}`;
         if (p1SetsWon !== undefined) await this.redisService.hset(cacheKey, 'p1SetsWon', String(p1SetsWon));
         if (p2SetsWon !== undefined) await this.redisService.hset(cacheKey, 'p2SetsWon', String(p2SetsWon));
-        if (scoreDetails) await this.redisService.hset(cacheKey, 'scoreDetails', JSON.stringify(scoreDetails));
+        if (nextScoreDetails) await this.redisService.hset(cacheKey, 'scoreDetails', JSON.stringify(nextScoreDetails));
         if (winnerId) await this.redisService.hset(cacheKey, 'winnerId', winnerId);
 
         // TTL 24 hours

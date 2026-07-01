@@ -44,8 +44,19 @@ export function validateTennisScoreDetails(context: ScoreValidationContext): Sco
   let p1SetsWon = 0;
   let p2SetsWon = 0;
   let winnerReachedAtSetIndex: number | null = null;
+  const lastEntryIndex = normalizedEntries.length - 1;
 
   for (const [index, entry] of normalizedEntries.entries()) {
+    const isLiveFinalSet = index === lastEntryIndex && entry.isFinished === false;
+
+    if (!entry.isFinished && !isLiveFinalSet) {
+      throw new BadRequestException(`Set ${entry.key}: Chỉ set cuối cùng mới được để trạng thái đang diễn ra.`);
+    }
+
+    if (isLiveFinalSet) {
+      continue;
+    }
+
     const winner = entry.p1 > entry.p2 ? 'P1' : entry.p2 > entry.p1 ? 'P2' : null;
     if (!winner) {
       throw new BadRequestException(`Set ${entry.key}: Không được phép hòa ${entry.scoreStr}.`);

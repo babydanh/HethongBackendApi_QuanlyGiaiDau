@@ -170,7 +170,7 @@ export class MatchesRepository {
       }
     }
 
-    const groupsMap = new Map<string, { id: string; name: string; stageName: string; tournamentName?: string }>();
+    const groupsMap = new Map<string, { id: string; name: string; stageName: string; tournamentName?: string; categoryId?: string; categoryName?: string }>();
     if (groupIdsForMatches.size > 0) {
       const groupsData = await this.db
         .select({
@@ -178,10 +178,13 @@ export class MatchesRepository {
           groupName: schema.tournamentGroups.name,
           stageName: schema.tournamentStages.name,
           tournamentName: schema.tournaments.name,
+          categoryId: schema.tournaments.categoryId,
+          categoryName: schema.categories.name,
         })
         .from(schema.tournamentGroups)
         .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
         .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+        .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
         .where(inArray(schema.tournamentGroups.id, Array.from(groupIdsForMatches)));
       for (const g of groupsData) {
         groupsMap.set(g.groupId, {
@@ -189,6 +192,8 @@ export class MatchesRepository {
           name: g.groupName,
           stageName: g.stageName,
           tournamentName: g.tournamentName,
+          categoryId: g.categoryId || undefined,
+          categoryName: g.categoryName || undefined,
         });
       }
     }
@@ -210,6 +215,10 @@ export class MatchesRepository {
         } : null,
         tournament: groupStage ? {
           name: groupStage.tournamentName,
+          categoryId: groupStage.categoryId,
+          category: {
+            name: groupStage.categoryName,
+          }
         } : null,
       };
     });
