@@ -41,4 +41,16 @@ export class NotificationsService {
   async markAllAsRead(userId: string) {
     return this.notificationsRepository.markAllAsRead(userId);
   }
+
+  async deleteByReceiverTypeAndRedirect(
+    receiverId: string,
+    type: string,
+    redirectUrl: string,
+  ) {
+    return this.notificationsRepository.deleteByReceiverTypeAndRedirect(
+      receiverId,
+      type,
+      redirectUrl,
+    );
+  }
 }

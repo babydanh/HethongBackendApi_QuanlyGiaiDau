@@ -177,6 +177,7 @@ export class MatchesService {
 
     let p1SetsWon = 0;
     let p2SetsWon = 0;
+    const lastSetIndex = rawSets.length - 1;
 
     rawSets.forEach((setValue, index) => {
       if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) {
@@ -194,6 +195,15 @@ export class MatchesService {
         team2Score < 0
       ) {
         throw new BadRequestException(`set ${index + 1} có điểm số không hợp lệ.`);
+      }
+
+      const isFinished = setRecord.isFinished !== false;
+      if (!isFinished && index !== lastSetIndex) {
+        throw new BadRequestException(`set ${index + 1} đang diễn ra nhưng không phải set cuối cùng.`);
+      }
+
+      if (!isFinished) {
+        return;
       }
 
       if (team1Score > team2Score) {
@@ -264,25 +274,12 @@ export class MatchesService {
     if (scoreDetails) {
       if (overrideReason) {
         const validation = this.validateBasicOverrideScoreDetails(scoreDetails);
-
-        if (p1SetsWon !== validation.p1SetsWon || p2SetsWon !== validation.p2SetsWon) {
-          throw new BadRequestException(
-            `Override score vẫn phải khớp số set/game thắng thực tế (${validation.p1SetsWon}-${validation.p2SetsWon}).`,
-          );
-        }
+        p1SetsWon = validation.p1SetsWon;
+        p2SetsWon = validation.p2SetsWon;
       } else {
         // Resolve config hierarchy (Stage -> Round -> Match)
         const resolvedConfig = this.resolveMatchConfig(existing);
         const validation = validateScoreDetails(scoreDetails, resolvedConfig);
-
-        // Verify sets won align with scoreDetails
-        if (p1SetsWon !== undefined && p1SetsWon !== validation.p1SetsWon) {
-          throw new BadRequestException(`p1SetsWon (${p1SetsWon}) không khớp với tỉ số chi tiết (${validation.p1SetsWon}).`);
-        }
-        if (p2SetsWon !== undefined && p2SetsWon !== validation.p2SetsWon) {
-          throw new BadRequestException(`p2SetsWon (${p2SetsWon}) không khớp với tỉ số chi tiết (${validation.p2SetsWon}).`);
-        }
-
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
 
@@ -333,6 +330,9 @@ export class MatchesService {
       scoreDetails: nextScoreDetails,
       winnerId,
     });
+    if (!updatedMatch) {
+      throw new NotFoundException('Match not found after score update');
+    }
 
     // Cache live score in Redis if match is active/ongoing
     if (existing.status === 'ONGOING' || existing.status === 'SCHEDULED') {
@@ -404,6 +404,9 @@ export class MatchesService {
         id,
         updateMatchStatusDto,
       );
+      if (!updatedMatch) {
+        throw new NotFoundException('Match not found after status update');
+      }
 
       // Broadcast status real-time
       this.liveScoreGateway.broadcastMatchStatus(id, updatedMatch);

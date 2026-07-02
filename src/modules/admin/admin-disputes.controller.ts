@@ -15,6 +15,7 @@ export class AdminDisputesController {
   constructor(private readonly adminService: AdminService) {}
 
   @Get()
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Lấy danh sách các khiếu nại tranh chấp (Chỉ ADMIN)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -28,6 +29,7 @@ export class AdminDisputesController {
   }
 
   @Get(':id/diff')
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Xem chi tiết chênh lệch tỉ số của khiếu nại (Chỉ ADMIN)' })
   async getDiff(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.getDisputeDiff(id);

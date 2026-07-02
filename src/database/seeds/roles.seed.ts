@@ -16,6 +16,11 @@ async function run() {
       .values([
         { name: 'ADMIN', slug: 'admin', description: 'Administrator' },
         {
+          name: 'MODERATOR',
+          slug: 'moderator',
+          description: 'System Moderator',
+        },
+        {
           name: 'ORGANIZER',
           slug: 'organizer',
           description: 'Tournament Organizer',

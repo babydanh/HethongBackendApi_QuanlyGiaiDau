@@ -1,6 +1,8 @@
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import { NOTIFICATION_TYPES } from './notification-types';
 
+const getCommunityRedirect = (communityId: string): string => `/communities/${communityId}`;
+
 const buildRedirectPath = (
   pathname: string,
   query: Record<string, string | undefined>,
@@ -46,6 +48,107 @@ const getOrganizerTournamentRedirect = (
     tab: options?.tab,
     divisionId: options?.divisionId,
   });
+
+export const buildCommunityInviteNotification = (params: {
+  communityId: string;
+  communityName: string;
+  inviterName: string;
+  receiverId: string;
+  senderId?: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  senderId: params.senderId,
+  type: NOTIFICATION_TYPES.COMMUNITY_INVITED,
+  title: 'Bạn có lời mời tham gia cộng đồng',
+  content: `${params.inviterName} vừa mời bạn tham gia cộng đồng ${params.communityName}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityRolePromotedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+  roleLabel: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_ROLE_PROMOTED,
+  title: 'Vai trò của bạn đã được cập nhật',
+  content: `Bạn đã được thăng quyền thành ${params.roleLabel} trong cộng đồng ${params.communityName}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityRoleDemotedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+  roleLabel: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_ROLE_DEMOTED,
+  title: 'Vai trò của bạn đã bị điều chỉnh',
+  content: `Vai trò của bạn trong cộng đồng ${params.communityName} đã được chuyển thành ${params.roleLabel}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityKickedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_KICKED,
+  title: 'Bạn đã bị mời ra khỏi cộng đồng',
+  content: `Bạn không còn là thành viên của cộng đồng ${params.communityName}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityInviteRevokedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_INVITE_REVOKED,
+  title: 'Lời mời tham gia cộng đồng đã bị thu hồi',
+  content: `Lời mời tham gia cộng đồng ${params.communityName} không còn hiệu lực nữa.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityOwnershipTransferredNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_OWNERSHIP_TRANSFERRED,
+  title: 'Bạn đã trở thành chủ sở hữu cộng đồng',
+  content: `Bạn vừa được chuyển quyền sở hữu cộng đồng ${params.communityName}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityBannedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_BANNED,
+  title: 'Bạn đã bị cấm khỏi cộng đồng',
+  content: `Bạn không thể tiếp tục tham gia cộng đồng ${params.communityName} cho đến khi được gỡ cấm.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityUnbannedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_UNBANNED,
+  title: 'Bạn đã được gỡ cấm khỏi cộng đồng',
+  content: `Bạn có thể tham gia lại cộng đồng ${params.communityName}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
 
 export const buildOrganizerNewRegistrationNotification = (params: {
   tournamentId: string;
@@ -295,11 +398,14 @@ export const buildTournamentPublishRejectedNotification = (params: {
   tournamentId: string;
   tournamentName: string;
   receiverId: string;
+  reason?: string;
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.TOURNAMENT_PUBLISH_REJECTED,
   title: 'Giải đấu không được duyệt',
-  content: `Giải ${params.tournamentName} chưa được phê duyệt. Vui lòng kiểm tra và cập nhật lại thông tin.`,
+  content: params.reason
+    ? `Giải ${params.tournamentName} chưa được phê duyệt. Lý do: ${params.reason}.`
+    : `Giải ${params.tournamentName} chưa được phê duyệt. Vui lòng kiểm tra và cập nhật lại thông tin.`,
   redirectUrl: getOrganizerTournamentRedirect(params.tournamentId, { tab: 'basic' }),
 });
 
@@ -307,11 +413,14 @@ export const buildTournamentSuspendedNotification = (params: {
   tournamentId: string;
   tournamentName: string;
   receiverId: string;
+  reason?: string;
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.TOURNAMENT_SUSPENDED,
   title: 'Giải đấu bị tạm đình chỉ',
-  content: `Giải ${params.tournamentName} đã bị tạm đình chỉ bởi quản trị viên.`,
+  content: params.reason
+    ? `Giải ${params.tournamentName} đã bị tạm đình chỉ. Lý do: ${params.reason}.`
+    : `Giải ${params.tournamentName} đã bị tạm đình chỉ bởi quản trị viên.`,
   redirectUrl: getOrganizerTournamentRedirect(params.tournamentId, { tab: 'basic' }),
 });
 
@@ -342,11 +451,14 @@ export const buildTournamentDeleteRejectedNotification = (params: {
   tournamentId: string;
   tournamentName: string;
   receiverId: string;
+  reason?: string;
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.TOURNAMENT_DELETE_REJECTED,
   title: 'Yêu cầu xóa giải bị từ chối',
-  content: `Yêu cầu xóa giải ${params.tournamentName} của bạn đã bị từ chối.`,
+  content: params.reason
+    ? `Yêu cầu xóa giải ${params.tournamentName} của bạn đã bị từ chối. Lý do: ${params.reason}.`
+    : `Yêu cầu xóa giải ${params.tournamentName} của bạn đã bị từ chối.`,
   redirectUrl: getOrganizerTournamentRedirect(params.tournamentId, { tab: 'basic' }),
 });
 
@@ -467,5 +579,66 @@ export const buildRefereeAssignedNotification = (params: {
   redirectUrl: getTournamentRedirect(params.tournamentId, {
     tab: 'matches',
     divisionId: params.divisionId,
+  }),
+});
+
+export const buildRefereeInviteNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  refereeId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.REFEREE_INVITED,
+  title: 'Bạn có lời mời làm trọng tài',
+  content: `Ban tổ chức vừa mời bạn tham gia điều hành giải ${params.tournamentName} với vai trò trọng tài.`,
+  redirectUrl: buildRedirectPath('/notifications', {
+    action: 'referee-invite',
+    tournamentId: params.tournamentId,
+    refereeId: params.refereeId,
+  }),
+});
+
+export const buildRefereeInviteAcceptedNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  refereeName: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.REFEREE_INVITE_ACCEPTED,
+  title: 'Trọng tài đã nhận lời mời',
+  content: `${params.refereeName} đã đồng ý tham gia điều hành giải ${params.tournamentName}.`,
+  redirectUrl: getOrganizerTournamentRedirect(params.tournamentId, {
+    tab: 'permissions',
+  }),
+});
+
+export const buildRefereeInviteRevokedNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.REFEREE_INVITE_REVOKED,
+  title: 'Lời mời trọng tài đã bị thu hồi',
+  content: `Ban tổ chức đã thu hồi lời mời trọng tài của bạn tại giải ${params.tournamentName}.`,
+  redirectUrl: getTournamentRedirect(params.tournamentId, {
+    tab: 'overview',
+  }),
+});
+
+export const buildRefereeInviteDeclinedNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  refereeName: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.REFEREE_INVITE_DECLINED,
+  title: 'Trọng tài đã từ chối lời mời',
+  content: `${params.refereeName} đã từ chối vai trò trọng tài tại giải ${params.tournamentName}.`,
+  redirectUrl: getOrganizerTournamentRedirect(params.tournamentId, {
+    tab: 'permissions',
   }),
 });

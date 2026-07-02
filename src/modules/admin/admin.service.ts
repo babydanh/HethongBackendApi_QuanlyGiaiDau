@@ -30,6 +30,37 @@ export class AdminService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private extractTournamentPreviousStatus(
+    tournamentConfig: unknown,
+    fallbackStatus: string,
+  ) {
+    if (!tournamentConfig || typeof tournamentConfig !== 'object' || Array.isArray(tournamentConfig)) {
+      return fallbackStatus;
+    }
+
+    const previousStatus = (tournamentConfig as { previousStatus?: unknown }).previousStatus;
+    return typeof previousStatus === 'string' && previousStatus.length > 0
+      ? previousStatus
+      : fallbackStatus;
+  }
+
+  private async logTournamentAdminAction(params: {
+    adminId: string;
+    action: string;
+    tournamentId: string;
+    oldValues: Record<string, unknown>;
+    newValues: Record<string, unknown>;
+  }) {
+    await this.db.insert(schema.auditLogs).values({
+      userId: params.adminId,
+      action: params.action,
+      tableName: 'tournaments',
+      recordId: params.tournamentId,
+      oldValues: params.oldValues,
+      newValues: params.newValues,
+    });
+  }
+
   async getMetrics(groupBy: 'day' | 'week' | 'month' | 'year' = 'month') {
     const intervalStr = groupBy === 'day' ? '1 day' : groupBy === 'week' ? '7 days' : groupBy === 'year' ? '365 days' : '30 days';
 
@@ -1020,7 +1051,7 @@ export class AdminService {
     return updatedReport;
   }
 
-  async suspendTournament(tournamentId: string) {
+  async suspendTournament(tournamentId: string, adminId: string, note?: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1036,7 +1067,10 @@ export class AdminService {
     }
 
     // Save previous status inside tournamentConfig JSON
-    const currentConfig = (tournament.tournamentConfig || {}) as Record<string, any>;
+    const currentConfig =
+      tournament.tournamentConfig && typeof tournament.tournamentConfig === 'object' && !Array.isArray(tournament.tournamentConfig)
+        ? (tournament.tournamentConfig as Record<string, unknown>)
+        : {};
     const updatedConfig = {
       ...currentConfig,
       previousStatus: tournament.status,
@@ -1057,13 +1091,29 @@ export class AdminService {
         receiverId: tournament.createdBy,
         tournamentId,
         tournamentName: tournament.name,
+        reason: note,
       }),
     );
+
+    await this.logTournamentAdminAction({
+      adminId,
+      action: 'TOURNAMENT_SUSPEND',
+      tournamentId,
+      oldValues: {
+        status: tournament.status,
+        tournamentConfig: tournament.tournamentConfig,
+      },
+      newValues: {
+        status: updatedTournament.status,
+        tournamentConfig: updatedTournament.tournamentConfig,
+        note: note || null,
+      },
+    });
 
     return updatedTournament;
   }
 
-  async unsuspendTournament(tournamentId: string) {
+  async unsuspendTournament(tournamentId: string, adminId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1079,8 +1129,10 @@ export class AdminService {
     }
 
     // Restore previous status from tournamentConfig
-    const config = (tournament.tournamentConfig || {}) as Record<string, any>;
-    const restoreStatus = config.previousStatus || 'UPCOMING';
+    const restoreStatus = this.extractTournamentPreviousStatus(
+      tournament.tournamentConfig,
+      'UPCOMING',
+    );
 
     const [updatedTournament] = await this.db
       .update(schema.tournaments)
@@ -1099,10 +1151,24 @@ export class AdminService {
       }),
     );
 
+    await this.logTournamentAdminAction({
+      adminId,
+      action: 'TOURNAMENT_UNSUSPEND',
+      tournamentId,
+      oldValues: {
+        status: tournament.status,
+        tournamentConfig: tournament.tournamentConfig,
+      },
+      newValues: {
+        status: updatedTournament.status,
+        tournamentConfig: updatedTournament.tournamentConfig,
+      },
+    });
+
     return updatedTournament;
   }
 
-  async approveTournament(tournamentId: string) {
+  async approveTournament(tournamentId: string, adminId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1134,10 +1200,18 @@ export class AdminService {
       }),
     );
 
+    await this.logTournamentAdminAction({
+      adminId,
+      action: 'TOURNAMENT_APPROVE',
+      tournamentId,
+      oldValues: { status: tournament.status },
+      newValues: { status: updatedTournament.status },
+    });
+
     return updatedTournament;
   }
 
-  async rejectTournament(tournamentId: string) {
+  async rejectTournament(tournamentId: string, adminId: string, note?: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1166,13 +1240,25 @@ export class AdminService {
         receiverId: tournament.createdBy,
         tournamentId,
         tournamentName: tournament.name,
+        reason: note,
       }),
     );
+
+    await this.logTournamentAdminAction({
+      adminId,
+      action: 'TOURNAMENT_REJECT',
+      tournamentId,
+      oldValues: { status: tournament.status },
+      newValues: {
+        status: updatedTournament.status,
+        note: note || null,
+      },
+    });
 
     return updatedTournament;
   }
 
-  async banTournament(tournamentId: string) {
+  async banTournament(tournamentId: string, adminId: string, note?: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1184,7 +1270,10 @@ export class AdminService {
     }
 
     // Save previous status inside tournamentConfig JSON
-    const currentConfig = (tournament.tournamentConfig || {}) as Record<string, any>;
+    const currentConfig =
+      tournament.tournamentConfig && typeof tournament.tournamentConfig === 'object' && !Array.isArray(tournament.tournamentConfig)
+        ? (tournament.tournamentConfig as Record<string, unknown>)
+        : {};
     const updatedConfig = {
       ...currentConfig,
       previousStatus: tournament.status,
@@ -1208,10 +1297,25 @@ export class AdminService {
       }),
     );
 
+    await this.logTournamentAdminAction({
+      adminId,
+      action: 'TOURNAMENT_BAN',
+      tournamentId,
+      oldValues: {
+        status: tournament.status,
+        tournamentConfig: tournament.tournamentConfig,
+      },
+      newValues: {
+        status: updatedTournament.status,
+        tournamentConfig: updatedTournament.tournamentConfig,
+        note: note || null,
+      },
+    });
+
     return updatedTournament;
   }
 
-  async approveDeleteTournament(tournamentId: string) {
+  async approveDeleteTournament(tournamentId: string, adminId: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1292,10 +1396,24 @@ export class AdminService {
       }),
     );
 
+    await this.logTournamentAdminAction({
+      adminId,
+      action: 'TOURNAMENT_DELETE_APPROVE',
+      tournamentId,
+      oldValues: {
+        status: tournament.status,
+        deletedAt: null,
+      },
+      newValues: {
+        status: deletedTournament.status,
+        deletedAt: deletedTournament.deletedAt,
+      },
+    });
+
     return deletedTournament;
   }
 
-  async rejectDeleteTournament(tournamentId: string) {
+  async rejectDeleteTournament(tournamentId: string, adminId: string, note?: string) {
     const [tournament] = await this.db
       .select()
       .from(schema.tournaments)
@@ -1310,10 +1428,15 @@ export class AdminService {
       throw new BadRequestException('Tournament deletion is not pending approval');
     }
 
+    const restoredStatus = this.extractTournamentPreviousStatus(
+      tournament.tournamentConfig,
+      'REGISTRATION_OPEN',
+    );
+
     const [updatedTournament] = await this.db
       .update(schema.tournaments)
       .set({
-        status: 'REGISTRATION_OPEN',
+        status: restoredStatus,
         updatedAt: new Date(),
       })
       .where(eq(schema.tournaments.id, tournamentId))
@@ -1324,16 +1447,17 @@ export class AdminService {
         receiverId: tournament.createdBy,
         tournamentId,
         tournamentName: tournament.name,
+        reason: note,
       }),
     );
 
     if (tournament.parentId) {
-      await this.db
-        .update(schema.tournaments)
-        .set({
-          status: 'REGISTRATION_OPEN',
-          updatedAt: new Date(),
+      const siblingTournaments = await this.db
+        .select({
+          id: schema.tournaments.id,
+          tournamentConfig: schema.tournaments.tournamentConfig,
         })
+        .from(schema.tournaments)
         .where(
           and(
             eq(schema.tournaments.parentId, tournament.parentId),
@@ -1341,7 +1465,36 @@ export class AdminService {
             isNull(schema.tournaments.deletedAt),
           ),
         );
+
+      for (const sibling of siblingTournaments) {
+        const siblingRestoreStatus = this.extractTournamentPreviousStatus(
+          sibling.tournamentConfig,
+          restoredStatus,
+        );
+
+        await this.db
+          .update(schema.tournaments)
+          .set({
+            status: siblingRestoreStatus,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.tournaments.id, sibling.id));
+      }
     }
+
+    await this.logTournamentAdminAction({
+      adminId,
+      action: 'TOURNAMENT_DELETE_REJECT',
+      tournamentId,
+      oldValues: {
+        status: tournament.status,
+        tournamentConfig: tournament.tournamentConfig,
+      },
+      newValues: {
+        status: updatedTournament.status,
+        note: note || null,
+      },
+    });
 
     return updatedTournament;
   }
@@ -1419,6 +1572,4 @@ export class AdminService {
       .orderBy(desc(schema.verificationTickets.createdAt));
   }
 }
-
-
 

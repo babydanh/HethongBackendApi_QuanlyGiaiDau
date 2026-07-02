@@ -66,3 +66,13 @@ export class ResolveReportDto {
   @IsNotEmpty()
   resolutionNote: string;
 }
+
+export class TournamentAdminActionDto {
+  @ApiProperty({
+    description: 'Ghi chú hoặc lý do xử lý của quản trị viên',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  note?: string;
+}

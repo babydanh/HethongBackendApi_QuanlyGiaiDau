@@ -13,10 +13,27 @@ import { ReviewCommunityDto } from './dto/review-community.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { UserRole } from '../../common/constants/enums';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildCommunityBannedNotification,
+  buildCommunityInviteNotification,
+  buildCommunityInviteRevokedNotification,
+  buildCommunityKickedNotification,
+  buildCommunityOwnershipTransferredNotification,
+  buildCommunityRoleDemotedNotification,
+  buildCommunityRolePromotedNotification,
+  buildCommunityUnbannedNotification,
+} from '../notifications/notification-builder';
+
+type CommunityMemberRole = 'OWNER' | 'MODERATOR' | 'MEMBER';
+type CommunityMemberStatus = 'JOINED' | 'PENDING' | 'INVITED' | 'REJECTED' | 'BANNED';
 
 @Injectable()
 export class CommunitiesService {
-  constructor(private readonly communitiesRepository: CommunitiesRepository) {}
+  constructor(
+    private readonly communitiesRepository: CommunitiesRepository,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // --- COMMUNITIES ---
 
@@ -121,6 +138,19 @@ export class CommunitiesService {
       throw new ConflictException('User is already a member of this community');
     }
 
+    const requesterMember = await this.communitiesRepository.findMember(
+      communityId,
+      requesterId,
+    );
+
+    if (dto.role === 'OWNER') {
+      throw new BadRequestException('Không thể thêm trực tiếp chủ sở hữu mới.');
+    }
+
+    if (requesterMember?.role === 'MODERATOR' && dto.role !== 'MEMBER') {
+      throw new ForbiddenException('Quản trị viên chỉ có thể thêm thành viên thường.');
+    }
+
     return await this.communitiesRepository.addMember(
       communityId,
       dto.userId,
@@ -145,15 +175,31 @@ export class CommunitiesService {
       throw new NotFoundException('Target user is not a member');
     }
 
+    if (existing.status !== 'JOINED') {
+      throw new BadRequestException('Chỉ thành viên đã tham gia mới được thay đổi vai trò.');
+    }
+
     if (dto.role === 'OWNER') {
       if (requesterId === targetUserId) {
         throw new ConflictException('You are already the OWNER');
       }
-      return await this.communitiesRepository.transferOwnership(
+
+      const ownershipTransferred = await this.communitiesRepository.transferOwnership(
         communityId,
         requesterId,
         targetUserId,
       );
+
+      const community = await this.findById(communityId);
+      await this.notificationsService.sendNotification(
+        buildCommunityOwnershipTransferredNotification({
+          communityId,
+          communityName: community.name,
+          receiverId: targetUserId,
+        }),
+      );
+
+      return ownershipTransferred;
     }
 
     // Prevent demoting self (optional, but good practice to ensure at least 1 owner remains)
@@ -161,11 +207,30 @@ export class CommunitiesService {
       throw new ForbiddenException('Cannot demote yourself from OWNER role');
     }
 
-    return await this.communitiesRepository.updateMemberRole(
+    const updatedMember = await this.communitiesRepository.updateMemberRole(
       communityId,
       targetUserId,
       dto.role,
     );
+
+    const community = await this.findById(communityId);
+    const roleLabel = this.getCommunityRoleLabel(dto.role);
+    const previousRole = existing.role as CommunityMemberRole;
+    const notificationBuilder =
+      this.isRolePromotion(previousRole, dto.role)
+        ? buildCommunityRolePromotedNotification
+        : buildCommunityRoleDemotedNotification;
+
+    await this.notificationsService.sendNotification(
+      notificationBuilder({
+        communityId,
+        communityName: community.name,
+        receiverId: targetUserId,
+        roleLabel,
+      }),
+    );
+
+    return updatedMember;
   }
 
   async removeMember(
@@ -191,14 +256,59 @@ export class CommunitiesService {
       throw new NotFoundException('User is not a member');
     }
 
+    if (existing.status === 'PENDING') {
+      throw new BadRequestException('Hãy xử lý đơn tham gia bằng luồng duyệt đơn, không xóa trực tiếp.');
+    }
+
+    if (requesterId === targetUserId && existing.role === 'OWNER' && existing.status === 'JOINED') {
+      throw new ForbiddenException('Chủ sở hữu không thể tự rời cộng đồng. Hãy chuyển quyền trước.');
+    }
+
     if (existing.role === 'OWNER' && requesterId !== targetUserId) {
       throw new ForbiddenException('Cannot remove an OWNER');
     }
 
-    return await this.communitiesRepository.removeMember(
+    const requesterMember =
+      requesterId === targetUserId
+        ? existing
+        : await this.communitiesRepository.findMember(communityId, requesterId);
+
+    if (
+      requesterId !== targetUserId &&
+      requesterMember?.role === 'MODERATOR' &&
+      existing.role !== 'MEMBER'
+    ) {
+      throw new ForbiddenException('Quản trị viên chỉ có thể mời ra thành viên thường.');
+    }
+
+    const removedMember = await this.communitiesRepository.removeMember(
       communityId,
       targetUserId,
     );
+
+    if (requesterId !== targetUserId) {
+      const community = await this.findById(communityId);
+
+      if (existing.status === 'INVITED') {
+        await this.notificationsService.sendNotification(
+          buildCommunityInviteRevokedNotification({
+            communityId,
+            communityName: community.name,
+            receiverId: targetUserId,
+          }),
+        );
+      } else if (existing.status === 'JOINED') {
+        await this.notificationsService.sendNotification(
+          buildCommunityKickedNotification({
+            communityId,
+            communityName: community.name,
+            receiverId: targetUserId,
+          }),
+        );
+      }
+    }
+
+    return removedMember;
   }
 
   // --- JOIN & FOLLOW ---
@@ -277,12 +387,135 @@ export class CommunitiesService {
     return await this.communitiesRepository.getMembers(id, 'PENDING');
   }
 
-  async inviteMember(userId: string, id: string, targetUserId: string, role: string, roles: string[]) {
+  async inviteMember(userId: string, id: string, targetUserId: string, role: CommunityMemberRole, roles: string[]) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
     const existing = await this.communitiesRepository.findMember(id, targetUserId);
     if (existing) throw new ConflictException('User is already a member or pending');
 
-    return await this.communitiesRepository.addMember(id, targetUserId, role, 'INVITED', undefined, userId);
+    if (role === 'OWNER') {
+      throw new BadRequestException('Không thể gửi lời mời với vai trò chủ sở hữu.');
+    }
+
+    const requesterMember = await this.communitiesRepository.findMember(id, userId);
+    if (requesterMember?.role === 'MODERATOR' && role !== 'MEMBER') {
+      throw new ForbiddenException('Quản trị viên chỉ có thể mời thành viên thường.');
+    }
+
+    const invitedMember = await this.communitiesRepository.addMember(
+      id,
+      targetUserId,
+      role,
+      'INVITED',
+      undefined,
+      userId,
+    );
+
+    const community = await this.findById(id);
+    await this.notificationsService.sendNotification(
+      buildCommunityInviteNotification({
+        communityId: id,
+        communityName: community.name,
+        inviterName: 'Ban quản trị',
+        receiverId: targetUserId,
+        senderId: userId,
+      }),
+    );
+
+    return invitedMember;
+  }
+
+  async banMember(
+    requesterId: string,
+    communityId: string,
+    targetUserId: string,
+    roles: string[],
+  ) {
+    await this.checkPermissions(communityId, requesterId, roles, ['OWNER', 'MODERATOR']);
+
+    const existing = await this.communitiesRepository.findMember(communityId, targetUserId);
+    if (!existing) {
+      throw new NotFoundException('User is not a member');
+    }
+
+    if (existing.status === 'BANNED') {
+      throw new ConflictException('Người dùng này đã bị cấm khỏi cộng đồng.');
+    }
+
+    if (existing.status !== 'JOINED') {
+      throw new BadRequestException('Chỉ có thể cấm thành viên chính thức của cộng đồng.');
+    }
+
+    if (requesterId === targetUserId) {
+      throw new ForbiddenException('Bạn không thể tự cấm chính mình.');
+    }
+
+    if (existing.role === 'OWNER') {
+      throw new ForbiddenException('Không thể cấm chủ sở hữu cộng đồng.');
+    }
+
+    const requesterMember = await this.communitiesRepository.findMember(communityId, requesterId);
+    if (
+      requesterMember?.role === 'MODERATOR' &&
+      existing.role !== 'MEMBER'
+    ) {
+      throw new ForbiddenException('Quản trị viên chỉ có thể cấm thành viên thường.');
+    }
+
+    const bannedMember = await this.communitiesRepository.updateMemberStatus(
+      communityId,
+      targetUserId,
+      'BANNED',
+      requesterId,
+    );
+
+    const community = await this.findById(communityId);
+    await this.notificationsService.sendNotification(
+      buildCommunityBannedNotification({
+        communityId,
+        communityName: community.name,
+        receiverId: targetUserId,
+      }),
+    );
+
+    return bannedMember;
+  }
+
+  async unbanMember(
+    requesterId: string,
+    communityId: string,
+    targetUserId: string,
+    roles: string[],
+  ) {
+    await this.checkPermissions(communityId, requesterId, roles, ['OWNER', 'MODERATOR']);
+
+    const existing = await this.communitiesRepository.findMember(communityId, targetUserId);
+    if (!existing || existing.status !== 'BANNED') {
+      throw new NotFoundException('Không tìm thấy thành viên đang bị cấm.');
+    }
+
+    const requesterMember = await this.communitiesRepository.findMember(communityId, requesterId);
+    if (
+      requesterMember?.role === 'MODERATOR' &&
+      existing.role !== 'MEMBER'
+    ) {
+      throw new ForbiddenException('Quản trị viên chỉ có thể gỡ cấm thành viên thường.');
+    }
+
+    const removedBan = await this.communitiesRepository.removeMember(
+      communityId,
+      targetUserId,
+    );
+
+    const community = await this.findById(communityId);
+    await this.notificationsService.sendNotification(
+      buildCommunityUnbannedNotification({
+        communityId,
+        communityName: community.name,
+        receiverId: targetUserId,
+      }),
+    );
+
+    return removedBan;
   }
 
   async respondToInvite(userId: string, id: string, action: 'ACCEPT' | 'DECLINE') {
@@ -342,10 +575,38 @@ export class CommunitiesService {
       throw new ForbiddenException('You are not a member of this community');
     }
 
+    if (member.status !== 'JOINED') {
+      throw new ForbiddenException('Bạn cần là thành viên chính thức của cộng đồng để thực hiện thao tác này.');
+    }
+
     if (!allowedCommunityRoles.includes(member.role)) {
       throw new ForbiddenException(
         `Requires one of the following community roles: ${allowedCommunityRoles.join(', ')}`,
       );
     }
+  }
+
+  private getCommunityRoleLabel(role: CommunityMemberRole): string {
+    switch (role) {
+      case 'OWNER':
+        return 'Chủ sở hữu';
+      case 'MODERATOR':
+        return 'Quản trị viên';
+      default:
+        return 'Thành viên';
+    }
+  }
+
+  private isRolePromotion(
+    previousRole: CommunityMemberRole,
+    nextRole: CommunityMemberRole,
+  ): boolean {
+    const roleRank: Record<CommunityMemberRole, number> = {
+      MEMBER: 1,
+      MODERATOR: 2,
+      OWNER: 3,
+    };
+
+    return roleRank[nextRole] > roleRank[previousRole];
   }
 }

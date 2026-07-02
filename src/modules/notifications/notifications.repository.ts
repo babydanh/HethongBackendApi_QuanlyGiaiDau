@@ -102,4 +102,21 @@ export class NotificationsRepository {
       )
       .returning();
   }
+
+  async deleteByReceiverTypeAndRedirect(
+    receiverId: string,
+    type: string,
+    redirectUrl: string,
+  ) {
+    return this.db
+      .delete(schema.notifications)
+      .where(
+        and(
+          eq(schema.notifications.receiverId, receiverId),
+          eq(schema.notifications.type, type),
+          eq(schema.notifications.redirectUrl, redirectUrl),
+        ),
+      )
+      .returning();
+  }
 }

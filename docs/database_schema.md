@@ -182,11 +182,18 @@ CREATE TABLE community_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     community_id UUID REFERENCES communities(id) ON DELETE CASCADE NOT NULL,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
-    role VARCHAR(50) DEFAULT 'MEMBER' NOT NULL,
-    status VARCHAR(50) DEFAULT 'JOINED' NOT NULL,
+    role VARCHAR(50) DEFAULT 'MEMBER' NOT NULL, -- 'MEMBER' | 'MODERATOR' | 'OWNER'
+    status VARCHAR(50) DEFAULT 'JOINED' NOT NULL, -- 'JOINED' | 'PENDING' | 'INVITED' | 'REJECTED' | 'BANNED'
     joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
     CONSTRAINT community_user_unique_idx UNIQUE (community_id, user_id)
 );
+
+-- Ghi chú nghiệp vụ community_members:
+-- 'JOINED'   : thành viên chính thức, có thể được phân quyền theo role.
+-- 'PENDING'  : đã gửi đơn xin vào cộng đồng, chờ OWNER/MODERATOR duyệt.
+-- 'INVITED'  : đã được mời nhưng chưa chấp nhận lời mời.
+-- 'REJECTED' : đơn xin tham gia đã bị từ chối.
+-- 'BANNED'   : bị cấm khỏi cộng đồng, không thể tự tham gia lại cho đến khi được gỡ cấm.
 
 CREATE TABLE community_rankings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

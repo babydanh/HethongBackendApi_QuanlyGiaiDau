@@ -44,8 +44,18 @@ export function validatePickleballSideOutScoreDetails(
   let p1SetsWon = 0;
   let p2SetsWon = 0;
   let winnerReachedAtSetIndex: number | null = null;
+  const lastEntryIndex = normalizedEntries.length - 1;
 
   for (const [index, entry] of normalizedEntries.entries()) {
+    const isLiveFinalSet = index === lastEntryIndex && entry.isFinished === false;
+    if (!entry.isFinished && !isLiveFinalSet) {
+      throw new BadRequestException(`Game ${entry.key}: Chỉ game cuối cùng mới được để trạng thái đang diễn ra.`);
+    }
+
+    if (isLiveFinalSet) {
+      continue;
+    }
+
     const maxScore = Math.max(entry.p1, entry.p2);
     const minScore = Math.min(entry.p1, entry.p2);
     const diff = maxScore - minScore;

@@ -184,14 +184,14 @@ export class UsersController {
   }
 
   @Get('admin/change-requests')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Lấy danh sách yêu cầu đổi giới tính/email (Admin)' })
   async findChangeRequests(@Query('status') status?: string) {
     return this.usersService.findChangeRequests(status);
   }
 
   @Patch('admin/change-requests/:id/approve')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Duyệt yêu cầu đổi giới tính/email (Admin)' })
   async approveChangeRequest(
     @Param('id') id: string,
@@ -201,7 +201,7 @@ export class UsersController {
   }
 
   @Patch('admin/change-requests/:id/reject')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Từ chối yêu cầu đổi giới tính/email (Admin)' })
   async rejectChangeRequest(
     @Param('id') id: string,

@@ -26,7 +26,7 @@ import { UpdateDivisionDto } from './dto/update-division.dto';
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
 import { CreateMatchDisputeDto, ResolveMatchDisputeDto } from './dto/match-dispute.dto';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -64,6 +64,13 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Lấy danh sách giải đấu người dùng tạo hoặc tham gia' })
   async findMy(@CurrentUser() user: JwtPayload) {
     return this.tournamentsService.findMy(user.sub);
+  }
+
+  @Get('workspace/me')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy workspace người dùng theo vai trò: tham gia, tổ chức, trọng tài' })
+  async findMyWorkspace(@CurrentUser() user: JwtPayload) {
+    return this.tournamentsService.getMyWorkspace(user.sub);
   }
 
   @Public()
@@ -417,11 +424,14 @@ export class TournamentsController {
     return this.tournamentsService.findParticipants(id, divisionId);
   }
 
-  @Public()
   @Get(':id/referees')
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách trọng tài của giải đấu' })
-  async findReferees(@Param('id', ParseUUIDPipe) id: string) {
-    return this.tournamentsService.findReferees(id);
+  async findReferees(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.findReferees(id, user.sub, this.getSystemRoles(user));
   }
 
   @Post(':id/referees')
@@ -433,6 +443,35 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.addReferee(id, body.email, user.sub, this.getSystemRoles(user));
+  }
+
+  @Patch(':id/referees/:refereeId/respond')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Trọng tài chấp nhận/từ chối lời mời làm trọng tài' })
+  @ApiResponse({ status: 200, description: 'Phản hồi lời mời thành công' })
+  async respondToRefereeInvite(
+    @Param('id', ParseUUIDPipe) tournamentId: string,
+    @Param('refereeId', ParseUUIDPipe) refereeId: string,
+    @Body('action') action: 'ACCEPT' | 'DECLINE',
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.respondToRefereeInvite(tournamentId, refereeId, user.sub, action);
+  }
+
+  @Delete(':id/referees/:refereeId')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'BTC thu hồi lời mời trọng tài đang chờ phản hồi' })
+  async revokeRefereeInvite(
+    @Param('id', ParseUUIDPipe) tournamentId: string,
+    @Param('refereeId', ParseUUIDPipe) refereeId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.revokeRefereeInvite(
+      tournamentId,
+      refereeId,
+      user.sub,
+      this.getSystemRoles(user),
+    );
   }
 
   @Public()

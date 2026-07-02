@@ -2172,6 +2172,180 @@ export class TournamentsRepository {
       );
   }
 
+  async findMyWorkspace(userId: string) {
+    const tournamentSummarySelect = {
+      id: schema.tournaments.id,
+      name: schema.tournaments.name,
+      status: schema.tournaments.status,
+      startDate: schema.tournaments.startDate,
+      endDate: schema.tournaments.endDate,
+      registrationEndDate: schema.tournaments.registrationEndDate,
+      locationAddress: schema.tournamentVenues.locationAddress,
+      matchType: schema.tournaments.matchType,
+      tournamentType: schema.tournaments.tournamentType,
+      logoUrl: schema.tournaments.logoUrl,
+      categoryId: schema.tournaments.categoryId,
+      tournamentConfig: schema.tournaments.tournamentConfig,
+      category: {
+        id: schema.categories.id,
+        name: schema.categories.name,
+        slug: schema.categories.slug,
+      },
+    } as const;
+
+    const [organizedRaw, participatingRaw, coOrganizerRaw, refereeInvites, refereeTournaments, refereeMatchesRaw] =
+      await Promise.all([
+        this.db
+          .select(tournamentSummarySelect)
+          .from(schema.tournaments)
+          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+          .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
+          .where(and(eq(schema.tournaments.createdBy, userId), isNull(schema.tournaments.deletedAt)))
+          .orderBy(desc(schema.tournaments.updatedAt)),
+        this.db
+          .select(tournamentSummarySelect)
+          .from(schema.tournamentRosters)
+          .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+          .innerJoin(schema.tournaments, eq(schema.tournamentParticipants.tournamentId, schema.tournaments.id))
+          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+          .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
+          .where(and(eq(schema.tournamentRosters.userId, userId), isNull(schema.tournaments.deletedAt)))
+          .orderBy(desc(schema.tournaments.updatedAt)),
+        this.db
+          .select(tournamentSummarySelect)
+          .from(schema.tournamentStaff)
+          .innerJoin(schema.tournaments, eq(schema.tournamentStaff.tournamentId, schema.tournaments.id))
+          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+          .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
+          .where(
+            and(
+              eq(schema.tournamentStaff.userId, userId),
+              eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
+              isNull(schema.tournaments.deletedAt),
+            ),
+          )
+          .orderBy(desc(schema.tournaments.updatedAt)),
+        this.db
+          .select({
+            refereeId: schema.tournamentReferees.id,
+            tournamentId: schema.tournamentReferees.tournamentId,
+            tournamentName: schema.tournaments.name,
+            tournamentStatus: schema.tournaments.status,
+            categoryName: schema.categories.name,
+            assignedAt: schema.tournamentReferees.createdAt,
+            status: schema.tournamentReferees.status,
+          })
+          .from(schema.tournamentReferees)
+          .innerJoin(schema.tournaments, eq(schema.tournamentReferees.tournamentId, schema.tournaments.id))
+          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+          .where(
+            and(
+              eq(schema.tournamentReferees.userId, userId),
+              eq(schema.tournamentReferees.status, 'INVITED'),
+              isNull(schema.tournaments.deletedAt),
+            ),
+          )
+          .orderBy(desc(schema.tournamentReferees.createdAt)),
+        this.db
+          .select({
+            refereeId: schema.tournamentReferees.id,
+            tournamentId: schema.tournamentReferees.tournamentId,
+            tournamentName: schema.tournaments.name,
+            tournamentStatus: schema.tournaments.status,
+            categoryName: schema.categories.name,
+            assignedAt: schema.tournamentReferees.createdAt,
+            status: schema.tournamentReferees.status,
+          })
+          .from(schema.tournamentReferees)
+          .innerJoin(schema.tournaments, eq(schema.tournamentReferees.tournamentId, schema.tournaments.id))
+          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+          .where(
+            and(
+              eq(schema.tournamentReferees.userId, userId),
+              eq(schema.tournamentReferees.status, 'ACCEPTED'),
+              isNull(schema.tournaments.deletedAt),
+            ),
+          )
+          .orderBy(desc(schema.tournamentReferees.createdAt)),
+        this.db
+          .select({
+            id: schema.matches.id,
+            tournamentId: schema.tournaments.id,
+            tournamentName: schema.tournaments.name,
+            categoryName: schema.categories.name,
+            stageName: schema.tournamentStages.name,
+            groupName: schema.tournamentGroups.name,
+            roundNumber: schema.matches.roundNumber,
+            matchOrder: schema.matches.matchOrder,
+            status: schema.matches.status,
+            scheduledAt: schema.matches.scheduledAt,
+            courtName: schema.matches.courtName,
+            participant1Id: schema.matches.participant1Id,
+            participant2Id: schema.matches.participant2Id,
+          })
+          .from(schema.matches)
+          .innerJoin(schema.tournamentStages, eq(schema.matches.stageId, schema.tournamentStages.id))
+          .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
+          .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+          .where(
+            and(
+              eq(schema.matches.refereeId, userId),
+              isNull(schema.matches.deletedAt),
+              isNull(schema.tournaments.deletedAt),
+            ),
+          )
+          .orderBy(asc(schema.matches.scheduledAt), asc(schema.matches.roundNumber), asc(schema.matches.matchOrder)),
+      ]);
+
+    const organizedIds = new Set(organizedRaw.map((tournament) => tournament.id));
+    const dedupeByTournamentId = <T extends { id: string }>(items: T[]) => {
+      const map = new Map<string, T>();
+      for (const item of items) {
+        if (!map.has(item.id)) {
+          map.set(item.id, item);
+        }
+      }
+      return Array.from(map.values());
+    };
+
+    const participantIds = Array.from(
+      new Set(
+        refereeMatchesRaw.flatMap((match) => [match.participant1Id, match.participant2Id].filter((id): id is string => Boolean(id))),
+      ),
+    );
+
+    const participants =
+      participantIds.length > 0
+        ? await this.db
+            .select({
+              id: schema.tournamentParticipants.id,
+              teamName: schema.tournamentParticipants.teamName,
+            })
+            .from(schema.tournamentParticipants)
+            .where(inArray(schema.tournamentParticipants.id, participantIds))
+        : [];
+
+    const participantsMap = new Map(participants.map((participant) => [participant.id, participant.teamName]));
+
+    return {
+      organizedTournaments: dedupeByTournamentId(organizedRaw),
+      participatingTournaments: dedupeByTournamentId(
+        participatingRaw.filter((tournament) => !organizedIds.has(tournament.id)),
+      ),
+      coOrganizerTournaments: dedupeByTournamentId(
+        coOrganizerRaw.filter((tournament) => !organizedIds.has(tournament.id)),
+      ),
+      refereeInvites,
+      refereeTournaments,
+      refereeMatches: refereeMatchesRaw.map((match) => ({
+        ...match,
+        participant1Name: match.participant1Id ? participantsMap.get(match.participant1Id) ?? null : null,
+        participant2Name: match.participant2Id ? participantsMap.get(match.participant2Id) ?? null : null,
+      })),
+    };
+  }
+
   async findCategory(id: string) {
     const result = await this.db
       .select()
@@ -3051,6 +3225,7 @@ export class TournamentsRepository {
         userId: schema.tournamentReferees.userId,
         status: schema.tournamentReferees.status,
         fullName: schema.profiles.fullName,
+        email: schema.users.email,
         avatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.tournamentReferees)
@@ -3374,6 +3549,20 @@ export class TournamentsRepository {
     return user;
   }
 
+  async findUserBasicById(userId: string) {
+    const [user] = await this.db
+      .select({
+        id: schema.users.id,
+        fullName: schema.profiles.fullName,
+        email: schema.users.email,
+      })
+      .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    return user || null;
+  }
+
   async addReferee(tournamentId: string, userId: string, assignedBy: string) {
     const [existing] = await this.db
       .select()
@@ -3387,11 +3576,17 @@ export class TournamentsRepository {
       .limit(1);
 
     if (existing) {
-      if (existing.status !== 'ACCEPTED') {
+      if (existing.status !== 'INVITED') {
         await this.db
           .update(schema.tournamentReferees)
-          .set({ status: 'ACCEPTED', assignedBy, assignedAt: new Date() })
+          .set({ status: 'INVITED', assignedBy, assignedAt: new Date() })
           .where(eq(schema.tournamentReferees.id, existing.id));
+        return {
+          ...existing,
+          status: 'INVITED',
+          assignedBy,
+          assignedAt: new Date(),
+        };
       }
       return existing;
     }
@@ -3402,10 +3597,50 @@ export class TournamentsRepository {
         tournamentId,
         userId,
         assignedBy,
-        status: 'ACCEPTED',
+        status: 'INVITED',
       })
       .returning();
     return referee;
+  }
+
+  async findRefereeById(refereeId: string) {
+    const [ref] = await this.db
+      .select()
+      .from(schema.tournamentReferees)
+      .where(eq(schema.tournamentReferees.id, refereeId))
+      .limit(1);
+    return ref || null;
+  }
+
+  async findRefereeByTournamentAndUser(tournamentId: string, userId: string) {
+    const [referee] = await this.db
+      .select()
+      .from(schema.tournamentReferees)
+      .where(
+        and(
+          eq(schema.tournamentReferees.tournamentId, tournamentId),
+          eq(schema.tournamentReferees.userId, userId),
+        ),
+      )
+      .limit(1);
+    return referee || null;
+  }
+
+  async updateRefereeStatus(refereeId: string, status: 'ACCEPTED' | 'DECLINED') {
+    const [updated] = await this.db
+      .update(schema.tournamentReferees)
+      .set({ status, assignedAt: new Date() })
+      .where(eq(schema.tournamentReferees.id, refereeId))
+      .returning();
+    return updated;
+  }
+
+  async removeRefereeInvite(refereeId: string) {
+    const [removed] = await this.db
+      .delete(schema.tournamentReferees)
+      .where(eq(schema.tournamentReferees.id, refereeId))
+      .returning();
+    return removed || null;
   }
 
   // ──────── Finalize stage ────────

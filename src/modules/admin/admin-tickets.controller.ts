@@ -29,7 +29,7 @@ export class AdminTicketsController {
   }
 
   @Get()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Lấy danh sách các yêu cầu xác minh (Chỉ ADMIN)' })
   @ApiQuery({ name: 'status', required: false, enum: ['PENDING', 'APPROVED', 'REJECTED'] })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -45,7 +45,7 @@ export class AdminTicketsController {
   }
 
   @Patch(':id/approve')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Phê duyệt yêu cầu xác minh (Chỉ ADMIN)' })
   async approve(
     @CurrentUser() admin: JwtPayload,
@@ -55,7 +55,7 @@ export class AdminTicketsController {
   }
 
   @Patch(':id/reject')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Từ chối yêu cầu xác minh (Chỉ ADMIN)' })
   async reject(
     @CurrentUser() admin: JwtPayload,

@@ -272,34 +272,26 @@ export class MatchesRepository {
       .where(eq(schema.tournamentStages.id, match.stageId))
       .limit(1);
 
-    // Get details for participant 1 & 2
+    // Get details for participant 1 & 2 in a single query to reduce live-score latency.
     let participant1: { id: string; teamName: string; tournamentDivisionId: string | null } | null = null;
     let participant2: { id: string; teamName: string; tournamentDivisionId: string | null } | null = null;
 
-    if (match.participant1Id) {
-      const [p1] = await this.db
-        .select({ 
-          id: schema.tournamentParticipants.id, 
-          teamName: schema.tournamentParticipants.teamName,
-          tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
-        })
-        .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.id, match.participant1Id))
-        .limit(1);
-      if (p1) participant1 = p1;
-    }
+    const participantIds = [match.participant1Id, match.participant2Id].filter(
+      (participantId): participantId is string => typeof participantId === 'string' && participantId.length > 0,
+    );
 
-    if (match.participant2Id) {
-      const [p2] = await this.db
+    if (participantIds.length > 0) {
+      const participants = await this.db
         .select({ 
           id: schema.tournamentParticipants.id, 
           teamName: schema.tournamentParticipants.teamName,
           tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
         })
         .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.id, match.participant2Id))
-        .limit(1);
-      if (p2) participant2 = p2;
+        .where(inArray(schema.tournamentParticipants.id, participantIds));
+
+      participant1 = participants.find((participant) => participant.id === match.participant1Id) ?? null;
+      participant2 = participants.find((participant) => participant.id === match.participant2Id) ?? null;
     }
 
     return {
@@ -384,10 +376,23 @@ export class MatchesRepository {
   }
 
   async updateScore(id: string, userId: string, data: UpdateMatchScoreDto) {
-    const existing = await this.findById(id);
-    if (!existing) throw new NotFoundException('Match not found');
-
     const [updated] = await this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({
+          p1SetsWon: schema.matches.p1SetsWon,
+          p2SetsWon: schema.matches.p2SetsWon,
+          scoreDetails: schema.matches.scoreDetails,
+          winnerId: schema.matches.winnerId,
+          status: schema.matches.status,
+        })
+        .from(schema.matches)
+        .where(eq(schema.matches.id, id))
+        .limit(1);
+
+      if (!existing) {
+        throw new NotFoundException('Match not found');
+      }
+
       const [up] = await tx
         .update(schema.matches)
         .set({
@@ -402,13 +407,12 @@ export class MatchesRepository {
         .where(eq(schema.matches.id, id))
         .returning();
 
-      const existingFlat = existing as unknown as Record<string, unknown>;
       const oldValues = {
-        p1SetsWon: existingFlat['p1SetsWon'],
-        p2SetsWon: existingFlat['p2SetsWon'],
-        scoreDetails: existingFlat['scoreDetails'],
-        winnerId: existingFlat['winnerId'],
-        status: existingFlat['status'],
+        p1SetsWon: existing.p1SetsWon,
+        p2SetsWon: existing.p2SetsWon,
+        scoreDetails: existing.scoreDetails,
+        winnerId: existing.winnerId,
+        status: existing.status,
       };
       const newValues = {
         p1SetsWon: up.p1SetsWon,
@@ -422,7 +426,7 @@ export class MatchesRepository {
       return [up];
     });
 
-    return updated;
+    return await this.findById(updated.id);
   }
 
   async updateStatus(id: string, data: UpdateMatchStatusDto) {
@@ -443,7 +447,7 @@ export class MatchesRepository {
       .where(eq(schema.matches.id, id))
       .returning();
 
-    return updated;
+    return await this.findById(updated.id);
   }
 
   async completeMatch(

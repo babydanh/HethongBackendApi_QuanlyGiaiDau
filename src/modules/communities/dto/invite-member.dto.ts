@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
+import { IsIn, IsNotEmpty, IsString, IsUUID } from 'class-validator';
 
 export class InviteMemberDto {
   @ApiProperty({ description: 'ID của người được mời' })
@@ -7,8 +7,9 @@ export class InviteMemberDto {
   @IsNotEmpty()
   userId: string;
 
-  @ApiProperty({ description: 'Vai trò (MEMBER/MODERATOR/OWNER)', default: 'MEMBER' })
+  @ApiProperty({ description: 'Vai trò được mời (MEMBER/MODERATOR)', default: 'MEMBER' })
   @IsString()
   @IsNotEmpty()
-  role: string;
+  @IsIn(['MEMBER', 'MODERATOR'])
+  role: 'MEMBER' | 'MODERATOR';
 }

@@ -69,6 +69,34 @@ describe('validateScoreDetails', () => {
     ).toThrow(BadRequestException);
   });
 
+  it('accepts tennis scoreDetails with the final set still in progress', () => {
+    const result = validateScoreDetails(
+      {
+        sets: [
+          { team1Score: 6, team2Score: 4, isFinished: true },
+          { team1Score: 3, team2Score: 2, isFinished: false },
+        ],
+      },
+      buildResolvedConfig({
+        kind: 'TENNIS',
+        scoringModel: 'TENNIS_SET',
+        bestOf: 3,
+        setsToWin: 2,
+        pointsPerSet: 6,
+        maxPoints: 7,
+        tiebreakAt: 6,
+        tiebreakPoints: 7,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 1,
+      p2SetsWon: 0,
+      setsToWin: 2,
+      totalSets: 2,
+    });
+  });
+
   it('accepts pickleball side-out score with valid sideOutState metadata', () => {
     const result = validateScoreDetails(
       {
@@ -93,6 +121,38 @@ describe('validateScoreDetails', () => {
 
     expect(result).toEqual({
       p1SetsWon: 1,
+      p2SetsWon: 0,
+      setsToWin: 1,
+      totalSets: 1,
+    });
+  });
+
+  it('accepts pickleball side-out with the current game still in progress', () => {
+    const result = validateScoreDetails(
+      {
+        sets: [
+          { team1Score: 8, team2Score: 6, isFinished: false },
+        ],
+        sideOutState: {
+          servingTeam: 2,
+          serverNumber: 1,
+          openingSequenceDone: true,
+        },
+      },
+      buildResolvedConfig({
+        kind: 'PICKLEBALL_SIDE_OUT',
+        scoringModel: 'PICKLEBALL_SIDE_OUT',
+        bestOf: 1,
+        setsToWin: 1,
+        pointsPerSet: 11,
+        maxPoints: 15,
+        tiebreakAt: 10,
+        tiebreakPoints: 11,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 0,
       p2SetsWon: 0,
       setsToWin: 1,
       totalSets: 1,
@@ -141,6 +201,33 @@ describe('validateScoreDetails', () => {
       p2SetsWon: 0,
       setsToWin: 2,
       totalSets: 1,
+    });
+  });
+
+  it('accepts rally-point scoreDetails with the final set still in progress', () => {
+    const result = validateScoreDetails(
+      {
+        sets: [
+          { team1Score: 21, team2Score: 18, isFinished: true },
+          { team1Score: 10, team2Score: 7, isFinished: false },
+        ],
+      },
+      buildResolvedConfig({
+        kind: 'BADMINTON',
+        scoringModel: 'RALLY_POINT_SET',
+        bestOf: 3,
+        setsToWin: 2,
+        pointsPerSet: 21,
+        maxPoints: 30,
+        tiebreakAt: 20,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 1,
+      p2SetsWon: 0,
+      setsToWin: 2,
+      totalSets: 2,
     });
   });
 

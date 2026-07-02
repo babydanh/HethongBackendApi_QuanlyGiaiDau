@@ -63,7 +63,7 @@ export class CommunitiesController {
   }
 
   @Get('pending')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách cộng đồng chờ duyệt (Chỉ ADMIN)' })
   async findPending(@Query() query: QueryCommunityDto) {
@@ -105,7 +105,7 @@ export class CommunitiesController {
   }
 
   @Patch(':id/review')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Duyệt / Từ chối cộng đồng (Chỉ ADMIN)' })
   async review(
@@ -185,6 +185,28 @@ export class CommunitiesController {
       userId,
       user.roles,
     );
+  }
+
+  @Post(':id/members/:userId/ban')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cấm thành viên khỏi cộng đồng (OWNER/MODERATOR theo quyền)' })
+  async banMember(
+    @CurrentUser() user: { id: string; roles: string[] },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return await this.communitiesService.banMember(user.id, id, userId, user.roles);
+  }
+
+  @Delete(':id/members/:userId/ban')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Gỡ cấm thành viên khỏi cộng đồng (OWNER/MODERATOR theo quyền)' })
+  async unbanMember(
+    @CurrentUser() user: { id: string; roles: string[] },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return await this.communitiesService.unbanMember(user.id, id, userId, user.roles);
   }
   @Post(':id/join')
   @ApiBearerAuth()
