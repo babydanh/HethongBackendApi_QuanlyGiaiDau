@@ -425,6 +425,7 @@ CREATE TABLE matches (
     completed_at TIMESTAMP WITH TIME ZONE,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
     deleted_at TIMESTAMP WITH TIME ZONE,
+    cheer_count INTEGER DEFAULT 0 NOT NULL,
     CONSTRAINT sets_non_negative CHECK (p1_sets_won >= 0 AND p2_sets_won >= 0),
     CONSTRAINT different_participants CHECK (participant1_id IS NULL OR participant2_id IS NULL OR participant1_id <> participant2_id)
 );
@@ -451,9 +452,63 @@ CREATE TABLE match_disputes (
     resolved_at TIMESTAMP WITH TIME ZONE
 );
 
+-- LƯU Ý: match_disputes là bảng legacy. Luồng nghiệp vụ mới dùng reports/report_actions.
+
 
 -- ==========================================
--- 7. TẦNG TÀI CHÍNH & THANH TOÁN (PAYMENTS & PAYOUTS)
+-- 7. TẦNG BÁO CÁO VI PHẠM & ĐIỀU PHỐI (REPORTS)
+-- ==========================================
+CREATE TABLE reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reporter_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    target_type VARCHAR(50) NOT NULL,
+    target_id UUID NOT NULL,
+    source VARCHAR(50) DEFAULT 'USER_REPORT' NOT NULL,
+    source_reference_id UUID,
+    category VARCHAR(50) DEFAULT 'OTHER' NOT NULL,
+    reason TEXT NOT NULL,
+    evidence_urls TEXT[] DEFAULT '{}'::TEXT[] NOT NULL,
+    status VARCHAR(50) DEFAULT 'SUBMITTED' NOT NULL,
+    assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
+    resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    resolution_note TEXT,
+    triaged_at TIMESTAMP WITH TIME ZONE,
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    CONSTRAINT reports_target_type_check CHECK (target_type IN ('USER', 'TOURNAMENT', 'MATCH', 'COMMUNITY')),
+    CONSTRAINT reports_source_check CHECK (source IN ('USER_REPORT', 'LEGACY_DISPUTE')),
+    CONSTRAINT reports_category_check CHECK (
+        category IN (
+            'CHEATING',
+            'RULE_VIOLATION',
+            'ABUSIVE_BEHAVIOR',
+            'FAKE_INFORMATION',
+            'PAYMENT_FRAUD',
+            'UNSAFE_ORGANIZATION',
+            'OTHER'
+        )
+    ),
+    CONSTRAINT reports_status_check CHECK (
+        status IN ('SUBMITTED', 'TRIAGED', 'UNDER_REVIEW', 'ESCALATED', 'RESOLVED', 'REJECTED')
+    )
+);
+
+CREATE TABLE report_actions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id UUID REFERENCES reports(id) ON DELETE CASCADE NOT NULL,
+    actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(50) NOT NULL,
+    from_status VARCHAR(50),
+    to_status VARCHAR(50) NOT NULL,
+    note TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+
+-- ==========================================
+-- 8. TẦNG TÀI CHÍNH & THANH TOÁN (PAYMENTS & PAYOUTS)
 -- ==========================================
 CREATE TABLE payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -461,17 +516,43 @@ CREATE TABLE payments (
     participant_id UUID REFERENCES tournament_participants(id) ON DELETE RESTRICT,
     tournament_id UUID REFERENCES tournaments(id) ON DELETE RESTRICT NOT NULL,
     division_id UUID REFERENCES tournament_divisions(id) ON DELETE CASCADE,
+    purpose VARCHAR(50) DEFAULT 'REGISTRATION_FEE' NOT NULL,
     amount NUMERIC(12, 2) NOT NULL,
     platform_fee_amount NUMERIC(12, 2),
     status VARCHAR(50) DEFAULT 'PENDING' NOT NULL,
     refund_status VARCHAR(50),
     refunded_amount NUMERIC(12, 2) DEFAULT 0.00,
     payment_gateway VARCHAR(50),
+    provider_order_code VARCHAR(50),
+    provider_transaction_id VARCHAR(255),
+    idempotency_key VARCHAR(255),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    refund_bank_name VARCHAR(100),
+    refund_account_number VARCHAR(50),
+    refund_account_name VARCHAR(255),
     transaction_reference VARCHAR(255) UNIQUE,
     gateway_response JSONB,
     paid_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
     CONSTRAINT amount_positive CHECK (amount > 0)
+);
+
+CREATE TABLE payment_refunds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payment_id UUID REFERENCES payments(id) ON DELETE RESTRICT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL,
+    status VARCHAR(50) DEFAULT 'REQUESTED' NOT NULL,
+    reason TEXT NOT NULL,
+    bank_name VARCHAR(100),
+    bank_account_number VARCHAR(50),
+    bank_account_name VARCHAR(255),
+    transaction_proof_url TEXT,
+    requested_by UUID REFERENCES users(id) ON DELETE RESTRICT,
+    processed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
 CREATE TABLE payment_status_logs (
@@ -483,6 +564,22 @@ CREATE TABLE payment_status_logs (
     reason TEXT,
     ip_address VARCHAR(45),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE TABLE financial_ledger_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tournament_id UUID REFERENCES tournaments(id) ON DELETE RESTRICT NOT NULL,
+    payment_id UUID REFERENCES payments(id) ON DELETE RESTRICT,
+    refund_id UUID REFERENCES payment_refunds(id) ON DELETE RESTRICT,
+    payout_id UUID REFERENCES organizer_payouts(id) ON DELETE RESTRICT,
+    entry_type VARCHAR(50) NOT NULL,
+    direction VARCHAR(10) NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    CONSTRAINT ledger_amount_positive CHECK (amount > 0),
+    CONSTRAINT ledger_direction_valid CHECK (direction IN ('CREDIT', 'DEBIT'))
 );
 
 CREATE TABLE organizer_payouts (

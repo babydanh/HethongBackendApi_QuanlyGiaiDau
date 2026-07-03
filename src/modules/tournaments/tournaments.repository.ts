@@ -1869,155 +1869,6 @@ export class TournamentsRepository {
       .limit(limit);
   }
 
-  async findTournamentDisputes(tournamentId: string, divisionId?: string) {
-    const stageRows = divisionId
-      ? await this.db
-          .select({ id: schema.tournamentStages.id })
-          .from(schema.tournamentStages)
-          .where(eq(schema.tournamentStages.tournamentDivisionId, divisionId))
-      : [];
-
-    const stageIds = stageRows.map((row) => row.id);
-
-    return this.db
-      .select({
-        id: schema.matchDisputes.id,
-        matchId: schema.matchDisputes.matchId,
-        reason: schema.matchDisputes.reason,
-        evidenceUrls: schema.matchDisputes.evidenceUrls,
-        status: schema.matchDisputes.status,
-        resolutionNote: schema.matchDisputes.resolutionNote,
-        createdAt: schema.matchDisputes.createdAt,
-        resolvedAt: schema.matchDisputes.resolvedAt,
-        filedBy: {
-          id: schema.users.id,
-          email: schema.users.email,
-          fullName: schema.profiles.fullName,
-        },
-        match: {
-          id: schema.matches.id,
-          status: schema.matches.status,
-          participant1Id: schema.matches.participant1Id,
-          participant2Id: schema.matches.participant2Id,
-          roundNumber: schema.matches.roundNumber,
-          matchOrder: schema.matches.matchOrder,
-          scheduledAt: schema.matches.scheduledAt,
-        },
-      })
-      .from(schema.matchDisputes)
-      .innerJoin(schema.matches, eq(schema.matchDisputes.matchId, schema.matches.id))
-      .innerJoin(schema.users, eq(schema.matchDisputes.filedBy, schema.users.id))
-      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .where(
-        divisionId
-          ? stageIds.length > 0
-            ? and(eq(schema.matches.tournamentId, tournamentId), inArray(schema.matches.stageId, stageIds))
-            : and(eq(schema.matches.tournamentId, tournamentId), sql`1 = 0`)
-          : eq(schema.matches.tournamentId, tournamentId),
-      )
-      .orderBy(desc(schema.matchDisputes.createdAt));
-  }
-
-  async createTournamentDispute(
-    tournamentId: string,
-    matchId: string,
-    userId: string,
-    reason: string,
-    evidenceUrls: string[],
-  ) {
-    return this.db.transaction(async (tx) => {
-      const [match] = await tx
-        .select()
-        .from(schema.matches)
-        .where(and(eq(schema.matches.id, matchId), eq(schema.matches.tournamentId, tournamentId)))
-        .limit(1);
-
-      if (!match) {
-        throw new NotFoundException('Không tìm thấy trận đấu thuộc giải này.');
-      }
-
-      const [dispute] = await tx
-        .insert(schema.matchDisputes)
-        .values({
-          matchId,
-          filedBy: userId,
-          reason,
-          evidenceUrls,
-          status: 'OPEN',
-        })
-        .returning();
-
-      await this.auditService.logCreate(tx, userId, 'match_disputes', dispute.id, dispute);
-
-      if (match.status !== 'DISPUTED') {
-        const [updatedMatch] = await tx
-          .update(schema.matches)
-          .set({ status: 'DISPUTED', updatedAt: new Date() })
-          .where(eq(schema.matches.id, match.id))
-          .returning();
-
-        await this.auditService.logUpdate(tx, userId, 'matches', match.id, match, updatedMatch);
-      }
-
-      return dispute;
-    });
-  }
-
-  async resolveTournamentDispute(
-    tournamentId: string,
-    disputeId: string,
-    userId: string,
-    resolutionNote: string,
-    matchStatus?: 'SCHEDULED' | 'ONGOING' | 'COMPLETED' | 'DISPUTED',
-  ) {
-    return this.db.transaction(async (tx) => {
-      const [dispute] = await tx
-        .select()
-        .from(schema.matchDisputes)
-        .where(eq(schema.matchDisputes.id, disputeId))
-        .limit(1);
-
-      if (!dispute) {
-        throw new NotFoundException('Không tìm thấy sự cố/tranh chấp.');
-      }
-
-      const [match] = await tx
-        .select()
-        .from(schema.matches)
-        .where(and(eq(schema.matches.id, dispute.matchId), eq(schema.matches.tournamentId, tournamentId)))
-        .limit(1);
-
-      if (!match) {
-        throw new NotFoundException('Không tìm thấy trận đấu thuộc giải này.');
-      }
-
-      const [updatedDispute] = await tx
-        .update(schema.matchDisputes)
-        .set({
-          status: 'RESOLVED',
-          resolvedBy: userId,
-          resolutionNote,
-          resolvedAt: new Date(),
-        })
-        .where(eq(schema.matchDisputes.id, dispute.id))
-        .returning();
-
-      await this.auditService.logUpdate(tx, userId, 'match_disputes', dispute.id, dispute, updatedDispute);
-
-      if (matchStatus && matchStatus !== match.status) {
-        const [updatedMatch] = await tx
-          .update(schema.matches)
-          .set({ status: matchStatus, updatedAt: new Date() })
-          .where(eq(schema.matches.id, match.id))
-          .returning();
-
-        await this.auditService.logUpdate(tx, userId, 'matches', match.id, match, updatedMatch);
-      }
-
-      return updatedDispute;
-    });
-  }
-
   async findBracket(tournamentId: string, divisionId?: string): Promise<{ stages: BracketStage[] }> {
     const stages = await this.db
       .select()
@@ -3714,5 +3565,62 @@ export class TournamentsRepository {
       .from(schema.matches)
       .where(eq(schema.matches.stageId, stageId));
     return result[0] || { maxRound: 0, maxOrder: 0 };
+  }
+
+  // ─── Tournament Follow ──────────────────────────────────────
+
+  async followTournament(tournamentId: string, userId: string) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.tournamentFollows)
+      .where(and(
+        eq(schema.tournamentFollows.tournamentId, tournamentId),
+        eq(schema.tournamentFollows.userId, userId),
+      ))
+      .limit(1);
+
+    if (existing) return existing;
+
+    const [follow] = await this.db
+      .insert(schema.tournamentFollows)
+      .values({ tournamentId, userId })
+      .returning();
+    return follow;
+  }
+
+  async unfollowTournament(tournamentId: string, userId: string) {
+    await this.db
+      .delete(schema.tournamentFollows)
+      .where(and(
+        eq(schema.tournamentFollows.tournamentId, tournamentId),
+        eq(schema.tournamentFollows.userId, userId),
+      ));
+  }
+
+  async getFollowedTournamentIds(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ tournamentId: schema.tournamentFollows.tournamentId })
+      .from(schema.tournamentFollows)
+      .where(eq(schema.tournamentFollows.userId, userId));
+    return rows.map(r => r.tournamentId);
+  }
+
+  async getFollowerUserIds(tournamentId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: schema.tournamentFollows.userId })
+      .from(schema.tournamentFollows)
+      .where(eq(schema.tournamentFollows.tournamentId, tournamentId));
+    return rows.map(r => r.userId);
+  }
+
+  async getFollowedTournaments(userId: string) {
+    return this.db
+      .select()
+      .from(schema.tournamentFollows)
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.tournamentFollows.tournamentId, schema.tournaments.id),
+      )
+      .where(eq(schema.tournamentFollows.userId, userId));
   }
 }

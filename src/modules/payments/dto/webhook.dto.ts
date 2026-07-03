@@ -1,32 +1,46 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsObject, IsString } from 'class-validator';
+
+export interface PayOSWebhookData {
+  orderCode: number;
+  amount: number;
+  description: string;
+  accountNumber: string;
+  reference: string;
+  transactionDateTime: string;
+  currency: string;
+  paymentLinkId: string;
+  code: string;
+  desc: string;
+  counterAccountBankId?: string | null;
+  counterAccountBankName?: string | null;
+  counterAccountName?: string | null;
+  counterAccountNumber?: string | null;
+  virtualAccountName?: string | null;
+  virtualAccountNumber?: string | null;
+}
 
 export class WebhookDto {
-  @ApiProperty({
-    example: 'uuid-payment',
-    description: 'ID của hóa đơn trong hệ thống (Thường lưu ở vnp_TxnRef)',
-  })
+  @ApiProperty({ example: '00' })
   @IsString()
   @IsNotEmpty()
-  transactionReference: string;
+  code: string;
 
-  @ApiProperty({
-    example: '00',
-    description: 'Mã phản hồi từ Gateway (VD: 00 là thành công)',
-  })
+  @ApiProperty({ example: 'success' })
   @IsString()
   @IsNotEmpty()
-  responseCode: string;
+  desc: string;
 
-  @ApiProperty({
-    example: 'VNP123456789',
-    description: 'Mã giao dịch tại Gateway',
-  })
+  @ApiProperty()
+  @IsBoolean()
+  success: boolean;
+
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @IsObject()
+  data: PayOSWebhookData;
+
+  @ApiProperty()
   @IsString()
-  @IsOptional()
-  gatewayTransactionId?: string;
-  
-  // Các field phụ khác mà Gateway có thể gửi về
-  @IsOptional()
-  rawPayload?: Record<string, unknown>;
+  @IsNotEmpty()
+  signature: string;
 }

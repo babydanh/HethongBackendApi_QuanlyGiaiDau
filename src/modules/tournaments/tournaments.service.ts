@@ -16,7 +16,6 @@ import { Cron } from '@nestjs/schedule';
 import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
-import { CreateMatchDisputeDto, ResolveMatchDisputeDto } from './dto/match-dispute.dto';
 import { resolveEffectiveSportRules } from './utils/sport-rules/resolve-effective-sport-rules';
 import {
   inferAllowedSportRuleKinds,
@@ -116,10 +115,9 @@ export class TournamentsService {
   }
 
   async findPublic(query: QueryTournamentDto) {
-    const result = await this.tournamentsRepository.findAll({
-      ...query,
-      tournamentType: 'PUBLIC',
-    });
+    // Lấy tất cả tournament không phân biệt CLUB/PUBLIC,
+    // chỉ loại DRAFT và CANCELLED
+    const result = await this.tournamentsRepository.findAll(query);
     result.data = result.data
       .filter((t) => t.status !== 'DRAFT' && t.status !== 'CANCELLED')
       .map(t => this.mapTournamentFormat(t));
@@ -418,6 +416,26 @@ export class TournamentsService {
     }
 
     const updated = await this.tournamentsRepository.update(id, userId, updateTournamentDto);
+
+    // Thông báo cho người theo dõi khi dời lịch
+    const dateChanged =
+      (updateTournamentDto.startDate && updateTournamentDto.startDate !== (existing.startDate?.toISOString() ?? null)) ||
+      (updateTournamentDto.endDate && updateTournamentDto.endDate !== (existing.endDate?.toISOString() ?? null)) ||
+      (updateTournamentDto.registrationStartDate && updateTournamentDto.registrationStartDate !== (existing.registrationStartDate?.toISOString() ?? null)) ||
+      (updateTournamentDto.registrationEndDate && updateTournamentDto.registrationEndDate !== (existing.registrationEndDate?.toISOString() ?? null));
+
+    if (dateChanged && existing.status !== 'DRAFT') {
+      const followers = await this.tournamentsRepository.getFollowerUserIds(id);
+      for (const followerId of followers) {
+        await this.notificationsService.sendNotification({
+          receiverId: followerId,
+          type: 'TOURNAMENT_SCHEDULE_CHANGED',
+          title: `${existing.name} đã thay đổi lịch thi đấu`,
+          content: `Giải đấu "${existing.name}" vừa được dời lịch. Kiểm tra ngay để cập nhật thời gian mới.`,
+          redirectUrl: `/tournaments/${id}`,
+        });
+      }
+    }
 
     if (existing.parentId) {
       const siblings = await this.tournamentsRepository.findByParentId(existing.parentId);
@@ -1137,8 +1155,29 @@ export class TournamentsService {
     // Xóa dữ liệu mock trước khi mở đăng ký
     await this.tournamentsRepository.clearMockParticipants(id);
 
-    const targetStatus = existing.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
+    // Nếu chưa tới ngày mở đăng ký → UPCOMING, nếu tới rồi → REGISTRATION_OPEN
+    const notYetOpen = existing.registrationStartDate && new Date(existing.registrationStartDate) > new Date();
+    const targetStatus = existing.isRanked
+      ? 'PENDING_APPROVAL'
+      : notYetOpen
+        ? 'UPCOMING'
+        : 'REGISTRATION_OPEN';
     const updated = await this.tournamentsRepository.update(id, userId, { status: targetStatus });
+
+    // Gửi thông báo cho người theo dõi khi giải mở đăng ký
+    if (targetStatus === 'REGISTRATION_OPEN') {
+      const followers = await this.tournamentsRepository.getFollowerUserIds(id);
+      for (const followerId of followers) {
+        await this.notificationsService.sendNotification({
+          receiverId: followerId,
+          type: 'TOURNAMENT_REGISTRATION_OPEN',
+          title: `${existing.name} đã mở đăng ký`,
+          content: `Giải đấu "${existing.name}" đã được công bố và mở đăng ký tham gia.`,
+          redirectUrl: `/tournaments/${id}`,
+        });
+      }
+    }
+
     return this.mapTournamentFormat(updated);
   }
 
@@ -1626,97 +1665,6 @@ export class TournamentsService {
     return this.tournamentsRepository.findOpsAuditLogs(tournamentId, divisionId);
   }
 
-  async getTournamentDisputes(
-    tournamentId: string,
-    userId: string,
-    systemRoles: string[] = [],
-    divisionId?: string,
-  ) {
-    const tournament = await this.tournamentsRepository.findById(tournamentId);
-    if (!tournament) {
-      throw new NotFoundException('Tournament not found');
-    }
-
-    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
-    if (!isAuthorized && tournament.communityId) {
-      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
-        isAuthorized = true;
-      }
-    }
-
-    if (!isAuthorized) {
-      throw new ForbiddenException('You do not have permission to view tournament disputes');
-    }
-
-    return this.tournamentsRepository.findTournamentDisputes(tournamentId, divisionId);
-  }
-
-  async createTournamentDispute(
-    tournamentId: string,
-    userId: string,
-    systemRoles: string[] = [],
-    data: CreateMatchDisputeDto,
-  ) {
-    const tournament = await this.tournamentsRepository.findById(tournamentId);
-    if (!tournament) {
-      throw new NotFoundException('Tournament not found');
-    }
-
-    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
-    if (!isAuthorized && tournament.communityId) {
-      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
-        isAuthorized = true;
-      }
-    }
-
-    if (!isAuthorized) {
-      throw new ForbiddenException('You do not have permission to create tournament disputes');
-    }
-
-    return this.tournamentsRepository.createTournamentDispute(
-      tournamentId,
-      data.matchId,
-      userId,
-      data.reason,
-      data.evidenceUrls ?? [],
-    );
-  }
-
-  async resolveTournamentDispute(
-    tournamentId: string,
-    disputeId: string,
-    userId: string,
-    systemRoles: string[] = [],
-    data: ResolveMatchDisputeDto,
-  ) {
-    const tournament = await this.tournamentsRepository.findById(tournamentId);
-    if (!tournament) {
-      throw new NotFoundException('Tournament not found');
-    }
-
-    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
-    if (!isAuthorized && tournament.communityId) {
-      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
-        isAuthorized = true;
-      }
-    }
-
-    if (!isAuthorized) {
-      throw new ForbiddenException('You do not have permission to resolve tournament disputes');
-    }
-
-    return this.tournamentsRepository.resolveTournamentDispute(
-      tournamentId,
-      disputeId,
-      userId,
-      data.resolutionNote,
-      data.matchStatus,
-    );
-  }
-
   async cancelTournament(id: string, userId: string, systemRoles: string[] = []) {
     const tournament = await this.tournamentsRepository.findById(id);
     if (!tournament) throw new NotFoundException('Tournament not found');
@@ -1855,6 +1803,24 @@ export class TournamentsService {
     }
 
     return this.tournamentsRepository.findReferees(id);
+  }
+
+  async followTournament(id: string, userId: string) {
+    return this.tournamentsRepository.followTournament(id, userId);
+  }
+
+  async unfollowTournament(id: string, userId: string) {
+    await this.tournamentsRepository.unfollowTournament(id, userId);
+  }
+
+  // Public để các service khác (matches) gọi
+  async getFollowerUserIds(tournamentId: string): Promise<string[]> {
+    return this.tournamentsRepository.getFollowerUserIds(tournamentId);
+  }
+
+  async getFollowedTournaments(userId: string) {
+    const rows = await this.tournamentsRepository.getFollowedTournaments(userId);
+    return rows.map(row => this.mapTournamentFormat(row.tournaments));
   }
 
   async updateSeeds(

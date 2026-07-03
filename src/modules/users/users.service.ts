@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { UsersRepository } from './users.repository';
@@ -13,6 +14,8 @@ import { ERROR_MESSAGES } from '../../common/constants/error-messages';
 import * as schema from '../../database/schema';
 import { StorageService } from '../../providers/storage/storage.service';
 import { RankingsService } from '../rankings/rankings.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { QueryMyReportsDto } from './dto/query-my-reports.dto';
 
 @Injectable()
 export class UsersService {
@@ -20,6 +23,7 @@ export class UsersService {
     private readonly usersRepository: UsersRepository,
     private readonly storageService: StorageService,
     private readonly rankingsService: RankingsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findAll(query: QueryUserDto) {
@@ -179,14 +183,59 @@ export class UsersService {
   }
 
   async createReport(reporterId: string, dto: CreateReportDto) {
-    const [report] = await this.usersRepository.createReport(
-      reporterId,
+    if (dto.targetType === 'USER' && dto.targetId === reporterId) {
+      throw new BadRequestException('Bạn không thể tự báo cáo chính mình');
+    }
+
+    const targetExists = await this.usersRepository.reportTargetExists(
       dto.targetType,
       dto.targetId,
-      dto.reason,
-      dto.evidenceUrls || [],
     );
+    if (!targetExists) {
+      throw new NotFoundException('Đối tượng báo cáo không tồn tại hoặc đã bị xóa');
+    }
+
+    let report: typeof schema.reports.$inferSelect;
+    try {
+      report = await this.usersRepository.createReport(
+        reporterId,
+        dto.targetType,
+        dto.targetId,
+        dto.category,
+        dto.reason,
+        dto.evidenceUrls || [],
+      );
+    } catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === '23505'
+      ) {
+        throw new ConflictException(
+          'Bạn đã có một báo cáo đang được xử lý cho đối tượng và nhóm vi phạm này',
+        );
+      }
+      throw error;
+    }
+
+    try {
+      await this.notificationsService.sendNotification({
+        receiverId: reporterId,
+        type: 'REPORT_SUBMITTED',
+        title: 'Đã tiếp nhận báo cáo vi phạm',
+        content: 'Báo cáo của bạn đã được ghi nhận và đang chờ điều phối viên phân loại.',
+        redirectUrl: `/profile/reports?reportId=${report.id}`,
+      });
+    } catch (error) {
+      console.error('Không thể gửi thông báo tiếp nhận báo cáo:', error);
+    }
+
     return report;
+  }
+
+  async getMyReports(reporterId: string, query: QueryMyReportsDto) {
+    return this.usersRepository.getMyReports(reporterId, query);
   }
 
   async searchUsers(query: string) {

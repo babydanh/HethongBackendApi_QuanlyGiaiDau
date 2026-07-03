@@ -1,12 +1,13 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNull, aliasedTable, like } from 'drizzle-orm';
 import { EloEngineService } from '../rankings/elo-engine.service';
 import { RankingsService } from '../rankings/rankings.service';
-import { OriginalMatchValues } from './interfaces/original-match-values.interface';
 import { NotificationsService } from '../notifications/notifications.service';
+import { QueryReportsDto } from './dto/admin.dto';
+import type { ReportStatus } from '../users/dto/query-my-reports.dto';
 import {
   buildTournamentDeleteApprovedNotification,
   buildTournamentDeleteRejectedNotification,
@@ -697,297 +698,76 @@ export class AdminService {
     };
   }
 
-  // ─── Dispute Revert & ELO Recalculation Cascade ───────────────
-
-  async listDisputes(page = 1, limit = 10) {
-    const offset = (page - 1) * limit;
-
-    const [totalRecord] = await this.db
-      .select({ count: count() })
-      .from(schema.matchDisputes);
-
-    const data = await this.db
-      .select({
-        dispute: schema.matchDisputes,
-        match: schema.matches,
-        filedByUser: {
-          id: schema.users.id,
-          email: schema.users.email,
-          fullName: schema.profiles.fullName,
-        },
-      })
-      .from(schema.matchDisputes)
-      .innerJoin(schema.matches, eq(schema.matchDisputes.matchId, schema.matches.id))
-      .innerJoin(schema.users, eq(schema.matchDisputes.filedBy, schema.users.id))
-      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(schema.matchDisputes.createdAt));
-
-    return {
-      data,
-      meta: {
-        total: totalRecord.count,
-        page,
-        limit,
-        totalPages: Math.ceil(totalRecord.count / limit),
-      },
-    };
-  }
-
-  async getDisputeDiff(disputeId: string) {
-    const [dispute] = await this.db
-      .select()
-      .from(schema.matchDisputes)
-      .where(eq(schema.matchDisputes.id, disputeId))
-      .limit(1);
-
-    if (!dispute) {
-      throw new NotFoundException('Không tìm thấy khiếu nại tranh chấp.');
-    }
-
-    const [match] = await this.db
-      .select()
-      .from(schema.matches)
-      .where(eq(schema.matches.id, dispute.matchId))
-      .limit(1);
-
-    if (!match) {
-      throw new NotFoundException('Không tìm thấy trận đấu liên quan.');
-    }
-
-    let p1Name = 'Người chơi 1';
-    let p2Name = 'Người chơi 2';
-
-    if (match.participant1Id) {
-      const [p1] = await this.db
-        .select({ teamName: schema.tournamentParticipants.teamName })
-        .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.id, match.participant1Id))
-        .limit(1);
-      if (p1?.teamName) p1Name = p1.teamName;
-    }
-
-    if (match.participant2Id) {
-      const [p2] = await this.db
-        .select({ teamName: schema.tournamentParticipants.teamName })
-        .from(schema.tournamentParticipants)
-        .where(eq(schema.tournamentParticipants.id, match.participant2Id))
-        .limit(1);
-      if (p2?.teamName) p2Name = p2.teamName;
-    }
-
-    // Find the oldest audit log to get the original values
-    const [oldestLog] = await this.db
-      .select({
-        id: schema.auditLogs.id,
-        oldValues: schema.auditLogs.oldValues,
-        newValues: schema.auditLogs.newValues,
-        createdAt: schema.auditLogs.createdAt,
-        user: {
-          email: schema.users.email,
-          fullName: schema.profiles.fullName,
-        }
-      })
-      .from(schema.auditLogs)
-      .leftJoin(schema.users, eq(schema.auditLogs.userId, schema.users.id))
-      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .where(
-        and(
-          eq(schema.auditLogs.tableName, 'matches'),
-          eq(schema.auditLogs.recordId, match.id)
-        )
-      )
-      .orderBy(asc(schema.auditLogs.createdAt))
-      .limit(1);
-
-    return {
-      dispute,
-      match: {
-        ...match,
-        p1Name,
-        p2Name,
-      },
-      originalValues: oldestLog?.oldValues || null,
-      modifier: oldestLog ? {
-        fullName: oldestLog.user?.fullName,
-        email: oldestLog.user?.email,
-        updatedAt: oldestLog.createdAt,
-      } : null,
-    };
-  }
-
-  async revertMatch(disputeId: string, adminId: string, resolutionNote: string) {
-    // 1. Fetch the dispute
-    const [dispute] = await this.db
-      .select()
-      .from(schema.matchDisputes)
-      .where(eq(schema.matchDisputes.id, disputeId))
-      .limit(1);
-
-    if (!dispute) {
-      throw new NotFoundException('Không tìm thấy đơn tranh chấp.');
-    }
-
-    if (dispute.status !== 'OPEN') {
-      throw new BadRequestException('Đơn tranh chấp này đã được xử lý.');
-    }
-
-    const [match] = await this.db
-      .select()
-      .from(schema.matches)
-      .where(eq(schema.matches.id, dispute.matchId))
-      .limit(1);
-
-    if (!match) {
-      throw new NotFoundException('Không tìm thấy trận đấu tương ứng.');
-    }
-
-    // 2. Fetch the oldest update audit log for this match to get the original values
-    const [oldestLog] = await this.db
-      .select()
-      .from(schema.auditLogs)
-      .where(
-        and(
-          eq(schema.auditLogs.tableName, 'matches'),
-          eq(schema.auditLogs.recordId, match.id)
-        )
-      )
-      .orderBy(asc(schema.auditLogs.createdAt))
-      .limit(1);
-
-    if (!oldestLog || !oldestLog.oldValues) {
-      throw new BadRequestException('Không tìm thấy lịch sử thay đổi để khôi phục tỉ số gốc.');
-    }
-
-    const original = oldestLog.oldValues as OriginalMatchValues;
-
-    return await this.db.transaction(async (tx) => {
-      // 3. Update the match in database back to original values
-      const [updatedMatch] = await tx
-        .update(schema.matches)
-        .set({
-          scoreDetails: original.scoreDetails,
-          p1SetsWon: original.p1SetsWon,
-          p2SetsWon: original.p2SetsWon,
-          winnerId: original.winnerId,
-          status: original.status || 'COMPLETED',
-          completedAt: original.completedAt ? new Date(original.completedAt) : match.completedAt,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.matches.id, match.id))
-        .returning();
-
-      // 4. Update dispute status to RESOLVED
-      const [updatedDispute] = await tx
-        .update(schema.matchDisputes)
-        .set({
-          status: 'RESOLVED',
-          resolvedBy: adminId,
-          resolutionNote,
-          resolvedAt: new Date(),
-        })
-        .where(eq(schema.matchDisputes.id, dispute.id))
-        .returning();
-
-      // 5. Get tournament info to get categoryId and matchType
-      const [tournament] = await tx
-        .select({
-          categoryId: schema.tournaments.categoryId,
-          matchType: schema.tournaments.matchType,
-        })
-        .from(schema.tournaments)
-        .where(eq(schema.tournaments.id, match.tournamentId))
-        .limit(1);
-
-      if (!tournament) {
-        throw new NotFoundException('Không tìm thấy thông tin giải đấu cho trận đấu này.');
-      }
-
-      // 6. Identify players involved
-      const participantIds: string[] = [];
-      if (match.participant1Id) participantIds.push(match.participant1Id);
-      if (match.participant2Id) participantIds.push(match.participant2Id);
-
-      const players: { userId: string }[] = participantIds.length > 0
-        ? await tx
-            .select({ userId: schema.tournamentRosters.userId })
-            .from(schema.tournamentRosters)
-            .where(inArray(schema.tournamentRosters.participantId, participantIds))
-        : [];
-
-      const playerIds = players.map(p => p.userId);
-      const fromTime = match.completedAt || match.updatedAt;
-
-      // 7. Recalculate ELO chain (dùng safe version, không blocking transaction)
-      if (playerIds.length > 0) {
-        await this.rankingsService.recalculateEloChainSafe(
-          playerIds,
-          fromTime,
-          tournament.categoryId,
-          tournament.matchType,
-        );
-      }
-
-      await tx.insert(schema.auditLogs).values({
-        userId: adminId,
-        action: 'MATCH_DISPUTE_REVERT',
-        tableName: 'match_disputes',
-        recordId: dispute.id,
-        oldValues: {
-          match: {
-            scoreDetails: match.scoreDetails,
-            p1SetsWon: match.p1SetsWon,
-            p2SetsWon: match.p2SetsWon,
-            winnerId: match.winnerId,
-            status: match.status,
-          },
-          dispute: {
-            status: dispute.status,
-          }
-        },
-        newValues: {
-          match: {
-            scoreDetails: updatedMatch.scoreDetails,
-            p1SetsWon: updatedMatch.p1SetsWon,
-            p2SetsWon: updatedMatch.p2SetsWon,
-            winnerId: updatedMatch.winnerId,
-            status: updatedMatch.status,
-          },
-          dispute: {
-            status: updatedDispute.status,
-            resolutionNote: updatedDispute.resolutionNote,
-          }
-        },
-      });
-
-      return updatedDispute;
-    });
-  }
-
-  async listReports(page = 1, limit = 10) {
-    const offset = (page - 1) * limit;
-
-    const [totalRecord] = await this.db
-      .select({ count: count() })
-      .from(schema.reports);
-
+  async listReports(query: QueryReportsDto) {
+    const offset = (query.page - 1) * query.limit;
     const reporterUser = aliasedTable(schema.users, 'reporter_user');
     const reporterProfile = aliasedTable(schema.profiles, 'reporter_profile');
     const targetUser = aliasedTable(schema.users, 'target_user');
     const targetUserProfile = aliasedTable(schema.profiles, 'target_user_profile');
     const targetTournament = aliasedTable(schema.tournaments, 'target_tournament');
+    const targetMatch = aliasedTable(schema.matches, 'target_match');
+    const targetCommunity = aliasedTable(schema.communities, 'target_community');
+    const assignedUser = aliasedTable(schema.users, 'assigned_user');
+    const assignedProfile = aliasedTable(schema.profiles, 'assigned_profile');
+
+    const conditions: SQL[] = [];
+    if (query.status) conditions.push(eq(schema.reports.status, query.status));
+    if (query.targetType) {
+      conditions.push(eq(schema.reports.targetType, query.targetType));
+    }
+    if (query.category) {
+      conditions.push(eq(schema.reports.category, query.category));
+    }
+    if (query.from) {
+      conditions.push(gte(schema.reports.createdAt, new Date(query.from)));
+    }
+    if (query.to) {
+      conditions.push(lte(schema.reports.createdAt, new Date(query.to)));
+    }
+    if (query.search?.trim()) {
+      const keyword = `%${query.search.trim()}%`;
+      conditions.push(
+        or(
+          ilike(schema.reports.reason, keyword),
+          ilike(reporterUser.email, keyword),
+          ilike(reporterProfile.fullName, keyword),
+          ilike(targetUser.email, keyword),
+          ilike(targetUserProfile.fullName, keyword),
+          ilike(targetTournament.name, keyword),
+          ilike(targetCommunity.name, keyword),
+        )!,
+      );
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totalRecord] = await this.db
+      .select({ count: count() })
+      .from(schema.reports)
+      .innerJoin(reporterUser, eq(schema.reports.reporterId, reporterUser.id))
+      .leftJoin(reporterProfile, eq(reporterUser.id, reporterProfile.userId))
+      .leftJoin(targetUser, and(eq(schema.reports.targetType, 'USER'), eq(schema.reports.targetId, targetUser.id)))
+      .leftJoin(targetUserProfile, eq(targetUser.id, targetUserProfile.userId))
+      .leftJoin(targetTournament, and(eq(schema.reports.targetType, 'TOURNAMENT'), eq(schema.reports.targetId, targetTournament.id)))
+      .leftJoin(targetMatch, and(eq(schema.reports.targetType, 'MATCH'), eq(schema.reports.targetId, targetMatch.id)))
+      .leftJoin(targetCommunity, and(eq(schema.reports.targetType, 'COMMUNITY'), eq(schema.reports.targetId, targetCommunity.id)))
+      .where(whereClause);
 
     const data = await this.db
       .select({
         id: schema.reports.id,
         targetType: schema.reports.targetType,
         targetId: schema.reports.targetId,
+        source: schema.reports.source,
+        sourceReferenceId: schema.reports.sourceReferenceId,
+        category: schema.reports.category,
         reason: schema.reports.reason,
         evidenceUrls: schema.reports.evidenceUrls,
         status: schema.reports.status,
+        assignedTo: schema.reports.assignedTo,
         resolutionNote: schema.reports.resolutionNote,
+        triagedAt: schema.reports.triagedAt,
         createdAt: schema.reports.createdAt,
+        updatedAt: schema.reports.updatedAt,
         resolvedAt: schema.reports.resolvedAt,
         reporter: {
           id: reporterUser.id,
@@ -1003,7 +783,24 @@ export class AdminService {
           id: targetTournament.id,
           name: targetTournament.name,
           status: targetTournament.status,
-        }
+        },
+        targetMatch: {
+          id: targetMatch.id,
+          tournamentId: targetMatch.tournamentId,
+          status: targetMatch.status,
+          roundNumber: targetMatch.roundNumber,
+          matchOrder: targetMatch.matchOrder,
+        },
+        targetCommunity: {
+          id: targetCommunity.id,
+          name: targetCommunity.name,
+          status: targetCommunity.status,
+        },
+        assignee: {
+          id: assignedUser.id,
+          email: assignedUser.email,
+          fullName: assignedProfile.fullName,
+        },
       })
       .from(schema.reports)
       .innerJoin(reporterUser, eq(schema.reports.reporterId, reporterUser.id))
@@ -1011,44 +808,231 @@ export class AdminService {
       .leftJoin(targetUser, and(eq(schema.reports.targetType, 'USER'), eq(schema.reports.targetId, targetUser.id)))
       .leftJoin(targetUserProfile, eq(targetUser.id, targetUserProfile.userId))
       .leftJoin(targetTournament, and(eq(schema.reports.targetType, 'TOURNAMENT'), eq(schema.reports.targetId, targetTournament.id)))
-      .limit(limit)
+      .leftJoin(targetMatch, and(eq(schema.reports.targetType, 'MATCH'), eq(schema.reports.targetId, targetMatch.id)))
+      .leftJoin(targetCommunity, and(eq(schema.reports.targetType, 'COMMUNITY'), eq(schema.reports.targetId, targetCommunity.id)))
+      .leftJoin(assignedUser, eq(schema.reports.assignedTo, assignedUser.id))
+      .leftJoin(assignedProfile, eq(assignedUser.id, assignedProfile.userId))
+      .where(whereClause)
+      .limit(query.limit)
       .offset(offset)
       .orderBy(desc(schema.reports.createdAt));
+
+    const total = Number((totalRecord as { count?: number | string } | undefined)?.count ?? 0);
 
     return {
       data,
       meta: {
-        total: totalRecord.count,
-        page,
-        limit,
-        totalPages: Math.ceil(totalRecord.count / limit),
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit),
       },
     };
   }
 
-  async resolveReport(reportId: string, adminId: string, status: 'RESOLVED' | 'REJECTED', resolutionNote: string) {
+  async getReportActions(reportId: string) {
     const [report] = await this.db
-      .select()
+      .select({ id: schema.reports.id })
       .from(schema.reports)
       .where(eq(schema.reports.id, reportId))
       .limit(1);
-
     if (!report) {
-      throw new NotFoundException('Report not found');
+      throw new NotFoundException('Không tìm thấy báo cáo vi phạm');
     }
 
-    const [updatedReport] = await this.db
-      .update(schema.reports)
-      .set({
-        status,
-        resolutionNote,
-        resolvedBy: adminId,
-        resolvedAt: new Date(),
+    const actorUser = aliasedTable(schema.users, 'report_action_actor');
+    const actorProfile = aliasedTable(schema.profiles, 'report_action_profile');
+    return this.db
+      .select({
+        id: schema.reportActions.id,
+        action: schema.reportActions.action,
+        fromStatus: schema.reportActions.fromStatus,
+        toStatus: schema.reportActions.toStatus,
+        note: schema.reportActions.note,
+        metadata: schema.reportActions.metadata,
+        createdAt: schema.reportActions.createdAt,
+        actor: {
+          id: actorUser.id,
+          email: actorUser.email,
+          fullName: actorProfile.fullName,
+        },
       })
-      .where(eq(schema.reports.id, reportId))
-      .returning();
+      .from(schema.reportActions)
+      .leftJoin(actorUser, eq(schema.reportActions.actorId, actorUser.id))
+      .leftJoin(actorProfile, eq(actorUser.id, actorProfile.userId))
+      .where(eq(schema.reportActions.reportId, reportId))
+      .orderBy(asc(schema.reportActions.createdAt));
+  }
 
+  private async transitionReport(params: {
+    reportId: string;
+    actorId: string;
+    action: string;
+    expectedStatuses: ReportStatus[];
+    targetStatus: ReportStatus;
+    note: string;
+  }) {
+    const updatedReport = await this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(schema.reports)
+        .where(eq(schema.reports.id, params.reportId))
+        .limit(1);
+
+      if (!current) {
+        throw new NotFoundException('Không tìm thấy báo cáo vi phạm');
+      }
+      if (!params.expectedStatuses.includes(current.status as ReportStatus)) {
+        throw new BadRequestException(
+          `Không thể chuyển báo cáo từ trạng thái ${current.status} sang ${params.targetStatus}`,
+        );
+      }
+
+      const isFinal = ['RESOLVED', 'REJECTED'].includes(params.targetStatus);
+      const [updated] = await tx
+        .update(schema.reports)
+        .set({
+          status: params.targetStatus,
+          assignedTo: params.actorId,
+          triagedAt:
+            params.targetStatus === 'TRIAGED'
+              ? new Date()
+              : current.triagedAt,
+          resolvedBy: isFinal ? params.actorId : current.resolvedBy,
+          resolutionNote: isFinal ? params.note : current.resolutionNote,
+          resolvedAt: isFinal ? new Date() : current.resolvedAt,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.reports.id, params.reportId),
+            eq(schema.reports.status, current.status),
+          ),
+        )
+        .returning();
+
+      if (!updated) {
+        throw new ConflictException(
+          'Báo cáo vừa được người khác cập nhật, vui lòng tải lại dữ liệu',
+        );
+      }
+
+      await tx.insert(schema.reportActions).values({
+        reportId: params.reportId,
+        actorId: params.actorId,
+        action: params.action,
+        fromStatus: current.status,
+        toStatus: params.targetStatus,
+        note: params.note,
+      });
+      await tx.insert(schema.auditLogs).values({
+        userId: params.actorId,
+        action: `REPORT_${params.action}`,
+        tableName: 'reports',
+        recordId: params.reportId,
+        oldValues: { status: current.status, assignedTo: current.assignedTo },
+        newValues: {
+          status: params.targetStatus,
+          assignedTo: params.actorId,
+          note: params.note,
+        },
+      });
+
+      return updated;
+    });
+
+    await this.sendReportStatusNotification(updatedReport);
     return updatedReport;
+  }
+
+  private async sendReportStatusNotification(
+    report: typeof schema.reports.$inferSelect,
+  ) {
+    const contentByStatus: Record<string, string> = {
+      TRIAGED: 'Báo cáo của bạn đã được phân loại và có người tiếp nhận.',
+      UNDER_REVIEW: 'Báo cáo của bạn đang được xác minh.',
+      ESCALATED: 'Báo cáo của bạn đã được chuyển lên quản trị viên để xem xét.',
+      RESOLVED: 'Báo cáo của bạn đã được xử lý và kết luận.',
+      REJECTED: 'Báo cáo của bạn đã được xem xét và không được chấp nhận.',
+    };
+    try {
+      await this.notificationsService.sendNotification({
+        receiverId: report.reporterId,
+        type: `REPORT_${report.status}`,
+        title: 'Cập nhật báo cáo vi phạm',
+        content: contentByStatus[report.status] ?? 'Báo cáo của bạn vừa được cập nhật.',
+        redirectUrl: `/profile/reports?reportId=${report.id}`,
+      });
+    } catch (error) {
+      console.error('Không thể gửi thông báo trạng thái báo cáo:', error);
+    }
+  }
+
+  async triageReport(reportId: string, moderatorId: string, note: string) {
+    return this.transitionReport({
+      reportId,
+      actorId: moderatorId,
+      action: 'TRIAGE',
+      expectedStatuses: ['SUBMITTED'],
+      targetStatus: 'TRIAGED',
+      note,
+    });
+  }
+
+  async startReportReview(reportId: string, moderatorId: string, note: string) {
+    return this.transitionReport({
+      reportId,
+      actorId: moderatorId,
+      action: 'START_REVIEW',
+      expectedStatuses: ['TRIAGED'],
+      targetStatus: 'UNDER_REVIEW',
+      note,
+    });
+  }
+
+  async escalateReport(reportId: string, moderatorId: string, note: string) {
+    return this.transitionReport({
+      reportId,
+      actorId: moderatorId,
+      action: 'ESCALATE',
+      expectedStatuses: ['TRIAGED', 'UNDER_REVIEW'],
+      targetStatus: 'ESCALATED',
+      note,
+    });
+  }
+
+  async resolveReport(
+    reportId: string,
+    actorId: string,
+    status: 'RESOLVED' | 'REJECTED',
+    resolutionNote: string,
+    isAdmin: boolean,
+  ) {
+    const expectedStatuses: ReportStatus[] = isAdmin
+      ? ['TRIAGED', 'UNDER_REVIEW', 'ESCALATED']
+      : ['TRIAGED', 'UNDER_REVIEW'];
+
+    if (status === 'RESOLVED' && !isAdmin) {
+      const [report] = await this.db
+        .select({ status: schema.reports.status })
+        .from(schema.reports)
+        .where(eq(schema.reports.id, reportId))
+        .limit(1);
+      if (report?.status === 'ESCALATED') {
+        throw new BadRequestException(
+          'Báo cáo đã chuyển cấp chỉ quản trị viên mới được kết luận',
+        );
+      }
+    }
+
+    return this.transitionReport({
+      reportId,
+      actorId,
+      action: status === 'RESOLVED' ? 'RESOLVE' : 'REJECT',
+      expectedStatuses,
+      targetStatus: status,
+      note: resolutionNote,
+    });
   }
 
   async suspendTournament(tournamentId: string, adminId: string, note?: string) {
@@ -1572,4 +1556,3 @@ export class AdminService {
       .orderBy(desc(schema.verificationTickets.createdAt));
   }
 }
-

@@ -7,8 +7,9 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import {
   BanUserDto,
-  RevertMatchDto,
   ResolveReportDto,
+  QueryReportsDto,
+  ReportWorkflowNoteDto,
   TournamentAdminActionDto,
 } from './dto/admin.dto';
 
@@ -38,28 +39,51 @@ export class AdminModerationController {
     return this.adminService.unbanUser(userId, admin.sub);
   }
 
-  @Post('matches/:id/revert')
-  @ApiOperation({ summary: 'Khôi phục kết quả gốc của trận đấu bị tranh chấp (Chỉ ADMIN)' })
-  async revertMatch(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) matchId: string,
-    @Body() dto: RevertMatchDto,
-  ) {
-    return this.adminService.revertMatch(matchId, admin.sub, dto.resolutionNote);
-  }
-
   @Get('reports')
   @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Lấy danh sách các báo cáo vi phạm (Chỉ ADMIN)' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  async listReports(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+  async listReports(@Query() query: QueryReportsDto) {
+    return this.adminService.listReports(query);
+  }
+
+  @Get('reports/:id/actions')
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Xem lịch sử xử lý của báo cáo vi phạm' })
+  async getReportActions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getReportActions(id);
+  }
+
+  @Post('reports/:id/triage')
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Phân loại và nhận xử lý báo cáo mới' })
+  async triageReport(
+    @CurrentUser() moderator: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportWorkflowNoteDto,
   ) {
-    const pageNum = page ? parseInt(page, 10) : 1;
-    const limitNum = limit ? parseInt(limit, 10) : 10;
-    return this.adminService.listReports(pageNum, limitNum);
+    return this.adminService.triageReport(id, moderator.sub, dto.note);
+  }
+
+  @Post('reports/:id/start-review')
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Bắt đầu xác minh báo cáo đã phân loại' })
+  async startReportReview(
+    @CurrentUser() moderator: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportWorkflowNoteDto,
+  ) {
+    return this.adminService.startReportReview(id, moderator.sub, dto.note);
+  }
+
+  @Post('reports/:id/escalate')
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Chuyển báo cáo lên admin để xem xét chế tài nặng' })
+  async escalateReport(
+    @CurrentUser() moderator: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportWorkflowNoteDto,
+  ) {
+    return this.adminService.escalateReport(id, moderator.sub, dto.note);
   }
 
   @Post('reports/:id/resolve')
@@ -70,7 +94,13 @@ export class AdminModerationController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResolveReportDto,
   ) {
-    return this.adminService.resolveReport(id, admin.sub, dto.status, dto.resolutionNote);
+    return this.adminService.resolveReport(
+      id,
+      admin.sub,
+      dto.status,
+      dto.resolutionNote,
+      (admin.roles ?? []).includes(UserRole.ADMIN),
+    );
   }
 
   @Post('tournaments/:id/suspend')

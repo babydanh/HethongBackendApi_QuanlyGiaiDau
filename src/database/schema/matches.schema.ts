@@ -92,6 +92,7 @@ export const matches = pgTable(
       .defaultNow()
       .notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    cheerCount: integer('cheer_count').default(0).notNull(),
   },
   (table) => ({
     setsNonNegative: check(

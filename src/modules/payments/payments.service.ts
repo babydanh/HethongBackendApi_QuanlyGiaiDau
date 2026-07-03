@@ -1,21 +1,45 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PayOS } from '@payos/node';
-import { PaymentsRepository } from './payments.repository';
-import { CreatePaymentDto } from './dto/create-payment.dto';
-import { PayoutRequestDto } from './dto/payout-request.dto';
-import { WebhookDto } from './dto/webhook.dto';
-import { NotificationsService } from '../notifications/notifications.service';
+import { randomInt, randomUUID, timingSafeEqual } from 'crypto';
+import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
 import {
   buildOrganizerPaymentCompletedNotification,
   buildParticipantPaymentCompletedNotification,
   buildPayoutReviewedNotification,
   buildTournamentPublishApprovedNotification,
 } from '../notifications/notification-builder';
+import { NotificationsService } from '../notifications/notifications.service';
+import { CreatePaymentDto, PaymentPurpose } from './dto/create-payment.dto';
+import { PayoutRequestDto } from './dto/payout-request.dto';
+import type { PayoutReviewStatus } from './dto/review-payout.dto';
+import { WebhookDto } from './dto/webhook.dto';
+import { PaymentsRepository } from './payments.repository';
+
+interface CalculatedPayment {
+  amount: number;
+  platformFeeAmount: number;
+  participantId?: string;
+  divisionId?: string;
+}
+
+const payoutExpectedStatuses: Record<PayoutReviewStatus, string[]> = {
+  UNDER_REVIEW: ['REQUESTED', 'PENDING'],
+  APPROVED: ['UNDER_REVIEW'],
+  PROCESSING: ['APPROVED'],
+  PAID: ['PROCESSING'],
+  REJECTED: ['REQUESTED', 'PENDING', 'UNDER_REVIEW'],
+};
 
 @Injectable()
 export class PaymentsService {
-  private payos: PayOS;
+  private readonly payos: PayOS | null;
 
   constructor(
     private readonly paymentsRepository: PaymentsRepository,
@@ -25,462 +49,241 @@ export class PaymentsService {
     const clientId = this.configService.get<string>('PAYOS_CLIENT_ID');
     const apiKey = this.configService.get<string>('PAYOS_API_KEY');
     const checksumKey = this.configService.get<string>('PAYOS_CHECKSUM_KEY');
-    if (clientId && apiKey && checksumKey && clientId !== 'your-payos-client-id') {
-      this.payos = new PayOS({ clientId, apiKey, checksumKey });
-    } else {
-      console.warn('PayOS credentials not fully configured in env or are placeholders. Webhook verification/links will fall back to mock mode.');
-    }
+    this.payos = clientId && apiKey && checksumKey
+      ? new PayOS({ clientId, apiKey, checksumKey })
+      : null;
   }
 
-  async createPaymentLink(userId: string, data: CreatePaymentDto) {
-    if (!data.participantId) {
-      const tournament = await this.paymentsRepository.findTournamentById(data.tournamentId);
-      if (!tournament) {
-        throw new NotFoundException('Không tìm thấy giải đấu');
-      }
-
-      if (!tournament.description || tournament.description.trim() === '') {
-        throw new BadRequestException('Vui lòng nhập mô tả chi tiết của giải đấu trước khi thanh toán công bố.');
-      }
-
-      if (!tournament.bannerUrl || tournament.bannerUrl.trim() === '') {
-        throw new BadRequestException('Vui lòng tải lên ảnh bìa (banner) giải đấu trước khi thanh toán công bố.');
-      }
-
-      if (!tournament.startDate) {
-        throw new BadRequestException('Vui lòng cấu hình ngày bắt đầu giải đấu trước khi thanh toán công bố.');
-      }
-
-      if (!tournament.endDate) {
-        throw new BadRequestException('Vui lòng cấu hình ngày kết thúc giải đấu trước khi thanh toán công bố.');
-      }
-
-      if (!tournament.registrationStartDate) {
-        throw new BadRequestException('Vui lòng cấu hình ngày bắt đầu đăng ký trước khi thanh toán công bố.');
-      }
-
-      if (!tournament.registrationEndDate) {
-        throw new BadRequestException('Vui lòng cấu hình ngày kết thúc đăng ký trước khi thanh toán công bố.');
-      }
-
-      if (!tournament.venueId) {
-        throw new BadRequestException('Vui lòng cấu hình địa điểm thi đấu (sân đấu) trước khi thanh toán công bố.');
-      }
+  async createPaymentLink(
+    userId: string,
+    data: CreatePaymentDto,
+    clientIdempotencyKey?: string,
+  ) {
+    if (!this.payos) {
+      throw new ServiceUnavailableException('Máy chủ chưa cấu hình PayOS.');
     }
 
-    const payment = await this.paymentsRepository.createPayment(userId, data);
-    
-    // Build description for payment gateway (sanitize to non-accented and max 25 chars for PayOS)
     const tournament = await this.paymentsRepository.findTournamentById(data.tournamentId);
-    const tournamentName = tournament?.name ?? 'Giải đấu thể thao';
-    let rawDescription = data.participantId
-      ? `Lệ phí tham gia: ${tournamentName}`
-      : `Phí công bố giải đấu: ${tournamentName}`;
+    if (!tournament) throw new NotFoundException('Không tìm thấy giải đấu.');
 
-    const gatewayParam = data.paymentGateway ?? 'VNPAY';
-
-    // ──────────────────────────────────────────
-    // PayOS Integration Branch
-    // ──────────────────────────────────────────
-    if (gatewayParam.toUpperCase() === 'PAYOS') {
-      // Chuẩn hóa tên giải đấu sang dạng không dấu, viết liền không khoảng trắng hoặc dấu đặc biệt để vừa 25 ký tự PayOS
-      let sanitizedDesc = data.participantId ? 'LP' : 'PCB';
-      const cleanName = tournamentName
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/đ/g, 'd')
-        .replace(/Đ/g, 'D')
-        .replace(/[^a-zA-Z0-9]/g, '');
-      
-      sanitizedDesc = `${sanitizedDesc}${cleanName}`;
-      if (sanitizedDesc.length > 25) {
-        sanitizedDesc = sanitizedDesc.substring(0, 25);
-      }
-
-      // Tạo orderCode độc nhất kiểu số nguyên nhỏ hơn JS MAX_SAFE_INTEGER
-      const orderCode = parseInt(
-        Date.now().toString().substring(4) + 
-        Math.floor(10 + Math.random() * 90).toString()
-      );
-
-      // Lưu orderCode vào transactionReference trong database để đối chiếu
-      await this.paymentsRepository.updatePaymentTransactionReference(payment.id, orderCode.toString());
-
-      if (this.payos) {
-        try {
-          const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
-          const returnUrl = `${frontendUrl}/tournaments/${data.tournamentId}?payment_status=success&payment_id=${payment.id}`;
-          const cancelUrl = `${frontendUrl}/tournaments/${data.tournamentId}?payment_status=cancel&payment_id=${payment.id}`;
-
-          const paymentBody = {
-            orderCode,
-            amount: Math.round(parseFloat(payment.amount)),
-            description: sanitizedDesc,
-            cancelUrl,
-            returnUrl,
-          };
-
-          const result = await this.payos.paymentRequests.create(paymentBody);
-          return {
-            paymentId: payment.id,
-            paymentUrl: result.checkoutUrl,
-            qrCode: result.qrCode,
-            status: payment.status,
-          };
-        } catch (err) {
-          console.error('Failed to create PayOS payment link:', err);
-          throw new BadRequestException('Không thể tạo liên kết thanh toán PayOS: ' + err.message);
-        }
-      } else {
-        // Fallback sang mock nếu chưa cấu hình thật
-        const mockUrl = `/payments/mock-gateway?paymentId=${payment.id}&gateway=PAYOS&amount=${payment.amount}&description=${encodeURIComponent(rawDescription)}`;
-        return {
-          paymentId: payment.id,
-          paymentUrl: mockUrl,
-          status: payment.status,
-        };
-      }
-    }
-
-    // Default VNPAY/Mock gateway logic
-    const mockUrl = `/payments/mock-gateway?paymentId=${payment.id}&gateway=${gatewayParam}&amount=${payment.amount}&description=${encodeURIComponent(rawDescription)}`;
-    
-    return {
-      paymentId: payment.id,
-      paymentUrl: mockUrl,
-      status: payment.status,
-    };
-  }
-
-  async handleWebhook(payload: any) {
-    // ──────────────────────────────────────────
-    // PayOS Webhook Detection and Handling
-    // ──────────────────────────────────────────
-    if (payload && (payload.data || payload.signature)) {
-      if (!this.payos) {
-        console.warn('PayOS is not configured. Treating PayOS webhook as mock verify.');
-        const orderCodeMock = payload.data?.orderCode;
-        if (orderCodeMock) {
-          const payment = await this.paymentsRepository.findPaymentByReference(orderCodeMock.toString());
-          if (payment) {
-            await this.paymentsRepository.updatePaymentStatus(
-              payment.id,
-              'COMPLETED',
-              payload.data,
-              'PAYOS_MOCK_WEBHOOK',
-            );
-            return { message: 'PayOS mock webhook confirmed successfully' };
-          }
-        }
-        throw new BadRequestException('PayOS is not configured on this server');
-      }
-
-      try {
-        const verifiedData = await this.payos.webhooks.verify(payload);
-        const orderCode = verifiedData.orderCode;
-
-        const payment = await this.paymentsRepository.findPaymentByReference(orderCode.toString());
-        if (!payment) {
-          throw new NotFoundException('Không tìm thấy giao dịch thanh toán PayOS');
-        }
-
-        if (payment.status === 'COMPLETED') {
-          return { message: 'Payment already completed' };
-        }
-
-        // Cập nhật trạng thái thành công
-        await this.paymentsRepository.updatePaymentStatus(
-          payment.id,
-          'COMPLETED',
-          verifiedData as any,
-          'PAYOS_WEBHOOK_CALLBACK',
-        );
-
-        // Gửi thông báo cho VĐV
-        const tournament = await this.paymentsRepository.findTournamentById(payment.tournamentId);
-        if (payment.participantId && tournament) {
-          try {
-            await this.notificationsService.sendNotification(
-              buildParticipantPaymentCompletedNotification({
-                receiverId: payment.userId,
-                tournamentId: tournament.id,
-                tournamentName: tournament.name,
-                divisionId: payment.divisionId,
-              }),
-            );
-            if (tournament.createdBy !== payment.userId) {
-              await this.notificationsService.sendNotification(
-                buildOrganizerPaymentCompletedNotification({
-                  receiverId: tournament.createdBy,
-                  tournamentId: tournament.id,
-                  tournamentName: tournament.name,
-                  divisionId: payment.divisionId,
-                }),
-              );
-            }
-          } catch (err) {
-            console.error('Failed to send notification for payment completion:', err);
-          }
-        }
-
-        if (!payment.participantId) {
-          // Xử lý công bố giải đấu
-          if (tournament && tournament.status === 'REGISTRATION_CLOSED') {
-            try {
-              await this.paymentsRepository.setTournamentStatus(payment.tournamentId, 'UPCOMING');
-            } catch (err) {
-              console.error('Failed to set tournament status to UPCOMING on publish fee:', err);
-            }
-          } else {
-            let expectedFee = 0;
-            if (tournament) {
-              if (tournament.tournamentType === 'PUBLIC') {
-                const configKey = tournament.isRanked 
-                  ? 'TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED' 
-                  : 'TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED';
-                expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, tournament.isRanked ? '100000' : '50000'));
-              } else {
-                const configKey = 'TOURNAMENT_PUBLISH_FEE_CLUB';
-                expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, '0'));
-              }
-            }
-
-            if (parseFloat(payment.amount) === expectedFee) {
-              try {
-                const nextStatus = tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
-                await this.paymentsRepository.setTournamentStatus(payment.tournamentId, nextStatus);
-                if (tournament) {
-                  await this.notificationsService.sendNotification(
-                    buildTournamentPublishApprovedNotification({
-                      receiverId: tournament.createdBy,
-                      tournamentId: tournament.id,
-                      tournamentName: tournament.name,
-                    }),
-                  );
-                }
-              } catch (err) {
-                console.error(`Failed to set tournament status on publish fee payment:`, err);
-              }
-            }
-          }
-        }
-
-        return { message: 'PayOS payment confirmed successfully' };
-      } catch (err) {
-        console.error('PayOS Webhook verification failed:', err);
-        throw new BadRequestException('Xác thực chữ ký webhook PayOS thất bại: ' + err.message);
-      }
-    }
-
-    // Default VNPAY/Mock callback processing logic
-    const payment = await this.paymentsRepository.findPaymentById(
-      payload.transactionReference,
+    const calculated = await this.calculatePayment(userId, data, tournament);
+    const reusable = await this.paymentsRepository.findReusablePayment(
+      userId,
+      data.purpose,
+      data.tournamentId,
+      calculated.participantId,
     );
-
-    if (!payment) {
-      throw new NotFoundException('Payment transaction not found');
-    }
-
-    if (payment.status === 'COMPLETED') {
-      return { message: 'Payment already completed' };
-    }
-
-    if (payload.responseCode === '00') {
-      // Thanh toán thành công
-      await this.paymentsRepository.updatePaymentStatus(
-        payment.id,
-        'COMPLETED',
-        payload.rawPayload,
-        'WEBHOOK_CALLBACK',
+    if (reusable?.providerOrderCode) {
+      const existing = await this.payos.paymentRequests.get(
+        Number(reusable.providerOrderCode),
       );
-      
-      // Bắn thông báo đăng ký thành công cho VĐV
-      const tournament = await this.paymentsRepository.findTournamentById(payment.tournamentId);
-      if (payment.participantId && tournament) {
-        try {
-          await this.notificationsService.sendNotification(
-            buildParticipantPaymentCompletedNotification({
-              receiverId: payment.userId,
-              tournamentId: tournament.id,
-              tournamentName: tournament.name,
-              divisionId: payment.divisionId,
-            }),
-          );
-          if (tournament.createdBy !== payment.userId) {
-                await this.notificationsService.sendNotification(
-                  buildOrganizerPaymentCompletedNotification({
-                    receiverId: tournament.createdBy,
-                    tournamentId: tournament.id,
-                    tournamentName: tournament.name,
-                    divisionId: payment.divisionId,
-                  }),
-                );
-          }
-        } catch (err) {
-          console.error('Failed to send notification for payment completion:', err);
-        }
-      }
-      
-      if (!payment.participantId) {
-        // Find the tournament to check its type and ranked flag
-        const tournament = await this.paymentsRepository.findTournamentById(payment.tournamentId);
-        
-        if (tournament && tournament.status === 'REGISTRATION_CLOSED') {
-          // This is the platform fee payment for a closed/locked tournament
-          try {
-            await this.paymentsRepository.setTournamentStatus(payment.tournamentId, 'UPCOMING');
-          } catch (err) {
-            console.error('Failed to set tournament status to UPCOMING on platform fee payment:', err);
-          }
-        } else {
-          // Get expected fees from system configs
-          let expectedFee = 0;
-          if (tournament) {
-            if (tournament.tournamentType === 'PUBLIC') {
-              const configKey = tournament.isRanked 
-                ? 'TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED' 
-                : 'TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED';
-              expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, tournament.isRanked ? '100000' : '50000'));
-            } else {
-              const configKey = 'TOURNAMENT_PUBLISH_FEE_CLUB';
-              expectedFee = parseFloat(await this.paymentsRepository.getConfigValue(configKey, '0'));
-            }
-          }
+      return {
+        paymentId: reusable.id,
+        paymentUrl: existing.id,
+        status: reusable.status,
+        amount: Number(reusable.amount),
+        purpose: reusable.purpose,
+        reused: true,
+      };
+    }
 
-          // If the payment matches the publishing fee, publish it
-          if (parseFloat(payment.amount) === expectedFee) {
-            try {
-              const nextStatus = tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
-              await this.paymentsRepository.setTournamentStatus(payment.tournamentId, nextStatus);
-              if (tournament) {
-                await this.notificationsService.sendNotification(
-                  buildTournamentPublishApprovedNotification({
-                    receiverId: tournament.createdBy,
-                    tournamentId: tournament.id,
-                    tournamentName: tournament.name,
-                  }),
-                );
-              }
-            } catch (err) {
-              console.error(`Failed to set tournament status to ${tournament?.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN'} on publish fee payment:`, err);
-            }
-          }
-        }
-      }
-      
-      return { message: 'Payment confirmed successfully' };
-    } else {
-      // Thanh toán thất bại
-      await this.paymentsRepository.updatePaymentStatus(
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const idempotencyKey = `${userId}:${clientIdempotencyKey?.trim() || randomUUID()}`;
+    if (idempotencyKey.length > 255) {
+      throw new BadRequestException('Idempotency-Key không được vượt quá 200 ký tự.');
+    }
+
+    let payment;
+    try {
+      payment = await this.paymentsRepository.createPaymentIntent(userId, {
+        tournamentId: data.tournamentId,
+        participantId: calculated.participantId,
+        divisionId: calculated.divisionId,
+        purpose: data.purpose,
+        amount: calculated.amount,
+        platformFeeAmount: calculated.platformFeeAmount,
+        idempotencyKey,
+        expiresAt,
+      });
+    } catch (error: unknown) {
+      throw new BadRequestException(
+        this.errorMessage(error, 'Không thể tạo payment intent hoặc yêu cầu đã bị lặp.'),
+      );
+    }
+
+    const orderCode = Number(`${Date.now().toString().slice(-10)}${randomInt(10, 99)}`);
+    await this.paymentsRepository.attachPayOSLink(payment.id, orderCode.toString());
+    const prefix = data.purpose === PaymentPurpose.REGISTRATION_FEE ? 'DK' : 'GP';
+    const cleanName = tournament.name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .slice(0, 23);
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
+
+    try {
+      const result = await this.payos.paymentRequests.create({
+        orderCode,
+        amount: calculated.amount,
+        description: `${prefix}${cleanName}`.slice(0, 25),
+        cancelUrl: `${frontendUrl}/tournaments/${data.tournamentId}?payment_status=cancel&payment_id=${payment.id}`,
+        returnUrl: `${frontendUrl}/tournaments/${data.tournamentId}?payment_status=return&payment_id=${payment.id}`,
+        expiredAt: Math.floor(expiresAt.getTime() / 1000),
+      });
+      return {
+        paymentId: payment.id,
+        paymentUrl: result.checkoutUrl,
+        qrCode: result.qrCode,
+        status: payment.status,
+        amount: calculated.amount,
+        purpose: data.purpose,
+        expiresAt,
+      };
+    } catch (error: unknown) {
+      await this.paymentsRepository.transitionPayment(
         payment.id,
+        'PENDING',
         'FAILED',
-        payload.rawPayload,
-        'WEBHOOK_CALLBACK',
+        'PAYOS_LINK_CREATION_FAILED',
       );
-      return { message: 'Payment marked as failed' };
+      throw new BadRequestException(
+        this.errorMessage(error, 'Không thể tạo liên kết thanh toán PayOS.'),
+      );
     }
   }
 
-  async mockVerify(paymentId: string) {
-    return this.handleWebhook({
-      transactionReference: paymentId,
-      responseCode: '00',
-      gatewayTransactionId: `MOCK_TXN_${Date.now()}`,
-      rawPayload: { mock: true, timestamp: new Date().toISOString() },
-    });
+  async handleWebhook(payload: WebhookDto) {
+    if (!this.payos) {
+      throw new ServiceUnavailableException('Máy chủ chưa cấu hình PayOS.');
+    }
+
+    let verified;
+    try {
+      verified = await this.payos.webhooks.verify(payload);
+    } catch (error: unknown) {
+      throw new BadRequestException(
+        this.errorMessage(error, 'Xác thực chữ ký webhook PayOS thất bại.'),
+      );
+    }
+
+    const payment = await this.paymentsRepository.findPaymentByReference(
+      verified.orderCode.toString(),
+    );
+    if (!payment) throw new NotFoundException('Không tìm thấy giao dịch PayOS.');
+    if (payment.paymentGateway !== 'PAYOS') {
+      throw new BadRequestException('Giao dịch không thuộc cổng PayOS.');
+    }
+    if (Number(payment.amount) !== verified.amount) {
+      throw new BadRequestException('Số tiền webhook không khớp payment intent.');
+    }
+    if (verified.code !== '00') {
+      return { accepted: true, completed: false };
+    }
+
+    const result = await this.paymentsRepository.transitionPayment(
+      payment.id,
+      'PENDING',
+      'COMPLETED',
+      'PAYOS_VERIFIED_WEBHOOK',
+      this.sanitizeWebhookData(verified),
+      verified.reference,
+    );
+    if (!result.payment) throw new NotFoundException('Không tìm thấy giao dịch thanh toán.');
+    if (!result.transitioned) {
+      if (result.payment.status === 'COMPLETED') {
+        return { accepted: true, completed: true, idempotent: true };
+      }
+      throw new BadRequestException(
+        `Không thể hoàn tất giao dịch từ trạng thái ${result.payment.status}.`,
+      );
+    }
+
+    await this.afterPaymentCompleted(result.payment);
+    return { accepted: true, completed: true, idempotent: false };
+  }
+
+  async mockVerify(paymentId: string, suppliedSecret?: string) {
+    const nodeEnv = this.configService.get<string>('NODE_ENV');
+    const enabled = this.configService.get<string>('ENABLE_MOCK_PAYMENT') === 'true';
+    if (nodeEnv !== 'test' && !enabled) {
+      throw new NotFoundException('Endpoint không tồn tại.');
+    }
+    if (nodeEnv !== 'test') {
+      const configuredSecret = this.configService.get<string>('MOCK_PAYMENT_SECRET');
+      if (!configuredSecret || !suppliedSecret || !this.secretsMatch(configuredSecret, suppliedSecret)) {
+        throw new ForbiddenException('Mock payment secret không hợp lệ.');
+      }
+    }
+
+    const payment = await this.paymentsRepository.findPaymentById(paymentId);
+    if (!payment) throw new NotFoundException('Không tìm thấy giao dịch.');
+    const result = await this.paymentsRepository.transitionPayment(
+      payment.id,
+      'PENDING',
+      'COMPLETED',
+      'TEST_MOCK_VERIFY',
+      { mock: true },
+      `MOCK_${Date.now()}`,
+    );
+    if (!result.transitioned && result.payment?.status !== 'COMPLETED') {
+      throw new BadRequestException('Giao dịch không còn ở trạng thái chờ thanh toán.');
+    }
+    return { completed: true, idempotent: !result.transitioned };
   }
 
   async requestPayout(organizerId: string, data: PayoutRequestDto) {
-    // 1. Get the tournament
     const tournament = await this.paymentsRepository.findTournamentById(data.tournamentId);
-    if (!tournament) {
-      throw new NotFoundException('Tournament not found');
+    if (!tournament) throw new NotFoundException('Không tìm thấy giải đấu.');
+    if (tournament.createdBy !== organizerId) {
+      throw new ForbiddenException('Chỉ chủ sở hữu giải đấu được yêu cầu giải ngân.');
     }
-
-    // Chi cho rut tien khi giai da bat dau hoac da ket thuc
-    if (tournament.status !== 'IN_PROGRESS' && tournament.status !== 'COMPLETED') {
-      throw new BadRequestException('Chỉ có thể rút tiền khi giải đang thi đấu hoặc đã kết thúc.');
+    if (tournament.status !== 'COMPLETED') {
+      throw new BadRequestException('Chỉ được giải ngân khi giải đấu đã hoàn thành.');
     }
-
-    // 2. Fetch platform fee percentage from config
-    let configKey = 'PLATFORM_FEE_PERCENTAGE_CLUB';
-    let defaultPct = '0';
-    if (tournament.tournamentType === 'PUBLIC') {
-      configKey = tournament.isRanked 
-        ? 'PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED' 
-        : 'PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED';
-      defaultPct = '5';
+    try {
+      return await this.paymentsRepository.createPayoutRequest(organizerId, data);
+    } catch (error: unknown) {
+      throw new BadRequestException(this.errorMessage(error, 'Không thể tạo yêu cầu giải ngân.'));
     }
-
-    const platformFeePercentage = parseFloat(
-      await this.paymentsRepository.getConfigValue(configKey, defaultPct)
-    );
-
-    // 3. Query total collected registration fees from database
-    const totalCollected = await this.paymentsRepository.getTotalCollected(data.tournamentId);
-    if (totalCollected === 0) {
-      throw new BadRequestException('No registration fees collected yet. Payout cannot be requested.');
-    }
-    
-    const maxWithdrawable = totalCollected * (1 - platformFeePercentage / 100);
-    if (data.amountRequested > maxWithdrawable) {
-      throw new BadRequestException('Requested amount exceeds available balance');
-    }
-
-    const platformFeeRetained = totalCollected * (platformFeePercentage / 100);
-
-    // 4. Determine holdUntil date based on user roles
-    const userRoles = await this.paymentsRepository.getUserRoles(organizerId);
-    const isOrganizerOrAdmin = userRoles.includes('organizer') || userRoles.includes('admin');
-    const holdUntil = isOrganizerOrAdmin ? null : (tournament.endDate ? new Date(tournament.endDate) : null);
-
-    return this.paymentsRepository.createPayoutRequest(
-      organizerId,
-      data,
-      totalCollected,
-      platformFeeRetained,
-      holdUntil,
-    );
   }
 
-  async findUserPayments(userId: string) {
-    return this.paymentsRepository.findUserPayments(userId);
-  }
-
-  async findOrganizerPayouts(organizerId: string) {
-    return this.paymentsRepository.findOrganizerPayouts(organizerId);
-  }
-
-  async findPaymentById(id: string) {
+  async findPaymentById(userId: string, id: string) {
     const payment = await this.paymentsRepository.findPaymentById(id);
-    if (!payment) {
-      throw new NotFoundException('Payment transaction not found');
+    if (!payment) throw new NotFoundException('Không tìm thấy giao dịch thanh toán.');
+    if (payment.userId !== userId) {
+      throw new ForbiddenException('Bạn không có quyền xem giao dịch này.');
     }
     return payment;
-  }
-
-  async findAllPayouts() {
-    return this.paymentsRepository.findAllPayoutRequests();
   }
 
   async reviewPayout(
     adminId: string,
     id: string,
-    status: 'APPROVED' | 'REJECTED',
+    status: PayoutReviewStatus,
     proofUrl?: string,
     note?: string,
   ) {
-    try {
-      const payout = await this.paymentsRepository.findPayoutById(id);
-      if (!payout) {
-        throw new NotFoundException('Payout request not found');
-      }
+    if ((status === 'APPROVED' || status === 'PAID') && !proofUrl?.trim()) {
+      throw new BadRequestException('Bằng chứng giao dịch là bắt buộc khi duyệt hoặc xác nhận đã trả.');
+    }
+    const payout = await this.paymentsRepository.findPayoutById(id);
+    if (!payout) throw new NotFoundException('Không tìm thấy yêu cầu giải ngân.');
+    const updated = await this.paymentsRepository.transitionPayout(
+      id,
+      payoutExpectedStatuses[status],
+      status,
+      adminId,
+      { transactionProofUrl: proofUrl, note },
+    );
+    if (!updated) {
+      throw new BadRequestException(
+        `Không thể chuyển yêu cầu từ trạng thái ${payout.status} sang ${status}.`,
+      );
+    }
 
-      const updatedPayout = await this.paymentsRepository.updatePayoutStatus(id, status, adminId, {
-        transactionProofUrl: proofUrl,
-        note,
-      });
-
+    if (status === 'PAID' || status === 'REJECTED') {
       const tournament = await this.paymentsRepository.findTournamentById(payout.tournamentId);
       if (tournament) {
         await this.notificationsService.sendNotification(
@@ -488,34 +291,240 @@ export class PaymentsService {
             receiverId: payout.organizerId,
             tournamentId: payout.tournamentId,
             tournamentName: tournament.name,
-            approved: status === 'APPROVED',
+            approved: status === 'PAID',
           }),
         );
       }
-
-      return updatedPayout;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Failed to update payout status';
-      throw new BadRequestException(message);
     }
+    return updated;
   }
 
-  async findAllTransactions() {
+  findUserPayments(userId: string) {
+    return this.paymentsRepository.findUserPayments(userId);
+  }
+
+  findOrganizerPayouts(organizerId: string) {
+    return this.paymentsRepository.findOrganizerPayouts(organizerId);
+  }
+
+  findAllPayouts() {
+    return this.paymentsRepository.findAllPayoutRequests();
+  }
+
+  findAllTransactions() {
     return this.paymentsRepository.findAllPayments();
   }
 
-  async getStats() {
+  getStats() {
     return this.paymentsRepository.getAdminStats();
   }
 
-  async confirmRefund(adminId: string, paymentId: string) {
-    try {
-      const updated = await this.paymentsRepository.confirmRefund(paymentId);
-      // Gửi thông báo/email cho VĐV nếu cần (mock hoặc notify)
-      return updated;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Failed to confirm refund';
-      throw new BadRequestException(message);
+  async confirmRefund(adminId: string, paymentId: string, proofUrl: string) {
+    const updated = await this.paymentsRepository.confirmLegacyRefund(
+      paymentId,
+      adminId,
+      proofUrl,
+    );
+    if (!updated) {
+      throw new BadRequestException(
+        'Chỉ giao dịch COMPLETED đang PENDING_REFUND mới được xác nhận hoàn tiền.',
+      );
     }
+    return updated;
+  }
+
+  private async calculatePayment(
+    userId: string,
+    data: CreatePaymentDto,
+    tournament: NonNullable<Awaited<ReturnType<PaymentsRepository['findTournamentById']>>>,
+  ): Promise<CalculatedPayment> {
+    if (data.purpose === PaymentPurpose.REGISTRATION_FEE) {
+      if (!data.participantId) {
+        throw new BadRequestException('participantId là bắt buộc với lệ phí đăng ký.');
+      }
+      const participant = await this.paymentsRepository.findParticipantById(data.participantId);
+      if (!participant || participant.tournamentId !== tournament.id) {
+        throw new BadRequestException('Lượt đăng ký không thuộc giải đấu.');
+      }
+      if (participant.registeredBy !== userId) {
+        throw new ForbiddenException('Bạn không sở hữu lượt đăng ký này.');
+      }
+      if (participant.isPaid) throw new BadRequestException('Lượt đăng ký đã thanh toán.');
+      if (data.divisionId && data.divisionId !== participant.tournamentDivisionId) {
+        throw new BadRequestException('divisionId không khớp lượt đăng ký.');
+      }
+
+      let amount = Number(tournament.entryFee);
+      if (participant.tournamentDivisionId) {
+        const division = await this.paymentsRepository.findDivisionById(
+          participant.tournamentDivisionId,
+        );
+        if (!division || division.tournamentId !== tournament.id) {
+          throw new BadRequestException('Hạng mục thi đấu không hợp lệ.');
+        }
+        amount = Number(division.entryFee);
+      }
+      if (!Number.isSafeInteger(amount) || amount <= 0) {
+        throw new BadRequestException('Lệ phí đăng ký phải là số nguyên dương.');
+      }
+
+      const percentage = await this.registrationPlatformFeePercentage(tournament);
+      const playerCount = Math.max(
+        1,
+        await this.paymentsRepository.countParticipantPlayers(participant.id),
+      );
+      const fee = Math.min(amount, calcPlatformFee(amount, percentage) * playerCount);
+      return {
+        amount,
+        platformFeeAmount: fee,
+        participantId: participant.id,
+        divisionId: participant.tournamentDivisionId ?? undefined,
+      };
+    }
+
+    if (data.participantId || data.divisionId) {
+      throw new BadRequestException('Phí cấp giải không nhận participantId hoặc divisionId.');
+    }
+    if (tournament.createdBy !== userId) {
+      throw new ForbiddenException('Chỉ chủ giải đấu được thanh toán khoản phí này.');
+    }
+    this.assertPublishConfiguration(tournament);
+
+    if (data.purpose === PaymentPurpose.TOURNAMENT_PUBLISH_FEE) {
+      const amount = await this.publishFee(tournament);
+      if (amount <= 0) {
+        throw new BadRequestException('Giải đấu này không phát sinh phí công bố.');
+      }
+      return { amount, platformFeeAmount: amount };
+    }
+
+    if (tournament.status !== 'REGISTRATION_CLOSED') {
+      throw new BadRequestException('Phí nền tảng chỉ được thanh toán sau khi chốt đăng ký.');
+    }
+    const players = await this.paymentsRepository.countTournamentPlayers(tournament.id);
+    const percentage = await this.registrationPlatformFeePercentage(tournament);
+    const amount = players * calcPlatformFee(Number(tournament.entryFee), percentage);
+    if (amount <= 0) throw new BadRequestException('Không có phí nền tảng cần thanh toán.');
+    return { amount, platformFeeAmount: amount };
+  }
+
+  private async publishFee(
+    tournament: NonNullable<Awaited<ReturnType<PaymentsRepository['findTournamentById']>>>,
+  ): Promise<number> {
+    const key = tournament.tournamentType === 'PUBLIC'
+      ? tournament.isRanked
+        ? 'TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED'
+        : 'TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED'
+      : 'TOURNAMENT_PUBLISH_FEE_CLUB';
+    const fallback = tournament.tournamentType === 'PUBLIC'
+      ? tournament.isRanked ? '100000' : '50000'
+      : '0';
+    const amount = Number(await this.paymentsRepository.getConfigValue(key, fallback));
+    if (!Number.isSafeInteger(amount) || amount < 0) {
+      throw new BadRequestException(`Cấu hình ${key} không hợp lệ.`);
+    }
+    return amount;
+  }
+
+  private async registrationPlatformFeePercentage(
+    tournament: NonNullable<Awaited<ReturnType<PaymentsRepository['findTournamentById']>>>,
+  ): Promise<number> {
+    const key = tournament.tournamentType === 'PUBLIC'
+      ? tournament.isRanked
+        ? 'PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED'
+        : 'PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED'
+      : 'PLATFORM_FEE_PERCENTAGE_CLUB';
+    const fallback = tournament.tournamentType === 'PUBLIC'
+      ? tournament.platformFeePercentage
+      : '0';
+    const percentage = Number(await this.paymentsRepository.getConfigValue(key, fallback));
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
+      throw new BadRequestException(`Cấu hình ${key} không hợp lệ.`);
+    }
+    return percentage;
+  }
+
+  private assertPublishConfiguration(
+    tournament: NonNullable<Awaited<ReturnType<PaymentsRepository['findTournamentById']>>>,
+  ) {
+    if (!tournament.description?.trim() || !tournament.bannerUrl?.trim()) {
+      throw new BadRequestException('Giải đấu phải có mô tả và ảnh bìa trước khi thanh toán.');
+    }
+    if (
+      !tournament.startDate ||
+      !tournament.endDate ||
+      !tournament.registrationStartDate ||
+      !tournament.registrationEndDate ||
+      !tournament.venueId
+    ) {
+      throw new BadRequestException('Giải đấu chưa cấu hình đủ thời gian và địa điểm.');
+    }
+  }
+
+  private async afterPaymentCompleted(
+    payment: NonNullable<Awaited<ReturnType<PaymentsRepository['findPaymentById']>>>,
+  ) {
+    const tournament = await this.paymentsRepository.findTournamentById(payment.tournamentId);
+    if (!tournament) return;
+
+    try {
+      if (payment.purpose === PaymentPurpose.REGISTRATION_FEE && payment.participantId) {
+        await this.notificationsService.sendNotification(
+          buildParticipantPaymentCompletedNotification({
+            receiverId: payment.userId,
+            tournamentId: tournament.id,
+            tournamentName: tournament.name,
+            divisionId: payment.divisionId,
+          }),
+        );
+        if (tournament.createdBy !== payment.userId) {
+          await this.notificationsService.sendNotification(
+            buildOrganizerPaymentCompletedNotification({
+              receiverId: tournament.createdBy,
+              tournamentId: tournament.id,
+              tournamentName: tournament.name,
+              divisionId: payment.divisionId,
+            }),
+          );
+        }
+      } else if (payment.purpose === PaymentPurpose.TOURNAMENT_PUBLISH_FEE) {
+        const nextStatus = tournament.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
+        await this.paymentsRepository.setTournamentStatus(tournament.id, nextStatus);
+        await this.notificationsService.sendNotification(
+          buildTournamentPublishApprovedNotification({
+            receiverId: tournament.createdBy,
+            tournamentId: tournament.id,
+            tournamentName: tournament.name,
+          }),
+        );
+      } else if (payment.purpose === PaymentPurpose.PLATFORM_FEE) {
+        await this.paymentsRepository.setTournamentStatus(tournament.id, 'UPCOMING');
+      }
+    } catch (error: unknown) {
+      console.error('Post-payment notification/status update failed:', error);
+    }
+  }
+
+  private sanitizeWebhookData(data: WebhookDto['data']): Record<string, unknown> {
+    return {
+      orderCode: data.orderCode,
+      amount: data.amount,
+      reference: data.reference,
+      transactionDateTime: data.transactionDateTime,
+      currency: data.currency,
+      paymentLinkId: data.paymentLinkId,
+      code: data.code,
+      desc: data.desc,
+    };
+  }
+
+  private secretsMatch(expected: string, supplied: string): boolean {
+    const expectedBuffer = Buffer.from(expected);
+    const suppliedBuffer = Buffer.from(supplied);
+    return expectedBuffer.length === suppliedBuffer.length && timingSafeEqual(expectedBuffer, suppliedBuffer);
+  }
+
+  private errorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
   }
 }

@@ -25,7 +25,6 @@ import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
-import { CreateMatchDisputeDto, ResolveMatchDisputeDto } from './dto/match-dispute.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -309,6 +308,33 @@ export class TournamentsController {
     return this.tournamentsService.publish(id, user.sub, this.getSystemRoles(user));
   }
 
+  @Post(':id/follow')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Theo dõi giải đấu' })
+  async follow(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.followTournament(id, user.sub);
+  }
+
+  @Delete(':id/follow')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Bỏ theo dõi giải đấu' })
+  async unfollow(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.unfollowTournament(id, user.sub);
+  }
+
+  @Get('my/followed')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Danh sách giải đấu đang theo dõi' })
+  async getFollowed(@CurrentUser() user: JwtPayload) {
+    return this.tournamentsService.getFollowedTournaments(user.sub);
+  }
+
   @Patch(':id/seeds')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật hạt giống hàng loạt cho các đội/VĐV' })
@@ -573,46 +599,6 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.getOpsAuditLogs(id, user.sub, this.getSystemRoles(user), divisionId);
-  }
-
-  @Get(':id/disputes')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Lấy danh sách sự cố/tranh chấp của giải cho panel vận hành' })
-  async getDisputes(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query('divisionId') divisionId: string | undefined,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return this.tournamentsService.getTournamentDisputes(id, user.sub, this.getSystemRoles(user), divisionId);
-  }
-
-  @Post(':id/disputes')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Tạo sự cố/tranh chấp cho một trận trong giải' })
-  async createDispute(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: CreateMatchDisputeDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return this.tournamentsService.createTournamentDispute(id, user.sub, this.getSystemRoles(user), body);
-  }
-
-  @Post(':id/disputes/:disputeId/resolve')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'BTC xử lý và đóng sự cố/tranh chấp trong panel giải' })
-  async resolveDispute(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('disputeId', ParseUUIDPipe) disputeId: string,
-    @Body() body: ResolveMatchDisputeDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return this.tournamentsService.resolveTournamentDispute(
-      id,
-      disputeId,
-      user.sub,
-      this.getSystemRoles(user),
-      body,
-    );
   }
 
   @Post(':id/cancel')

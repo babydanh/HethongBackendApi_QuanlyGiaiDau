@@ -1,7 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsUUID, IsNumber, IsOptional, Min, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+
+export enum PaymentPurpose {
+  REGISTRATION_FEE = 'REGISTRATION_FEE',
+  TOURNAMENT_PUBLISH_FEE = 'TOURNAMENT_PUBLISH_FEE',
+  PLATFORM_FEE = 'PLATFORM_FEE',
+}
 
 export class CreatePaymentDto {
+  @ApiProperty({ enum: PaymentPurpose, description: 'Mục đích thanh toán' })
+  @IsEnum(PaymentPurpose)
+  purpose: PaymentPurpose;
+
   @ApiProperty({
     example: 'uuid-tournament',
     description: 'ID của giải đấu cần thanh toán phí tham gia',
@@ -25,19 +35,4 @@ export class CreatePaymentDto {
   @IsOptional()
   divisionId?: string;
 
-  @ApiProperty({
-    example: 500000,
-    description: 'Số tiền cần thanh toán',
-  })
-  @IsNumber()
-  @Min(1)
-  amount: number;
-
-  @ApiPropertyOptional({
-    example: 'VNPAY',
-    description: 'Cổng thanh toán (mặc định VNPAY)',
-  })
-  @IsString()
-  @IsOptional()
-  paymentGateway?: string;
 }

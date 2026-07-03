@@ -1,9 +1,14 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, count, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryUserDto } from './dto/query-user.dto';
+import type {
+  ReportCategory,
+  ReportTargetType,
+} from './dto/create-report.dto';
+import type { QueryMyReportsDto } from './dto/query-my-reports.dto';
 
 @Injectable()
 export class UsersRepository {
@@ -231,18 +236,119 @@ export class UsersRepository {
     };
   }
 
-  async createReport(reporterId: string, targetType: 'USER' | 'TOURNAMENT', targetId: string, reason: string, evidenceUrls: string[]) {
-    return await this.db
-      .insert(schema.reports)
-      .values({
-        reporterId,
-        targetType,
-        targetId,
-        reason,
-        evidenceUrls,
-        status: 'PENDING',
-      })
-      .returning();
+  async reportTargetExists(targetType: ReportTargetType, targetId: string) {
+    switch (targetType) {
+      case 'USER': {
+        const [target] = await this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(and(eq(schema.users.id, targetId), isNull(schema.users.deletedAt)))
+          .limit(1);
+        return Boolean(target);
+      }
+      case 'TOURNAMENT': {
+        const [target] = await this.db
+          .select({ id: schema.tournaments.id })
+          .from(schema.tournaments)
+          .where(
+            and(
+              eq(schema.tournaments.id, targetId),
+              isNull(schema.tournaments.deletedAt),
+            ),
+          )
+          .limit(1);
+        return Boolean(target);
+      }
+      case 'MATCH': {
+        const [target] = await this.db
+          .select({ id: schema.matches.id })
+          .from(schema.matches)
+          .where(and(eq(schema.matches.id, targetId), isNull(schema.matches.deletedAt)))
+          .limit(1);
+        return Boolean(target);
+      }
+      case 'COMMUNITY': {
+        const [target] = await this.db
+          .select({ id: schema.communities.id })
+          .from(schema.communities)
+          .where(
+            and(
+              eq(schema.communities.id, targetId),
+              isNull(schema.communities.deletedAt),
+            ),
+          )
+          .limit(1);
+        return Boolean(target);
+      }
+    }
+  }
+
+  async createReport(
+    reporterId: string,
+    targetType: ReportTargetType,
+    targetId: string,
+    category: ReportCategory,
+    reason: string,
+    evidenceUrls: string[],
+  ) {
+    return this.db.transaction(async (tx) => {
+      const [report] = await tx
+        .insert(schema.reports)
+        .values({
+          reporterId,
+          targetType,
+          targetId,
+          category,
+          reason,
+          evidenceUrls,
+          status: 'SUBMITTED',
+        })
+        .returning();
+
+      await tx.insert(schema.reportActions).values({
+        reportId: report.id,
+        actorId: reporterId,
+        action: 'SUBMIT',
+        toStatus: 'SUBMITTED',
+      });
+
+      return report;
+    });
+  }
+
+  async getMyReports(reporterId: string, query: QueryMyReportsDto) {
+    const conditions: SQL[] = [eq(schema.reports.reporterId, reporterId)];
+    if (query.status) conditions.push(eq(schema.reports.status, query.status));
+    if (query.targetType) {
+      conditions.push(eq(schema.reports.targetType, query.targetType));
+    }
+    if (query.category) {
+      conditions.push(eq(schema.reports.category, query.category));
+    }
+
+    const whereClause = and(...conditions);
+    const offset = (query.page - 1) * query.limit;
+    const [totalRecord] = await this.db
+      .select({ count: count() })
+      .from(schema.reports)
+      .where(whereClause);
+    const data = await this.db
+      .select()
+      .from(schema.reports)
+      .where(whereClause)
+      .orderBy(desc(schema.reports.createdAt))
+      .limit(query.limit)
+      .offset(offset);
+
+    return {
+      data,
+      meta: {
+        total: totalRecord.count,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(totalRecord.count / query.limit),
+      },
+    };
   }
 
   async searchUsers(queryStr: string) {

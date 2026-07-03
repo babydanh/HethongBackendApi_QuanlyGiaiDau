@@ -1,14 +1,23 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsNotEmpty, IsOptional, IsString, IsUrl } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+
+export const payoutReviewStatuses = [
+  'UNDER_REVIEW',
+  'APPROVED',
+  'PROCESSING',
+  'PAID',
+  'REJECTED',
+] as const;
+export type PayoutReviewStatus = (typeof payoutReviewStatuses)[number];
 
 export class ReviewPayoutDto {
-  @ApiProperty({ enum: ['APPROVED', 'REJECTED'] })
+  @ApiProperty({ enum: payoutReviewStatuses })
   @IsString()
   @IsNotEmpty()
-  @IsIn(['APPROVED', 'REJECTED'])
-  status: 'APPROVED' | 'REJECTED';
+  @IsIn(payoutReviewStatuses)
+  status: PayoutReviewStatus;
 
-  @ApiPropertyOptional({ description: 'Link ảnh bằng chứng giao dịch (bắt buộc nếu APPROVED)' })
+  @ApiPropertyOptional({ description: 'Link bằng chứng giao dịch (bắt buộc khi APPROVED hoặc PAID)' })
   @IsString()
   @IsOptional()
   transactionProofUrl?: string;

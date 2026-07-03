@@ -150,6 +150,26 @@ export class MatchesService {
       console.error('Failed to send MATCH_COMPLETED notifications:', err);
     }
 
+    // Gửi thông báo cho người theo dõi giải đấu
+    if (existing.tournamentId) {
+      try {
+        const followers = await this.matchesRepository.getFollowerUserIds(existing.tournamentId);
+        for (const fid of followers) {
+          await this.notificationsService.sendNotification({
+            receiverId: fid,
+            type: 'MATCH_COMPLETED',
+            title: `Cập nhật kết quả trận đấu`,
+            content: existing.tournament?.name
+              ? `Trận đấu thuộc giải "${existing.tournament.name}" đã có kết quả.`
+              : 'Một trận đấu trong giải bạn theo dõi đã có kết quả.',
+            redirectUrl: `/tournaments/${existing.tournamentId}`,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to send follower match notifications:', err);
+      }
+    }
+
     return updatedMatch;
   }
 
@@ -332,6 +352,13 @@ export class MatchesService {
     });
     if (!updatedMatch) {
       throw new NotFoundException('Match not found after score update');
+    }
+
+    // Auto-set status to COMPLETED when winner is determined
+    if (winnerId) {
+      await this.matchesRepository.updateStatus(id, {
+        status: 'COMPLETED',
+      });
     }
 
     // Cache live score in Redis if match is active/ongoing

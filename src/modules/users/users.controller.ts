@@ -27,6 +27,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUserDto } from './dto/query-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateReportDto } from './dto/create-report.dto';
+import { QueryMyReportsDto } from './dto/query-my-reports.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -68,6 +69,15 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Return user profile' })
   async getProfile(@CurrentUser() user: { id: string }) {
     return this.usersService.getProfile(user.id);
+  }
+
+  @Get('reports/me')
+  @ApiOperation({ summary: 'Xem và theo dõi các báo cáo vi phạm đã gửi' })
+  async getMyReports(
+    @CurrentUser() user: { id: string },
+    @Query() query: QueryMyReportsDto,
+  ) {
+    return this.usersService.getMyReports(user.id, query);
   }
 
   @Public()

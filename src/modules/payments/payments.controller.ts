@@ -4,6 +4,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { ReviewPayoutDto } from './dto/review-payout.dto';
+import { ConfirmRefundDto } from './dto/confirm-refund.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -64,9 +65,10 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Xác nhận đã hoàn tiền thủ công cho giao dịch rút giải (Chỉ ADMIN)' })
   async confirmRefund(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ConfirmRefundDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.paymentsService.confirmRefund(user.sub, id);
+    return this.paymentsService.confirmRefund(user.sub, id, body.transactionProofUrl);
   }
 
   @Post('create-link')
@@ -127,8 +129,8 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Lấy chi tiết giao dịch thanh toán theo ID' })
   async findPaymentById(
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.paymentsService.findPaymentById(id);
+    return this.paymentsService.findPaymentById(user.sub, id);
   }
 }
-

@@ -35,6 +35,7 @@ export class MatchesRepository {
           where g.id = ${schema.matches.groupId}
           and t.deleted_at is null
           and t.visibility = 'PUBLIC'
+          and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
         )`
       );
     } else {
@@ -45,6 +46,7 @@ export class MatchesRepository {
           join ${schema.tournaments} t on s.tournament_id = t.id
           where g.id = ${schema.matches.groupId}
           and t.deleted_at is null
+          and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
         )`
       );
     }
@@ -889,5 +891,13 @@ export class MatchesRepository {
       )
       .returning();
     return deleted;
+  }
+
+  async getFollowerUserIds(tournamentId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: schema.tournamentFollows.userId })
+      .from(schema.tournamentFollows)
+      .where(eq(schema.tournamentFollows.tournamentId, tournamentId));
+    return rows.map(r => r.userId);
   }
 }
