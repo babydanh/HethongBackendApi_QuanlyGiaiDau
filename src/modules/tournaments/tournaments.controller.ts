@@ -450,6 +450,16 @@ export class TournamentsController {
     return this.tournamentsService.findParticipants(id, divisionId);
   }
 
+  @Get(':id/manage/participants')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách participant đầy đủ cho BTC' })
+  async findParticipantsForOrganizer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('divisionId') divisionId?: string,
+  ) {
+    return this.tournamentsService.findParticipantsForOrganizer(id, divisionId);
+  }
+
   @Get(':id/referees')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách trọng tài của giải đấu' })

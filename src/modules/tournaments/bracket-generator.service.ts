@@ -37,13 +37,11 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
               ),
         );
 
@@ -229,13 +227,11 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
               ),
         );
 
@@ -671,13 +667,11 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
               ),
         );
 
@@ -897,5 +891,4 @@ export class BracketGeneratorService {
     }
   }
 }
-
 

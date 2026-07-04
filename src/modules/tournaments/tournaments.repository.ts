@@ -27,9 +27,17 @@ export class TournamentsRepository {
     private readonly seriesService: SeriesService,
   ) {}
 
-  async findAll(query: QueryTournamentDto) {
+  async findAll(
+    query: QueryTournamentDto,
+    options?: {
+      defaultTournamentType?: 'CLUB' | 'PUBLIC' | null;
+      defaultVisibility?: 'PUBLIC' | 'PRIVATE' | null;
+    },
+  ) {
     const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy } = query;
     const offset = (page - 1) * limit;
+    const defaultTournamentType = options?.defaultTournamentType;
+    const defaultVisibility = options?.defaultVisibility;
 
     const conditions: SQL[] = [];
 
@@ -55,11 +63,15 @@ export class TournamentsRepository {
     }
     if (communityId) {
       conditions.push(eq(schema.tournaments.communityId, communityId));
-      const type = tournamentType || 'CLUB';
-      conditions.push(eq(schema.tournaments.tournamentType, type));
+      const type = tournamentType || defaultTournamentType || 'CLUB';
+      if (type) {
+        conditions.push(eq(schema.tournaments.tournamentType, type));
+      }
     } else {
-      const type = tournamentType || 'PUBLIC';
-      conditions.push(eq(schema.tournaments.tournamentType, type));
+      const type = tournamentType || defaultTournamentType;
+      if (type) {
+        conditions.push(eq(schema.tournaments.tournamentType, type));
+      }
     }
     if (matchType) {
       conditions.push(eq(schema.tournaments.matchType, matchType));
@@ -71,8 +83,10 @@ export class TournamentsRepository {
         conditions.push(eq(schema.tournaments.visibility, visibility));
       }
     } else {
-      const reqVisibility = visibility || 'PUBLIC';
-      conditions.push(eq(schema.tournaments.visibility, reqVisibility));
+      const reqVisibility = visibility || defaultVisibility;
+      if (reqVisibility) {
+        conditions.push(eq(schema.tournaments.visibility, reqVisibility));
+      }
     }
 
     if (region) {
@@ -118,7 +132,14 @@ export class TournamentsRepository {
         const [participantCount] = await this.db
           .select({ count: count() })
           .from(schema.tournamentParticipants)
-          .where(eq(schema.tournamentParticipants.tournamentId, row.tournament.id));
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, row.tournament.id),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            ),
+          );
 
         type DivisionInfo = {
           id: string;
@@ -148,7 +169,14 @@ export class TournamentsRepository {
             const [dCount] = await this.db
               .select({ count: count() })
               .from(schema.tournamentParticipants)
-              .where(eq(schema.tournamentParticipants.tournamentDivisionId, d.id));
+              .where(
+                and(
+                  eq(schema.tournamentParticipants.tournamentDivisionId, d.id),
+                  ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+                  ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                  ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                ),
+              );
             return {
               ...d,
               categoryId: row.tournament.categoryId,
@@ -250,7 +278,14 @@ export class TournamentsRepository {
     const [participantCount] = await this.db
       .select({ count: count() })
       .from(schema.tournamentParticipants)
-      .where(eq(schema.tournamentParticipants.tournamentId, id));
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, id),
+          ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+          ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+        ),
+      );
 
     // Count matches summary
     let matchesTotal = 0;
@@ -355,7 +390,14 @@ export class TournamentsRepository {
         const [participantCountByDivision] = await this.db
           .select({ count: count() })
           .from(schema.tournamentParticipants)
-          .where(eq(schema.tournamentParticipants.tournamentDivisionId, division.id));
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentDivisionId, division.id),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            ),
+          );
 
         const [matchCountByDivision] = await this.db
           .select({ count: count() })
@@ -1053,9 +1095,11 @@ export class TournamentsRepository {
       const teamInviteToken = isDoubles ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase() : null;
       const teamStatus = isWaitlisted
         ? 'WAITLISTED'
-        : regMode === 'APPROVAL'
-          ? 'PENDING'
-          : isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
+        : isDoubles && !partnerId
+          ? 'PENDING_PARTNER'
+          : regMode === 'APPROVAL'
+            ? 'PENDING_APPROVAL'
+            : 'COMPLETE';
       const isPaid = effectiveEntryFeeAmount === 0;
 
       const [participant] = await tx
@@ -1187,7 +1231,7 @@ export class TournamentsRepository {
         throw new BadRequestException('Mã mời đồng đội hoặc đội thi đấu không hợp lệ.');
       }
 
-      if (participant.teamStatus !== 'PENDING') {
+      if (participant.teamStatus !== 'PENDING_PARTNER') {
         throw new BadRequestException('Đội thi đấu này đã đủ thành viên hoặc không ở trạng thái chờ.');
       }
 
@@ -1290,7 +1334,9 @@ export class TournamentsRepository {
           role: 'MAIN',
         });
 
-      // 6. Cập nhật trạng thái đội hoàn tất (hoặc giữ PENDING nếu cần duyệt)
+      // 6. Cập nhật trạng thái đội hoàn tất:
+      // - OPEN => COMPLETE
+      // - APPROVAL => PENDING_APPROVAL
       const entryFeeAmount = division?.entryFee
         ? parseFloat(division.entryFee)
         : parseFloat(tournament.entryFee || '0');
@@ -1298,7 +1344,7 @@ export class TournamentsRepository {
 
       const tCfg = (tournament.tournamentConfig || {}) as Record<string, any>;
       const regMode = tCfg.registrationMode || 'OPEN';
-      const targetStatus = regMode === 'APPROVAL' ? 'PENDING' : 'COMPLETE';
+      const targetStatus = regMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
 
       const [updatedParticipant] = await tx
         .update(schema.tournamentParticipants)
@@ -1643,7 +1689,10 @@ export class TournamentsRepository {
         isPaid: participant.isPaid,
         teamInviteToken: participant.teamInviteToken,
         teamMembers: members,
-        teamInviteLink: participant.teamStatus === 'PENDING' && participant.registeredBy === userId
+        teamInviteLink:
+          participant.teamStatus === 'PENDING_PARTNER' &&
+          participant.registeredBy === userId &&
+          participant.teamInviteToken
           ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${participant.teamInviteToken}`
           : null
       }
@@ -1690,6 +1739,7 @@ export class TournamentsRepository {
       seed: number | null;
       isPaid: boolean;
       tournamentDivisionId: string | null;
+      teamStatus: string;
       registeredAt: Date;
       registeredBy: {
         id: string | null;
@@ -1780,6 +1830,20 @@ export class TournamentsRepository {
       ...p,
       members: rostersMap.get(p.id) || [],
     }));
+  }
+
+  async findPublicParticipants(
+    tournamentId: string,
+    categoryId: string,
+    divisionId?: string,
+  ) {
+    const participants = await this.findParticipants(tournamentId, categoryId, divisionId);
+    return participants.filter(
+      (participant) =>
+        participant.teamStatus !== 'REJECTED' &&
+        participant.teamStatus !== 'WITHDRAWN' &&
+        participant.teamStatus !== 'KICKED',
+    );
   }
 
   async findOpsAuditLogs(
@@ -2364,7 +2428,9 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentId, div.id),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED')
             )
           );
 
@@ -2629,6 +2695,15 @@ export class TournamentsRepository {
     return updated;
   }
 
+  async findParticipantById(participantId: string) {
+    const [participant] = await this.db
+      .select()
+      .from(schema.tournamentParticipants)
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .limit(1);
+    return participant;
+  }
+
   async getParticipantRosters(participantId: string) {
     return this.db
       .select({
@@ -2693,7 +2768,7 @@ export class TournamentsRepository {
       }
 
       const isDoubles = divisionMatchType === 'DOUBLES' || divisionMatchType === 'MIXED_DOUBLES';
-      const teamStatus = isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING') : 'COMPLETE';
+      const teamStatus = isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING_PARTNER') : 'COMPLETE';
 
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
@@ -2852,7 +2927,9 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentId, child.id),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED')
             )
           );
         return result?.count || 0;
@@ -2921,7 +2998,7 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
-              eq(schema.tournamentParticipants.teamStatus, 'PENDING')
+              eq(schema.tournamentParticipants.teamStatus, 'PENDING_APPROVAL')
             )
           );
 
@@ -2983,7 +3060,7 @@ export class TournamentsRepository {
         .innerJoin(schema.tournaments, eq(schema.tournamentParticipants.tournamentId, schema.tournaments.id))
         .where(
           and(
-            eq(schema.tournamentParticipants.teamStatus, 'PENDING'),
+            eq(schema.tournamentParticipants.teamStatus, 'PENDING_PARTNER'),
             lt(schema.tournamentParticipants.registeredAt, timeoutThreshold)
           )
         );
@@ -3033,7 +3110,7 @@ export class TournamentsRepository {
   }
 
   /**
-   * Promote first WAITLISTED participant to COMPLETE when a slot opens up.
+   * Promote first WAITLISTED participant to the next valid ready state when a slot opens up.
    * Skill: BE Skill 6 (Domain Logic) — waitlist tự động
    */
   private async promoteNextWaitlisted(
@@ -3059,9 +3136,44 @@ export class TournamentsRepository {
       .limit(1);
 
     if (nextWaitlisted) {
+      const [tournament] = await tx
+        .select({
+          matchType: schema.tournaments.matchType,
+          tournamentConfig: schema.tournaments.tournamentConfig,
+        })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1);
+
+      const [division] = nextWaitlisted.tournamentDivisionId
+        ? await tx
+            .select({ matchType: schema.tournamentDivisions.matchType })
+            .from(schema.tournamentDivisions)
+            .where(eq(schema.tournamentDivisions.id, nextWaitlisted.tournamentDivisionId))
+            .limit(1)
+        : [null];
+
+      const [rosterCount] = await tx
+        .select({ count: count() })
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, nextWaitlisted.id));
+
+      const matchType = division?.matchType ?? tournament?.matchType ?? null;
+      const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+      const regMode =
+        ((tournament?.tournamentConfig || {}) as Record<string, unknown>).registrationMode === 'APPROVAL'
+          ? 'APPROVAL'
+          : 'OPEN';
+      const promotedStatus =
+        isDoubles && Number(rosterCount.count) < 2
+          ? 'PENDING_PARTNER'
+          : regMode === 'APPROVAL'
+            ? 'PENDING_APPROVAL'
+            : 'COMPLETE';
+
       const [promoted] = await tx
         .update(schema.tournamentParticipants)
-        .set({ teamStatus: 'COMPLETE' })
+        .set({ teamStatus: promotedStatus })
         .where(eq(schema.tournamentParticipants.id, nextWaitlisted.id))
         .returning();
       return promoted;

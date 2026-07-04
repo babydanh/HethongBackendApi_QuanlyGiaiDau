@@ -109,15 +109,22 @@ export class TournamentsService {
   }
 
   async findAll(query: QueryTournamentDto) {
-    const result = await this.tournamentsRepository.findAll(query);
+    const result = await this.tournamentsRepository.findAll(query, {
+      defaultTournamentType: 'PUBLIC',
+      defaultVisibility: 'PUBLIC',
+    });
     result.data = result.data.map(t => this.mapTournamentFormat(t));
     return result;
   }
 
   async findPublic(query: QueryTournamentDto) {
-    // Lấy tất cả tournament không phân biệt CLUB/PUBLIC,
-    // chỉ loại DRAFT và CANCELLED
-    const result = await this.tournamentsRepository.findAll(query);
+    // Lấy tất cả tournament hiển thị công khai trên app/web:
+    // không ép mặc định theo tournamentType hay visibility,
+    // nhưng vẫn cho phép caller filter rõ PUBLIC/PRIVATE nếu cần.
+    const result = await this.tournamentsRepository.findAll(query, {
+      defaultTournamentType: null,
+      defaultVisibility: null,
+    });
     result.data = result.data
       .filter((t) => t.status !== 'DRAFT' && t.status !== 'CANCELLED')
       .map(t => this.mapTournamentFormat(t));
@@ -690,6 +697,48 @@ export class TournamentsService {
     }
   }
 
+  private assertRegistrationAccessible(
+    tournament: {
+      status?: string | null;
+      inviteCode?: string | null;
+      registrationEndDate?: Date | string | null;
+      isRegistrationLocked?: boolean | null;
+    },
+    options?: {
+      inviteCode?: string;
+      allowDraft?: boolean;
+    },
+  ) {
+    const status = tournament.status || '';
+    const allowDraft = options?.allowDraft === true;
+    const inviteCode = options?.inviteCode;
+    const matchesDraftInvite =
+      status === 'DRAFT' &&
+      !!inviteCode &&
+      !!tournament.inviteCode &&
+      tournament.inviteCode === inviteCode;
+
+    if (
+      status !== 'REGISTRATION_OPEN' &&
+      status !== 'UPCOMING' &&
+      !allowDraft &&
+      !matchesDraftInvite
+    ) {
+      throw new BadRequestException('Tournament registration is closed');
+    }
+
+    if (
+      tournament.registrationEndDate &&
+      new Date() > new Date(tournament.registrationEndDate)
+    ) {
+      throw new BadRequestException('Hạn đăng ký giải đấu đã kết thúc');
+    }
+
+    if (tournament.isRegistrationLocked) {
+      throw new BadRequestException('Đăng ký giải đấu đã tạm thời bị khóa bởi Ban tổ chức');
+    }
+  }
+
   async register(id: string, userId: string, registerTournamentDto: RegisterTournamentDto, inviteCode?: string) {
     await this.validateProfileComplete(userId);
 
@@ -698,17 +747,7 @@ export class TournamentsService {
       throw new NotFoundException('Tournament not found');
     }
 
-    if (tournament.status !== 'REGISTRATION_OPEN') {
-      throw new BadRequestException('Tournament registration is closed');
-    }
-
-    if (tournament.registrationEndDate && new Date() > new Date(tournament.registrationEndDate)) {
-      throw new BadRequestException('Hạn đăng ký giải đấu đã kết thúc');
-    }
-
-    if (tournament.isRegistrationLocked) {
-      throw new BadRequestException('Đăng ký giải đấu đã tạm thời bị khóa bởi Ban tổ chức');
-    }
+    this.assertRegistrationAccessible(tournament, { inviteCode });
 
     const userIds = [userId];
     if (registerTournamentDto.partnerEmailOrPhone) {
@@ -765,7 +804,7 @@ export class TournamentsService {
             }),
           ),
         );
-      } else if (result.participant.teamStatus === 'PENDING') {
+      } else if (result.participant.teamStatus === 'PENDING_APPROVAL') {
         notifications.push(
           this.notificationsService.sendNotification(
             buildParticipantRegistrationPendingNotification({
@@ -806,17 +845,7 @@ export class TournamentsService {
       throw new NotFoundException('Tournament not found');
     }
 
-    if (tournament.status !== 'REGISTRATION_OPEN') {
-      throw new BadRequestException('Tournament registration is closed');
-    }
-
-    if (tournament.registrationEndDate && new Date() > new Date(tournament.registrationEndDate)) {
-      throw new BadRequestException('Hạn đăng ký giải đấu đã kết thúc');
-    }
-
-    if (tournament.isRegistrationLocked) {
-      throw new BadRequestException('Đăng ký giải đấu đã tạm thời bị khóa bởi Ban tổ chức');
-    }
+    this.assertRegistrationAccessible(tournament, { allowDraft: true });
 
     const leaderRoster = await this.tournamentsRepository.findLeaderByParticipantId(participantId);
     const userIds = [userId];
@@ -877,7 +906,7 @@ export class TournamentsService {
       }
 
       for (const roster of participantRosters) {
-        if (result.participant.teamStatus === 'PENDING') {
+        if (result.participant.teamStatus === 'PENDING_APPROVAL') {
           notifications.push(
             this.notificationsService.sendNotification(
               buildParticipantRegistrationPendingNotification({
@@ -960,6 +989,14 @@ export class TournamentsService {
     if (!tournament) {
       throw new NotFoundException('Tournament not found');
     }
+    return this.tournamentsRepository.findPublicParticipants(id, tournament.categoryId, divisionId);
+  }
+
+  async findParticipantsForOrganizer(id: string, divisionId?: string) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
     return this.tournamentsRepository.findParticipants(id, tournament.categoryId, divisionId);
   }
 
@@ -995,17 +1032,7 @@ export class TournamentsService {
       throw new NotFoundException('Tournament not found for this invite code');
     }
 
-    if (tournament.status !== 'REGISTRATION_OPEN') {
-      throw new BadRequestException('Tournament registration is closed');
-    }
-
-    if (tournament.registrationEndDate && new Date() > new Date(tournament.registrationEndDate)) {
-      throw new BadRequestException('Hạn đăng ký giải đấu đã kết thúc');
-    }
-
-    if (tournament.isRegistrationLocked) {
-      throw new BadRequestException('Đăng ký giải đấu đã tạm thời bị khóa bởi Ban tổ chức');
-    }
+    this.assertRegistrationAccessible(tournament, { inviteCode });
 
     const userIds = [userId];
     if (registerTournamentDto.partnerEmailOrPhone) {
@@ -1017,7 +1044,12 @@ export class TournamentsService {
 
     await this.validateEloLimits(tournament, userIds);
 
-    return this.tournamentsRepository.registerParticipant(tournament.id, userId, registerTournamentDto);
+    return this.tournamentsRepository.registerParticipant(
+      tournament.id,
+      userId,
+      registerTournamentDto,
+      inviteCode,
+    );
   }
 
   async regenerateInviteCode(id: string, userId: string, systemRoles: string[] = []) {
@@ -1483,6 +1515,21 @@ export class TournamentsService {
       systemRoles.includes('ADMIN') || tournament.createdBy === userId;
     if (!isAuthorized) {
       throw new ForbiddenException('You do not have permission to update status');
+    }
+
+    if (status !== 'COMPLETE' && status !== 'REJECTED') {
+      throw new BadRequestException('Chỉ hỗ trợ duyệt hoặc từ chối hồ sơ đăng ký.');
+    }
+
+    const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant || participant.tournamentId !== tournamentId) {
+      throw new NotFoundException('Participant not found');
+    }
+
+    if (participant.teamStatus !== 'PENDING_APPROVAL') {
+      throw new BadRequestException(
+        'Chỉ hồ sơ đang chờ duyệt mới được phép duyệt hoặc từ chối.',
+      );
     }
 
     const updated = await this.tournamentsRepository.updateParticipantStatus(participantId, status);
