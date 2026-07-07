@@ -223,7 +223,7 @@ async function main() {
     .insert(schema.categories)
     .values({
       name: 'Bóng bàn',
-      slug: 'table-tennis',
+      slug: 'table_tennis',
       description: 'Môn thể thao dùng vợt gỗ và quả bóng bàn nhỏ',
       categoryConfig: {
         ruleKind: 'TABLE_TENNIS',

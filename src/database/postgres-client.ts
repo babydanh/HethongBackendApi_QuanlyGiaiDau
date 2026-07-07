@@ -21,13 +21,14 @@ export function createPostgresClient(
   config: ConnectionConfig,
   overrides: Partial<PostgresOptions> = {},
 ): AppSqlClient {
+  const isSSLEnabled = process.env.DB_SSL === 'true';
   return postgres({
     host: config.host,
     port: config.port,
     username: config.username,
     password: config.password,
     database: config.database,
-    ssl: config.ssl ?? DEFAULT_SSL,
+    ssl: isSSLEnabled ? (config.ssl ?? DEFAULT_SSL) : false,
     prepare: false,
     max: 10,
     idle_timeout: 20,
