@@ -55,7 +55,7 @@ import { AiModule } from './modules/ai/ai.module';
     }),
     RedisModule,
     MailModule,
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 10000 }]),
     ScheduleModule.forRoot(),
     DatabaseModule,
     AuthModule,
