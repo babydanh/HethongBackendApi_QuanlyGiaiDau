@@ -74,17 +74,47 @@ export class PaymentsService {
       calculated.participantId,
     );
     if (reusable?.providerOrderCode) {
-      const existing = await this.payos.paymentRequests.get(
-        Number(reusable.providerOrderCode),
+      try {
+        const existing = await this.payos.paymentRequests.get(
+          Number(reusable.providerOrderCode),
+        );
+        const existingLink = existing as unknown as {
+          status?: string | null;
+          checkoutUrl?: string | null;
+          qrCode?: string | null;
+          expiredAt?: number | string | null;
+        };
+        const remoteStatus = String(existingLink.status || '').toUpperCase();
+        const remoteExpiredAt = Number(existingLink.expiredAt ?? 0);
+        const remotelyExpired =
+          Number.isFinite(remoteExpiredAt) &&
+          remoteExpiredAt > 0 &&
+          remoteExpiredAt * 1000 <= Date.now();
+        const hasUsableLink = Boolean(existingLink.checkoutUrl || existingLink.qrCode);
+
+        if (
+          !remotelyExpired &&
+          hasUsableLink &&
+          (!remoteStatus || ['PENDING', 'PROCESSING'].includes(remoteStatus))
+        ) {
+          return {
+            paymentId: reusable.id,
+            paymentUrl: existingLink.checkoutUrl ?? null,
+            qrCode: existingLink.qrCode ?? undefined,
+            status: reusable.status,
+            amount: Number(reusable.amount),
+            purpose: reusable.purpose,
+            reused: true,
+          };
+        }
+      } catch {}
+
+      await this.paymentsRepository.transitionPayment(
+        reusable.id,
+        'PENDING',
+        'CANCELLED',
+        'PAYOS_REUSABLE_LINK_INVALID',
       );
-      return {
-        paymentId: reusable.id,
-        paymentUrl: existing.id,
-        status: reusable.status,
-        amount: Number(reusable.amount),
-        purpose: reusable.purpose,
-        reused: true,
-      };
     }
 
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
@@ -181,6 +211,22 @@ export class PaymentsService {
     if (verified.code !== '00') {
       return { accepted: true, completed: false };
     }
+    if (payment.status === 'COMPLETED') {
+      return { accepted: true, completed: true, idempotent: true };
+    }
+
+    const invalidReason = await this.ensurePaymentStillCompletable(payment);
+    if (invalidReason) {
+      await this.paymentsRepository.transitionPayment(
+        payment.id,
+        'PENDING',
+        'CANCELLED',
+        invalidReason,
+        this.sanitizeWebhookData(verified),
+        verified.reference,
+      );
+      return { accepted: true, completed: false, invalidated: true };
+    }
 
     const result = await this.paymentsRepository.transitionPayment(
       payment.id,
@@ -219,6 +265,23 @@ export class PaymentsService {
 
     const payment = await this.paymentsRepository.findPaymentById(paymentId);
     if (!payment) throw new NotFoundException('Không tìm thấy giao dịch.');
+    if (payment.status === 'COMPLETED') {
+      return { completed: true, idempotent: true };
+    }
+
+    const invalidReason = await this.ensurePaymentStillCompletable(payment);
+    if (invalidReason) {
+      await this.paymentsRepository.transitionPayment(
+        payment.id,
+        'PENDING',
+        'CANCELLED',
+        invalidReason,
+        { mock: true },
+        `MOCK_CANCEL_${Date.now()}`,
+      );
+      throw new BadRequestException('Giao dịch không còn hợp lệ để hoàn tất thanh toán.');
+    }
+
     const result = await this.paymentsRepository.transitionPayment(
       payment.id,
       'PENDING',
@@ -352,6 +415,9 @@ export class PaymentsService {
       if (participant.isPaid) throw new BadRequestException('Lượt đăng ký đã thanh toán.');
       if (data.divisionId && data.divisionId !== participant.tournamentDivisionId) {
         throw new BadRequestException('divisionId không khớp lượt đăng ký.');
+      }
+      if (!['COMPLETE', 'PENDING_APPROVAL'].includes(participant.teamStatus)) {
+        throw new BadRequestException('Lượt đăng ký chưa ở trạng thái hợp lệ để thanh toán.');
       }
 
       let amount = Number(tournament.entryFee);
@@ -516,6 +582,33 @@ export class PaymentsService {
       code: data.code,
       desc: data.desc,
     };
+  }
+
+  private async ensurePaymentStillCompletable(
+    payment: NonNullable<Awaited<ReturnType<PaymentsRepository['findPaymentById']>>>,
+  ): Promise<string | null> {
+    if (payment.purpose !== PaymentPurpose.REGISTRATION_FEE || !payment.participantId) {
+      return null;
+    }
+
+    const participant = await this.paymentsRepository.findParticipantById(payment.participantId);
+    if (!participant || participant.tournamentId !== payment.tournamentId) {
+      return 'PARTICIPANT_NOT_FOUND';
+    }
+    if (participant.registeredBy !== payment.userId) {
+      return 'PARTICIPANT_OWNER_MISMATCH';
+    }
+    if (participant.isPaid) {
+      return 'PARTICIPANT_ALREADY_PAID';
+    }
+    if (payment.divisionId && payment.divisionId !== participant.tournamentDivisionId) {
+      return 'PARTICIPANT_DIVISION_MISMATCH';
+    }
+    if (!['COMPLETE', 'PENDING_APPROVAL'].includes(participant.teamStatus)) {
+      return `PARTICIPANT_STATUS_${participant.teamStatus}`;
+    }
+
+    return null;
   }
 
   private secretsMatch(expected: string, supplied: string): boolean {

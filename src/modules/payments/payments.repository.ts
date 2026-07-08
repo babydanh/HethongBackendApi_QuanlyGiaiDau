@@ -80,6 +80,7 @@ export class PaymentsRepository {
         and(
           eq(schema.tournamentParticipants.tournamentId, tournamentId),
           eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+          eq(schema.tournamentParticipants.isPaid, true),
         ),
       );
     return result?.count ?? 0;

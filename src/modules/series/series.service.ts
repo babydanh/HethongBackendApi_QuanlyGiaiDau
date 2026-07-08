@@ -314,7 +314,7 @@ export class SeriesService {
     }
 
     const email = user.email || null;
-    const phone = user.phone || null;
+    const phone = null;
 
     const managers = await this.seriesRepository.findManagers(seriesId);
     if (managers.some((m) => m.manager.userId === user.id)) {

@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -542,15 +542,10 @@ export class SeriesRepository {
       .select({
         id: schema.users.id,
         email: schema.users.email,
-        phone: schema.profiles.phoneNumber,
       })
       .from(schema.users)
-      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(
-        or(
-          eq(schema.users.email, emailOrPhone),
-          eq(schema.profiles.phoneNumber, emailOrPhone)
-        )
+        eq(schema.users.email, emailOrPhone)
       )
       .limit(1);
     return result || null;
