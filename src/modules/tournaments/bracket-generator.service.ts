@@ -38,10 +38,12 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
               ),
         );
 
@@ -228,10 +230,12 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
               ),
         );
 
@@ -668,10 +672,12 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
               ),
         );
 
@@ -891,4 +897,3 @@ export class BracketGeneratorService {
     }
   }
 }
-

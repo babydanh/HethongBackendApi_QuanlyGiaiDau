@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional, IsIn, IsEmail, Matches } from 'class-validator';
+import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional, IsIn, Matches } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterTournamentDto {
@@ -31,27 +31,9 @@ export class RegisterTournamentDto {
   @IsOptional()
   tournamentDivisionId?: string;
 
-  @ApiPropertyOptional({ description: 'Loại đăng ký guest', enum: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'] })
+  @ApiPropertyOptional({ description: 'Loại đăng ký', enum: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'] })
   @IsOptional()
   @IsString()
   @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
   matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
-
-  @ApiPropertyOptional({ description: 'Tên người đăng ký guest' })
-  @IsOptional()
-  @IsString()
-  guestName?: string;
-
-  @ApiPropertyOptional({ description: 'Email guest' })
-  @IsOptional()
-  @IsEmail({}, { message: 'Email khách không hợp lệ' })
-  guestEmail?: string;
-
-  @ApiPropertyOptional({ description: 'Số điện thoại guest' })
-  @IsOptional()
-  @IsString()
-  @Matches(/^(?:\+84|0[3|5|7|8|9])\d{8}$/, {
-    message: 'Số điện thoại khách không hợp lệ. Phải là số điện thoại Việt Nam (ví dụ: 0912345678 hoặc +84912345678)',
-  })
-  guestPhone?: string;
 }

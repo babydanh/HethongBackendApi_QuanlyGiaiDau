@@ -27,6 +27,73 @@ export class TournamentsRepository {
     private readonly seriesService: SeriesService,
   ) {}
 
+  private isDoublesMatchType(matchType: string | null | undefined) {
+    return matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+  }
+
+  private async resolveDivisionEntryFee(
+    tx: Transaction | AppDbOrTx,
+    tournament: { entryFee: string | null },
+    divisionId?: string | null,
+  ) {
+    if (divisionId) {
+      const [division] = await tx
+        .select({ entryFee: schema.tournamentDivisions.entryFee })
+        .from(schema.tournamentDivisions)
+        .where(eq(schema.tournamentDivisions.id, divisionId))
+        .limit(1);
+
+      if (division?.entryFee !== undefined && division.entryFee !== null) {
+        return parseFloat(division.entryFee);
+      }
+    }
+
+    return parseFloat(tournament.entryFee || '0');
+  }
+
+  private async invalidatePendingParticipantPayments(
+    tx: Transaction | AppDbOrTx,
+    tournamentId: string,
+    participantId: string,
+    reason: string,
+  ) {
+    const pendingPayments = await tx
+      .select({
+        id: schema.payments.id,
+        status: schema.payments.status,
+      })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.participantId, participantId),
+          eq(schema.payments.status, PaymentStatus.PENDING),
+        ),
+      );
+
+    if (pendingPayments.length === 0) {
+      return;
+    }
+
+    const paymentIds = pendingPayments.map((payment) => payment.id);
+    await tx
+      .update(schema.payments)
+      .set({
+        status: 'CANCELLED',
+        updatedAt: new Date(),
+      })
+      .where(inArray(schema.payments.id, paymentIds));
+
+    await tx.insert(schema.paymentStatusLogs).values(
+      pendingPayments.map((payment) => ({
+        paymentId: payment.id,
+        previousStatus: payment.status,
+        newStatus: 'CANCELLED',
+        reason,
+      })),
+    );
+  }
+
   async findAll(
     query: QueryTournamentDto,
     options?: {
@@ -46,10 +113,7 @@ export class TournamentsRepository {
 
     // Exclude DRAFT, PENDING_APPROVAL, SUSPENDED, and CANCELLED tournaments from public listing (unless createdBy is specified)
     if (!createdBy) {
-      conditions.push(ne(schema.tournaments.status, 'DRAFT'));
-      conditions.push(ne(schema.tournaments.status, 'PENDING_APPROVAL'));
-      conditions.push(ne(schema.tournaments.status, 'SUSPENDED'));
-      conditions.push(ne(schema.tournaments.status, 'CANCELLED'));
+      conditions.push(sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`);
     }
 
     if (search) {
@@ -931,8 +995,8 @@ export class TournamentsRepository {
             .where(
               and(
                 eq(schema.tournamentParticipants.tournamentDivisionId, selectedDivision.id),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
               ),
             );
 
@@ -963,8 +1027,8 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED')
+              eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+              eq(schema.tournamentParticipants.isPaid, true)
             )
           );
 
@@ -1000,7 +1064,9 @@ export class TournamentsRepository {
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentRosters.userId, userId),
-            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
           )
         );
       if (existingRosters.length > 0) {
@@ -1008,10 +1074,10 @@ export class TournamentsRepository {
       }
 
       // 9. Thêm participant
-      const isDoubles = tournament.matchType === 'DOUBLES' || tournament.matchType === 'MIXED_DOUBLES';
+      const tournamentIsDoubles = this.isDoublesMatchType(tournament.matchType);
       
       let partnerId: string | null = null;
-      if (isDoubles && data.partnerEmailOrPhone) {
+      if (tournamentIsDoubles && data.partnerEmailOrPhone) {
         // Resolve partner account
         const [partnerUser] = await tx
           .select({ id: schema.users.id })
@@ -1042,7 +1108,9 @@ export class TournamentsRepository {
             and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
               eq(schema.tournamentRosters.userId, partnerUser.id),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED')
             )
           );
         if (partnerExisting.length > 0) {
@@ -1088,9 +1156,16 @@ export class TournamentsRepository {
       const resolvedDivision = await resolveMatchingDivision(partnerId);
       const selectedDivision = resolvedDivision?.division ?? null;
       const isWaitlisted = resolvedDivision?.isWaitlisted === true;
-      const effectiveEntryFeeAmount = isWaitlisted
-        ? 0
-        : parseFloat(selectedDivision?.entryFee ?? tournament.entryFee ?? '0');
+      const effectiveMatchType = selectedDivision?.matchType ?? tournament.matchType;
+      const isDoubles = this.isDoublesMatchType(effectiveMatchType);
+      const payableEntryFeeAmount = parseFloat(selectedDivision?.entryFee ?? tournament.entryFee ?? '0');
+
+      if (
+        selectedDivision?.registrationEndDate &&
+        now > new Date(selectedDivision.registrationEndDate)
+      ) {
+        throw new BadRequestException('Hạn đăng ký của nội dung thi đấu này đã kết thúc.');
+      }
 
       const teamInviteToken = isDoubles ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase() : null;
       const teamStatus = isWaitlisted
@@ -1100,7 +1175,7 @@ export class TournamentsRepository {
           : regMode === 'APPROVAL'
             ? 'PENDING_APPROVAL'
             : 'COMPLETE';
-      const isPaid = effectiveEntryFeeAmount === 0;
+      const isPaid = payableEntryFeeAmount === 0;
 
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
@@ -1131,24 +1206,8 @@ export class TournamentsRepository {
         });
       }
 
-      // 11. Xử lý Payment (Singles, hoặc Doubles khi đội hoàn thành và có phí)
-      let paymentUrl: string | null = null;
-      if (effectiveEntryFeeAmount > 0 && (teamStatus === 'COMPLETE')) {
-        const [payment] = await tx
-          .insert(schema.payments)
-          .values({
-            userId,
-            tournamentId,
-            divisionId: selectedDivision?.id ?? null,
-            participantId: participant.id,
-            amount: effectiveEntryFeeAmount.toString(),
-            status: 'PENDING',
-            paymentGateway: 'VNPAY',
-          })
-          .returning();
-        
-        paymentUrl = `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_TxnRef=${payment.id}&vnp_Amount=${effectiveEntryFeeAmount * 100}`;
-      }
+      // Payment intent is created later by the checkout flow.
+      const paymentUrl: string | null = null;
 
       // 12. Audit log
       await this.auditService.logCreate(tx, userId, 'tournament_participants', participant.id, participant);
@@ -1244,7 +1303,9 @@ export class TournamentsRepository {
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentRosters.userId, userId),
-            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
           )
         );
       if (existingRosters.length > 0) {
@@ -1355,24 +1416,8 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentParticipants.id, participantId))
         .returning();
 
-      // 7. Tạo Payment cho Doubles khi đội hoàn tất (nếu có phí)
-      let paymentUrl: string | null = null;
-      if (entryFeeAmount > 0) {
-        const [payment] = await tx
-          .insert(schema.payments)
-          .values({
-            userId: participant.registeredBy, // Người đăng ký (Leader) thanh toán
-            tournamentId,
-            divisionId: participant.tournamentDivisionId,
-            participantId: participant.id,
-            amount: entryFeeAmount.toString(),
-            status: 'PENDING',
-            paymentGateway: 'VNPAY',
-          })
-          .returning();
-        
-        paymentUrl = `https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_TxnRef=${payment.id}&vnp_Amount=${entryFeeAmount * 100}`;
-      }
+      // Payment intent is created later by the checkout flow.
+      const paymentUrl: string | null = null;
 
       await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, participant, updatedParticipant);
 
@@ -1387,6 +1432,7 @@ export class TournamentsRepository {
     tournamentId: string,
     userId: string,
     bankData?: { bankName?: string; bankAccountNumber?: string; bankAccountName?: string },
+    divisionId?: string,
   ) {
     return await this.db.transaction(async (tx) => {
       // 1. Tìm participant mà user đang tham gia
@@ -1398,7 +1444,10 @@ export class TournamentsRepository {
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentRosters.userId, userId),
-            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+            ...(divisionId ? [eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)] : []),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
           )
         )
         .limit(1);
@@ -1440,9 +1489,13 @@ export class TournamentsRepository {
       const finalBankName = bankData?.bankName || profile?.bankName;
       const finalBankAccountNumber = bankData?.bankAccountNumber || profile?.bankAccountNumber;
       const finalBankAccountName = bankData?.bankAccountName || profile?.bankAccountName;
+      const entryFeeAmount = await this.resolveDivisionEntryFee(
+        tx,
+        tournament,
+        oldParticipant.tournamentDivisionId,
+      );
 
       if (oldParticipant.isPaid) {
-        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
         if (entryFeeAmount > 0) {
           if (!finalBankName?.trim() || !finalBankAccountNumber?.trim() || !finalBankAccountName?.trim()) {
             throw new BadRequestException(
@@ -1459,11 +1512,16 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentParticipants.id, participantId))
         .returning();
 
+      await this.invalidatePendingParticipantPayments(
+        tx,
+        tournamentId,
+        participantId,
+        'PARTICIPANT_WITHDRAWN',
+      );
 
       // 4. Nếu đã thanh toán, thực hiện hoàn tiền (chuyển sang trạng thái PENDING_REFUND và lưu thông tin bank)
       let refundAmount: string | null = null;
       if (oldParticipant.isPaid) {
-        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
         if (entryFeeAmount > 0) {
           // Cập nhật trạng thái hoàn tiền trên bản ghi payment gốc
           await tx
@@ -1525,10 +1583,21 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentParticipants.id, participantId))
         .returning();
 
+      await this.invalidatePendingParticipantPayments(
+        tx,
+        tournamentId,
+        participantId,
+        'PARTICIPANT_KICKED',
+      );
+
       // 4. Hoàn tiền nếu đã nộp lệ phí
       let refundAmount: string | null = null;
       if (participant.isPaid) {
-        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
+        const entryFeeAmount = await this.resolveDivisionEntryFee(
+          tx,
+          tournament,
+          participant.tournamentDivisionId,
+        );
         if (entryFeeAmount > 0) {
           await tx
             .update(schema.payments)
@@ -1642,19 +1711,22 @@ export class TournamentsRepository {
     });
   }
 
-  async myRegistration(tournamentId: string, userId: string) {
-    const userRoster = await this.db
-      .select({ participantId: schema.tournamentRosters.participantId })
-      .from(schema.tournamentRosters)
-      .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
-      .where(
-        and(
-          eq(schema.tournamentParticipants.tournamentId, tournamentId),
-          eq(schema.tournamentRosters.userId, userId),
-          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
+  async myRegistration(tournamentId: string, userId: string, divisionId?: string) {
+      const userRoster = await this.db
+        .select({ participantId: schema.tournamentRosters.participantId })
+        .from(schema.tournamentRosters)
+        .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            eq(schema.tournamentRosters.userId, userId),
+            ...(divisionId ? [eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)] : []),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
     if (userRoster.length === 0) {
       return { registered: false };
@@ -1687,7 +1759,9 @@ export class TournamentsRepository {
         teamName: participant.teamName,
         teamStatus: participant.teamStatus,
         isPaid: participant.isPaid,
+        registeredAt: participant.registeredAt,
         teamInviteToken: participant.teamInviteToken,
+        members,
         teamMembers: members,
         teamInviteLink:
           participant.teamStatus === 'PENDING_PARTNER' &&
@@ -1732,6 +1806,7 @@ export class TournamentsRepository {
     tournamentId: string,
     categoryId: string,
     divisionId?: string,
+    onlyEligible = false,
   ): Promise<
     {
       id: string;
@@ -1774,10 +1849,22 @@ export class TournamentsRepository {
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
               eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ...(onlyEligible
+                ? [
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ]
+                : []),
             )
           : and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ...(onlyEligible
+                ? [
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ]
+                : []),
             )
       );
 
@@ -1837,13 +1924,7 @@ export class TournamentsRepository {
     categoryId: string,
     divisionId?: string,
   ) {
-    const participants = await this.findParticipants(tournamentId, categoryId, divisionId);
-    return participants.filter(
-      (participant) =>
-        participant.teamStatus !== 'REJECTED' &&
-        participant.teamStatus !== 'WITHDRAWN' &&
-        participant.teamStatus !== 'KICKED',
-    );
+    return this.findParticipants(tournamentId, categoryId, divisionId, true);
   }
 
   async findOpsAuditLogs(
@@ -2271,6 +2352,25 @@ export class TournamentsRepository {
     return result[0];
   }
 
+  async findByIdVenue(venueId: string) {
+    const [venue] = await this.db
+      .select()
+      .from(schema.tournamentVenues)
+      .where(eq(schema.tournamentVenues.id, venueId))
+      .limit(1);
+    return venue || null;
+  }
+
+  async findCategoryBySlug(slug: string) {
+    const result = await this.db
+      .select()
+      .from(schema.categories)
+      .where(eq(schema.categories.slug, slug))
+      .limit(1);
+    if (result.length === 0) return null;
+    return result[0];
+  }
+
   async regenerateInviteCode(id: string, userId: string) {
     return await this.db.transaction(async (tx) => {
       const newCode = await this.generateUniqueInviteCode(tx);
@@ -2687,12 +2787,33 @@ export class TournamentsRepository {
   }
 
   async updateParticipantStatus(participantId: string, status: string) {
-    const [updated] = await this.db
-      .update(schema.tournamentParticipants)
-      .set({ teamStatus: status })
-      .where(eq(schema.tournamentParticipants.id, participantId))
-      .returning();
-    return updated;
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .limit(1);
+      if (!existing) {
+        return null;
+      }
+
+      const [updated] = await tx
+        .update(schema.tournamentParticipants)
+        .set({ teamStatus: status })
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+
+      if (status === 'REJECTED') {
+        await this.invalidatePendingParticipantPayments(
+          tx,
+          existing.tournamentId,
+          participantId,
+          'PARTICIPANT_REJECTED',
+        );
+      }
+
+      return updated ?? null;
+    });
   }
 
   async findParticipantById(participantId: string) {
@@ -2722,7 +2843,7 @@ export class TournamentsRepository {
       .where(
         or(
           eq(schema.users.email, emailOrPhone),
-          eq(schema.profiles.phoneNumber, emailOrPhone)
+          eq(schema.profiles.phoneNumber, emailOrPhone),
         )
       )
       .limit(1);
@@ -2853,8 +2974,19 @@ export class TournamentsRepository {
 
       // 3. Refund each paid participant
       for (const participant of activeParticipants) {
+        await this.invalidatePendingParticipantPayments(
+          tx,
+          tournamentId,
+          participant.id,
+          'TOURNAMENT_CANCELLED',
+        );
+
         if (participant.isPaid) {
-          const entryFeeAmount = parseFloat(updatedTournament.entryFee || '0');
+          const entryFeeAmount = await this.resolveDivisionEntryFee(
+            tx,
+            updatedTournament,
+            participant.tournamentDivisionId,
+          );
           if (entryFeeAmount > 0) {
             await tx
               .update(schema.payments)
@@ -2987,7 +3119,8 @@ export class TournamentsRepository {
         .where(
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
-            eq(schema.tournamentParticipants.teamStatus, 'COMPLETE')
+            eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+            eq(schema.tournamentParticipants.isPaid, true),
           )
         );
 
@@ -3005,7 +3138,6 @@ export class TournamentsRepository {
         if (pendingParts.length === 0) return [];
 
         const canceledLeaders: Array<{ leaderId: string; divisionId: string | null }> = [];
-        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
 
         for (const p of pendingParts) {
           await tx
@@ -3013,6 +3145,18 @@ export class TournamentsRepository {
             .set({ teamStatus: 'KICKED', teamInviteToken: null })
             .where(eq(schema.tournamentParticipants.id, p.id));
 
+          await this.invalidatePendingParticipantPayments(
+            tx,
+            tournamentId,
+            p.id,
+            'REGISTRATION_CANCELLED_TOURNAMENT_FULL',
+          );
+
+          const entryFeeAmount = await this.resolveDivisionEntryFee(
+            tx,
+            tournament,
+            p.tournamentDivisionId,
+          );
           if (entryFeeAmount > 0 && p.isPaid) {
             await tx
               .update(schema.payments)
@@ -3080,7 +3224,18 @@ export class TournamentsRepository {
           .set({ teamStatus: 'KICKED', teamInviteToken: null })
           .where(eq(schema.tournamentParticipants.id, participant.id));
 
-        const entryFeeAmount = parseFloat(tournament.entryFee || '0');
+        await this.invalidatePendingParticipantPayments(
+          tx,
+          tournament.id,
+          participant.id,
+          'PARTNER_JOIN_TIMEOUT',
+        );
+
+        const entryFeeAmount = await this.resolveDivisionEntryFee(
+          tx,
+          tournament,
+          participant.tournamentDivisionId,
+        );
         if (entryFeeAmount > 0 && participant.isPaid) {
           await tx
             .update(schema.payments)
@@ -3139,6 +3294,7 @@ export class TournamentsRepository {
       const [tournament] = await tx
         .select({
           matchType: schema.tournaments.matchType,
+          entryFee: schema.tournaments.entryFee,
           tournamentConfig: schema.tournaments.tournamentConfig,
         })
         .from(schema.tournaments)
@@ -3159,7 +3315,12 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentRosters.participantId, nextWaitlisted.id));
 
       const matchType = division?.matchType ?? tournament?.matchType ?? null;
-      const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+      const isDoubles = this.isDoublesMatchType(matchType);
+      const entryFeeAmount = await this.resolveDivisionEntryFee(
+        tx,
+        { entryFee: tournament?.entryFee ?? null },
+        nextWaitlisted.tournamentDivisionId,
+      );
       const regMode =
         ((tournament?.tournamentConfig || {}) as Record<string, unknown>).registrationMode === 'APPROVAL'
           ? 'APPROVAL'
@@ -3173,7 +3334,10 @@ export class TournamentsRepository {
 
       const [promoted] = await tx
         .update(schema.tournamentParticipants)
-        .set({ teamStatus: promotedStatus })
+        .set({
+          teamStatus: promotedStatus,
+          isPaid: nextWaitlisted.isPaid || entryFeeAmount === 0,
+        })
         .where(eq(schema.tournamentParticipants.id, nextWaitlisted.id))
         .returning();
       return promoted;

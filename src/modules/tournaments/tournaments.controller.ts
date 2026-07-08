@@ -10,10 +10,12 @@ import {
   ParseUUIDPipe,
   ParseIntPipe,
   Req,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
+import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
@@ -216,10 +218,12 @@ export class TournamentsController {
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('invite') inviteCode?: string,
+    @Query('pid') participantId?: string,
+    @Query('token') teamInviteToken?: string,
     @Req() req?: Request,
   ) {
     const authInfo = this.getAuthInfoFromRequest(req);
-    return this.tournamentsService.findOne(id, authInfo.userId, inviteCode, authInfo.roles);
+    return this.tournamentsService.findOne(id, authInfo.userId, inviteCode, authInfo.roles, participantId, teamInviteToken);
   }
 
   @Public()
@@ -234,13 +238,17 @@ export class TournamentsController {
 
   private getAuthInfoFromRequest(request: Request | undefined): { userId: string | null; roles: string[] } {
     if (!request || !request.headers) return { userId: null, roles: [] };
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = this.extractAccessToken(request);
+    if (!token) {
       return { userId: null, roles: [] };
     }
-    const token = authHeader.split(' ')[1];
     try {
-      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('ascii'));
+      const payloadPart = token.split('.')[1];
+      if (!payloadPart) {
+        return { userId: null, roles: [] };
+      }
+      const normalizedPayload = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(Buffer.from(normalizedPayload, 'base64').toString('utf8'));
       let roles: string[] = [];
       if (Array.isArray(payload.roles)) {
         roles = payload.roles;
@@ -253,14 +261,73 @@ export class TournamentsController {
     }
   }
 
+  private extractAccessToken(request: Request): string | null {
+    const authHeader = request.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return authHeader.split(' ')[1];
+    }
+
+    const cookieToken = request.cookies?.accessToken;
+    if (typeof cookieToken === 'string' && cookieToken.trim().length > 0) {
+      return cookieToken.trim();
+    }
+
+    const rawCookieHeader = request.headers.cookie;
+    if (typeof rawCookieHeader !== 'string' || rawCookieHeader.trim().length === 0) {
+      return null;
+    }
+
+    for (const cookieChunk of rawCookieHeader.split(';')) {
+      const [rawName, ...valueParts] = cookieChunk.trim().split('=');
+      if (rawName !== 'accessToken' || valueParts.length === 0) {
+        continue;
+      }
+      const rawValue = valueParts.join('=').trim();
+      if (!rawValue) {
+        return null;
+      }
+      try {
+        return decodeURIComponent(rawValue);
+      } catch {
+        return rawValue;
+      }
+    }
+
+    return null;
+  }
+
   @Post()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Tạo giải đấu mới' })
+  @ApiOperation({ summary: 'Tạo giải đấu mới (hỗ trợ cả Web và App)' })
   async create(
     @Body() createTournamentDto: CreateTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.create(user.sub, createTournamentDto, this.getSystemRoles(user));
+    if (!user?.sub) {
+      throw new UnauthorizedException('Bạn cần đăng nhập để tạo giải đấu.');
+    }
+    return this.tournamentsService.create(
+      user.sub,
+      createTournamentDto,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post('lite')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo giải đấu nhanh trong CLB (Lite) — chỉ cần sport slug, không cần categoryId UUID' })
+  async createLite(
+    @Body() dto: CreateLiteTournamentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    if (!user?.sub) {
+      throw new UnauthorizedException('Bạn cần đăng nhập để tạo giải đấu.');
+    }
+    return this.tournamentsService.createLite(
+      user.sub,
+      dto,
+      this.getSystemRoles(user),
+    );
   }
 
   @Patch(':id')
@@ -386,9 +453,14 @@ export class TournamentsController {
   async withdraw(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() bankData?: { bankName?: string; bankAccountNumber?: string; bankAccountName?: string },
+    @Body() bankData?: {
+      bankName?: string;
+      bankAccountNumber?: string;
+      bankAccountName?: string;
+      tournamentDivisionId?: string;
+    },
   ) {
-    return this.tournamentsService.withdraw(id, user.sub, bankData);
+    return this.tournamentsService.withdraw(id, user.sub, bankData, bankData?.tournamentDivisionId);
   }
 
   @Get(':id/my-registration')
@@ -397,8 +469,9 @@ export class TournamentsController {
   async myRegistration(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
+    @Query('divisionId') divisionId?: string,
   ) {
-    return this.tournamentsService.myRegistration(id, user.sub);
+    return this.tournamentsService.myRegistration(id, user.sub, divisionId);
   }
 
   @Post(':id/regenerate-invite')
