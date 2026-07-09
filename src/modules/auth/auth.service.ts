@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  ConflictException,
   Inject,
   Logger,
 } from '@nestjs/common';
@@ -47,7 +48,7 @@ export class AuthService {
     const email = registerDto.email.toLowerCase().trim();
     const existingUser = await this.authRepository.findUserByEmail(email);
     if (existingUser) {
-      throw new BadRequestException(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);
+      throw new ConflictException(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
 
     const hashedPassword = await bcrypt.hash(registerDto.password, 12);
@@ -361,13 +362,12 @@ export class AuthService {
     return { message: 'Mã xác minh email đã được gửi qua hàng đợi' };
   }
 
-  async confirmEmailVerification(userId: string, token: string) {
+  async confirmEmailVerification(token: string) {
     const [record] = await this.db
       .select()
       .from(schema.otpCodes)
       .where(
         and(
-          eq(schema.otpCodes.userId, userId),
           eq(schema.otpCodes.type, 'EMAIL_VERIFY'),
           eq(schema.otpCodes.code, token),
           eq(schema.otpCodes.isUsed, false),
@@ -385,7 +385,7 @@ export class AuthService {
       .set({ isUsed: true })
       .where(eq(schema.otpCodes.id, record.id));
 
-    await this.usersRepository.verifyEmail(userId);
+    await this.usersRepository.verifyEmail(record.userId);
     return { success: true, message: 'Email đã được xác thực thành công' };
   }
 

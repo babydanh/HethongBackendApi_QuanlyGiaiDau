@@ -8,6 +8,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -233,7 +234,6 @@ export class AuthController {
     return await this.authService.googleMobileLogin(body.idToken, userAgent, ipAddress);
   }
 
-  @Public()
   @UseGuards(new RateLimitGuard(5, 60000))
   @Post('verify-email/request')
   @HttpCode(HttpStatus.OK)
@@ -247,26 +247,26 @@ export class AuthController {
   @Post('verify-email/confirm')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Xác thực kích hoạt email bằng token' })
-  async confirmEmailVerification(@CurrentUser() user: JwtPayload, @Body() body: { token: string }) {
-    return await this.authService.confirmEmailVerification(user.sub, body.token);
+  async confirmEmailVerification(@Body() body: { token: string }) {
+    return await this.authService.confirmEmailVerification(body.token);
   }
 
   @Public()
   @UseGuards(new RateLimitGuard(5, 60000))
   @Post('verify-phone/request')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Yêu cầu gửi OTP SMS kích thực số điện thoại (Mock)' })
-  async requestPhoneVerification(@CurrentUser() user: JwtPayload, @Body() body: { phoneNumber?: string }) {
-    return await this.authService.requestPhoneVerification(user.sub, body.phoneNumber);
+  @HttpCode(HttpStatus.BAD_REQUEST)
+  @ApiOperation({ summary: 'Yêu cầu gửi OTP SMS kích thực số điện thoại (Tạm khóa)' })
+  requestPhoneVerification() {
+    throw new BadRequestException('Tính năng xác thực qua số điện thoại tạm thời bị khóa. Vui lòng sử dụng xác thực qua Email.');
   }
 
   @Public()
   @UseGuards(new RateLimitGuard(10, 60000))
   @Post('verify-phone/confirm')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Xác thực OTP số điện thoại' })
-  async confirmPhoneVerification(@CurrentUser() user: JwtPayload, @Body() body: { code: string }) {
-    return await this.authService.confirmPhoneVerification(user.sub, body.code);
+  @HttpCode(HttpStatus.BAD_REQUEST)
+  @ApiOperation({ summary: 'Xác thực OTP số điện thoại (Tạm khóa)' })
+  confirmPhoneVerification() {
+    throw new BadRequestException('Tính năng xác thực qua số điện thoại tạm thời bị khóa. Vui lòng sử dụng xác thực qua Email.');
   }
 
   @Post('logout-all')
