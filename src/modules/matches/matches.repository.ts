@@ -8,6 +8,10 @@ import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { AuditService } from '../audit/audit.service';
+import {
+  resolveLoserTargetSlot,
+  resolveWinnerTargetSlot,
+} from '../../common/helpers/bracket-advancement.helper';
 
 @Injectable()
 export class MatchesRepository {
@@ -82,6 +86,7 @@ export class MatchesRepository {
         .where(and(
           ...(tId ? [eq(schema.tournamentStages.tournamentId, tId)] : []),
           ...(divisionId ? [eq(schema.tournamentStages.tournamentDivisionId, divisionId)] : []),
+          isNull(schema.tournamentStages.deletedAt),
         ));
       const stageIds = stages.map(s => s.id);
       
@@ -470,158 +475,15 @@ export class MatchesRepository {
     }
   ) {
     return await this.db.transaction(async (tx) => {
-      const [existing] = await tx
-        .select()
-        .from(schema.matches)
-        .where(eq(schema.matches.id, id))
-        .limit(1);
-
-      // 1. Update the match status to COMPLETED and winnerId
-      const [updated] = await tx
-        .update(schema.matches)
-        .set({
-          status: 'COMPLETED',
-          winnerId,
-          p1SetsWon: matchDetails.p1SetsWon,
-          p2SetsWon: matchDetails.p2SetsWon,
-          scoreDetails: matchDetails.scoreDetails,
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.matches.id, id))
-        .returning();
-
-      if (existing) {
-        const oldValues = {
-          p1SetsWon: existing.p1SetsWon,
-          p2SetsWon: existing.p2SetsWon,
-          scoreDetails: existing.scoreDetails,
-          winnerId: existing.winnerId,
-          status: existing.status,
-        };
-        const newValues = {
-          p1SetsWon: updated.p1SetsWon,
-          p2SetsWon: updated.p2SetsWon,
-          scoreDetails: updated.scoreDetails,
-          winnerId: updated.winnerId,
-          status: updated.status,
-        };
-        await this.auditService.logUpdate(tx, matchDetails.auditUserId ?? null, 'matches', id, oldValues, newValues);
-      }
-
-      // 2. Auto-advance Winner
-      if (matchDetails.nextMatchId) {
-        // Query next match to determine its branch
-        const [nextMatch] = await tx
-          .select()
-          .from(schema.matches)
-          .where(eq(schema.matches.id, matchDetails.nextMatchId))
-          .limit(1);
-
-        let updateField: { participant1Id?: string | null; participant2Id?: string | null };
-
-        if (nextMatch && nextMatch.bracketBranch === 'GRAND_FINALS') {
-          if (existing.bracketBranch === 'MAIN') {
-            updateField = { participant1Id: winnerId };
-          } else {
-            updateField = { participant2Id: winnerId };
-          }
-        } else {
-          if (existing.bracketBranch === 'LOSERS') {
-            if (existing.roundNumber % 2 !== 0) {
-              // Odd round in Losers: 1-to-1 mapping, always goes to participant1Id
-              updateField = { participant1Id: winnerId };
-            } else {
-              // Even round in Losers: collapses 2-to-1
-              const isOdd = (existing.matchOrder % 2 !== 0);
-              updateField = isOdd ? { participant1Id: winnerId } : { participant2Id: winnerId };
-            }
-          } else {
-            // MAIN branch collapses 2-to-1
-            const isOdd = (existing.matchOrder % 2 !== 0);
-            updateField = isOdd ? { participant1Id: winnerId } : { participant2Id: winnerId };
-          }
-        }
-
-        await tx
-          .update(schema.matches)
-          .set(updateField)
-          .where(eq(schema.matches.id, matchDetails.nextMatchId));
-      }
-
-      // 3. Auto-advance Loser (Double Elimination)
-      if (matchDetails.loserNextMatchId) {
-        const loserId = (winnerId === existing.participant1Id)
-          ? existing.participant2Id
-          : existing.participant1Id;
-
-        let updateField: { participant1Id?: string | null; participant2Id?: string | null };
-        if (existing.roundNumber === 1) {
-          const isOdd = (existing.matchOrder % 2 !== 0);
-          updateField = isOdd
-            ? { participant1Id: loserId }
-            : { participant2Id: loserId };
-        } else {
-          // Winners round >= 2: always goes to participant2Id in Losers Bracket
-          updateField = { participant2Id: loserId };
-        }
-
-        await tx
-          .update(schema.matches)
-          .set(updateField)
-          .where(eq(schema.matches.id, matchDetails.loserNextMatchId));
-      }
-
-      // 4. Double Elimination — Grand Finals Reset
-      if (existing.bracketBranch === 'GRAND_FINALS' && existing.roundNumber === 1) {
-        // If Losers Bracket champion (participant2) wins GF1
-        if (winnerId === existing.participant2Id) {
-          const [gf2Exists] = await tx
-            .select()
-            .from(schema.matches)
-            .where(
-              and(
-                eq(schema.matches.groupId, existing.groupId!),
-                eq(schema.matches.roundNumber, 2)
-              )
-            )
-            .limit(1);
-
-          if (!gf2Exists) {
-            const gf2Id = randomUUID();
-            const [gf2] = await tx
-              .insert(schema.matches)
-              .values({
-                id: gf2Id,
-                groupId: existing.groupId as any,
-                roundNumber: 2, // GF Round 2 (Reset Match)
-                matchOrder: 1,
-                bracketBranch: 'GRAND_FINALS',
-                status: 'SCHEDULED',
-                participant1Id: existing.participant1Id, // Winners Bracket champ
-                participant2Id: existing.participant2Id, // Losers Bracket champ
-                p1SetsWon: 0,
-                p2SetsWon: 0,
-                totalSetsPlayed: 0,
-                tournamentId: existing.tournamentId,
-                stageId: existing.stageId,
-                updatedAt: new Date(),
-              })
-              .returning();
-
-            // Link GF1 to GF2
-            await tx
-              .update(schema.matches)
-              .set({ nextMatchId: gf2.id })
-              .where(eq(schema.matches.id, existing.id));
-
-            updated.nextMatchId = gf2.id;
-          }
-        }
-      }
+      const updated = await this.completeMatchInTx(tx, id, winnerId, {
+        p1SetsWon: matchDetails.p1SetsWon,
+        p2SetsWon: matchDetails.p2SetsWon,
+        scoreDetails: matchDetails.scoreDetails,
+        auditUserId: matchDetails.auditUserId,
+      });
 
       // 5. Update standings if Round Robin
-      if (matchDetails.isRoundRobin) {
+      if (matchDetails.isRoundRobin && updated) {
         // Query custom win/draw/loss points from sportRules
         const [group] = await tx
           .select({
@@ -629,7 +491,7 @@ export class MatchesRepository {
           })
           .from(schema.tournamentGroups)
           .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-          .where(eq(schema.tournamentGroups.id, existing.groupId!))
+          .where(eq(schema.tournamentGroups.id, updated.groupId))
           .limit(1);
 
         let winPoints = 3;
@@ -653,8 +515,8 @@ export class MatchesRepository {
           }
         }
 
-        const p1Id = existing.participant1Id;
-        const p2Id = existing.participant2Id;
+        const p1Id = updated.participant1Id;
+        const p2Id = updated.participant2Id;
         const participants = [p1Id, p2Id];
         const isDraw = !winnerId && p1Id && p2Id;
 
@@ -668,7 +530,7 @@ export class MatchesRepository {
             .from(schema.groupStandings)
             .where(
               and(
-                eq(schema.groupStandings.groupId, existing.groupId!),
+                eq(schema.groupStandings.groupId, updated.groupId),
                 eq(schema.groupStandings.participantId, pId)
               )
             )
@@ -691,7 +553,7 @@ export class MatchesRepository {
             await tx
               .insert(schema.groupStandings)
               .values({
-                groupId: existing.groupId as any,
+                groupId: updated.groupId,
                 participantId: pId,
                 played: 1,
                 won: isWinner ? 1 : 0,
@@ -708,6 +570,237 @@ export class MatchesRepository {
 
       return updated;
     });
+  }
+
+  private async completeMatchInTx(
+    tx: any,
+    id: string,
+    winnerId: string,
+    details: {
+      p1SetsWon: number;
+      p2SetsWon: number;
+      scoreDetails: Record<string, unknown> | null | undefined;
+      auditUserId?: string | null;
+      isBye?: boolean;
+    }
+  ) {
+    const [existing] = await tx
+      .select()
+      .from(schema.matches)
+      .where(eq(schema.matches.id, id))
+      .limit(1);
+
+    if (!existing) return null;
+
+    // 1. Update the match status to COMPLETED and winnerId
+    const [updated] = await tx
+      .update(schema.matches)
+      .set({
+        status: 'COMPLETED',
+        winnerId,
+        p1SetsWon: details.p1SetsWon,
+        p2SetsWon: details.p2SetsWon,
+        scoreDetails: details.scoreDetails,
+        isBye: details.isBye ?? existing.isBye,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.matches.id, id))
+      .returning();
+
+    const oldValues = {
+      p1SetsWon: existing.p1SetsWon,
+      p2SetsWon: existing.p2SetsWon,
+      scoreDetails: existing.scoreDetails,
+      winnerId: existing.winnerId,
+      status: existing.status,
+    };
+    const newValues = {
+      p1SetsWon: updated.p1SetsWon,
+      p2SetsWon: updated.p2SetsWon,
+      scoreDetails: updated.scoreDetails,
+      winnerId: updated.winnerId,
+      status: updated.status,
+    };
+    await this.auditService.logUpdate(tx, details.auditUserId ?? null, 'matches', id, oldValues, newValues);
+
+    // 2. Auto-advance Winner
+    if (existing.nextMatchId) {
+      const [nextMatch] = await tx
+        .select()
+        .from(schema.matches)
+        .where(eq(schema.matches.id, existing.nextMatchId))
+        .limit(1);
+
+      if (nextMatch) {
+        const targetSlot = resolveWinnerTargetSlot({
+          sourceBranch: existing.bracketBranch,
+          sourceRoundNumber: existing.roundNumber,
+          sourceMatchOrder: existing.matchOrder,
+          targetBranch: nextMatch.bracketBranch,
+        });
+        const updateField = { [targetSlot]: winnerId };
+
+        await tx
+          .update(schema.matches)
+          .set(updateField)
+          .where(eq(schema.matches.id, existing.nextMatchId));
+
+        // Check if target match should auto-complete as a bye
+        await this.autoCompleteIfByeMatch(tx, existing.nextMatchId, details.auditUserId);
+      }
+    }
+
+    // 3. Auto-advance Loser (Double Elimination)
+    if (existing.loserNextMatchId) {
+      const [loserNextMatch] = await tx
+        .select()
+        .from(schema.matches)
+        .where(eq(schema.matches.id, existing.loserNextMatchId))
+        .limit(1);
+
+      if (loserNextMatch) {
+        const loserId = (winnerId === existing.participant1Id)
+          ? existing.participant2Id
+          : existing.participant1Id;
+
+        const targetSlot = resolveLoserTargetSlot({
+          sourceRoundNumber: existing.roundNumber,
+          sourceMatchOrder: existing.matchOrder,
+        });
+        const updateField = { [targetSlot]: loserId };
+
+        await tx
+          .update(schema.matches)
+          .set(updateField)
+          .where(eq(schema.matches.id, existing.loserNextMatchId));
+
+        // Check if target match should auto-complete as a bye
+        await this.autoCompleteIfByeMatch(tx, existing.loserNextMatchId, details.auditUserId);
+      }
+    }
+
+    // 4. Double Elimination — Grand Finals Reset
+    if (existing.bracketBranch === 'GRAND_FINALS' && existing.roundNumber === 1) {
+      if (winnerId === existing.participant2Id) {
+        const [gf2Exists] = await tx
+          .select()
+          .from(schema.matches)
+          .where(
+            and(
+              eq(schema.matches.groupId, existing.groupId),
+              eq(schema.matches.roundNumber, 2)
+            )
+          )
+          .limit(1);
+
+        if (!gf2Exists) {
+          const gf2Id = randomUUID();
+          const [gf2] = await tx
+            .insert(schema.matches)
+            .values({
+              id: gf2Id,
+              groupId: existing.groupId,
+              roundNumber: 2,
+              bracketBranch: 'GRAND_FINALS',
+              status: 'SCHEDULED',
+              participant1Id: existing.participant1Id,
+              participant2Id: existing.participant2Id,
+              p1SetsWon: 0,
+              p2SetsWon: 0,
+              totalSetsPlayed: 0,
+              tournamentId: existing.tournamentId,
+              stageId: existing.stageId,
+              updatedAt: new Date(),
+            })
+            .returning();
+
+          await tx
+            .update(schema.matches)
+            .set({ nextMatchId: gf2.id })
+            .where(eq(schema.matches.id, existing.id));
+
+          updated.nextMatchId = gf2.id;
+        }
+      }
+    }
+
+    return updated;
+  }
+
+  private async autoCompleteIfByeMatch(tx: any, targetId: string, auditUserId?: string | null) {
+    const [targetMatch] = await tx
+      .select()
+      .from(schema.matches)
+      .where(eq(schema.matches.id, targetId))
+      .limit(1);
+
+    if (!targetMatch || targetMatch.status === 'COMPLETED') return;
+
+    // Fetch the feeding matches
+    const feedingMatches = await tx
+      .select()
+      .from(schema.matches)
+      .where(
+        and(
+          eq(schema.matches.tournamentId, targetMatch.tournamentId),
+          or(
+            eq(schema.matches.nextMatchId, targetId),
+            eq(schema.matches.loserNextMatchId, targetId)
+          )
+        )
+      );
+
+    let p1Fed = false;
+    let p2Fed = false;
+    let p1FedCompleted = false;
+    let p2FedCompleted = false;
+
+    for (const fm of feedingMatches) {
+      let targetSlot: 'p1' | 'p2' | null = null;
+      if (fm.nextMatchId === targetId) {
+        targetSlot = resolveWinnerTargetSlot({
+          sourceBranch: fm.bracketBranch,
+          sourceRoundNumber: fm.roundNumber,
+          sourceMatchOrder: fm.matchOrder,
+          targetBranch: targetMatch.bracketBranch,
+        }) === 'participant1Id' ? 'p1' : 'p2';
+      } else if (fm.loserNextMatchId === targetId) {
+        targetSlot = resolveLoserTargetSlot({
+          sourceRoundNumber: fm.roundNumber,
+          sourceMatchOrder: fm.matchOrder,
+        }) === 'participant1Id' ? 'p1' : 'p2';
+      }
+
+      if (targetSlot === 'p1') {
+        p1Fed = true;
+        if (fm.status === 'COMPLETED') p1FedCompleted = true;
+      } else if (targetSlot === 'p2') {
+        p2Fed = true;
+        if (fm.status === 'COMPLETED') p2FedCompleted = true;
+      }
+    }
+
+    const p1PermanentlyEmpty = !p1Fed || (p1FedCompleted && !targetMatch.participant1Id);
+    const p2PermanentlyEmpty = !p2Fed || (p2FedCompleted && !targetMatch.participant2Id);
+
+    if (targetMatch.participant1Id && p2PermanentlyEmpty) {
+      await this.completeMatchInTx(tx, targetId, targetMatch.participant1Id, {
+        p1SetsWon: 0,
+        p2SetsWon: 0,
+        scoreDetails: { isBye: true },
+        isBye: true,
+        auditUserId,
+      });
+    } else if (targetMatch.participant2Id && p1PermanentlyEmpty) {
+      await this.completeMatchInTx(tx, targetId, targetMatch.participant2Id, {
+        p1SetsWon: 0,
+        p2SetsWon: 0,
+        scoreDetails: { isBye: true },
+        isBye: true,
+        auditUserId,
+      });
+    }
   }
 
   async getRostersForParticipants(participantIds: string[]) {

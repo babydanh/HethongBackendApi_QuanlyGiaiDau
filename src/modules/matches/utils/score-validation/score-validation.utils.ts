@@ -29,6 +29,9 @@ export function extractNormalizedScoreEntries(scoreDetails: Record<string, unkno
         p2: team2Score,
         scoreStr: `${team1Score}-${team2Score}`,
         isFinished: setValue.isFinished === true,
+        isOverridden: isRecord(setValue.scoreOverride) &&
+          typeof setValue.scoreOverride.reason === 'string' &&
+          setValue.scoreOverride.reason.trim().length > 0,
       };
     });
   }
@@ -54,7 +57,7 @@ export function extractNormalizedScoreEntries(scoreDetails: Record<string, unkno
       throw new BadRequestException(`Điểm số set '${scoreStr}' phải là số nguyên không âm.`);
     }
 
-    return { key, p1, p2, scoreStr, isFinished: true };
+    return { key, p1, p2, scoreStr, isFinished: true, isOverridden: false };
   });
 }
 

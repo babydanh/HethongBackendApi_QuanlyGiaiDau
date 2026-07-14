@@ -23,10 +23,30 @@ export function validateScoreDetails(
     throw new BadRequestException(`Số set/game nhập vào (${normalizedEntries.length}) vượt quá thể thức BO${resolvedConfig.bestOf}.`);
   }
 
+  const normalizedEntriesForValidation = normalizedEntries.map((entry) => {
+    if (!entry.isFinished || !entry.isOverridden) {
+      return entry;
+    }
+
+    if (entry.p1 === entry.p2) {
+      throw new BadRequestException(`Set ${entry.key}: Ngoại lệ vẫn phải xác định một bên thắng.`);
+    }
+
+    const winnerScore = resolvedConfig.pointsPerSet;
+    const p1 = entry.p1 > entry.p2 ? winnerScore : 0;
+    const p2 = entry.p2 > entry.p1 ? winnerScore : 0;
+    return {
+      ...entry,
+      p1,
+      p2,
+      scoreStr: `${p1}-${p2}`,
+    };
+  });
+
   const context = {
     scoreDetails,
     resolvedConfig,
-    normalizedEntries,
+    normalizedEntries: normalizedEntriesForValidation,
   };
 
   switch (resolvedConfig.scoringModel) {

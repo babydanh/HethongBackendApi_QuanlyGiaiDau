@@ -744,15 +744,79 @@ export class TournamentsService {
     }
 
     const config = (existing.tournamentConfig || {}) as Record<string, unknown>;
-    const bracketType = division?.bracketType || (config.bracketType as string) || 'SINGLE_ELIMINATION';
+    const bracketType = (division?.bracketType || (config.bracketType as string) || 'SINGLE_ELIMINATION').toUpperCase();
 
     if (bracketType === 'DOUBLE_ELIMINATION') {
       return this.bracketGeneratorService.generateDoubleElimination(id, userId, divisionId, seedingType);
     } else if (bracketType === 'ROUND_ROBIN') {
       return this.bracketGeneratorService.generateRoundRobin(id, userId, divisionId, seedingType);
+    } else if (bracketType === 'GROUP_STAGE_KNOCKOUT') {
+      return this.bracketGeneratorService.generateGroupStageKnockout(id, userId, divisionId, seedingType);
     } else {
       return this.bracketGeneratorService.generateSingleElimination(id, userId, divisionId, seedingType);
     }
+  }
+
+  async autoSeedFromElo(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[] = [],
+    divisionId?: string,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) isAuthorized = true;
+    }
+    if (!isAuthorized) throw new ForbiddenException();
+
+    const participants = await this.tournamentsRepository.findParticipantsForSeeding(tournament.id, divisionId);
+
+    // Get categoryId and matchType from tournament/division
+    let categoryId = tournament.categoryId;
+    let matchType = tournament.matchType || 'DOUBLES';
+    if (divisionId) {
+      const division = await this.tournamentsRepository.findDivisionById(divisionId);
+      if (division) {
+        matchType = division.matchType || matchType;
+      }
+    }
+
+    // Calculate ELO for each participant
+    const eloEntries: Array<{ participantId: string; elo: number }> = [];
+    for (const p of participants) {
+      const members = (p as any).members || [];
+      if (members.length === 0) {
+        eloEntries.push({ participantId: p.id, elo: 1000 });
+        continue;
+      }
+
+      const elos = await Promise.all(
+        members.map((m: { userId: string }) =>
+          this.tournamentsRepository.getUserElo(m.userId, tournament.categoryId, tournament.matchType || 'DOUBLES'),
+        ),
+      );
+
+      const effectiveElo = elos.length > 0
+        ? Math.round(elos.reduce((a: number, b: number) => a + b, 0) / elos.length)
+        : 1000;
+
+      eloEntries.push({ participantId: p.id, elo: effectiveElo });
+    }
+
+    // Sort by ELO descending, assign seeds
+    eloEntries.sort((a, b) => b.elo - a.elo);
+    const seeds = eloEntries.map((entry, index) => ({
+      participantId: entry.participantId,
+      seed: index + 1,
+    }));
+
+    await this.tournamentsRepository.updateSeeds(tournamentId, seeds);
+
+    return { message: 'Auto seeding completed', seeds };
   }
 
   private async validateEloLimits(
@@ -781,7 +845,7 @@ export class TournamentsService {
         : null;
     const maxCombinedElo = config?.maxCombinedElo !== undefined && config?.maxCombinedElo !== null ? Number(config.maxCombinedElo) : null;
     const maxTeammateGap = config?.maxTeammateGap !== undefined && config?.maxTeammateGap !== null ? Number(config.maxTeammateGap) : null;
-    const effectiveMatchType = (division?.matchType || tournament.matchType || 'SINGLES') as string;
+    const effectiveMatchType = division?.matchType || tournament.matchType || 'SINGLES';
 
     if (minElo === null && maxElo === null && maxCombinedElo === null && maxTeammateGap === null) {
       return;
@@ -970,6 +1034,17 @@ export class TournamentsService {
       await this.sendNotificationBatch(notifications);
     } catch (err) {
       console.error('Failed to send registration notifications:', err);
+    }
+
+    // Auto seed by ELO if configured
+    try {
+      const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+      if (config.seedingMethod === 'ELO') {
+        const divisionId = result.participant.tournamentDivisionId;
+        await this.autoSeedFromElo(id, userId, [], divisionId ?? undefined);
+      }
+    } catch (err) {
+      console.error('Failed to auto-seed after registration:', err);
     }
 
     return result;
@@ -1406,7 +1481,7 @@ export class TournamentsService {
     const targetStatus = isClubOrFree ? 'UPCOMING' : 'REGISTRATION_CLOSED';
 
     // Sinh bracket trước, chỉ update status khi bracket generation thành công
-    let bracket: { message: string; stageId: string; totalMatches: number } | null = null;
+    let bracket: unknown = null;
     try {
       bracket = await this.generateBracket(id, userId, systemRoles);
     } catch (err) {
@@ -1532,8 +1607,8 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
-    if (tournament.status !== 'DRAFT' && tournament.status !== 'REGISTRATION_OPEN') {
-      throw new BadRequestException('Chỉ có thể tạo dữ liệu ảo ở trạng thái Nháp hoặc Đang mở đăng ký.');
+    if (tournament.status !== 'DRAFT') {
+      throw new BadRequestException('Chỉ có thể tạo dữ liệu ảo khi giải đấu đang ở trạng thái Nháp.');
     }
 
     const isAuthorized =
@@ -1565,6 +1640,28 @@ export class TournamentsService {
     }
 
     return this.tournamentsRepository.clearMockParticipants(tournamentId, divisionId);
+  }
+
+  async deleteMockParticipant(
+    tournamentId: string,
+    participantId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    if (tournament.status !== 'DRAFT' && tournament.status !== 'REGISTRATION_OPEN') {
+      throw new BadRequestException('Chỉ có thể xoá dữ liệu giả lập ở trạng thái Nháp hoặc Đang mở đăng ký.');
+    }
+
+    const isAuthorized =
+      systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('You do not have permission to delete mock participants');
+    }
+
+    return this.tournamentsRepository.deleteMockParticipant(tournamentId, participantId);
   }
 
   async createPlayoffMatch(
@@ -1623,6 +1720,26 @@ export class TournamentsService {
 
     await this.tournamentsRepository.cancelScheduledMatchesInStage(stageId);
     return { message: 'Stage finalized successfully' };
+  }
+
+  async advanceStandings(
+    tournamentId: string,
+    divisionId: string,
+    stageId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    let isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) isAuthorized = true;
+    }
+    if (!isAuthorized) throw new ForbiddenException();
+
+    return this.bracketGeneratorService.advanceStandings(tournamentId, divisionId, stageId);
   }
 
   async updateParticipantStatus(

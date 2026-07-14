@@ -2,9 +2,17 @@ import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, ne } from 'drizzle-orm';
+import { eq, and, ne, or, inArray, isNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { MatchNode } from './interfaces/match-node.interface';
+import {
+  getDoubleEliminationShape,
+  MAX_DOUBLE_ELIMINATION_PARTICIPANTS,
+  MIN_DOUBLE_ELIMINATION_PARTICIPANTS,
+  resolveLoserTargetSlot,
+  resolveWinnersLoserTargetIndex,
+  resolveWinnerTargetSlot,
+} from '../../common/helpers/bracket-advancement.helper';
 
 @Injectable()
 export class BracketGeneratorService {
@@ -37,13 +45,23 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
               ),
         );
 
@@ -229,20 +247,33 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
               ),
         );
 
       const numParticipants = participants.length;
-      if (numParticipants < 2) {
+      if (
+        numParticipants < MIN_DOUBLE_ELIMINATION_PARTICIPANTS ||
+        numParticipants > MAX_DOUBLE_ELIMINATION_PARTICIPANTS
+      ) {
         throw new BadRequestException(
-          'At least 2 participants required to generate bracket',
+          `Double Elimination yêu cầu từ ${MIN_DOUBLE_ELIMINATION_PARTICIPANTS} đến ${MAX_DOUBLE_ELIMINATION_PARTICIPANTS} đội`,
         );
       }
 
@@ -296,9 +327,10 @@ export class BracketGeneratorService {
         .returning();
 
       // 5. Tính toán cấu trúc nhánh
-      const powerOf2 = Math.pow(2, Math.ceil(Math.log2(numParticipants)));
-      const winnersRounds = Math.log2(powerOf2);
-      const losersRounds = 2 * winnersRounds - 2;
+      const shape = getDoubleEliminationShape(numParticipants);
+      const powerOf2 = shape.bracketSize;
+      const winnersRounds = shape.winnersRounds;
+      const losersRounds = shape.losersRounds;
 
       const winnersMatchesByRound = new Map<number, MatchNode[]>();
       const losersMatchesByRound = new Map<number, MatchNode[]>();
@@ -448,10 +480,12 @@ export class BracketGeneratorService {
 
           if (r === 1) {
             const losersR1 = losersMatchesByRound.get(1)!;
-            currentRound[i].loserNextMatchId = losersR1[Math.floor(i / 2)].id;
+            const targetIndex = resolveWinnersLoserTargetIndex(r, i, currentRound.length);
+            currentRound[i].loserNextMatchId = losersR1[targetIndex].id;
           } else {
             const losersTargetRound = losersMatchesByRound.get(2 * r - 2)!;
-            currentRound[i].loserNextMatchId = losersTargetRound[i].id;
+            const targetIndex = resolveWinnersLoserTargetIndex(r, i, currentRound.length);
+            currentRound[i].loserNextMatchId = losersTargetRound[targetIndex].id;
           }
         }
       }
@@ -465,11 +499,11 @@ export class BracketGeneratorService {
             if (lr === losersRounds) {
               currentRound[i].nextMatchId = gf1.id;
             } else if (nextRound) {
-              if (lr % 2 !== 0) {
-                currentRound[i].nextMatchId = nextRound[Math.floor(i / 2)]?.id || null;
-              } else {
-                currentRound[i].nextMatchId = nextRound[Math.floor(i / 2)].id;
-              }
+              // Losers bracket alternates between same-size rounds and half-size rounds.
+              // Odd rounds feed the next round by the same match index.
+              // Even rounds collapse two matches into one next match.
+              const nextIndex = lr % 2 !== 0 ? i : Math.floor(i / 2);
+              currentRound[i].nextMatchId = nextRound[nextIndex]?.id || null;
             }
           }
         }
@@ -561,33 +595,13 @@ export class BracketGeneratorService {
         const next = matchMap.get(completed.nextMatchId);
         if (!next) return;
 
-        if (next.bracketBranch === 'GRAND_FINALS') {
-          if (completed.bracketBranch === 'MAIN') {
-            next.participant1Id = completed.winnerId;
-          } else {
-            next.participant2Id = completed.winnerId;
-          }
-        } else {
-          if (completed.bracketBranch === 'LOSERS') {
-            if (completed.roundNumber % 2 !== 0) {
-              next.participant1Id = completed.winnerId;
-            } else {
-              const isOdd = (completed.matchOrder % 2 !== 0);
-              if (isOdd) {
-                next.participant1Id = completed.winnerId;
-              } else {
-                next.participant2Id = completed.winnerId;
-              }
-            }
-          } else {
-            const isOdd = (completed.matchOrder % 2 !== 0);
-            if (isOdd) {
-              next.participant1Id = completed.winnerId;
-            } else {
-              next.participant2Id = completed.winnerId;
-            }
-          }
-        }
+        const targetSlot = resolveWinnerTargetSlot({
+          sourceBranch: completed.bracketBranch,
+          sourceRoundNumber: completed.roundNumber,
+          sourceMatchOrder: completed.matchOrder,
+          targetBranch: next.bracketBranch,
+        });
+        next[targetSlot] = completed.winnerId;
 
         propagateInMemoryByes(next.id);
       };
@@ -601,16 +615,11 @@ export class BracketGeneratorService {
           ? completed.participant2Id
           : completed.participant1Id;
 
-        if (completed.roundNumber === 1) {
-          const isOdd = (completed.matchOrder % 2 !== 0);
-          if (isOdd) {
-            next.participant1Id = loserId;
-          } else {
-            next.participant2Id = loserId;
-          }
-        } else {
-          next.participant2Id = loserId;
-        }
+        const targetSlot = resolveLoserTargetSlot({
+          sourceRoundNumber: completed.roundNumber,
+          sourceMatchOrder: completed.matchOrder,
+        });
+        next[targetSlot] = loserId;
 
         propagateInMemoryByes(next.id);
       };
@@ -671,13 +680,23 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
               ),
         );
 
@@ -704,7 +723,45 @@ export class BracketGeneratorService {
       // 4. Tạo Stage & Groups (hỗ trợ multi-group)
       // Chia participants thành nhiều bảng nhỏ (max ~8 đội/bảng)
       const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-      const maxGroupSize = (config.roundRobinGroupSize as number) || 8;
+
+      // Đọc config từ division.roundConfig (ưu tiên) hoặc tournament config
+      let maxGroupSize = (config.roundRobinGroupSize as number) || 8;
+      let winPoints = 3, drawPoints = 1, lossPoints = 0;
+      let tiebreakerRules: Record<string, unknown> = { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] };
+      let roundsToPlay = (config.roundRobinLegs as number) || 1;
+      let roundRobinLegs = 1;
+
+      if (divisionId) {
+        const divisions = await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.id, divisionId))
+          .limit(1);
+        const div = divisions[0];
+        if (div) {
+          const rc = div.roundConfig as Record<string, unknown> | null;
+          if (rc) {
+            const gs = rc.groupsConfig as Record<string, unknown> | null;
+            if (gs?.maxGroupSize && Number(gs.maxGroupSize) <= 8) {
+              maxGroupSize = Number(gs.maxGroupSize);
+            }
+            const sc = rc.scoring as Record<string, unknown> | null;
+            if (sc) {
+              if (sc.winPoints) winPoints = Number(sc.winPoints);
+              if (sc.drawPoints) drawPoints = Number(sc.drawPoints);
+              if (sc.lossPoints) lossPoints = Number(sc.lossPoints);
+            }
+            if (rc.tiebreakerRules) tiebreakerRules = rc.tiebreakerRules as Record<string, unknown>;
+            const rtp = (rc as Record<string, unknown>).roundsToPlay;
+            if (typeof rtp === 'number' && rtp > 0 && rtp <= 20) roundRobinLegs = rtp;
+          }
+        }
+      }
+      if (!roundRobinLegs || roundRobinLegs < 1) roundRobinLegs = (config.roundRobinLegs as number) || 1;
+
+      if (maxGroupSize > 8) {
+        throw new BadRequestException('Max 8 đội/bảng');
+      }
 
       const [stage] = await tx
         .insert(schema.tournamentStages)
@@ -714,6 +771,12 @@ export class BracketGeneratorService {
           type: 'ROUND_ROBIN',
           order: 1,
           tournamentDivisionId: divisionId ?? null,
+          roundConfig: {
+            scoring: { winPoints, drawPoints, lossPoints },
+            tiebreakerRules,
+            maxGroupSize,
+            roundsToPlay: roundRobinLegs,
+          },
         })
         .returning();
 
@@ -764,25 +827,7 @@ export class BracketGeneratorService {
         }
       }
 
-      // 5. Xếp lịch thi đấu vòng tròn (Circle Method) cho từng bảng
-      // Đọc số lượt đấu: ưu tiên division.roundConfig.roundsToPlay → tournament config → mặc định 1
-      let legs = 1;
-      if (divisionId) {
-        const divisions = await tx
-          .select()
-          .from(schema.tournamentDivisions)
-          .where(eq(schema.tournamentDivisions.id, divisionId))
-          .limit(1);
-        const div = divisions[0];
-        if (div) {
-          const divConfig = div.roundConfig as Record<string, unknown> | null;
-          const rtp = divConfig?.roundsToPlay;
-          if (typeof rtp === 'number' && rtp > 0 && rtp <= 20) legs = rtp;
-        }
-      }
-      if (!legs || legs < 1) legs = (config.roundRobinLegs as number) || 1;
-
-      // Xếp lịch vòng tròn (Circle Method) cho từng bảng
+      // 5. Xếp lịch vòng tròn (Circle Method) cho từng bảng
       const allMatchesToInsert: (typeof schema.matches.$inferInsert)[] = [];
       let globalMatchCounter = 1;
 
@@ -797,11 +842,11 @@ export class BracketGeneratorService {
         const roundsCount = N - 1;
         const matchesPerRound = N / 2;
 
-        for (let leg = 0; leg < legs; leg++) {
+        for (let leg = 0; leg < roundRobinLegs; leg++) {
           const teams = [...teamList];
 
           for (let round = 1; round <= roundsCount; round++) {
-            const currentRoundNumber = leg * roundsCount + round + (g * roundsCount * legs);
+            const currentRoundNumber = leg * roundsCount + round + (g * roundsCount * roundRobinLegs);
 
             for (let i = 0; i < matchesPerRound; i++) {
               const home = teams[i];
@@ -895,5 +940,799 @@ export class BracketGeneratorService {
         this.advanceWinner(nextMatch, matchNodesByRound);
       }
     }
+  }
+
+  // ─── Tiebreaker: Tạo playoff matches cho các đội bằng điểm ───
+  private async resolveTiebreakers(
+    tx: any,
+    tournamentId: string,
+    stageId: string,
+    groupId: string,
+    standings: Array<{ participantId: string; totalPoints: number; pointsFor: number; pointsAgainst: number }>,
+    tiebreakerRules: { primary: string; secondary: string[] },
+  ): Promise<string[]> {
+    // Nhóm các đội có cùng totalPoints
+    const pointGroups = new Map<number, Array<{ participantId: string; pointsFor: number; pointsAgainst: number }>>();
+    for (const s of standings) {
+      const list = pointGroups.get(s.totalPoints) || [];
+      list.push({ participantId: s.participantId, pointsFor: s.pointsFor, pointsAgainst: s.pointsAgainst });
+      pointGroups.set(s.totalPoints, list);
+    }
+
+    const rankedOrder: string[] = [];
+
+    for (const [, group] of pointGroups) {
+      if (group.length === 1) {
+        rankedOrder.push(group[0].participantId);
+      } else if (group.length === 2) {
+        // 2 đội bằng điểm → tạo 1 playoff match
+        const { maxRound, maxOrder } = await this.getMaxRoundAndOrder(tx, stageId);
+        const groups = await tx
+          .select()
+          .from(schema.tournamentGroups)
+          .where(eq(schema.tournamentGroups.stageId, stageId))
+          .limit(1);
+        const groupId = groups[0]?.id;
+        if (groupId) {
+          await tx.insert(schema.matches).values({
+            id: randomUUID(),
+            tournamentId,
+            stageId,
+            groupId,
+            participant1Id: group[0].participantId,
+            participant2Id: group[1].participantId,
+            roundNumber: maxRound + 1,
+            matchOrder: maxOrder + 1,
+            bracketBranch: 'PLAYOFF',
+            status: 'SCHEDULED',
+            isBye: false,
+            p1SetsWon: 0,
+            p2SetsWon: 0,
+            totalSetsPlayed: 0,
+            nextMatchId: null,
+            loserNextMatchId: null,
+            winnerId: null,
+            updatedAt: new Date(),
+          });
+          // Winner gets higher rank (placeholder - will be resolved when match completes)
+          rankedOrder.push(group[0].participantId, group[1].participantId);
+        }
+      } else if (group.length === 3) {
+        // 3 đội bằng điểm → round-robin mini-playoff
+        const { maxRound, maxOrder } = await this.getMaxRoundAndOrder(tx, stageId);
+        const groups = await tx
+          .select()
+          .from(schema.tournamentGroups)
+          .where(eq(schema.tournamentGroups.stageId, stageId))
+          .limit(1);
+        const groupId = groups[0]?.id;
+        if (groupId) {
+          // Tạo 3 trận vòng tròn nhỏ
+          const pairs = [[group[0].participantId, group[1].participantId], [group[1].participantId, group[2].participantId], [group[0].participantId, group[2].participantId]];
+          for (let i = 0; i < pairs.length; i++) {
+            await tx.insert(schema.matches).values({
+              id: randomUUID(),
+              tournamentId,
+              stageId,
+              groupId,
+              participant1Id: pairs[i][0],
+              participant2Id: pairs[i][1],
+              roundNumber: maxRound + 1,
+              matchOrder: maxOrder + 1 + i,
+              bracketBranch: 'PLAYOFF',
+              status: 'SCHEDULED',
+              isBye: false,
+              p1SetsWon: 0,
+              p2SetsWon: 0,
+              totalSetsPlayed: 0,
+              nextMatchId: null,
+              loserNextMatchId: null,
+              winnerId: null,
+              updatedAt: new Date(),
+            });
+          }
+          // Placeholder ranking (will be resolved when matches complete)
+          rankedOrder.push(...group.map(g => g.participantId));
+        }
+      } else {
+        // > 3 đội: sort by set diff then point diff
+        group.sort((a, b) => {
+          const diffA = a.pointsFor - a.pointsAgainst;
+          const diffB = b.pointsFor - b.pointsAgainst;
+          return diffB - diffA;
+        });
+        rankedOrder.push(...group.map(g => g.participantId));
+      }
+    }
+
+    return rankedOrder;
+  }
+
+  private async getMaxRoundAndOrder(tx: any, stageId: string) {
+    const result = await tx
+      .select({
+        maxRound: sql<number>`COALESCE(MAX(${schema.matches.roundNumber}), 0)`,
+        maxOrder: sql<number>`COALESCE(MAX(${schema.matches.matchOrder}), 0)`,
+      })
+      .from(schema.matches)
+      .where(eq(schema.matches.stageId, stageId));
+    return result[0] || { maxRound: 0, maxOrder: 0 };
+  }
+
+  // ─── Group Stage → Knockout ───
+  async generateGroupStageKnockout(
+    tournamentId: string,
+    userId: string,
+    divisionId?: string,
+    seedingType?: 'SEEDED' | 'RANDOM',
+  ) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Kiểm tra giải đấu
+      const [tournament] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1);
+
+      if (!tournament) throw new BadRequestException('Tournament not found');
+
+      // 2. Lấy danh sách đội tham gia
+      const participants = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
+              )
+            : and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                or(
+                  eq(schema.tournamentParticipants.isMock, true),
+                  and(
+                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eq(schema.tournamentParticipants.isPaid, true),
+                  ),
+                ),
+              ),
+        );
+
+      const numParticipants = participants.length;
+      if (numParticipants < 2) {
+        throw new BadRequestException('At least 2 participants required');
+      }
+
+      // 3. Đọc division + roundConfig
+      let division: typeof schema.tournamentDivisions.$inferSelect | undefined;
+      if (divisionId) {
+        const divs = await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.id, divisionId))
+          .limit(1);
+        division = divs[0];
+      }
+
+      const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+      const divConfig = division?.roundConfig as Record<string, unknown> | null || {};
+      const groupsConfig = (divConfig.groupsConfig || config.groupsConfig || {}) as Record<string, unknown>;
+      const advancementConfig = (divConfig.advancementConfig || config.advancementConfig || {}) as Record<string, unknown>;
+      const playoffConfig = (divConfig.playoffConfig || config.playoffConfig || {}) as Record<string, unknown>;
+      const scoring = (divConfig.scoring || config.scoring || { winPoints: 3, drawPoints: 1, lossPoints: 0 }) as Record<string, unknown>;
+      const tiebreakerRules = (divConfig.tiebreakerRules || config.tiebreakerRules || { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] }) as Record<string, unknown>;
+
+      const numGroups = (groupsConfig.numGroups as number) || 2;
+      const teamsPerGroup = (groupsConfig.teamsPerGroup as number) || 4;
+      const teamsAdvancing = (advancementConfig.teamsAdvancing as number) || 1;
+      const allowWildcard = (advancementConfig.allowWildcardThird as boolean) || false;
+      const wildcardTeams = (advancementConfig.wildcardTeamsAdvancing as number) || 0;
+      const playoffType = (playoffConfig.type as string) || 'SINGLE_ELIMINATION';
+      const rtp = (groupsConfig.roundsToPlay as number) || 1;
+
+      if (numParticipants < 2) {
+        throw new BadRequestException('At least 2 participants required');
+      }
+
+      // Validate groups config
+      const actualNumGroups = Math.min(
+        Math.max(Math.ceil(numParticipants / teamsPerGroup), 2),
+        Math.ceil(numParticipants / 3),
+      );
+      if (actualNumGroups < 2) {
+        throw new BadRequestException('Need at least 2 groups for group stage knockout');
+      }
+
+      // 3. Soft-delete các Stage/Group/Matches cũ
+      await tx
+        .update(schema.tournamentStages)
+        .set({ deletedAt: new Date() })
+        .where(
+          divisionId
+            ? and(
+                eq(schema.tournamentStages.tournamentId, tournamentId),
+                eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              )
+            : eq(schema.tournamentStages.tournamentId, tournamentId),
+        );
+
+      // 4. Stage 1: Round Robin
+      const winPts = (scoring.winPoints as number) || 3;
+      const drawPts = (scoring.drawPoints as number) || 1;
+      const lossPts = (scoring.lossPoints as number) || 0;
+
+      const [stage1] = await tx
+        .insert(schema.tournamentStages)
+        .values({
+          tournamentId,
+          name: 'Vòng bảng',
+          type: 'ROUND_ROBIN',
+          order: 1,
+          tournamentDivisionId: divisionId ?? null,
+          roundConfig: {
+            scoring: { winPoints: winPts, drawPoints: drawPts, lossPoints: lossPts },
+            tiebreakerRules,
+            advanceConfig: {
+              teamsAdvancing: advancementConfig.teamsAdvancing || 1,
+              allowWildcardThird: allowWildcard,
+              wildcardTeamsAdvancing: wildcardTeams,
+            },
+            maxGroupSize: teamsPerGroup,
+            roundsToPlay: rtp,
+          },
+        })
+        .returning();
+
+      // Phân bố participants vào groups (snake draft)
+      const sortedParticipants = [...participants];
+      if (seedingType === 'SEEDED') {
+        sortedParticipants.sort((a, b) => (a.seed || 999) - (b.seed || 999));
+      } else {
+        for (let i = sortedParticipants.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const temp = sortedParticipants[i];
+          sortedParticipants[i] = sortedParticipants[j];
+          sortedParticipants[j] = temp;
+        }
+      }
+
+      const baseSize = Math.floor(numParticipants / actualNumGroups);
+      const extra = numParticipants % actualNumGroups;
+      const groupSizes: number[] = [];
+      for (let g = 0; g < actualNumGroups; g++) {
+        groupSizes.push(g < extra ? baseSize + 1 : baseSize);
+      }
+
+      // Snake-draft participants into groups
+      const groupParticipants: Array<Array<typeof participants[0]>> = Array.from({ length: actualNumGroups }, () => []);
+      let participantIndex = 0;
+      for (let round = 0; round < Math.max(...groupSizes); round++) {
+        for (let g = 0; g < actualNumGroups; g++) {
+          if (round < groupSizes[g] && participantIndex < sortedParticipants.length) {
+            groupParticipants[g].push(sortedParticipants[participantIndex++]);
+          }
+        }
+      }
+
+      // Tạo groups + standings
+      const groups: Array<{ id: string; name: string }> = [];
+      for (let g = 0; g < actualNumGroups; g++) {
+        const [newGroup] = await tx
+          .insert(schema.tournamentGroups)
+          .values({
+            stageId: stage1.id,
+            name: `Bảng ${String.fromCharCode(65 + g)}`,
+          })
+          .returning();
+        groups.push(newGroup);
+
+        for (const p of groupParticipants[g]) {
+          await tx.insert(schema.groupStandings).values({
+            groupId: newGroup.id,
+            participantId: p.id,
+            played: 0,
+            won: 0,
+            lost: 0,
+            draws: 0,
+            pointsFor: 0,
+            pointsAgainst: 0,
+            totalPoints: 0,
+            updatedAt: new Date(),
+          });
+        }
+      }
+
+      // Circle method scheduling for each group
+      const allMatchesToInsert: (typeof schema.matches.$inferInsert)[] = [];
+      let globalMatchCounter = 1;
+
+      for (let g = 0; g < groups.length; g++) {
+        const group = groups[g];
+        const participantIds = groupParticipants[g].map(p => p.id);
+        const teamList: (string | null)[] = [...participantIds];
+        if (teamList.length < 2) continue;
+        if (teamList.length % 2 !== 0) teamList.push(null);
+
+        const N = teamList.length;
+        const roundsCount = N - 1;
+        const matchesPerRound = N / 2;
+
+        for (let leg = 0; leg < rtp; leg++) {
+          const teams = [...teamList];
+
+          for (let round = 1; round <= roundsCount; round++) {
+            const currentRoundNumber = leg * roundsCount + round + (g * roundsCount * rtp);
+
+            for (let i = 0; i < matchesPerRound; i++) {
+              const home = teams[i];
+              const away = teams[N - 1 - i];
+              if (home && away) {
+                allMatchesToInsert.push({
+                  id: randomUUID(),
+                  groupId: group.id,
+                  roundNumber: currentRoundNumber,
+                  matchOrder: globalMatchCounter++,
+                  bracketBranch: 'MAIN',
+                  status: 'SCHEDULED',
+                  isBye: false,
+                  participant1Id: (leg % 2 === 0) ? home : away,
+                  participant2Id: (leg % 2 === 0) ? away : home,
+                  winnerId: null,
+                  p1SetsWon: 0,
+                  p2SetsWon: 0,
+                  totalSetsPlayed: 0,
+                  nextMatchId: null,
+                  loserNextMatchId: null,
+                  tournamentId,
+                  stageId: stage1.id,
+                  updatedAt: new Date(),
+                });
+              }
+            }
+            const last = teams.pop()!;
+            teams.splice(1, 0, last);
+          }
+        }
+      }
+
+      if (allMatchesToInsert.length > 0) {
+        await tx.insert(schema.matches).values(allMatchesToInsert);
+      }
+
+      // 6. Stage 2: Playoff (SINGLE_ELIMINATION or DOUBLE_ELIMINATION)
+      const totalAdvancing = teamsAdvancing * actualNumGroups + (allowWildcard ? wildcardTeams : 0);
+      const powerOf2 = Math.pow(2, Math.ceil(Math.log2(totalAdvancing)));
+
+      const playoffTypeUpper = playoffType.toUpperCase();
+      const [stage2] = await tx
+        .insert(schema.tournamentStages)
+        .values({
+          tournamentId,
+          name: playoffTypeUpper === 'DOUBLE_ELIMINATION' ? 'Vòng loại trực tiếp (Nhánh thua)' : 'Vòng loại trực tiếp',
+          type: playoffTypeUpper,
+          order: 2,
+          tournamentDivisionId: divisionId ?? null,
+          roundConfig: {
+            advanceMapping: {
+              numGroups: actualNumGroups,
+              teamsAdvancing,
+              allowWildcard: allowWildcard,
+              wildcardTeams,
+              totalAdvancing,
+            },
+          },
+        })
+        .returning();
+
+      if (playoffTypeUpper === 'SINGLE_ELIMINATION') {
+        // Tạo bracket rỗng (TBD slots) cho knockout stage
+        const [koGroup] = await tx
+          .insert(schema.tournamentGroups)
+          .values({
+            stageId: stage2.id,
+            name: 'Vòng loại trực tiếp',
+          })
+          .returning();
+
+        const totalRounds = Math.log2(powerOf2);
+        const matchNodesByRound = new Map<number, MatchNode[]>();
+
+        for (let r = totalRounds; r >= 1; r--) {
+          const matchesInRound = Math.pow(2, totalRounds - r);
+          const roundMatches: MatchNode[] = [];
+          for (let i = 0; i < matchesInRound; i++) {
+            roundMatches.push({
+              id: randomUUID(),
+              groupId: koGroup.id,
+              roundNumber: r,
+              matchOrder: i + 1,
+              bracketBranch: 'MAIN',
+              status: 'SCHEDULED',
+              isBye: false,
+              nextMatchId: null,
+              loserNextMatchId: null,
+              participant1Id: null,
+              participant2Id: null,
+              winnerId: null,
+              p1SetsWon: 0,
+              p2SetsWon: 0,
+              totalSetsPlayed: 0,
+              tournamentId,
+              stageId: stage2.id,
+            });
+          }
+          matchNodesByRound.set(r, roundMatches);
+        }
+
+        // Gắn next_match_id
+        for (let r = 1; r < totalRounds; r++) {
+          const currentRoundMatches = matchNodesByRound.get(r)!;
+          const nextRoundMatches = matchNodesByRound.get(r + 1)!;
+          for (let i = 0; i < currentRoundMatches.length; i++) {
+            const nextMatchIndex = Math.floor(i / 2);
+            currentRoundMatches[i].nextMatchId = nextRoundMatches[nextMatchIndex].id;
+          }
+        }
+
+        // Insert matches
+        for (let r = totalRounds; r >= 1; r--) {
+          const roundMatches = matchNodesByRound.get(r)!;
+          if (roundMatches.length > 0) {
+            await tx.insert(schema.matches).values(roundMatches);
+          }
+        }
+      } else {
+        // DOUBLE_ELIMINATION
+        const [koGroup] = await tx
+          .insert(schema.tournamentGroups)
+          .values({
+            stageId: stage2.id,
+            name: 'Vòng loại trực tiếp',
+          })
+          .returning();
+
+        const shape = getDoubleEliminationShape(powerOf2);
+        const allMatchesList: (typeof schema.matches.$inferInsert)[] = [];
+
+        // Winners bracket
+        const winnersRounds = shape.winnersRounds;
+        const winnersMatchesByRound: MatchNode[][] = [];
+        for (let r = 0; r < winnersRounds; r++) {
+          const matchesInRound = Math.pow(2, winnersRounds - 1 - r);
+          const roundMatches: MatchNode[] = [];
+          for (let i = 0; i < matchesInRound; i++) {
+            roundMatches.push({
+              id: randomUUID(),
+              groupId: koGroup.id,
+              roundNumber: r + 1,
+              matchOrder: i + 1,
+              bracketBranch: 'WINNERS',
+              status: 'SCHEDULED',
+              isBye: false,
+              nextMatchId: null,
+              loserNextMatchId: null,
+              participant1Id: null,
+              participant2Id: null,
+              winnerId: null,
+              p1SetsWon: 0,
+              p2SetsWon: 0,
+              totalSetsPlayed: 0,
+              tournamentId,
+              stageId: stage2.id,
+            });
+          }
+        }
+
+        // Losers bracket
+        const losersRounds = shape.losersRounds;
+        const losersMatchesByRound: MatchNode[][] = [];
+        for (let r = 0; r < losersRounds; r++) {
+          const matchesInRound = shape.losersMatchCounts[r];
+          const roundMatches: MatchNode[] = [];
+          for (let i = 0; i < matchesInRound; i++) {
+            roundMatches.push({
+              id: randomUUID(),
+              groupId: koGroup.id,
+              roundNumber: winnersRounds + r + 1,
+              matchOrder: i + 1,
+              bracketBranch: 'LOSERS',
+              status: 'SCHEDULED',
+              isBye: false,
+              nextMatchId: null,
+              loserNextMatchId: null,
+              participant1Id: null,
+              participant2Id: null,
+              winnerId: null,
+              p1SetsWon: 0,
+              p2SetsWon: 0,
+              totalSetsPlayed: 0,
+              tournamentId,
+              stageId: stage2.id,
+            });
+          }
+          losersMatchesByRound.push(roundMatches);
+        }
+
+        // Grand final
+        const grandFinal: MatchNode = {
+          id: randomUUID(),
+          groupId: koGroup.id,
+          roundNumber: winnersRounds + losersRounds + 1,
+          matchOrder: 1,
+          bracketBranch: 'GRAND_FINALS',
+          status: 'SCHEDULED',
+          isBye: false,
+          nextMatchId: null,
+          loserNextMatchId: null,
+          participant1Id: null,
+          participant2Id: null,
+          winnerId: null,
+          p1SetsWon: 0,
+          p2SetsWon: 0,
+          totalSetsPlayed: 0,
+          tournamentId,
+          stageId: stage2.id,
+        };
+
+        // Link winners bracket
+        for (let r = 0; r < winnersRounds - 1; r++) {
+          const currentRound = winnersMatchesByRound[r];
+          const nextRound = winnersMatchesByRound[r + 1];
+          for (let i = 0; i < currentRound.length; i++) {
+            const nextMatchIndex = Math.floor(i / 2);
+            currentRound[i].nextMatchId = nextRound[nextMatchIndex].id;
+          }
+        }
+        // Winners final → grand final
+        const lastWinnersRound = winnersMatchesByRound[winnersMatchesByRound.length - 1];
+        if (lastWinnersRound) {
+          lastWinnersRound[0].nextMatchId = grandFinal.id;
+        }
+
+        // Link losers bracket
+        for (let r = 0; r < losersRounds; r++) {
+          const currentRound = losersMatchesByRound[r];
+          const nextRound = losersMatchesByRound[r + 1];
+          if (nextRound) {
+            for (let i = 0; i < currentRound.length; i++) {
+              const nextMatchIndex = Math.floor(i / 2);
+              currentRound[i].nextMatchId = nextRound[nextMatchIndex].id;
+            }
+          }
+        }
+        // Losers final → grand final
+        const lastLosersRound = losersMatchesByRound[losersMatchesByRound.length - 1];
+        if (lastLosersRound) {
+          lastLosersRound[0].nextMatchId = grandFinal.id;
+        }
+
+        // Insert all matches
+        const allMatches = [
+          ...winnersMatchesByRound.flat(),
+          ...losersMatchesByRound.flat(),
+          grandFinal,
+        ];
+        await tx.insert(schema.matches).values(allMatches);
+      }
+
+      return {
+        message: 'Group Stage + Knockout generated successfully',
+        stage1Id: stage1.id,
+        stage2Id: stage2.id,
+        totalGroups: actualNumGroups,
+        totalAdvancing,
+      };
+    });
+  }
+
+  // ─── Advance Standings: Group Stage → Knockout ───
+  async advanceStandings(
+    tournamentId: string,
+    divisionId: string,
+    stageId: string,
+  ) {
+    return await this.db.transaction(async (tx) => {
+      // 1. Load stage 1 (ROUND_ROBIN) info
+      const [stage1] = await tx
+        .select()
+        .from(schema.tournamentStages)
+        .where(eq(schema.tournamentStages.id, stageId))
+        .limit(1);
+
+      if (!stage1) throw new BadRequestException('Stage not found');
+      if (stage1.type !== 'ROUND_ROBIN') throw new BadRequestException('Stage must be ROUND_ROBIN');
+
+      const advanceConfig = (stage1.roundConfig as Record<string, unknown>)?.advanceConfig as Record<string, unknown> || {};
+      const teamsAdvancing = (advanceConfig.teamsAdvancing as number) || 1;
+      const allowWildcard = (advanceConfig.allowWildcardThird as boolean) || false;
+      const wildcardTeams = (advanceConfig.wildcardTeamsAdvancing as number) || 0;
+
+      // 2. Find stage 2 (knockout)
+      const stages = await tx
+        .select()
+        .from(schema.tournamentStages)
+        .where(
+          and(
+            eq(schema.tournamentStages.tournamentId, tournamentId),
+            divisionId ? eq(schema.tournamentStages.tournamentDivisionId, divisionId) : undefined,
+            eq(schema.tournamentStages.order, 2),
+            isNull(schema.tournamentStages.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      const stage2 = stages[0];
+      if (!stage2) throw new BadRequestException('Stage 2 (knockout) not found. Generate bracket first.');
+
+      // 3. Load groups + standings for stage 1
+      const groups = await tx
+        .select()
+        .from(schema.tournamentGroups)
+        .where(eq(schema.tournamentGroups.stageId, stageId));
+
+      const groupIds = groups.map((g) => g.id);
+      const allStandings = await tx
+        .select()
+        .from(schema.groupStandings)
+        .where(inArray(schema.groupStandings.groupId, groupIds));
+
+      // 4. Rank each group
+      const advancingParticipants: Array<{ participantId: string; groupIndex: number; rank: number }> = [];
+
+      for (let gi = 0; gi < groups.length; gi++) {
+        const group = groups[gi];
+        const groupStandings = allStandings.filter((s) => s.groupId === group.id);
+
+        // Sort by totalPoints DESC, then tiebreaker
+        groupStandings.sort((a, b) => {
+          if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+          // Primary: H2H (simplified - check direct match result)
+          const diffA = a.pointsFor - a.pointsAgainst;
+          const diffB = b.pointsFor - b.pointsAgainst;
+          return diffB - diffA;
+        });
+
+        // Check for ties and create playoff matches
+        const pointGroups = new Map<number, typeof groupStandings>();
+        for (const s of groupStandings) {
+          const list = pointGroups.get(s.totalPoints) || [];
+          list.push(s);
+          pointGroups.set(s.totalPoints, list);
+        }
+
+        for (const [, tiedGroup] of pointGroups) {
+          if (tiedGroup.length >= 2) {
+            await this.resolveTiebreakers(
+              tx,
+              tournamentId,
+              stageId,
+              group.id,
+              tiedGroup.map(s => ({
+                participantId: s.participantId,
+                totalPoints: s.totalPoints,
+                pointsFor: s.pointsFor,
+                pointsAgainst: s.pointsAgainst,
+              })),
+              { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] },
+            );
+          }
+        }
+
+        // Take top N advancing
+        for (let r = 0; r < teamsAdvancing && r < groupStandings.length; r++) {
+          advancingParticipants.push({
+            participantId: groupStandings[r].participantId,
+            groupIndex: gi,
+            rank: r + 1,
+          });
+        }
+      }
+
+      // Wildcard: best third-place
+      if (allowWildcard && wildcardTeams > 0) {
+        const thirdPlaced: Array<{ participantId: string; pointsFor: number; pointsAgainst: number }> = [];
+        for (let gi = 0; gi < groups.length; gi++) {
+          const group = groups[gi];
+          const groupStandings = allStandings.filter((s) => s.groupId === group.id);
+          groupStandings.sort((a, b) => {
+            if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+            const diffA = a.pointsFor - a.pointsAgainst;
+            const diffB = b.pointsFor - b.pointsAgainst;
+            return diffB - diffA;
+          });
+          if (groupStandings.length >= 3) {
+            thirdPlaced.push({
+              participantId: groupStandings[2].participantId,
+              pointsFor: groupStandings[2].pointsFor,
+              pointsAgainst: groupStandings[2].pointsAgainst,
+            });
+          }
+        }
+        thirdPlaced.sort((a, b) => {
+          const diffA = a.pointsFor - a.pointsAgainst;
+          const diffB = b.pointsFor - b.pointsAgainst;
+          return diffB - diffA;
+        });
+        for (let i = 0; i < Math.min(wildcardTeams, thirdPlaced.length); i++) {
+          advancingParticipants.push({
+            participantId: thirdPlaced[i].participantId,
+            groupIndex: -1,
+            rank: 3,
+          });
+        }
+      }
+
+      // 4. Fill advancing participants into stage 2 match slots (cross-group seeding)
+      const koMatches = await tx
+        .select()
+        .from(schema.matches)
+        .where(
+          and(
+            eq(schema.matches.stageId, stage2.id),
+            isNull(schema.matches.deletedAt),
+          ),
+        )
+        .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
+
+      if (koMatches.length === 0) {
+        throw new BadRequestException('No knockout matches found in stage 2');
+      }
+
+      // Cross-group seeding: A1 vs B2, B1 vs A2, etc.
+      const round1Matches = koMatches.filter((m) => m.roundNumber === 1);
+      const advancingByGroup = new Map<number, typeof advancingParticipants>();
+      for (const ap of advancingParticipants) {
+        const list = advancingByGroup.get(ap.groupIndex) || [];
+        list.push(ap);
+        advancingByGroup.set(ap.groupIndex, list);
+      }
+
+      const numAdvGroups = advancingByGroup.size;
+      let matchIdx = 0;
+      for (let gi = 0; gi < numAdvGroups; gi++) {
+        const groupAdv = advancingByGroup.get(gi) || [];
+        if (groupAdv.length < 1) continue;
+
+        // A1 vs B2, B1 vs A2 pattern
+        const nextGi = (gi + 1) % numAdvGroups;
+        const nextGroupAdv = advancingByGroup.get(nextGi) || [];
+
+        if (matchIdx < round1Matches.length) {
+          round1Matches[matchIdx].participant1Id = groupAdv[0]?.participantId || null;
+          round1Matches[matchIdx].participant2Id = nextGroupAdv[1]?.participantId || null;
+          matchIdx++;
+        }
+        if (matchIdx < round1Matches.length && nextGroupAdv.length > 0) {
+          round1Matches[matchIdx].participant1Id = nextGroupAdv[0]?.participantId || null;
+          round1Matches[matchIdx].participant2Id = groupAdv[1]?.participantId || null;
+          matchIdx++;
+        }
+      }
+
+      // Update matches in DB
+      for (const m of koMatches) {
+        await tx
+          .update(schema.matches)
+          .set({
+            participant1Id: m.participant1Id,
+            participant2Id: m.participant2Id,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.matches.id, m.id));
+      }
+
+      return {
+        message: 'Standings advanced to knockout stage successfully',
+        stage2Id: stage2.id,
+        advancingParticipants: advancingParticipants.length,
+      };
+    });
   }
 }

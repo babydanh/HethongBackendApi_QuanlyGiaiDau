@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, count, type SQL } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, count, inArray, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -190,6 +190,7 @@ export class UsersRepository {
       .select({
         id: schema.users.id,
         createdAt: schema.users.createdAt,
+        isMock: schema.users.isMock,
         fullName: schema.profiles.fullName,
         avatarUrl: schema.profiles.avatarUrl,
         coverUrl: schema.profiles.coverUrl,
@@ -230,10 +231,174 @@ export class UsersRepository {
         )
       );
 
+    const achievements = await this.getPublicProfileAchievements(userId);
+
     return {
       ...user,
-      ranks,
+      ranks: user.isMock ? [] : ranks,
+      achievements,
     };
+  }
+
+  private async getPublicProfileAchievements(userId: string) {
+    const participations = await this.db
+      .selectDistinct({
+        tournamentId: schema.tournaments.id,
+        tournamentName: schema.tournaments.name,
+        tournamentStatus: schema.tournaments.status,
+        isRanked: schema.tournaments.isRanked,
+        startDate: schema.tournaments.startDate,
+        endDate: schema.tournaments.endDate,
+      })
+      .from(schema.tournamentRosters)
+      .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+      .innerJoin(schema.tournaments, eq(schema.tournamentParticipants.tournamentId, schema.tournaments.id))
+      .where(
+        and(
+          eq(schema.tournamentRosters.userId, userId),
+          eq(schema.tournaments.isRanked, true),
+          eq(schema.tournaments.status, 'COMPLETED'),
+          isNull(schema.tournaments.deletedAt),
+        ),
+      );
+
+    const achievements: Array<{
+      tournamentId: string;
+      tournamentName: string;
+      rank: 1 | 2 | 3;
+      completedAt: string | null;
+      tournamentDate: string | null;
+    }> = [];
+
+    for (const tournament of participations) {
+      const stages = await this.db
+        .select({
+          id: schema.tournamentStages.id,
+          order: schema.tournamentStages.order,
+        })
+        .from(schema.tournamentStages)
+        .where(eq(schema.tournamentStages.tournamentId, tournament.tournamentId))
+        .orderBy(asc(schema.tournamentStages.order));
+
+      if (stages.length === 0) continue;
+
+      const stageIds = stages.map((stage) => stage.id);
+      const maxStageOrder = Math.max(...stages.map((stage) => stage.order));
+
+      const matches = await this.db
+        .select({
+          id: schema.matches.id,
+          stageId: schema.matches.stageId,
+          stageOrder: schema.tournamentStages.order,
+          participant1Id: schema.matches.participant1Id,
+          participant2Id: schema.matches.participant2Id,
+          winnerId: schema.matches.winnerId,
+          status: schema.matches.status,
+          completedAt: schema.matches.completedAt,
+          isBye: schema.matches.isBye,
+        })
+        .from(schema.matches)
+        .innerJoin(schema.tournamentStages, eq(schema.matches.stageId, schema.tournamentStages.id))
+        .where(
+          and(
+            eq(schema.matches.tournamentId, tournament.tournamentId),
+            inArray(schema.matches.stageId, stageIds),
+          ),
+        )
+        .orderBy(asc(schema.tournamentStages.order), asc(schema.matches.roundNumber), asc(schema.matches.matchOrder));
+
+      const userParticipantIds = new Set(
+        (
+          await this.db
+            .select({ participantId: schema.tournamentRosters.participantId })
+            .from(schema.tournamentRosters)
+            .where(eq(schema.tournamentRosters.userId, userId))
+        ).map((row) => row.participantId),
+      );
+
+      const userMatches = matches.filter((match) =>
+        userParticipantIds.has(match.participant1Id || '') ||
+        userParticipantIds.has(match.participant2Id || ''),
+      );
+      if (userMatches.length === 0) continue;
+
+      const lastStageMatches = matches.filter((match) => match.stageOrder === maxStageOrder && match.status === 'COMPLETED');
+      let finalMatches = lastStageMatches.filter((match) => {
+        const p1InPrev = match.participant1Id ? userParticipantIds.has(match.participant1Id) : false;
+        const p2InPrev = match.participant2Id ? userParticipantIds.has(match.participant2Id) : false;
+        return p1InPrev || p2InPrev;
+      });
+      if (finalMatches.length === 0 && lastStageMatches.length === 1) {
+        finalMatches = lastStageMatches;
+      }
+
+      const bronzeMatches = lastStageMatches.filter((match) => !finalMatches.some((finalMatch) => finalMatch.id === match.id));
+
+      const userInMatch = (match: typeof matches[number]) => {
+        const inP1 = match.participant1Id ? userParticipantIds.has(match.participant1Id) : false;
+        const inP2 = match.participant2Id ? userParticipantIds.has(match.participant2Id) : false;
+        return {
+          inP1,
+          inP2,
+          isWinner:
+            (inP1 && match.winnerId === match.participant1Id) ||
+            (inP2 && match.winnerId === match.participant2Id),
+        };
+      };
+
+      const finalUserMatch = finalMatches.find((match) => {
+        const state = userInMatch(match);
+        return state.inP1 || state.inP2;
+      });
+
+      if (finalUserMatch) {
+        const state = userInMatch(finalUserMatch);
+        achievements.push({
+          tournamentId: tournament.tournamentId,
+          tournamentName: tournament.tournamentName,
+          rank: state.isWinner ? 1 : 2,
+          completedAt: finalUserMatch.completedAt ? finalUserMatch.completedAt.toISOString() : null,
+          tournamentDate: (tournament.endDate || tournament.startDate)?.toISOString() || null,
+        });
+        continue;
+      }
+
+      const bronzeUserMatch = bronzeMatches.find((match) => {
+        const state = userInMatch(match);
+        return state.inP1 || state.inP2;
+      });
+      if (bronzeUserMatch) {
+        const state = userInMatch(bronzeUserMatch);
+        if (state.isWinner) {
+          achievements.push({
+            tournamentId: tournament.tournamentId,
+            tournamentName: tournament.tournamentName,
+            rank: 3,
+            completedAt: bronzeUserMatch.completedAt ? bronzeUserMatch.completedAt.toISOString() : null,
+            tournamentDate: (tournament.endDate || tournament.startDate)?.toISOString() || null,
+          });
+          continue;
+        }
+      }
+
+      const latestUserMatch = [...userMatches].sort((a, b) => b.stageOrder - a.stageOrder)[0];
+      if (latestUserMatch && latestUserMatch.stageOrder < maxStageOrder) {
+        const state = userInMatch(latestUserMatch);
+        if (!state.isWinner) {
+          achievements.push({
+            tournamentId: tournament.tournamentId,
+            tournamentName: tournament.tournamentName,
+            rank: 3,
+            completedAt: latestUserMatch.completedAt ? latestUserMatch.completedAt.toISOString() : null,
+            tournamentDate: (tournament.endDate || tournament.startDate)?.toISOString() || null,
+          });
+        }
+      }
+    }
+
+    return achievements
+      .sort((a, b) => a.rank - b.rank || (b.completedAt || '').localeCompare(a.completedAt || ''))
+      .slice(0, 12);
   }
 
   async reportTargetExists(targetType: ReportTargetType, targetId: string) {

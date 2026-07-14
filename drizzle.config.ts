@@ -14,7 +14,7 @@ const sslMode = process.env.DB_SSL === 'true' ? 'require' : 'disable';
 
 // Encode password in case it contains special characters like @
 const encodedPassword = encodeURIComponent(password);
-const connectionString = `postgresql://${user}:${encodedPassword}@${host}:${port}/${database}?sslmode=${sslMode}`;
+const connectionString = `postgresql://${user}:${encodedPassword}@${host}:${port}/${database}?sslmode=${sslMode}&options=-c%20search_path=public`;
 
 export default defineConfig({
   schema: './src/database/schema/index.ts',

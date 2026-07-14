@@ -231,6 +231,42 @@ describe('validateScoreDetails', () => {
     });
   });
 
+  it('keeps validating later sets after an earlier set was approved as an override', () => {
+    const result = validateScoreDetails(
+      {
+        sets: [
+          {
+            team1Score: 9,
+            team2Score: 4,
+            isFinished: true,
+            scoreOverride: {
+              reason: 'Trọng tài chốt set rút gọn',
+              decidedAt: '2026-07-14T08:00:00.000Z',
+              decidedBy: 'referee-id',
+            },
+          },
+          { team1Score: 4, team2Score: 2, isFinished: false },
+        ],
+      },
+      buildResolvedConfig({
+        kind: 'PICKLEBALL_RALLY',
+        scoringModel: 'RALLY_POINT_SET',
+        bestOf: 3,
+        setsToWin: 2,
+        pointsPerSet: 11,
+        maxPoints: 15,
+        tiebreakAt: 10,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 1,
+      p2SetsWon: 0,
+      setsToWin: 2,
+      totalSets: 2,
+    });
+  });
+
   it('rejects extra set entries after the match is already decided', () => {
     expect(() =>
       validateScoreDetails(

@@ -2,7 +2,7 @@ import { Controller, Post, UseInterceptors, UploadedFile, BadRequestException } 
 import { FileInterceptor } from '@nestjs/platform-express';
 import { StorageService } from '../../providers/storage/storage.service';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { Public } from 'src/common/decorators/public.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Upload')
 @Controller('upload')

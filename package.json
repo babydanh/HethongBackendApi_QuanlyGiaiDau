@@ -17,6 +17,8 @@
     "seed:admin": "npx ts-node src/database/seeds/admin.seed.ts",
     "seed:test": "npx ts-node src/database/seeds/seed-test.ts",
     "seed:brackets": "npx ts-node src/database/seeds/generate-brackets.ts",
+    "seed:play": "npx ts-node src/database/seeds/play-matches.ts",
+    "repair:brackets": "npx ts-node src/database/seeds/repair-double-elim-brackets.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",

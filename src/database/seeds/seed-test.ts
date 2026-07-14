@@ -2,23 +2,24 @@ import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
 import * as bcrypt from 'bcrypt';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { createPostgresClientFromEnv } from '../postgres-client';
 import * as crypto from 'crypto';
 const uuidv4 = () => crypto.randomUUID();
 
-const sql = createPostgresClientFromEnv({ ssl: undefined });
-const db = drizzle(sql, { schema });
+const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
+const db = drizzle(sqlClient, { schema });
 
 async function createTournament(params: {
   name: string; bracketType: string; numTeams: number; venueId: string;
-  categoryId: string; organizerId: string;
+  categoryId: string; organizerId: string; status?: string;
 }) {
-  const { name, bracketType, numTeams, venueId, categoryId, organizerId } = params;
-  const maxSlots = bracketType === 'round_robin' ? numTeams
-    : bracketType === 'double_elimination'
-      ? Math.pow(2, Math.ceil(Math.log2(numTeams)))
-      : Math.pow(2, Math.ceil(Math.log2(numTeams)));
+  const { name, bracketType, numTeams, venueId, categoryId, organizerId, status = 'IN_PROGRESS' } = params;
+  const maxSlots = numTeams === 0 ? 16
+    : bracketType === 'round_robin' ? numTeams
+      : bracketType === 'double_elimination'
+        ? Math.pow(2, Math.ceil(Math.log2(numTeams)))
+        : Math.pow(2, Math.ceil(Math.log2(numTeams)));
 
   const tourId = uuidv4();
   const shortTs = Date.now().toString().slice(-6);
@@ -29,7 +30,7 @@ async function createTournament(params: {
     name: name,
     categoryId: categoryId,
     createdBy: organizerId,
-    status: 'IN_PROGRESS',
+    status: status as any,
     matchType: 'SINGLES',
     sportRules: { kind: 'BADMINTON', setsToWin: 2, pointsPerSet: 21, winByTwo: true },
     tournamentConfig: {
@@ -68,9 +69,10 @@ async function createTournament(params: {
       tournamentId: tourId,
       tournamentDivisionId: divisionId,
       registeredBy: organizerId,
-      teamName: `${name} - Đội ${i}`,
+      teamName: `Đội ${i}`,
       teamStatus: 'COMPLETE',
       isMock: true,
+      isPaid: true,
     });
   }
 
@@ -81,6 +83,30 @@ async function createTournament(params: {
 
 async function main() {
   console.log('=== SEED TEST DATA START ===\n');
+
+  // 0. Clean old bracket test tournaments (those with inviteCode starting with 'T')
+  console.log('0. Cleaning old test tournaments...');
+  const oldTours = await db.select().from(schema.tournaments).where(sql`invite_code LIKE 'T%'`);
+  const oldTourIds = oldTours.map(t => t.id);
+  if (oldTourIds.length > 0) {
+    // Delete matches of those tournaments
+    const stages = await db.select().from(schema.tournamentStages).where(inArray(schema.tournamentStages.tournamentId, oldTourIds));
+    const stageIds = stages.map(s => s.id);
+    if (stageIds.length > 0) {
+      const groups = await db.select().from(schema.tournamentGroups).where(inArray(schema.tournamentGroups.stageId, stageIds));
+      const groupIds = groups.map(g => g.id);
+      if (groupIds.length > 0) {
+        await db.delete(schema.groupStandings).where(inArray(schema.groupStandings.groupId, groupIds));
+        await db.delete(schema.matches).where(inArray(schema.matches.groupId, groupIds));
+        await db.delete(schema.tournamentGroups).where(inArray(schema.tournamentGroups.stageId, stageIds));
+      }
+      await db.delete(schema.tournamentStages).where(inArray(schema.tournamentStages.tournamentId, oldTourIds));
+    }
+    await db.delete(schema.tournamentParticipants).where(inArray(schema.tournamentParticipants.tournamentId, oldTourIds));
+    await db.delete(schema.tournamentDivisions).where(inArray(schema.tournamentDivisions.tournamentId, oldTourIds));
+    await db.delete(schema.tournaments).where(inArray(schema.tournaments.id, oldTourIds));
+  }
+  console.log('  Cleaned old tournaments successfully.');
 
   // 1. Roles
   console.log('1. Roles...');
@@ -155,16 +181,18 @@ async function main() {
     { name: 'DE-11: Double Elim 11 đội', bracketType: 'double_elimination', numTeams: 11 },
     { name: 'DE-13: Double Elim 13 đội', bracketType: 'double_elimination', numTeams: 13 },
     // Round Robin - odd numbers
-    { name: 'RR-09: Round Robin 9 đội', bracketType: 'round_robin', numTeams: 9 },
+    { name: 'RR-10: Round Robin 10 đội', bracketType: 'round_robin', numTeams: 10 },
     { name: 'RR-11: Round Robin 11 đội', bracketType: 'round_robin', numTeams: 11 },
     { name: 'RR-13: Round Robin 13 đội', bracketType: 'round_robin', numTeams: 13 },
+    // Registration test
+    { name: 'REG-TEST: Đăng ký thử nghiệm', bracketType: 'single_elimination', numTeams: 0, status: 'REGISTRATION_OPEN' },
   ];
 
   const tourIds: string[] = [];
   for (const cfg of configs) {
     const id = await createTournament({
       name: cfg.name, bracketType: cfg.bracketType, numTeams: cfg.numTeams,
-      venueId, categoryId: badmintonCat.id, organizerId,
+      venueId, categoryId: badmintonCat.id, organizerId, status: cfg.status,
     });
     tourIds.push(id);
   }
@@ -180,11 +208,11 @@ async function main() {
     console.log(`  ${configs[i].name}: ${tourIds[i]}`);
   }
 
-  await sql.end();
+  await sqlClient.end();
 }
 
 main().catch(async (err) => {
   console.error('Error:', err);
-  await sql.end();
+  await sqlClient.end();
   process.exit(1);
 });

@@ -66,6 +66,7 @@ export interface RosterMember {
   fullName: string | null;
   avatarUrl: string | null;
   role: string;
+  isMock?: boolean;
   elo: {
     eloPoints: number;
     tierName: string;

@@ -226,6 +226,10 @@ export class MatchesService {
         return;
       }
 
+      if (team1Score === team2Score) {
+        throw new BadRequestException(`set ${index + 1} không được phép hòa khi chốt ngoại lệ.`);
+      }
+
       if (team1Score > team2Score) {
         p1SetsWon += 1;
       } else if (team2Score > team1Score) {
@@ -237,6 +241,94 @@ export class MatchesService {
       p1SetsWon,
       p2SetsWon,
     };
+  }
+
+  private mergeTrustedSetOverrides(
+    scoreDetails: Record<string, unknown>,
+    existingScoreDetails: unknown,
+    overrideReason: string | undefined,
+    userId: string,
+  ): Record<string, unknown> {
+    if (!Array.isArray(scoreDetails.sets)) {
+      return scoreDetails;
+    }
+
+    const existingDetails =
+      existingScoreDetails && typeof existingScoreDetails === 'object' && !Array.isArray(existingScoreDetails)
+        ? (existingScoreDetails as Record<string, unknown>)
+        : {};
+    const existingSets = Array.isArray(existingDetails.sets) ? existingDetails.sets : [];
+    let overrideTargetIndex = -1;
+
+    if (overrideReason) {
+      scoreDetails.sets.forEach((setValue, index) => {
+        if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return;
+
+        const existingSet = existingSets[index];
+        const wasFinished =
+          existingSet && typeof existingSet === 'object' && !Array.isArray(existingSet)
+            ? (existingSet as Record<string, unknown>).isFinished === true
+            : false;
+        if ((setValue as Record<string, unknown>).isFinished === true && !wasFinished) {
+          overrideTargetIndex = index;
+        }
+      });
+
+    }
+
+    const hasPerSetOverride = existingSets.some((setValue) => {
+      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return false;
+      const setOverride = (setValue as Record<string, unknown>).scoreOverride;
+      return !!setOverride && typeof setOverride === 'object' && !Array.isArray(setOverride);
+    });
+    const legacyOverride =
+      !hasPerSetOverride &&
+      existingDetails.scoreOverride &&
+      typeof existingDetails.scoreOverride === 'object' &&
+      !Array.isArray(existingDetails.scoreOverride) &&
+      typeof (existingDetails.scoreOverride as Record<string, unknown>).reason === 'string'
+        ? existingDetails.scoreOverride
+        : undefined;
+    const legacyOverrideTargetIndex = legacyOverride
+      ? existingSets.findLastIndex((setValue) => {
+          if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return false;
+          const setRecord = setValue as Record<string, unknown>;
+          return setRecord.isFinished === true && !setRecord.scoreOverride;
+        })
+      : -1;
+
+    const sets = scoreDetails.sets.map((setValue, index) => {
+      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return setValue;
+
+      const safeSet = { ...(setValue as Record<string, unknown>) };
+      delete safeSet.scoreOverride;
+      const existingSet = existingSets[index];
+      const existingOverride =
+        existingSet && typeof existingSet === 'object' && !Array.isArray(existingSet)
+          ? (existingSet as Record<string, unknown>).scoreOverride
+          : undefined;
+
+      if (index === overrideTargetIndex && overrideReason) {
+        safeSet.scoreOverride = {
+          reason: overrideReason,
+          decidedAt: new Date().toISOString(),
+          decidedBy: userId,
+        };
+      } else if (
+        existingOverride &&
+        typeof existingOverride === 'object' &&
+        !Array.isArray(existingOverride) &&
+        typeof (existingOverride as Record<string, unknown>).reason === 'string'
+      ) {
+        safeSet.scoreOverride = existingOverride;
+      } else if (index === legacyOverrideTargetIndex && legacyOverride) {
+        safeSet.scoreOverride = legacyOverride;
+      }
+
+      return safeSet;
+    });
+
+    return { ...scoreDetails, sets };
   }
 
   async findAll(query: QueryMatchDto) {
@@ -286,9 +378,18 @@ export class MatchesService {
 
     let p1SetsWon = updateMatchScoreDto.p1SetsWon;
     let p2SetsWon = updateMatchScoreDto.p2SetsWon;
-    const scoreDetails = updateMatchScoreDto.scoreDetails;
+    let scoreDetails = updateMatchScoreDto.scoreDetails;
     let winnerId = updateMatchScoreDto.winnerId;
     const overrideReason = updateMatchScoreDto.overrideReason?.trim();
+
+    if (scoreDetails) {
+      scoreDetails = this.mergeTrustedSetOverrides(
+        scoreDetails,
+        existing.scoreDetails,
+        overrideReason,
+        user.sub,
+      );
+    }
 
     // 1. Validate score details if provided
     if (scoreDetails) {
@@ -344,21 +445,22 @@ export class MatchesService {
           }
         : scoreDetails;
 
+    // Nếu trận đấu đã xác định được đội thắng, tiến hành chốt kết quả và tự động đi tiếp (advancement logic)
+    if (winnerId) {
+      return await this.finalizeCompletedMatch(existing, id, winnerId, user.sub, {
+        p1SetsWon,
+        p2SetsWon,
+        scoreDetails: nextScoreDetails,
+      });
+    }
+
     const updatedMatch = await this.matchesRepository.updateScore(id, user.sub, {
       p1SetsWon,
       p2SetsWon,
       scoreDetails: nextScoreDetails,
-      winnerId,
     });
     if (!updatedMatch) {
       throw new NotFoundException('Match not found after score update');
-    }
-
-    // Auto-set status to COMPLETED when winner is determined
-    if (winnerId) {
-      await this.matchesRepository.updateStatus(id, {
-        status: 'COMPLETED',
-      });
     }
 
     // Cache live score in Redis if match is active/ongoing
@@ -406,6 +508,10 @@ export class MatchesService {
     }
 
     if (updateMatchStatusDto.status === 'COMPLETED') {
+      if (existing.status === 'COMPLETED') {
+        return existing;
+      }
+
       // Validate that we have a winner
       let winnerId = existing.winnerId;
       if (!winnerId) {

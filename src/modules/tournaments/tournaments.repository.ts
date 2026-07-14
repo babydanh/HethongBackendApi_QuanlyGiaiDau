@@ -18,6 +18,10 @@ import { UpdateDivisionDto } from './dto/update-division.dto';
 import { RosterMember, BracketMatch, BracketGroup, BracketStage } from './interfaces/tournament-config.interface';
 import { SeriesService } from '../series/series.service';
 import { ExclusionRuleException } from '../series/exceptions/exclusion-rule.exception';
+import {
+  resolveLoserTargetSlot,
+  resolveWinnerTargetSlot,
+} from '../../common/helpers/bracket-advancement.helper';
 
 @Injectable()
 export class TournamentsRepository {
@@ -1654,27 +1658,13 @@ export class TournamentsRepository {
             .where(eq(schema.matches.id, match.nextMatchId))
             .limit(1);
 
-          let updateField: { participant1Id?: string | null; participant2Id?: string | null };
-
-          if (nextMatch && nextMatch.bracketBranch === 'GRAND_FINALS') {
-            if (match.bracketBranch === 'MAIN') {
-              updateField = { participant1Id: winnerId };
-            } else {
-              updateField = { participant2Id: winnerId };
-            }
-          } else {
-            if (match.bracketBranch === 'LOSERS') {
-              if (match.roundNumber % 2 !== 0) {
-                updateField = { participant1Id: winnerId };
-              } else {
-                const isOdd = (match.matchOrder % 2 !== 0);
-                updateField = isOdd ? { participant1Id: winnerId } : { participant2Id: winnerId };
-              }
-            } else {
-              const isOdd = (match.matchOrder % 2 !== 0);
-              updateField = isOdd ? { participant1Id: winnerId } : { participant2Id: winnerId };
-            }
-          }
+          const targetSlot = resolveWinnerTargetSlot({
+            sourceBranch: match.bracketBranch,
+            sourceRoundNumber: match.roundNumber,
+            sourceMatchOrder: match.matchOrder,
+            targetBranch: nextMatch?.bracketBranch ?? 'MAIN',
+          });
+          const updateField = { [targetSlot]: winnerId };
 
           await tx
             .update(schema.matches)
@@ -1683,14 +1673,11 @@ export class TournamentsRepository {
         }
 
         if (match.loserNextMatchId) {
-          const isOdd = (match.matchOrder % 2 !== 0);
-          let updateField: { participant1Id?: string | null; participant2Id?: string | null };
-
-          if (match.roundNumber === 1) {
-            updateField = isOdd ? { participant1Id: null } : { participant2Id: null };
-          } else {
-            updateField = { participant2Id: null };
-          }
+          const targetSlot = resolveLoserTargetSlot({
+            sourceRoundNumber: match.roundNumber,
+            sourceMatchOrder: match.matchOrder,
+          });
+          const updateField = { [targetSlot]: null };
 
           await tx
             .update(schema.matches)
@@ -1878,6 +1865,7 @@ export class TournamentsRepository {
         participantId: schema.tournamentRosters.participantId,
         userId: schema.tournamentRosters.userId,
         role: schema.tournamentRosters.role,
+        isMock: schema.users.isMock,
         fullName: schema.profiles.fullName,
         avatarUrl: schema.profiles.avatarUrl,
         eloPoints: schema.userRanks.eloPoints,
@@ -1905,10 +1893,16 @@ export class TournamentsRepository {
         fullName: r.fullName,
         avatarUrl: r.avatarUrl,
         role: r.role,
-        elo: {
-          eloPoints: r.eloPoints ?? 1200,
-          tierName: r.tierName ?? 'Beginner',
-        },
+        isMock: r.isMock ?? false,
+        elo: r.isMock
+          ? {
+              eloPoints: 1000,
+              tierName: 'Chưa xếp hạng',
+            }
+          : {
+              eloPoints: r.eloPoints ?? 1000,
+              tierName: r.tierName ?? 'Beginner',
+            },
       });
       rostersMap.set(r.participantId, list);
     }
@@ -2019,12 +2013,15 @@ export class TournamentsRepository {
       .select()
       .from(schema.tournamentStages)
       .where(
-        divisionId
-          ? and(
-              eq(schema.tournamentStages.tournamentId, tournamentId),
-              eq(schema.tournamentStages.tournamentDivisionId, divisionId),
-            )
-          : eq(schema.tournamentStages.tournamentId, tournamentId),
+        and(
+          divisionId
+            ? and(
+                eq(schema.tournamentStages.tournamentId, tournamentId),
+                eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              )
+            : eq(schema.tournamentStages.tournamentId, tournamentId),
+          isNull(schema.tournamentStages.deletedAt),
+        )
       )
       .orderBy(schema.tournamentStages.order);
 
@@ -2786,6 +2783,69 @@ export class TournamentsRepository {
     });
   }
 
+  async deleteMockParticipant(tournamentId: string, participantId: string) {
+    return await this.db.transaction(async (tx) => {
+      const [participant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.id, participantId),
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          ),
+        )
+        .limit(1);
+
+      if (!participant) {
+        throw new BadRequestException('Participant not found');
+      }
+
+      if (!participant.isMock) {
+        throw new BadRequestException('Only mock participants can be deleted through this action');
+      }
+
+      const mockRosters = await tx
+        .select({ userId: schema.tournamentRosters.userId })
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, participantId));
+
+      await tx
+        .delete(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, participantId));
+
+      await tx
+        .update(schema.matches)
+        .set({ participant1Id: null })
+        .where(eq(schema.matches.participant1Id, participantId));
+
+      await tx
+        .update(schema.matches)
+        .set({ participant2Id: null })
+        .where(eq(schema.matches.participant2Id, participantId));
+
+      await tx
+        .update(schema.matches)
+        .set({ winnerId: null })
+        .where(eq(schema.matches.winnerId, participantId));
+
+      await tx
+        .delete(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId));
+
+      const userIds = Array.from(new Set(mockRosters.map((roster) => roster.userId)));
+      if (userIds.length > 0) {
+        await tx
+          .delete(schema.profiles)
+          .where(inArray(schema.profiles.userId, userIds));
+        await tx
+          .delete(schema.users)
+          .where(and(inArray(schema.users.id, userIds), eq(schema.users.isMock, true)));
+      }
+
+      return { count: 1 };
+    });
+  }
+
   async updateParticipantStatus(participantId: string, status: string) {
     return this.db.transaction(async (tx) => {
       const [existing] = await tx
@@ -2899,6 +2959,7 @@ export class TournamentsRepository {
           registeredBy: userId,
           teamName: teamName || 'Guest Team',
           isPaid: true,
+          isWildcard: true,
           teamStatus,
         })
         .returning();
@@ -3410,6 +3471,45 @@ export class TournamentsRepository {
       .innerJoin(schema.users, eq(schema.tournamentStaff.userId, schema.users.id))
       .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(and(...conditions));
+  }
+
+  async findParticipantsForSeeding(tournamentId: string, divisionId?: string) {
+    const participants = await this.db
+      .select()
+      .from(schema.tournamentParticipants)
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          divisionId
+            ? eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)
+            : undefined,
+          or(
+            eq(schema.tournamentParticipants.isMock, true),
+            and(
+              eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+              eq(schema.tournamentParticipants.isPaid, true),
+            ),
+          ),
+        ),
+      );
+
+    const participantIds = participants.map((p) => p.id);
+    const rosters = await this.db
+      .select()
+      .from(schema.tournamentRosters)
+      .where(inArray(schema.tournamentRosters.participantId, participantIds));
+
+    const rosterMap = new Map<string, typeof rosters>();
+    for (const r of rosters) {
+      const list = rosterMap.get(r.participantId) || [];
+      list.push(r);
+      rosterMap.set(r.participantId, list);
+    }
+
+    return participants.map((p) => ({
+      ...p,
+      members: rosterMap.get(p.id) || [],
+    }));
   }
 
   async updateSeeds(tournamentId: string, seeds: { participantId: string; seed: number }[]) {

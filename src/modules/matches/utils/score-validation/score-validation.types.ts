@@ -6,6 +6,7 @@ export interface NormalizedScoreEntry {
   p2: number;
   scoreStr: string;
   isFinished: boolean;
+  isOverridden: boolean;
 }
 
 export interface ScoreValidationSummary {

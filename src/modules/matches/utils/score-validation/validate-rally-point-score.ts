@@ -66,7 +66,7 @@ export function validateRallyPointScoreDetails(context: ScoreValidationContext):
       throw new BadRequestException(`Hiệp ${entry.key}: Không được phép hòa ${entry.scoreStr}.`);
     }
 
-    validateRallyPointSetScore(
+    if (!entry.isOverridden) validateRallyPointSetScore(
       entry.key,
       maxScore,
       resolvedConfig.pointsPerSet,

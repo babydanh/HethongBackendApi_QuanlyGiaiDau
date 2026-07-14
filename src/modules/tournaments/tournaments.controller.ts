@@ -627,6 +627,17 @@ export class TournamentsController {
     return this.tournamentsService.clearMockParticipants(id, user.sub, this.getSystemRoles(user), divisionId);
   }
 
+  @Delete(':id/participants/:participantId/mock')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xóa một participant giả lập' })
+  async deleteMockParticipant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.deleteMockParticipant(id, participantId, user.sub, this.getSystemRoles(user));
+  }
+
   @Patch(':id/participants/:participantId')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Duyệt hoặc từ chối vận động viên đăng ký' })
@@ -718,6 +729,29 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.finalizeStage(id, stageId, user.sub, this.getSystemRoles(user));
+  }
+
+  @Post(':id/auto-seed')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tự động xếp hạt giống theo ELO' })
+  async autoSeed(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('divisionId') divisionId: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.autoSeedFromElo(id, user.sub, this.getSystemRoles(user), divisionId);
+  }
+
+  @Post(':id/advance-standings')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Chot vong bang va chuyen tiep sang vong loai truc tiep' })
+  async advanceStandings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('divisionId') divisionId: string,
+    @Body('stageId') stageId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.advanceStandings(id, divisionId, stageId, user.sub, this.getSystemRoles(user));
   }
 
   @Public()
