@@ -189,9 +189,11 @@ export class AuthService {
       );
     }
 
-    // 2. If not linked, check if user exists by email
-    let user = oauthProfile.email
-      ? await this.authRepository.findUserByEmail(oauthProfile.email)
+    // 2. If not linked, check if user exists by email (case-insensitive — giống login/register)
+    const normalizedEmail = oauthProfile.email?.toLowerCase().trim() || oauthProfile.email;
+    oauthProfile.email = normalizedEmail;
+    let user = normalizedEmail
+      ? await this.authRepository.findUserByEmail(normalizedEmail)
       : null;
 
     if (!user) {
@@ -217,12 +219,20 @@ export class AuthService {
         defaultRole?.id || '',
       );
     } else {
-      // Nếu user đã tồn tại, kiểm tra và cập nhật Profile nếu bị thiếu fullName hoặc avatarUrl
+      // 3.1. Nếu user đã tồn tại nhưng chưa xác minh email, tự động xác minh email vì họ đã chứng minh sở hữu qua OAuth2
+      if (!user.isEmailVerified) {
+        await this.db.update(schema.users)
+          .set({ isEmailVerified: true })
+          .where(eq(schema.users.id, user.id));
+        user.isEmailVerified = true;
+      }
+
+      // 3.2. Kiểm tra và cập nhật Profile nếu bị thiếu fullName hoặc avatarUrl
       const [profile] = await this.db.select().from(schema.profiles).where(eq(schema.profiles.userId, user.id)).limit(1);
       if (!profile) {
         await this.db.insert(schema.profiles).values({
           userId: user.id,
-          fullName: oauthProfile.displayName || 'User',
+          fullName: oauthProfile.displayName || oauthProfile.email.split('@')[0],
           avatarUrl: oauthProfile.avatarUrl,
         });
       } else {

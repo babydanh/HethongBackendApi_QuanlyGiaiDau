@@ -85,7 +85,44 @@ async function run() {
       console.log('Admin profile already exists.');
     }
 
-    console.log('--- Admin Seeding Completed Successfully! ---');
+    // 6. Ensure organizer@vndcsport.com exists
+    let organizerRole = await db.select().from(roles).where(eq(roles.name, 'ORGANIZER')).limit(1).then(rows => rows[0]);
+    if (!organizerRole) {
+      const [newRole] = await db.insert(roles).values({
+        name: 'ORGANIZER',
+        slug: 'organizer',
+        description: 'Organizer'
+      }).returning();
+      organizerRole = newRole;
+    }
+    
+    const organizerPasswordHash = bcrypt.hashSync('password123', 12);
+    let organizerUser = await db.select().from(users).where(eq(users.email, 'organizer@vndcsport.com')).limit(1).then(rows => rows[0]);
+    if (!organizerUser) {
+      console.log('Creating organizer@vndcsport.com user...');
+      [organizerUser] = await db.insert(users).values({
+        email: 'organizer@vndcsport.com',
+        passwordHash: organizerPasswordHash,
+        isEmailVerified: true
+      }).returning();
+    } else {
+      await db.update(users).set({ passwordHash: organizerPasswordHash, deletedAt: null }).where(eq(users.id, organizerUser.id));
+    }
+
+    await db.insert(userToRoles).values({
+      userId: organizerUser.id,
+      roleId: organizerRole.id
+    }).onConflictDoNothing();
+
+    const organizerProfile = await db.select().from(profiles).where(eq(profiles.userId, organizerUser.id)).limit(1).then(rows => rows[0]);
+    if (!organizerProfile) {
+      await db.insert(profiles).values({
+        userId: organizerUser.id,
+        fullName: 'BTC VNDC Sport',
+      });
+    }
+
+    console.log('--- Admin and Organizer Seeding Completed Successfully! ---');
   } finally {
     await sql.end();
   }

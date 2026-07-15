@@ -109,5 +109,15 @@ export class QueryTournamentDto {
   @IsString()
   @IsIn(['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'])
   bracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT';
+
+  @ApiPropertyOptional({
+    example: 'MALE',
+    description: 'Lọc theo giới tính: MALE, FEMALE, MIXED',
+    enum: ['MALE', 'FEMALE', 'MIXED'],
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
+  genderRestriction?: 'MALE' | 'FEMALE' | 'MIXED';
 }
 

@@ -1,6 +1,6 @@
 ﻿import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 
@@ -14,7 +14,10 @@ export class AuthRepository {
     const users = await this.db
       .select()
       .from(schema.users)
-      .where(eq(schema.users.email, email))
+      .where(and(
+        eq(schema.users.email, email),
+        isNull(schema.users.deletedAt),
+      ))
       .limit(1);
     return users[0];
   }
