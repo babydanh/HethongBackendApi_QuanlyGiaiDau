@@ -1,6 +1,6 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 
@@ -14,7 +14,10 @@ export class AuthRepository {
     const users = await this.db
       .select()
       .from(schema.users)
-      .where(eq(schema.users.email, email))
+      .where(and(
+        eq(schema.users.email, email),
+        isNull(schema.users.deletedAt),
+      ))
       .limit(1);
     return users[0];
   }
@@ -38,6 +41,36 @@ export class AuthRepository {
       .where(eq(schema.roles.name, roleName))
       .limit(1);
     return roles[0];
+  }
+
+  async createDefaultUserRanks(userId: string) {
+    // Tạo userRanks mặc định cho tất cả category (ELO 1000, SINGLES)
+    const categories = await this.db
+      .select({ id: schema.categories.id })
+      .from(schema.categories);
+
+    for (const cat of categories) {
+      const existing = await this.db
+        .select()
+        .from(schema.userRanks)
+        .where(and(
+          eq(schema.userRanks.userId, userId),
+          eq(schema.userRanks.categoryId, cat.id),
+          eq(schema.userRanks.matchType, 'SINGLES'),
+          isNull(schema.userRanks.communityId),
+          isNull(schema.userRanks.genderRestriction),
+        ))
+        .limit(1);
+
+      if (existing.length === 0) {
+        await this.db.insert(schema.userRanks).values({
+          userId,
+          categoryId: cat.id,
+          matchType: 'SINGLES',
+          eloPoints: 1000,
+        }).onConflictDoNothing();
+      }
+    }
   }
 
   async createUserWithProfile(
@@ -119,6 +152,16 @@ export class AuthRepository {
     const [record] = await this.db
       .insert(schema.authProviders)
       .values(data)
+      .onConflictDoUpdate({
+        target: [schema.authProviders.provider, schema.authProviders.providerUserId],
+        set: {
+          providerEmail: data.providerEmail,
+          providerAvatarUrl: data.providerAvatarUrl,
+          providerDisplayName: data.providerDisplayName,
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken,
+        },
+      })
       .returning();
     return record;
   }

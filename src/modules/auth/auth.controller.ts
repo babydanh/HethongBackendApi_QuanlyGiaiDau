@@ -10,6 +10,7 @@ import {
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -116,6 +117,14 @@ export class AuthController {
       res.clearCookie('accessToken', cookieOptions);
       res.clearCookie('refreshToken', cookieOptions);
     });
+
+    // Clear CSRF token cookie
+    res.clearCookie('csrf-token', {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict' as const,
+      path: '/',
+    });
     
     return { message: 'Logged out successfully' };
   }
@@ -146,6 +155,17 @@ export class AuthController {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/',
+    });
+
+    // CSRF Double Submit Cookie — non-httpOnly để JS đọc được
+    // SameSite=Strict để chặn attacker đọc từ cross-origin
+    const csrfToken = randomBytes(32).toString('hex');
+    res.cookie('csrf-token', csrfToken, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: '/',
     });

@@ -21,7 +21,7 @@ export class MatchesRepository {
   ) {}
 
   async findAll(query: QueryMatchDto) {
-    const { page = 1, limit = 10, groupId, status, userId, publicOnly } = query;
+    const { page = 1, limit = 10, groupId, status, userId, publicOnly, bracketType } = query;
     const offset = (page - 1) * limit;
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
@@ -79,13 +79,14 @@ export class MatchesRepository {
       );
     }
 
-    if (tId || divisionId) {
+    if (tId || divisionId || bracketType) {
       const stages = await this.db
         .select({ id: schema.tournamentStages.id })
         .from(schema.tournamentStages)
         .where(and(
           ...(tId ? [eq(schema.tournamentStages.tournamentId, tId)] : []),
           ...(divisionId ? [eq(schema.tournamentStages.tournamentDivisionId, divisionId)] : []),
+          ...(bracketType ? [eq(schema.tournamentStages.type, bracketType)] : []),
           isNull(schema.tournamentStages.deletedAt),
         ));
       const stageIds = stages.map(s => s.id);

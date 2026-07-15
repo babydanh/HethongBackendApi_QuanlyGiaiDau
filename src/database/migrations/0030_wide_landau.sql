@@ -1,0 +1,1 @@
+ALTER TABLE "otp_codes" ALTER COLUMN "code" SET DATA TYPE varchar(255);

@@ -226,55 +226,6 @@ async function main() {
     console.error('   ❌ Lỗi khi tải dữ liệu địa giới từ API:', error);
   }
 
-  // 5. Gán quyền ADMIN cho 2 tài khoản OAuth2 của hệ thống
-  console.log('\n5. Đang gán quyền ADMIN cho tài khoản quản trị hệ thống...');
-  const adminOAuthEmails = ['macter.970@gmail.com', 'hxlinh1683@gmail.com'];
-  const adminRoleId = roleMap.get('admin');
-  const organizerRoleId = roleMap.get('organizer');
-
-  for (const email of adminOAuthEmails) {
-    let [user] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
-    
-    // Nếu chưa tồn tại trong DB, tạo sẵn user
-    if (!user) {
-      [user] = await db.insert(schema.users).values({
-        email: email,
-        isEmailVerified: true,
-      }).returning();
-      console.log(`   ➜ Đã tạo sẵn tài khoản cho OAuth2: ${email}`);
-    }
-
-    // Gán ADMIN role
-    if (adminRoleId) {
-      const [existingAdminRole] = await db.select().from(schema.userToRoles)
-        .where(and(eq(schema.userToRoles.userId, user.id), eq(schema.userToRoles.roleId, adminRoleId))).limit(1);
-      if (!existingAdminRole) {
-        await db.insert(schema.userToRoles).values({ userId: user.id, roleId: adminRoleId }).onConflictDoNothing();
-        console.log(`   ➜ Đã gán ADMIN cho: ${email}`);
-      } else {
-        console.log(`   ➜ ${email} đã có quyền ADMIN.`);
-      }
-    }
-
-    // Gán ORGANIZER role
-    if (organizerRoleId) {
-      await db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRoleId }).onConflictDoNothing();
-    }
-
-    // Tạo sẵn Profile trống để đồng bộ khi login OAuth2
-    const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, user.id)).limit(1);
-    if (!profile) {
-      await db.insert(schema.profiles).values({
-        userId: user.id,
-        fullName: email.split('@')[0], // Tạm thời lấy phần trước @ làm tên
-      });
-      console.log(`   ➜ Đã khởi tạo Profile mặc định cho: ${email}`);
-    }
-  }
-
-  // Lấy ID của một admin làm người cập nhật cho System Configs
-  const [defaultAdmin] = await db.select().from(schema.users).where(eq(schema.users.email, 'macter.970@gmail.com')).limit(1);
-
   // 5. Setup System Configs
   console.log('\n5. Đang khởi tạo cấu hình hệ thống mặc định (System Configs)...');
   const systemConfigsList = [
@@ -293,7 +244,7 @@ async function main() {
         key: config.key,
         value: config.value,
         description: config.description,
-        updatedBy: defaultAdmin?.id // Gán người cập nhật là tài khoản Admin hệ thống
+        updatedBy: null
       });
       console.log(`   ➜ Đã tạo cấu hình: ${config.key} = ${config.value}`);
     } else {

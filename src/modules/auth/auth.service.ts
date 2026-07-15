@@ -65,6 +65,9 @@ export class AuthService {
       defaultRole?.id || '',
     );
 
+    // Tạo userRanks mặc định (ELO 1000) cho tất cả category
+    await this.authRepository.createDefaultUserRanks(newUser.id);
+
     delete (newUser as { passwordHash?: string | null }).passwordHash;
     return newUser;
   }
@@ -98,6 +101,8 @@ export class AuthService {
       roles,
       userAgent,
       ipAddress,
+      user.isEmailVerified,
+      user.isMock,
     );
   }
 
@@ -143,12 +148,20 @@ export class AuthService {
 
       const roles = await this.authRepository.findUserRoles(payload.sub);
 
+      const [userRecord] = await this.db
+        .select({ isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
+        .from(schema.users)
+        .where(eq(schema.users.id, payload.sub))
+        .limit(1);
+
       return this.generateTokens(
         payload.sub,
         payload.email,
         roles,
         userAgent,
         ipAddress,
+        userRecord?.isEmailVerified,
+        userRecord?.isMock,
       );
     } catch {
       throw new UnauthorizedException(ERROR_MESSAGES.TOKEN_EXPIRED);
@@ -177,28 +190,51 @@ export class AuthService {
     );
 
     if (existingProvider) {
+      // Cập nhật lại fullName và avatarUrl mới nhất từ OAuth sang Profile
+      const updateData: Partial<typeof schema.profiles.$inferInsert> = {};
+      if (oauthProfile.displayName) updateData.fullName = oauthProfile.displayName;
+      if (oauthProfile.avatarUrl) updateData.avatarUrl = oauthProfile.avatarUrl;
+      if (Object.keys(updateData).length > 0) {
+        await this.db.update(schema.profiles)
+          .set(updateData)
+          .where(eq(schema.profiles.userId, existingProvider.userId));
+      }
+
       const roles = await this.authRepository.findUserRoles(
         existingProvider.userId,
       );
+      const [existingUser] = await this.db
+        .select({ isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
+        .from(schema.users)
+        .where(eq(schema.users.id, existingProvider.userId))
+        .limit(1);
+
       return this.generateTokens(
         existingProvider.userId,
         oauthProfile.email || '',
         roles,
         userAgent,
         ipAddress,
+        existingUser?.isEmailVerified,
+        existingUser?.isMock,
       );
     }
 
-    // 2. If not linked, check if user exists by email
-    let user = oauthProfile.email
-      ? await this.authRepository.findUserByEmail(oauthProfile.email)
+    // 2. If not linked, check if user exists by email (case-insensitive — giống login/register)
+    const normalizedEmail = oauthProfile.email?.toLowerCase().trim() || oauthProfile.email;
+    oauthProfile.email = normalizedEmail;
+    let user = normalizedEmail
+      ? await this.authRepository.findUserByEmail(normalizedEmail)
       : null;
+
+    const systemAdminsRaw = this.configService.get<string>('SYSTEM_ADMINS') || '';
+    const systemAdmins = systemAdminsRaw.split(',').map(email => email.trim().toLowerCase());
+    const isSystemAdmin = normalizedEmail ? systemAdmins.includes(normalizedEmail) : false;
 
     if (!user) {
       // 3. If no user, create a new one
-      const defaultRole = await this.authRepository.findRoleByName(
-        UserRole.PLAYER,
-      );
+      const targetRoleName = isSystemAdmin ? UserRole.ADMIN : UserRole.PLAYER;
+      const defaultRole = await this.authRepository.findRoleByName(targetRoleName);
       
       // Nếu email có đuôi @vndcsport.vn (email ảo tự sinh), ta để isEmailVerified: false
       const isVirtualEmail = oauthProfile.email.endsWith('@vndcsport.vn');
@@ -210,19 +246,60 @@ export class AuthService {
           isEmailVerified: !isVirtualEmail,
         },
         { 
-          fullName: oauthProfile.displayName || 'User', 
+          fullName: oauthProfile.displayName || oauthProfile.email.split('@')[0], 
           avatarUrl: oauthProfile.avatarUrl,
           userId: '' 
         },
         defaultRole?.id || '',
       );
+
+      // Nếu là Admin hệ thống, gán thêm vai trò ORGANIZER và kiểm tra ADMIN
+      if (isSystemAdmin) {
+        const organizerRole = await this.authRepository.findRoleByName(UserRole.ORGANIZER);
+        if (organizerRole) {
+          await this.db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRole.id }).onConflictDoNothing();
+        }
+        // Đảm bảo có vai trò ADMIN
+        const adminRole = await this.authRepository.findRoleByName(UserRole.ADMIN);
+        if (adminRole) {
+          await this.db.insert(schema.userToRoles).values({ userId: user.id, roleId: adminRole.id }).onConflictDoNothing();
+        }
+      }
+
+      // Tạo userRanks mặc định (ELO 1000) cho tất cả category
+      await this.authRepository.createDefaultUserRanks(user.id);
     } else {
-      // Nếu user đã tồn tại, kiểm tra và cập nhật Profile nếu bị thiếu fullName hoặc avatarUrl
+      // 3.1. Tạo userRanks mặc định nếu chưa có
+      await this.authRepository.createDefaultUserRanks(user.id);
+
+      // 3.2. Nếu user đã tồn tại nhưng chưa xác minh email, tự động xác minh email vì họ đã chứng minh sở hữu qua OAuth2
+      if (!user.isEmailVerified) {
+        await this.db.update(schema.users)
+          .set({ isEmailVerified: true })
+          .where(eq(schema.users.id, user.id));
+        user.isEmailVerified = true;
+      }
+
+      // 3.3. Nếu là Admin đăng nhập mà chưa có đủ quyền ADMIN hoặc ORGANIZER, gán bổ sung luôn
+      if (isSystemAdmin) {
+        const organizerRole = await this.authRepository.findRoleByName(UserRole.ORGANIZER);
+        const adminRole = await this.authRepository.findRoleByName(UserRole.ADMIN);
+        const roles = await this.authRepository.findUserRoles(user.id);
+        
+        if (organizerRole && !roles.includes(UserRole.ORGANIZER)) {
+          await this.db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRole.id }).onConflictDoNothing();
+        }
+        if (adminRole && !roles.includes(UserRole.ADMIN)) {
+          await this.db.insert(schema.userToRoles).values({ userId: user.id, roleId: adminRole.id }).onConflictDoNothing();
+        }
+      }
+
+      // 3.4. Kiểm tra và cập nhật Profile nếu bị thiếu fullName hoặc avatarUrl, hoặc đồng bộ lại từ Google
       const [profile] = await this.db.select().from(schema.profiles).where(eq(schema.profiles.userId, user.id)).limit(1);
       if (!profile) {
         await this.db.insert(schema.profiles).values({
           userId: user.id,
-          fullName: oauthProfile.displayName || 'User',
+          fullName: oauthProfile.displayName || oauthProfile.email.split('@')[0],
           avatarUrl: oauthProfile.avatarUrl,
         });
       } else {
@@ -260,6 +337,8 @@ export class AuthService {
       roles,
       userAgent,
       ipAddress,
+      user.isEmailVerified,
+      user.isMock,
     );
   }
 
@@ -269,8 +348,17 @@ export class AuthService {
     roles: string[],
     userAgent?: string,
     ipAddress?: string,
+    isEmailVerified?: boolean,
+    isMock?: boolean,
   ) {
-    const payload = { sub: userId, email, roles, jti: crypto.randomUUID() };
+    const payload = {
+      sub: userId,
+      email,
+      roles,
+      jti: crypto.randomUUID(),
+      isEmailVerified: isEmailVerified ?? false,
+      isMock: isMock ?? false,
+    };
 
     const accessExpiresIn = this.configService.get<string>('auth.jwtAccessExpiresIn') || '15m';
     const refreshExpiresIn = this.configService.get<string>('auth.jwtRefreshExpiresIn') || '7d';

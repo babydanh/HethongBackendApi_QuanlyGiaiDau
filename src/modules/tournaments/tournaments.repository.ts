@@ -105,7 +105,7 @@ export class TournamentsRepository {
       defaultVisibility?: 'PUBLIC' | 'PRIVATE' | null;
     },
   ) {
-    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType } = query;
+    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType, genderRestriction } = query;
     const offset = (page - 1) * limit;
     const defaultTournamentType = options?.defaultTournamentType;
     const defaultVisibility = options?.defaultVisibility;
@@ -149,6 +149,10 @@ export class TournamentsRepository {
     }
     if (bracketType) {
       conditions.push(sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`);
+    }
+
+    if (genderRestriction) {
+      conditions.push(eq(schema.tournaments.genderRestriction, genderRestriction));
     }
 
     if (createdBy) {
@@ -206,6 +210,7 @@ export class TournamentsRepository {
       .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
       .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
       .where(whereClause)
+      .orderBy(sql`${schema.tournaments.createdAt} DESC`)
       .limit(limit)
       .offset(offset);
 
