@@ -80,4 +80,13 @@ export class QueryMatchDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   publicOnly?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'GROUP_STAGE_KNOCKOUT',
+    description: 'Lọc theo thể thức thi đấu: SINGLE_ELIMINATION, DOUBLE_ELIMINATION, ROUND_ROBIN, GROUP_STAGE_KNOCKOUT',
+    enum: ['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'],
+  })
+  @IsOptional()
+  @IsString()
+  bracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT';
 }
