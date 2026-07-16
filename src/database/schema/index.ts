@@ -8,6 +8,7 @@ export * from './matches.schema';
 export * from './payments.schema';
 export * from './social.schema';
 export * from './notifications.schema';
+export * from './livestream.schema';
 export * from './advertisements.schema';
 export * from './audit.schema';
 export * from './community_gallery.schema';
@@ -16,4 +17,3 @@ export * from './community_rankings.schema';
 export * from './series.schema';
 export * from './admin_tables.schema';
 export * from './otp_codes.schema';
-
