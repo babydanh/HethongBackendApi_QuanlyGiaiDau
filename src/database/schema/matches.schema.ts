@@ -33,7 +33,9 @@ export const groupStandings = pgTable('group_standings', {
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  idxStandingsGroupId: index('idx_standings_group_id').on(table.groupId),
+}));
 
 export const matches = pgTable(
   'matches',

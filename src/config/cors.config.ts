@@ -1,7 +1,16 @@
 export const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Cho phép tất cả các nguồn (origins) trong môi trường phát triển (bao gồm localhost, IP LAN và các cổng ngẫu nhiên của Flutter Web)
-    callback(null, true);
+    const isProd = process.env.NODE_ENV === 'production';
+    const allowedOrigins = [
+      'https://giaidau.vnvar.com',
+      'https://www.giaidau.vnvar.com'
+    ];
+
+    if (!isProd || !origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
   },
   credentials: true,
 };

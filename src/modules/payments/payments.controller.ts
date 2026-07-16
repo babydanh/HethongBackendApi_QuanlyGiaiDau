@@ -1,4 +1,5 @@
 import { Controller, Post, Body, Get, Patch, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PayoutRequestDto } from './dto/payout-request.dto';
@@ -74,6 +75,7 @@ export class PaymentsController {
   @Post('create-link')
   @ApiBearerAuth()
   @Roles(UserRole.PLAYER, UserRole.ORGANIZER)
+  @Throttle({ sensitive: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Tạo link thanh toán (VNPAY/MoMo)' })
   async createPaymentLink(
     @Body() createPaymentDto: CreatePaymentDto,

@@ -109,6 +109,10 @@ export const pairRanks = pgTable(
     user1Id: uuid('user1_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
     user2Id: uuid('user2_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
     categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'cascade' }).notNull(),
+    matchType: varchar('match_type', { length: 50 }).default('DOUBLES').notNull(),
+    genderRestriction: varchar('gender_restriction', { length: 20 }),
+    scope: varchar('scope', { length: 20 }).default('PUBLIC').notNull(),
+    communityId: uuid('community_id').references(() => communities.id, { onDelete: 'cascade' }),
     eloPoints: integer('elo_points').default(1000).notNull(),
     matchesPlayed: integer('matches_played').default(0).notNull(),
     matchesWon: integer('matches_won').default(0).notNull(),
@@ -116,11 +120,14 @@ export const pairRanks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    userPairUnique: unique('user_pair_category_unique_idx').on(
+    userPairUnique: uniqueIndex('user_pair_rank_context_idx').on(
       table.user1Id,
       table.user2Id,
-      table.categoryId
+      table.categoryId,
+      table.matchType,
+      table.scope,
+      sql`COALESCE(${table.genderRestriction}, '')`,
+      sql`COALESCE(${table.communityId}::text, '')`,
     ),
   })
 );
-

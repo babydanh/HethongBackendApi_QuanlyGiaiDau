@@ -5,6 +5,7 @@ import {
   text,
   boolean,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 import { users } from './users.schema';
 import { matches } from './matches.schema';
@@ -25,7 +26,12 @@ export const notifications = pgTable('notifications', {
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  idxNotificationsReceiverRead: index('idx_notifications_receiver_read').on(
+    table.receiverId,
+    table.isRead,
+  ),
+}));
 
 export const matchComments = pgTable('match_comments', {
   id: uuid('id').primaryKey().defaultRandom(),

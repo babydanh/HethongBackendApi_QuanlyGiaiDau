@@ -27,5 +27,11 @@ export const envValidationSchema = Joi.object({
   PAYOS_CLIENT_ID: Joi.string().allow('').optional().default(''),
   PAYOS_API_KEY: Joi.string().allow('').optional().default(''),
   PAYOS_CHECKSUM_KEY: Joi.string().allow('').optional().default(''),
+  LIVESTREAM_RTMP_BASE_URL: Joi.string().allow('').optional().default('rtmp://localhost:1935/live'),
+  LIVESTREAM_HLS_PUBLIC_BASE_URL: Joi.string().allow('').optional().default('http://localhost:8888/live'),
+  LIVESTREAM_SRT_BASE_URL: Joi.string().allow('').optional().default('srt://localhost:8890'),
+  MEDIA_PUBLIC_BASE_URL: Joi.string().allow('').optional().default(''),
+  MEDIA_RTMP_BASE_URL: Joi.string().allow('').optional().default(''),
+  MEDIA_SRT_BASE_URL: Joi.string().allow('').optional().default(''),
+  MEDIA_WEBHOOK_SECRET: Joi.string().allow('').optional().default(''),
 });
-

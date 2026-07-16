@@ -34,6 +34,7 @@ import { SeriesModule } from './modules/series/series.module';
 import { RedisModule } from './providers/redis/redis.module';
 import { MailModule } from './providers/mail/mail.module';
 import { AiModule } from './modules/ai/ai.module';
+import { LivestreamModule } from './modules/livestream/livestream.module';
 
 @Module({
   imports: [
@@ -55,7 +56,10 @@ import { AiModule } from './modules/ai/ai.module';
     }),
     RedisModule,
     MailModule,
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 10000 }]),
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60000, limit: 1000 },
+      { name: 'sensitive', ttl: 60000, limit: 100 }
+    ]),
     ScheduleModule.forRoot(),
     DatabaseModule,
     AuthModule,
@@ -77,6 +81,7 @@ import { AiModule } from './modules/ai/ai.module';
     AdminModule,
     SeriesModule,
     AiModule,
+    LivestreamModule,
   ],
   controllers: [AppController],
   providers: [

@@ -2,6 +2,11 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { TournamentsService } from '../tournaments/tournaments.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { MatchesService } from '../matches/matches.service';
+import { PaymentsService } from '../payments/payments.service';
+import { RankingsService } from '../rankings/rankings.service';
+import { QueryMatchDto } from '../matches/dto/query-match.dto';
 
 @Injectable()
 export class AiService {
@@ -11,6 +16,10 @@ export class AiService {
   constructor(
     private readonly configService: ConfigService,
     private readonly tournamentsService: TournamentsService,
+    private readonly notificationsService: NotificationsService,
+    private readonly matchesService: MatchesService,
+    private readonly paymentsService: PaymentsService,
+    private readonly rankingsService: RankingsService,
   ) {
     const apiKey = this.configService.get<string>('ai.apiKey');
     const baseURL = this.configService.get<string>('ai.baseUrl') || 'https://openrouter.ai/api/v1';
@@ -38,6 +47,61 @@ export class AiService {
     return match ? match[1] : null;
   }
 
+  private async buildUserContext(userId: string): Promise<string> {
+    let ctx = '\n--- THÔNG TIN CÁ NHÂN CỦA BẠN ---\n';
+
+    // Thông báo chưa đọc
+    try {
+      const unread = await this.notificationsService.getUnreadCount(userId);
+      ctx += `- Thông báo chưa đọc: ${unread.count}\n`;
+    } catch { ctx += '- Thông báo: Không thể tải\n'; }
+
+    // Giải đấu đang tham gia
+    try {
+      const myTours = await this.tournamentsService.findMy(userId);
+      const ACTIVE_STATUSES = ['IN_PROGRESS', 'REGISTRATION_OPEN', 'UPCOMING'] as const;
+      const active = myTours.filter(
+        (t: { status?: string }) => t.status && ACTIVE_STATUSES.includes(t.status as typeof ACTIVE_STATUSES[number])
+      );
+      if (active.length > 0) {
+        ctx += `- Giải đấu đang tham gia:\n`;
+        active.slice(0, 5).forEach((t: { name?: string; status?: string }) => {
+          const statusText = t.status === 'IN_PROGRESS' ? 'Đang thi đấu'
+            : t.status === 'REGISTRATION_OPEN' ? 'Đang mở đăng ký' : 'Sắp diễn ra';
+          ctx += `  • ${t.name || 'Không tên'}: ${statusText}\n`;
+        });
+      }
+    } catch { /* silently ignore */ }
+
+    // ELO hiện tại
+    try {
+      const ranking = await this.rankingsService.getUserRankings(userId);
+      if (ranking?.publicRanks && ranking.publicRanks.length > 0) {
+        const top = ranking.publicRanks[0];
+        ctx += `- ELO hiện tại: ${top.eloPoints ?? 'Chưa có'} (${top.tierName || 'Chưa xếp hạng'})\n`;
+      }
+    } catch { /* silently ignore */ }
+
+    // Trận sắp tới
+    try {
+      const query = new QueryMatchDto();
+      query.userId = userId;
+      const matches = await this.matchesService.findAll(query);
+      if (Array.isArray(matches)) {
+        const upcoming = matches.filter((m: { status?: string }) => m.status === 'SCHEDULED').slice(0, 3);
+        if (upcoming.length > 0) {
+          ctx += `- Trận sắp tới:\n`;
+          upcoming.forEach((m: { participant1?: { teamName?: string }; participant2?: { teamName?: string }; scheduledAt?: string }) => {
+            ctx += `  • ${m.participant1?.teamName || 'TBD'} vs ${m.participant2?.teamName || 'TBD'}: ${m.scheduledAt ? new Date(m.scheduledAt).toLocaleString('vi-VN') : 'Chưa xếp lịch'}\n`;
+          });
+        }
+      }
+    } catch { /* silently ignore */ }
+
+    ctx += '---\n';
+    return ctx;
+  }
+
   private buildSystemPrompt(tournamentContext: string): string {
     return `
 Bạn là Trợ lý ảo AI của nền tảng quản lý giải đấu thể thao VNDC Sport (VNDC Sport Trợ lý ảo).
@@ -58,13 +122,186 @@ THÔNG TIN HỆ THỐNG & LIÊN HỆ:
    - Email hỗ trợ kỹ thuật: support@vndcsport.com.
    - Fanpage chính thức: fb.com/vndcsport.official.
 
-HƯỚNG DẪN ĐIỀU HƯỚNG GIAO DIỆN (UI NAVIGATION):
-1. Cập nhật hồ sơ: Click vào ảnh đại diện (avatar) ở góc trên bên phải màn hình ➔ Chọn "Hồ sơ của tôi" (hoặc "Cá nhân") ➔ Nhấn nút "Chỉnh sửa hồ sơ" để cập nhật Họ tên, SĐT, Ngày sinh và Giới tính.
-2. Xem Bảng xếp hạng / Điểm ELO: Click trực tiếp vào mục "Bảng xếp hạng" trên thanh Menu chính (Navbar) ở đầu trang.
-3. Xem giải đấu đã tham gia: Click vào ảnh đại diện ở góc trên bên phải ➔ Chọn mục "Giải đấu của tôi".
-4. Đăng ký giải đấu: Tìm giải đấu tại trang chủ hoặc trang "Giải đấu" ➔ Click vào tên giải để xem chi tiết ➔ Nhấn nút "Đăng ký thi đấu" (màu xanh lá) ➔ Chọn bảng đấu và điền form.
-5. Tạo giải đấu mới (dành cho BTC): Click vào ảnh đại diện ở góc trên bên phải ➔ Chọn "Khu vực BTC" ➔ Click nút "Tạo giải đấu mới" ở góc phải trang quản lý.
-6. Tạo cộng đồng/câu lạc bộ mới: Click vào mục "Cộng đồng" trên thanh Menu chính ➔ Chọn nút "Tạo cộng đồng mới".
+HƯỚNG DẪN GIAO DIỆN (UI NAVIGATION):
+
+1. 👤 Cập nhật hồ sơ cá nhân:
+   Click avatar (góc phải trên) → "Hồ sơ của tôi" → ✏️ "Chỉnh sửa hồ sơ"
+   → Cập nhật: Họ tên, SĐT, Ngày sinh, Giới tính → 💾 Lưu
+
+2. 🏆 Xem bảng xếp hạng / ELO:
+   Click "Bảng xếp hạng" trên thanh menu đầu trang
+   → Xem ELO, phân hạng (Thấp D → Cao A), lịch sử trận
+
+3. 🎯 Xem giải đấu đã tham gia:
+   Click avatar (góc phải trên) → "Giải đấu của tôi"
+   → Xem danh sách giải đang tham gia, trạng thái, kết quả
+
+4. 📝 Đăng ký giải đấu:
+   🔍 Tìm giải ở trang chủ hoặc trang "Giải đấu"
+   👆 Click vào tên giải → xem chi tiết
+   🟢 Nhấn "Đăng ký thi đấu" (nút xanh lá)
+   📋 Chọn bảng đấu → điền form (tên đội, đồng đội...) → ✅ Hoàn tất
+
+5. 🛠️ Tạo giải đấu mới (dành cho BTC):
+   Click avatar → "Khu vực BTC" → 🆕 "Tạo giải đấu mới"
+   → Điền thông tin: tên, môn, thể thức, ngày giờ...
+   → Sau khi tạo: vào tab "Đăng ký" để quản lý VĐV
+   → Tab "Sơ đồ" để cấu hình sơ đồ thi đấu (Loại trực tiếp / Nhánh thắng thua / Vòng tròn / Vòng bảng+KO)
+
+6. 👥 Câu lạc bộ & Cộng đồng:
+
+   🆕 Tạo câu lạc bộ mới:
+   - Click "Cộng đồng" trên menu → "Tạo cộng đồng mới"
+   - Điền: tên CLB, môn thể thao, mô tả, logo
+   - Chọn: công khai / riêng tư
+   - Mời thành viên tham gia
+
+   👤 Quản lý thành viên:
+   - Vào trang CLB → tab "Thành viên"
+   - Xem danh sách, phân quyền: Chủ sở hữu / Quản trị / Thành viên
+   - Mời thành viên mới qua link hoặc email
+   - Chấp nhận / từ chối đơn xin gia nhập
+
+   🏸 Tạo giải đấu trong CLB - có 2 cách:
+
+   📱 Giải nhanh (Lite):
+   - Click "Tạo giải nhanh" (màu xanh)
+   - Chọn môn, hình thức (đơn/đôi), thể thức (Loại trực tiếp / Nhánh th/thua / Vòng tròn)
+   - Đặt tên → ✅ Tạo → tự động vào trang quản lý
+   - Phù hợp giao lưu nhanh, ít cấu hình
+
+   🏆 Giải nội bộ nâng cao:
+   - Click "Tạo giải đấu nội bộ"
+   - Điền tên, chọn môn, hình thức, số đội
+   - Tạo xong → vào trang quản lý để cấu hình chi tiết:
+     • Tab "Cấu hình": thể thức (SE/DE/RR/GS-KO), số set, điểm
+     • Tab "Lịch": sân đấu, giờ thi đấu
+     • Tab "Đăng ký": duyệt VĐV, ràng buộc ELO
+     • Tab "Sơ đồ": bracket config, vòng bảng, tiebreaker
+     • Tab "Tài chính": lệ phí, giải thưởng
+   - Giải nội bộ CLB: miễn phí publish
+
+   💰 Quản lý tài chính CLB:
+   - Giải đấu nội bộ: miễn phí publish (0đ)
+   - Có thể thu lệ phí tham gia (entry fee) nếu muốn
+   - Thanh toán trực tuyến qua VNPAY
+   - Xem lịch sử giao dịch
+
+   👁️ Theo dõi (Follow):
+   - Click icon ♡ trên trang CLB để theo dõi
+   - Nhận thông báo khi CLB tạo giải mới
+   - Xem danh sách CLB đang theo dõi trong trang cá nhân
+
+   🔥 Thử thách (Challenges):
+   - CLB có thể tạo thử thách giữa các thành viên
+   - Đặt cược điểm ELO nội bộ
+   - Xem bảng xếp hạng thử thách
+
+   ⚙️ Cài đặt CLB:
+   - Tab "Cài đặt": sửa tên, logo, mô tả
+   - Tab "Thành viên": quản lý vai trò
+   - Tab "Giải đấu": xem tất cả giải trong CLB
+
+7. ⚙️ Quản lý giải đấu (dành cho BTC):
+   👆 Chọn nội dung thi đấu ở ô chọn đầu trang
+   📋 Tab "Cấu hình": chọn thể thức (Loại trực tiếp / Nhánh thắng thua / Vòng tròn / Vòng bảng+KO), số set, điểm
+   🗓️ Tab "Lịch": xếp sân, giờ thi đấu
+   👥 Tab "Đăng ký": duyệt VĐV, gán suất đặc cách 🃏, xếp hạt giống #️⃣
+   🏆 Tab "Sơ đồ": xem sơ đồ thi đấu, cấu hình vòng bảng, điểm thắng/thua, phân định thứ hạng
+   💰 Tab "Tài chính": lệ phí, giải thưởng
+   🔐 Tab "Phân quyền": thêm trọng tài, đồng tổ chức
+
+8. 🃏 Suất đặc cách:
+   Tab "Đăng ký" → ⬇️ Kéo xuống "Suất đặc cách"
+   → Chọn nội dung thi đấu → Nhập email/SĐT người chơi (và đồng đội nếu đánh đôi)
+   → Nhập tên đội → 🟢 "Gán suất đặc cách"
+   → Suất đặc cách bỏ qua mọi giới hạn ELO
+
+9. #️⃣ Xếp hạt giống:
+   Tab "Đăng ký" → ⬇️ Kéo xuống "Xếp hạt giống"
+   → Chọn phương pháp: 📊 ELO (tự động) / 🔀 Ngẫu nhiên / ✋ Thủ công
+   → 🟦 "Tự động xếp hạt giống" → hệ thống sắp xếp theo ELO
+   → Nhấn ▲▼ để đổi thứ tự hạt giống thủ công
+
+10. 🔄 Vòng tròn & Vòng bảng:
+    Tab "Sơ đồ" → cấu hình:
+    - Số vòng đấu: 2 = lượt đi + về
+    - 🟢 Điểm thắng / 🔴 Điểm thua
+    - ⚖️ Phân định thứ hạng: Đối đầu → Hiệu số set → Hiệu số điểm
+    - Nếu đông đội (>8): tự động chia bảng
+    - 💡 Xem gợi ý cấu hình dựa trên số người đã đăng ký
+
+11. 🏆 Vòng bảng + Loại trực tiếp:
+    Tab "Sơ đồ":
+    - Số bảng, số đội/bảng, số đội đi tiếp
+    - 🎲 Thể thức vòng loại: Loại trực tiếp / Nhánh thắng thua
+    - 📊 Xếp hạt giống: ELO / Ngẫu nhiên
+    - Sau khi vòng bảng kết thúc → "Chốt vòng bảng & Chuyển tiếp"
+    - Hệ thống tự động sắp xếp đội vào vòng loại (chéo bảng)
+
+12. ⏰ Đếm ngược & Thời gian:
+    - Trang chi tiết giải: xem ⏳ "Mở đăng ký sau" / "Đóng đăng ký sau" / "Khởi tranh sau"
+    - Khi đang thi đấu: "🟢 Đang thi đấu" + "Kết thúc sau"
+    - Tab "Đăng ký" (quản lý): đếm ngược cạnh ngày mở/đóng đăng ký
+    - ⚠️ Lịch có thể thay đổi - BTC có thể dời lịch
+
+13. 🖼️ Ảnh & Cloudinary:
+    - Tải lên ảnh đại diện: giới hạn 5MB, định dạng PNG/JPG/WEBP
+    - Tải lên ảnh giải đấu
+    - Khi xoá ảnh: tự động xoá khỏi Cloudinary, không rác
+
+14. 📅 Bộ lọc & Tìm kiếm:
+    - Trang "Giải đấu": lọc theo 🏅 môn, 📍 khu vực, 📊 trạng thái
+    - Trang "Lịch thi đấu": lọc theo 🟢 Đang đấu / ⏳ Sắp đấu / ✅ Đã kết thúc
+    - 🔍 Tìm kiếm: theo tên giải, địa điểm, mô tả
+    - 🎯 Bộ lọc nâng cao: hình thức (đơn/đôi), ngày tháng
+
+15. 🔗 Chuỗi giải đấu:
+    📌 Chuỗi giải đấu = tập hợp nhiều chặng (giải đấu) nối tiếp nhau, tính điểm PSR tích luỹ
+
+    👤 Xem chuỗi giải đấu:
+    - Vào trang "Chuỗi giải đấu" trên menu chính
+    - Click vào tên chuỗi để xem: danh sách các chặng, bảng xếp hạng PSR, thể thức
+
+    🛠️ Tạo chuỗi giải đấu (dành cho BTC):
+    - Click avatar → "Khu vực BTC" → "Tạo chuỗi giải đấu"
+    - Điền: tên chuỗi, đường dẫn, mô tả, chọn môn thể thao
+    - Thêm các chặng: mỗi chặng là 1 giải đấu riêng biệt
+    - Cấu hình điểm PSR cho từng hạng (hạng 1, hạng 2, hạng 3...)
+    - Sau khi tạo, các chặng xuất hiện trong danh sách
+
+    📊 Bảng xếp hạng chuỗi giải đấu:
+    - Tích luỹ điểm PSR qua các chặng
+    - Xếp hạng VĐV dựa trên tổng điểm PSR
+    - Có thể lọc theo mùa giải
+
+    ⚙️ Quản lý chuỗi giải đấu:
+    - Tab "Thông tin": sửa tên, mô tả chuỗi
+    - Tab "Cấu hình": điểm PSR, thể thức, mùa giải
+    - Tab "Lịch": xem danh sách chặng, thêm/xoá chặng
+    - Tab "Bảng xếp hạng": xem xếp hạng PSR, lọc theo chặng
+
+16. 🏸 Giải đấu đơn:
+    📌 Giải đấu nhanh, đơn giản, ít cấu hình - phù hợp cho câu lạc bộ nhỏ hoặc giải giao lưu
+
+    🛠️ Tạo giải đấu đơn:
+    - Vào "Tạo giải đấu" → chọn "Giải đấu đơn"
+    - Chọn môn thể thao: Pickleball, Cầu lông, Tennis, Bóng bàn
+    - Chọn hình thức: Đánh đơn / Đánh đôi
+    - Chọn thể thức: Loại trực tiếp / Nhánh thắng thua / Vòng tròn
+    - Đặt tên giải → ✅ Tạo
+    - Giải đấu đơn không cần cấu hình phức tạp như giải đầy đủ
+
+    👤 Đăng ký tham gia:
+    - Vào trang giải đấu → "Đăng ký"
+    - Dùng mã mời để tham gia
+    - Nhập tên đội, thêm thành viên / đồng đội
+    - Chờ BTC duyệt hoặc tự động vào danh sách
+
+    🏆 Quản lý & thi đấu:
+    - Tab "Sơ đồ": xem sơ đồ thi đấu, cập nhật kết quả trận đấu
+    - Tab "Bảng xếp hạng": xếp hạng VĐV (nếu thể thức vòng tròn)
+    - Giao diện đơn giản, tập trung vào thi đấu, phù hợp di động
 
 HỆ THỐNG PHÂN HẠNG & TÍNH ELO:
 1. Phân hạng (Tiers): Hệ thống chia thành các phân hạng từ thấp đến cao: Low D ➔ High D ➔ C ➔ B ➔ Low A ➔ High A.
@@ -139,7 +376,12 @@ ${divisionsStr}
       }
     }
 
-    const systemPrompt = this.buildSystemPrompt(tournamentContext);
+    let userContext = '';
+    if (userId) {
+      userContext = await this.buildUserContext(userId);
+    }
+
+    const systemPrompt = this.buildSystemPrompt(tournamentContext) + userContext;
 
     return [
       { role: 'system', content: systemPrompt },

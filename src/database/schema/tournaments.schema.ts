@@ -10,6 +10,7 @@ import {
   integer,
   check,
   date,
+  index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -111,6 +112,13 @@ export const tournaments = pgTable(
       'platform_fee_valid',
       sql`${table.platformFeePercentage} >= 0 AND ${table.platformFeePercentage} <= 100`,
     ),
+    idxTournamentsStatusVisibility: index('idx_tournaments_status_visibility').on(
+      table.status,
+      table.visibility,
+    ),
+    idxTournamentsCreatedBy: index('idx_tournaments_created_by').on(
+      table.createdBy,
+    ),
   }),
 );
 
@@ -132,7 +140,12 @@ export const tournamentStages = pgTable('tournament_stages', {
   notificationNote: text('notification_note'),
   matchSettings: jsonb('match_settings'),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-});
+}, (table) => ({
+  idxStagesTournamentDivision: index('idx_stages_tournament_division').on(
+    table.tournamentId,
+    table.tournamentDivisionId,
+  ),
+}));
 
 export const tournamentGroups = pgTable('tournament_groups', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -141,7 +154,9 @@ export const tournamentGroups = pgTable('tournament_groups', {
     .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-});
+}, (table) => ({
+  idxGroupsStageId: index('idx_groups_stage_id').on(table.stageId),
+}));
 
 export const tournamentParticipants = pgTable('tournament_participants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -169,7 +184,15 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   registeredAt: timestamp('registered_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  idxParticipantsTournamentStatus: index('idx_participants_tournament_status').on(
+    table.tournamentId,
+    table.teamStatus,
+  ),
+  idxParticipantsTournamentId: index('idx_participants_tournament_id').on(
+    table.tournamentId,
+  ),
+}));
 
 export const tournamentRosters = pgTable('tournament_rosters', {
   id: uuid('id').primaryKey().defaultRandom(),
