@@ -6,16 +6,21 @@ import { BracketGeneratorService } from './bracket-generator.service';
 import { TournamentSchedulerService } from './tournament-scheduler.service';
 import { DatabaseModule } from '../../database/database.module';
 import { SeriesModule } from '../series/series.module';
+import { RedisModule } from '../../providers/redis/redis.module';
+import { RegistrationLockService } from './registration-lock.service';
+import { StorageModule } from '../../providers/storage/storage.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [DatabaseModule, SeriesModule],
+  imports: [DatabaseModule, SeriesModule, RedisModule, StorageModule, AuthModule],
   controllers: [TournamentsController],
   providers: [
     TournamentsService,
     TournamentsRepository,
     BracketGeneratorService,
     TournamentSchedulerService,
+    RegistrationLockService,
   ],
-  exports: [TournamentsService, BracketGeneratorService],
+  exports: [TournamentsService, BracketGeneratorService, RegistrationLockService, TournamentsRepository],
 })
 export class TournamentsModule {}

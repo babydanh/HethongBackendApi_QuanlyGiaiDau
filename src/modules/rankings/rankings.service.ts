@@ -174,8 +174,8 @@ export class RankingsService {
       );
 
       if (scope === 'PUBLIC') {
-        await this.recalculateUserRankTier(tx, dto.winnerId, dto.categoryId, dto.matchType);
-        await this.recalculateUserRankTier(tx, dto.loserId, dto.categoryId, dto.matchType);
+        await this.recalculateUserRankTier(tx, dto.winnerId, dto.categoryId, dto.matchType, dto.genderRestriction);
+        await this.recalculateUserRankTier(tx, dto.loserId, dto.categoryId, dto.matchType, dto.genderRestriction);
       }
 
       // 4. Record history
@@ -230,24 +230,53 @@ export class RankingsService {
 
     // 1. Fetch rosters
     const winnerRosters = await db
-      .select({ userId: schema.tournamentRosters.userId })
+      .select({
+        userId: schema.tournamentRosters.userId,
+        userIsMock: schema.users.isMock,
+        participantIsMock: schema.tournamentParticipants.isMock,
+      })
       .from(schema.tournamentRosters)
+      .innerJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+      )
       .where(eq(schema.tournamentRosters.participantId, winnerParticipantId));
 
     const loserRosters = await db
-      .select({ userId: schema.tournamentRosters.userId })
+      .select({
+        userId: schema.tournamentRosters.userId,
+        userIsMock: schema.users.isMock,
+        participantIsMock: schema.tournamentParticipants.isMock,
+      })
       .from(schema.tournamentRosters)
+      .innerJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+      )
       .where(eq(schema.tournamentRosters.participantId, loserParticipantId));
 
     if (winnerRosters.length === 0 || loserRosters.length === 0) {
       throw new BadRequestException('Winner or Loser team has no players registered.');
     }
 
+    const hasMockPlayer = [...winnerRosters, ...loserRosters].some(
+      (roster) => roster.userIsMock || roster.participantIsMock,
+    );
+    if (hasMockPlayer) {
+      return {
+        success: true,
+        skipped: true,
+        reason: 'MOCK_PARTICIPANT',
+      };
+    }
+
     const winnerUserIds = winnerRosters.map((r) => r.userId);
     const loserUserIds = loserRosters.map((r) => r.userId);
 
     const result = await db.transaction(async (tx) => {
-      if (matchType === 'DOUBLES' && winnerUserIds.length === 2 && loserUserIds.length === 2) {
+      if (['DOUBLES', 'MIXED_DOUBLES'].includes(matchType) && winnerUserIds.length === 2 && loserUserIds.length === 2) {
         // 1. Sort IDs to make unique pair key
         const wId1 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[0] : winnerUserIds[1];
         const wId2 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[1] : winnerUserIds[0];
@@ -275,7 +304,15 @@ export class RankingsService {
             and(
               eq(schema.pairRanks.user1Id, wId1),
               eq(schema.pairRanks.user2Id, wId2),
-              eq(schema.pairRanks.categoryId, categoryId)
+              eq(schema.pairRanks.categoryId, categoryId),
+              eq(schema.pairRanks.matchType, matchType),
+              eq(schema.pairRanks.scope, scope),
+              genderRestriction
+                ? eq(schema.pairRanks.genderRestriction, genderRestriction)
+                : isNull(schema.pairRanks.genderRestriction),
+              communityId
+                ? eq(schema.pairRanks.communityId, communityId)
+                : isNull(schema.pairRanks.communityId),
             )
           )
           .limit(1);
@@ -288,6 +325,10 @@ export class RankingsService {
               user1Id: wId1,
               user2Id: wId2,
               categoryId,
+              matchType,
+              genderRestriction: genderRestriction || null,
+              scope,
+              communityId: communityId || null,
               eloPoints: Math.round(avgElo),
               matchesPlayed: 0,
               matchesWon: 0,
@@ -303,7 +344,15 @@ export class RankingsService {
             and(
               eq(schema.pairRanks.user1Id, lId1),
               eq(schema.pairRanks.user2Id, lId2),
-              eq(schema.pairRanks.categoryId, categoryId)
+              eq(schema.pairRanks.categoryId, categoryId),
+              eq(schema.pairRanks.matchType, matchType),
+              eq(schema.pairRanks.scope, scope),
+              genderRestriction
+                ? eq(schema.pairRanks.genderRestriction, genderRestriction)
+                : isNull(schema.pairRanks.genderRestriction),
+              communityId
+                ? eq(schema.pairRanks.communityId, communityId)
+                : isNull(schema.pairRanks.communityId),
             )
           )
           .limit(1);
@@ -316,6 +365,10 @@ export class RankingsService {
               user1Id: lId1,
               user2Id: lId2,
               categoryId,
+              matchType,
+              genderRestriction: genderRestriction || null,
+              scope,
+              communityId: communityId || null,
               eloPoints: Math.round(avgElo),
               matchesPlayed: 0,
               matchesWon: 0,
@@ -400,7 +453,7 @@ export class RankingsService {
         ];
 
         for (const { rank, delta } of winnersToUpdate) {
-          const newElo = rank.eloPoints + delta;
+          const newElo = Math.max(100, rank.eloPoints + delta);
           let isWinnerShieldActive = false;
           if (scope === 'PUBLIC') {
             isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
@@ -431,7 +484,7 @@ export class RankingsService {
             reason: 'MATCH_WIN',
             previousElo: rank.eloPoints,
             newElo,
-            changedPoints: delta,
+            changedPoints: newElo - rank.eloPoints,
           });
         }
 
@@ -442,7 +495,7 @@ export class RankingsService {
         ];
 
         for (const { rank, delta } of losersToUpdate) {
-          const newElo = rank.eloPoints + delta;
+          const newElo = Math.max(100, rank.eloPoints + delta);
           const boundaries = ELO_SHIELD_BOUNDARIES;
           let finalLoserElo = newElo;
           let isLoserShieldActive = false;
@@ -489,10 +542,10 @@ export class RankingsService {
 
         if (scope === 'PUBLIC') {
           for (const uid of winnerUserIds) {
-            await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
+            await this.recalculateUserRankTier(tx, uid, categoryId, matchType, genderRestriction);
           }
           for (const uid of loserUserIds) {
-            await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
+            await this.recalculateUserRankTier(tx, uid, categoryId, matchType, genderRestriction);
           }
         }
 
@@ -516,6 +569,7 @@ export class RankingsService {
           scope,
           communityId,
           true, // Lock for update!
+          genderRestriction,
         );
         winnerRanks.push(rank);
       }
@@ -530,6 +584,7 @@ export class RankingsService {
           scope,
           communityId,
           true, // Lock for update!
+          genderRestriction,
         );
         loserRanks.push(rank);
       }
@@ -639,10 +694,10 @@ export class RankingsService {
 
       if (scope === 'PUBLIC') {
         for (const userId of winnerUserIds) {
-          await this.recalculateUserRankTier(tx, userId, categoryId, matchType);
+          await this.recalculateUserRankTier(tx, userId, categoryId, matchType, genderRestriction);
         }
         for (const userId of loserUserIds) {
-          await this.recalculateUserRankTier(tx, userId, categoryId, matchType);
+          await this.recalculateUserRankTier(tx, userId, categoryId, matchType, genderRestriction);
         }
       }
 
@@ -662,7 +717,11 @@ export class RankingsService {
     userId: string,
     categoryId: string,
     matchType: string,
+    genderRestriction?: string,
   ) {
+    const genderCondition = genderRestriction
+      ? eq(schema.userRanks.genderRestriction, genderRestriction)
+      : isNull(schema.userRanks.genderRestriction);
     const tiers = await tx
       .select()
       .from(schema.eloTiers)
@@ -690,6 +749,7 @@ export class RankingsService {
         and(
           eq(schema.userRanks.categoryId, categoryId),
           eq(schema.userRanks.matchType, matchType),
+          genderCondition,
           isNull(schema.userRanks.communityId),
         ),
       )
@@ -706,7 +766,7 @@ export class RankingsService {
         await tx
           .update(schema.userRanks)
           .set({ tierId: tierS.id })
-          .where(eq(schema.userRanks.userId, tierSUserId));
+          .where(eq(schema.userRanks.id, topRank.id));
 
         // Downgrade any other player currently holding Tier S to Tier A (High)
         await tx
@@ -716,6 +776,7 @@ export class RankingsService {
             and(
               eq(schema.userRanks.categoryId, categoryId),
               eq(schema.userRanks.matchType, matchType),
+              genderCondition,
               isNull(schema.userRanks.communityId),
               eq(schema.userRanks.tierId, tierS.id),
               sql`${schema.userRanks.userId} != ${tierSUserId}`
@@ -730,6 +791,7 @@ export class RankingsService {
             and(
               eq(schema.userRanks.categoryId, categoryId),
               eq(schema.userRanks.matchType, matchType),
+              genderCondition,
               isNull(schema.userRanks.communityId),
               eq(schema.userRanks.tierId, tierS.id)
             )
@@ -747,6 +809,7 @@ export class RankingsService {
             eq(schema.userRanks.userId, userId),
             eq(schema.userRanks.categoryId, categoryId),
             eq(schema.userRanks.matchType, matchType),
+            genderCondition,
             isNull(schema.userRanks.communityId),
           ),
         )
@@ -792,6 +855,7 @@ export class RankingsService {
           userId,
           rank.categoryId,
           rank.matchType,
+          rank.genderRestriction || undefined,
         );
       }
     });
@@ -1138,4 +1202,3 @@ export class RankingsService {
     });
   }
 }
-

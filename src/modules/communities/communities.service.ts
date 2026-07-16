@@ -24,6 +24,8 @@ import {
   buildCommunityRolePromotedNotification,
   buildCommunityUnbannedNotification,
 } from '../notifications/notification-builder';
+import { StorageService } from '../../providers/storage/storage.service';
+import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
 
 type CommunityMemberRole = 'OWNER' | 'MODERATOR' | 'MEMBER';
 type CommunityMemberStatus = 'JOINED' | 'PENDING' | 'INVITED' | 'REJECTED' | 'BANNED';
@@ -33,6 +35,7 @@ export class CommunitiesService {
   constructor(
     private readonly communitiesRepository: CommunitiesRepository,
     private readonly notificationsService: NotificationsService,
+    private readonly storageService: StorageService,
   ) {}
 
   // --- COMMUNITIES ---
@@ -543,6 +546,20 @@ export class CommunitiesService {
 
   async removeGalleryItem(userId: string, id: string, imageId: string, roles: string[]) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
+
+    // Fetch the gallery item to get the image URL before deleting from DB
+    const item = await this.communitiesRepository.findGalleryItemById(id, imageId);
+    if (item && isStoredImageUrl(item.imageUrl)) {
+      try {
+        const publicId = extractStoredImagePublicId(item.imageUrl);
+        if (publicId) {
+          await this.storageService.deleteFile(publicId);
+        }
+      } catch (err) {
+        console.error('Failed to delete gallery image from storage:', err);
+      }
+    }
+
     return await this.communitiesRepository.removeGalleryItem(id, imageId);
   }
 

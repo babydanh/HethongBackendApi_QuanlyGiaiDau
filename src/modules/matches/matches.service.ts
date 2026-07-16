@@ -103,7 +103,7 @@ export class MatchesService {
             tournament.matchType,
             scope,
             tournament.communityId || undefined,
-            (tournament as unknown as Record<string, unknown>).genderRestriction as string | undefined,
+            tournament.genderRestriction || undefined,
           );
         } catch (err) {
           console.error('Failed to update ELO after match completion:', err.message);

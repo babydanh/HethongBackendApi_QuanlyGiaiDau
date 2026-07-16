@@ -452,6 +452,20 @@ export class CommunitiesRepository {
       .orderBy(sql`${schema.communityGallery.createdAt} DESC`);
   }
 
+  async findGalleryItemById(communityId: string, imageId: string) {
+    const [item] = await this.db
+      .select()
+      .from(schema.communityGallery)
+      .where(
+        and(
+          eq(schema.communityGallery.id, imageId),
+          eq(schema.communityGallery.communityId, communityId)
+        )
+      )
+      .limit(1);
+    return item || null;
+  }
+
   async addGalleryItem(communityId: string, uploaderId: string, imageUrl: string, caption?: string) {
     const [item] = await this.db
       .insert(schema.communityGallery)
@@ -469,7 +483,9 @@ export class CommunitiesRepository {
   async getTournaments(communityId: string, status?: string) {
     let condition = and(
       eq(schema.tournaments.communityId, communityId),
-      isNull(schema.tournaments.deletedAt)
+      eq(schema.tournaments.visibility, 'PUBLIC'),
+      isNull(schema.tournaments.deletedAt),
+      sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`
     ) as SQL;
     if (status && status !== 'ALL') {
       condition = and(condition, eq(schema.tournaments.status, status)) as SQL;
@@ -526,5 +542,4 @@ export class CommunitiesRepository {
     return result.count;
   }
 }
-
 

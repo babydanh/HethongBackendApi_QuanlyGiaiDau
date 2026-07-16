@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { TeamStatus, TournamentStatus, PaymentStatus } from '../../common/constants/enums';
+import { PaymentStatus } from '../../common/constants/enums';
 import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt, like, isNull, desc, asc } from 'drizzle-orm';
 import { AuditService, Transaction } from '../audit/audit.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
@@ -105,7 +105,7 @@ export class TournamentsRepository {
       defaultVisibility?: 'PUBLIC' | 'PRIVATE' | null;
     },
   ) {
-    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy } = query;
+    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate } = query;
     const offset = (page - 1) * limit;
     const defaultTournamentType = options?.defaultTournamentType;
     const defaultVisibility = options?.defaultVisibility;
@@ -121,7 +121,10 @@ export class TournamentsRepository {
     }
 
     if (search) {
-      conditions.push(ilike(schema.tournaments.name, `%${search}%`));
+      const pattern = `%${search}%`;
+      conditions.push(
+        sql`(${schema.tournaments.name}::text ILIKE ${pattern} OR ${schema.tournaments.description}::text ILIKE ${pattern} OR ${schema.tournaments.city}::text ILIKE ${pattern})`
+      );
     }
     if (categoryId) {
       conditions.push(eq(schema.tournaments.categoryId, categoryId));
@@ -165,6 +168,14 @@ export class TournamentsRepository {
           and v.location_address ilike ${`%${region}%`}
         )`
       );
+    }
+
+    if (startDate) {
+      conditions.push(sql`date(${schema.tournaments.endDate}) >= ${startDate}::date`);
+    }
+
+    if (endDate) {
+      conditions.push(sql`date(coalesce(${schema.tournaments.registrationStartDate}, ${schema.tournaments.startDate})) <= ${endDate}::date`);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1096,7 +1107,7 @@ export class TournamentsRepository {
           .limit(1);
 
         if (!partnerUser) {
-          throw new BadRequestException('Không tìm thấy tài khoản Baseline của đồng đội. Vui lòng kiểm tra lại Email hoặc SĐT.');
+          throw new BadRequestException('Không tìm thấy tài khoản VNDC Sport của đồng đội. Vui lòng kiểm tra lại Email hoặc SĐT.');
         }
 
         if (partnerUser.id === userId) {
@@ -2124,6 +2135,19 @@ export class TournamentsRepository {
 
     if (result.length === 0) return null;
     return result[0];
+  }
+
+  async countActiveTournamentsByUser(userId: string): Promise<number> {
+    const result = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.tournaments)
+      .where(
+        and(
+          eq(schema.tournaments.createdBy, userId),
+          sql`${schema.tournaments.deletedAt} IS NULL`
+        )
+      );
+    return Number(result[0]?.count || 0);
   }
 
   async findMyTournaments(userId: string) {
@@ -3254,7 +3278,7 @@ export class TournamentsRepository {
     }>
   > {
     return await this.db.transaction(async (tx) => {
-      const timeoutThreshold = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
+      const timeoutThreshold = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes ago
 
       const expiredParts = await tx
         .select({
@@ -3702,20 +3726,69 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentDivisionId, id),
+              eq(schema.tournamentParticipants.isMock, false),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
               ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
             ),
           );
 
         if (activeParticipants > 0) {
-          throw new BadRequestException('Không thể xóa hình thức đã có người chơi. Hãy di chuyển hoặc loại bỏ người chơi trước.');
+          throw new BadRequestException('Không thể xóa hình thức đang có người chơi thật. Hãy di chuyển hoặc loại bỏ người chơi thật trước.');
         }
+
+        const mockParticipants = await tx
+          .select({ id: schema.tournamentParticipants.id })
+          .from(schema.tournamentParticipants)
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentDivisionId, id),
+              eq(schema.tournamentParticipants.isMock, true),
+            ),
+          );
+        const mockParticipantIds = mockParticipants.map((participant) => participant.id);
+        const mockRosterUsers = mockParticipantIds.length > 0
+          ? await tx
+              .select({ userId: schema.tournamentRosters.userId })
+              .from(schema.tournamentRosters)
+              .where(inArray(schema.tournamentRosters.participantId, mockParticipantIds))
+          : [];
 
         // Hard delete since tournament_divisions doesn't have a deletedAt column
         // and cascade is handled by FK constraint
         await tx
           .delete(schema.tournamentDivisions)
           .where(eq(schema.tournamentDivisions.id, id));
+
+        const mockUserIds = Array.from(new Set(mockRosterUsers.map((roster) => roster.userId)));
+        if (mockUserIds.length > 0) {
+          const remainingRosterUsers = await tx
+            .select({ userId: schema.tournamentRosters.userId })
+            .from(schema.tournamentRosters)
+            .where(inArray(schema.tournamentRosters.userId, mockUserIds));
+          const remainingRegistrants = await tx
+            .select({ userId: schema.tournamentParticipants.registeredBy })
+            .from(schema.tournamentParticipants)
+            .where(inArray(schema.tournamentParticipants.registeredBy, mockUserIds));
+          const referencedUserIds = new Set([
+            ...remainingRosterUsers.map((row) => row.userId),
+            ...remainingRegistrants.map((row) => row.userId),
+          ]);
+          const orphanMockUserIds = mockUserIds.filter((mockUserId) => !referencedUserIds.has(mockUserId));
+
+          if (orphanMockUserIds.length > 0) {
+            await tx
+              .delete(schema.profiles)
+              .where(inArray(schema.profiles.userId, orphanMockUserIds));
+            await tx
+              .delete(schema.users)
+              .where(
+                and(
+                  inArray(schema.users.id, orphanMockUserIds),
+                  eq(schema.users.isMock, true),
+                ),
+              );
+          }
+        }
 
         await this.auditService.logDelete(
           tx,
@@ -3725,7 +3798,7 @@ export class TournamentsRepository {
           oldRecord
         );
 
-        return { success: true };
+        return { success: true, removedMockParticipants: mockParticipantIds.length };
       });
     } catch (error) {
       console.error(`Failed to delete division ${id}:`, error);

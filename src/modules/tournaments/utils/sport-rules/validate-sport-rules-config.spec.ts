@@ -71,4 +71,45 @@ describe('validateSportRuleConfig', () => {
       ),
     ).toThrow(BadRequestException);
   });
+
+  it('accepts a valid group stage knockout configuration', () => {
+    expect(() =>
+      validateSportRuleConfig(
+        {
+          kind: 'BADMINTON',
+          groupsConfig: { numGroups: 8, teamsPerGroup: 5, roundsToPlay: 1 },
+          advancementConfig: { teamsAdvancing: 2, allowWildcardThird: false },
+          playoffConfig: { type: 'DOUBLE_ELIMINATION', seedingType: 'SEEDED' },
+          scoring: { winPoints: 3, drawPoints: 0, lossPoints: 0 },
+          tiebreakerRules: {
+            primary: 'SET_DIFF',
+            secondary: ['H2H_POINTS', 'POINT_DIFF'],
+          },
+        },
+        {
+          sourceLabel: 'roundConfig',
+          expectedKind: 'BADMINTON',
+          allowedKinds: ['BADMINTON'],
+          allowRoundStructure: true,
+        },
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects group stage knockout with only one group', () => {
+    expect(() =>
+      validateSportRuleConfig(
+        {
+          kind: 'BADMINTON',
+          groupsConfig: { numGroups: 1, teamsPerGroup: 35, roundsToPlay: 1 },
+        },
+        {
+          sourceLabel: 'roundConfig',
+          expectedKind: 'BADMINTON',
+          allowedKinds: ['BADMINTON'],
+          allowRoundStructure: true,
+        },
+      ),
+    ).toThrow(BadRequestException);
+  });
 });

@@ -12,6 +12,7 @@ import {
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
@@ -28,10 +29,8 @@ import { UpdateDivisionDto } from './dto/update-division.dto';
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 @ApiTags('tournaments')
@@ -425,6 +424,7 @@ export class TournamentsController {
 
   @Post(':id/register')
   @ApiBearerAuth()
+  @Throttle({ sensitive: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Đăng ký tham gia giải đấu' })
   async register(
     @Param('id', ParseUUIDPipe) id: string,
@@ -437,6 +437,7 @@ export class TournamentsController {
 
   @Post(':id/join-team')
   @ApiBearerAuth()
+  @Throttle({ sensitive: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Đồng đội tham gia nhóm thi đấu đánh đôi' })
   async joinTeam(
     @Param('id', ParseUUIDPipe) id: string,

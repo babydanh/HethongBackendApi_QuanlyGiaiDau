@@ -157,15 +157,33 @@ export class MatchesRepository {
           participantId: schema.tournamentRosters.participantId,
           userId: schema.tournamentRosters.userId,
           fullName: schema.profiles.fullName,
+          eloPoints: schema.userRanks.eloPoints,
         })
         .from(schema.tournamentRosters)
         .leftJoin(schema.profiles, eq(schema.tournamentRosters.userId, schema.profiles.userId))
+        .leftJoin(
+          schema.userRanks,
+          and(
+            eq(schema.tournamentRosters.userId, schema.userRanks.userId),
+                        sql`exists (
+              select 1 from ${schema.tournamentParticipants} tp 
+              join ${schema.tournamentDivisions} td on tp.tournament_division_id = td.id
+              join ${schema.tournaments} t on td.tournament_id = t.id
+              where tp.id = ${schema.tournamentRosters.participantId} 
+              and t.category_id = ${schema.userRanks.categoryId}
+            )`
+          )
+        )
         .where(inArray(schema.tournamentRosters.participantId, Array.from(participantIds)));
 
-      const rostersMap = new Map<string, { userId: string; fullName: string | null }[]>();
+      const rostersMap = new Map<string, { userId: string; fullName: string | null; elo?: { eloPoints: number } }[]>();
       for (const r of rosters) {
         const list = rostersMap.get(r.participantId) || [];
-        list.push({ userId: r.userId, fullName: r.fullName });
+        list.push({ 
+          userId: r.userId, 
+          fullName: r.fullName,
+          elo: r.eloPoints !== null && r.eloPoints !== undefined ? { eloPoints: r.eloPoints } : undefined
+        });
         rostersMap.set(r.participantId, list);
       }
 
@@ -177,20 +195,39 @@ export class MatchesRepository {
       }
     }
 
-    const groupsMap = new Map<string, { id: string; name: string; stageName: string; tournamentName?: string; categoryId?: string; categoryName?: string }>();
+    const groupsMap = new Map<string, { 
+      id: string; 
+      name: string; 
+      stageName: string; 
+      stageType?: string;
+      tournamentName?: string; 
+      categoryId?: string; 
+      categoryName?: string;
+      matchType?: string;
+      genderRestriction?: string;
+    }>();
     if (groupIdsForMatches.size > 0) {
       const groupsData = await this.db
         .select({
           groupId: schema.tournamentGroups.id,
           groupName: schema.tournamentGroups.name,
           stageName: schema.tournamentStages.name,
+          stageType: schema.tournamentStages.type,
           tournamentName: schema.tournaments.name,
           categoryId: schema.tournaments.categoryId,
           categoryName: schema.categories.name,
+          matchType: schema.tournaments.matchType,
+          genderRestriction: schema.tournaments.genderRestriction,
+          divisionMatchType: schema.tournamentDivisions.matchType,
+          divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
         })
         .from(schema.tournamentGroups)
         .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
         .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+        .leftJoin(
+          schema.tournamentDivisions,
+          eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
+        )
         .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
         .where(inArray(schema.tournamentGroups.id, Array.from(groupIdsForMatches)));
       for (const g of groupsData) {
@@ -198,9 +235,12 @@ export class MatchesRepository {
           id: g.groupId,
           name: g.groupName,
           stageName: g.stageName,
+          stageType: g.stageType || undefined,
           tournamentName: g.tournamentName,
           categoryId: g.categoryId || undefined,
           categoryName: g.categoryName || undefined,
+          matchType: g.divisionMatchType || g.matchType || undefined,
+          genderRestriction: g.divisionGenderRestriction || g.genderRestriction || undefined,
         });
       }
     }
@@ -212,17 +252,20 @@ export class MatchesRepository {
 
       return {
         ...match,
-        participant1: p1 ? { id: p1.id, teamName: p1.teamName, seed: p1.seed } : null,
-        participant2: p2 ? { id: p2.id, teamName: p2.teamName, seed: p2.seed } : null,
+        participant1: p1 ? { id: p1.id, teamName: p1.teamName, seed: p1.seed, members: p1.members } : null,
+        participant2: p2 ? { id: p2.id, teamName: p2.teamName, seed: p2.seed, members: p2.members } : null,
         group: groupStage ? {
           name: groupStage.name,
           stage: {
             name: groupStage.stageName,
+            type: groupStage.stageType,
           }
         } : null,
         tournament: groupStage ? {
           name: groupStage.tournamentName,
           categoryId: groupStage.categoryId,
+          matchType: groupStage.matchType,
+          genderRestriction: groupStage.genderRestriction,
           category: {
             name: groupStage.categoryName,
           }
@@ -263,6 +306,8 @@ export class MatchesRepository {
         categoryId: schema.tournaments.categoryId,
         matchType: schema.tournaments.matchType,
         genderRestriction: schema.tournaments.genderRestriction,
+        divisionMatchType: schema.tournamentDivisions.matchType,
+        divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
         createdBy: schema.tournaments.createdBy,
         stageType: schema.tournamentStages.type,
         roundConfig: schema.tournamentStages.roundConfig,
@@ -274,6 +319,10 @@ export class MatchesRepository {
       })
       .from(schema.tournamentStages)
       .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+      .leftJoin(
+        schema.tournamentDivisions,
+        eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
+      )
       .leftJoin(schema.categories, eq(schema.categories.id, schema.tournaments.categoryId))
       .leftJoin(schema.tournamentGroups, eq(schema.tournamentGroups.id, match.groupId!))
       .where(eq(schema.tournamentStages.id, match.stageId))
@@ -315,7 +364,8 @@ export class MatchesRepository {
             categoryName: group.categoryName,
             categorySlug: group.categorySlug,
             categoryConfig: group.categoryConfig,
-            matchType: group.matchType,
+            matchType: group.divisionMatchType ?? group.matchType,
+            genderRestriction: group.divisionGenderRestriction ?? group.genderRestriction,
             createdBy: group.createdBy,
             sportRules: group.sportRules,
             tournamentConfig: group.tournamentConfig,
@@ -524,6 +574,8 @@ export class MatchesRepository {
           if (!pId) continue;
           const isWinner = pId === winnerId;
           const pointsEarned = isDraw ? drawPoints : (isWinner ? winPoints : lossPoints);
+          const setPointsFor = pId === p1Id ? matchDetails.p1SetsWon : matchDetails.p2SetsWon;
+          const setPointsAgainst = pId === p1Id ? matchDetails.p2SetsWon : matchDetails.p1SetsWon;
 
           const existingStanding = await tx
             .select()
@@ -545,6 +597,8 @@ export class MatchesRepository {
                 won: row.won + (isWinner ? 1 : 0),
                 lost: row.lost + ((!isWinner && !isDraw) ? 1 : 0),
                 draws: row.draws + (isDraw ? 1 : 0),
+                pointsFor: row.pointsFor + setPointsFor,
+                pointsAgainst: row.pointsAgainst + setPointsAgainst,
                 totalPoints: row.totalPoints + pointsEarned,
                 updatedAt: new Date(),
               })
@@ -559,8 +613,8 @@ export class MatchesRepository {
                 won: isWinner ? 1 : 0,
                 lost: (!isWinner && !isDraw) ? 1 : 0,
                 draws: isDraw ? 1 : 0,
-                pointsFor: 0,
-                pointsAgainst: 0,
+                pointsFor: setPointsFor,
+                pointsAgainst: setPointsAgainst,
                 totalPoints: pointsEarned,
                 updatedAt: new Date(),
               });

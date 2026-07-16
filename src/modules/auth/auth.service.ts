@@ -165,6 +165,11 @@ export class AuthService {
     userAgent?: string,
     ipAddress?: string,
   ) {
+    // Nếu tài khoản OAuth không cung cấp email, tự động sinh email ảo dựa trên ID nhà phát hành
+    if (!oauthProfile.email) {
+      oauthProfile.email = `${oauthProfile.provider.toLowerCase()}-${oauthProfile.providerUserId}@vndcsport.vn`;
+    }
+
     // 1. Check if provider is already linked
     const existingProvider = await this.authRepository.findAuthProvider(
       oauthProfile.provider,
@@ -194,11 +199,15 @@ export class AuthService {
       const defaultRole = await this.authRepository.findRoleByName(
         UserRole.PLAYER,
       );
+      
+      // Nếu email có đuôi @vndcsport.vn (email ảo tự sinh), ta để isEmailVerified: false
+      const isVirtualEmail = oauthProfile.email.endsWith('@vndcsport.vn');
+      
       user = await this.authRepository.createOAuthUser(
         {
-          email: oauthProfile.email!,
+          email: oauthProfile.email,
           passwordHash: null,
-          isEmailVerified: true,
+          isEmailVerified: !isVirtualEmail,
         },
         { 
           fullName: oauthProfile.displayName || 'User', 
@@ -319,6 +328,44 @@ export class AuthService {
 
   async googleMobileLogin(idToken: string, userAgent?: string, ipAddress?: string) {
     const oauthProfile = await this.verifyGoogleIdToken(idToken);
+    return this.oauthLogin(oauthProfile, userAgent, ipAddress);
+  }
+
+  async verifyFacebookAccessToken(accessToken: string): Promise<OAuthProfileDto> {
+    try {
+      const response = await fetch(
+        `https://graph.facebook.com/v18.0/me?fields=id,name,email,picture.type(large)&access_token=${accessToken}`,
+      );
+      if (!response.ok) {
+        throw new Error('Facebook Graph API error');
+      }
+      const data = (await response.json()) as {
+        id: string;
+        name: string;
+        email?: string;
+        picture?: { data?: { url?: string } };
+      };
+
+      if (!data.id) {
+        throw new UnauthorizedException('Access Token của Facebook không hợp lệ.');
+      }
+
+      return {
+        provider: 'FACEBOOK',
+        providerUserId: data.id,
+        email: data.email,
+        displayName: data.name,
+        avatarUrl: data.picture?.data?.url,
+        accessToken,
+        refreshToken: undefined,
+      };
+    } catch {
+      throw new UnauthorizedException('Xác thực Facebook Access Token thất bại.');
+    }
+  }
+
+  async facebookMobileLogin(accessToken: string, userAgent?: string, ipAddress?: string) {
+    const oauthProfile = await this.verifyFacebookAccessToken(accessToken);
     return this.oauthLogin(oauthProfile, userAgent, ipAddress);
   }
 

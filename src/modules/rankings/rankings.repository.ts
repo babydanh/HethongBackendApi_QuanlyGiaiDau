@@ -17,7 +17,7 @@ export class RankingsRepository {
   }
 
   async getLeaderboard(query: QueryRankingDto) {
-    const { page = 1, limit = 50, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode } = query;
+    const { page = 1, limit = 50, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode, genderRestriction } = query;
     const offset = (page - 1) * limit;
 
     if (scope === 'COMMUNITY') {
@@ -27,7 +27,14 @@ export class RankingsRepository {
       const conditions: SQL[] = [
         eq(schema.communityRankings.categoryId, categoryId),
         eq(schema.communityRankings.communityId, communityId),
+        eq(schema.users.isMock, false),
       ];
+      if (matchType) {
+        conditions.push(eq(schema.communityRankings.matchType, matchType));
+      }
+      if (genderRestriction) {
+        conditions.push(eq(schema.communityRankings.genderRestriction, genderRestriction));
+      }
 
       if (provinceCode) {
         conditions.push(eq(schema.profiles.provinceCode, provinceCode));
@@ -41,6 +48,8 @@ export class RankingsRepository {
           userId: schema.communityRankings.userId,
           categoryId: schema.communityRankings.categoryId,
           communityId: schema.communityRankings.communityId,
+          matchType: schema.communityRankings.matchType,
+          genderRestriction: schema.communityRankings.genderRestriction,
           eloPoints: schema.communityRankings.eloPoints,
           matchesPlayed: schema.communityRankings.matchesPlayed,
           matchesWon: schema.communityRankings.matchesWon,
@@ -72,13 +81,14 @@ export class RankingsRepository {
       const conditions: SQL[] = [
         eq(schema.userRanks.categoryId, categoryId),
         isNull(schema.userRanks.communityId),
+        eq(schema.users.isMock, false),
       ];
       if (matchType) {
         conditions.push(eq(schema.userRanks.matchType, matchType));
       }
-      // if (query.genderRestriction) {
-      //   conditions.push(eq(schema.userRanks.genderRestriction, query.genderRestriction));
-      // }
+      if (genderRestriction) {
+        conditions.push(eq(schema.userRanks.genderRestriction, genderRestriction));
+      }
       if (provinceCode) {
         conditions.push(eq(schema.profiles.provinceCode, provinceCode));
       }
@@ -91,7 +101,7 @@ export class RankingsRepository {
           userId: schema.userRanks.userId,
           categoryId: schema.userRanks.categoryId,
           matchType: schema.userRanks.matchType,
-          // genderRestriction: schema.userRanks.genderRestriction,
+          genderRestriction: schema.userRanks.genderRestriction,
           eloPoints: schema.userRanks.eloPoints,
           matchesPlayed: schema.userRanks.matchesPlayed,
           matchesWon: schema.userRanks.matchesWon,
@@ -127,12 +137,23 @@ export class RankingsRepository {
   }
 
   async getUserRankings(userId: string) {
+    const [rankableUser] = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(eq(schema.users.id, userId), eq(schema.users.isMock, false)))
+      .limit(1);
+
+    if (!rankableUser) {
+      return { publicRanks: [], communityRanks: [] };
+    }
+
     const publicRanks = await this.db
       .select({
         id: schema.userRanks.id,
         categoryId: schema.userRanks.categoryId,
         categoryName: schema.categories.name,
         matchType: schema.userRanks.matchType,
+        genderRestriction: schema.userRanks.genderRestriction,
         eloPoints: schema.userRanks.eloPoints,
         matchesPlayed: schema.userRanks.matchesPlayed,
         matchesWon: schema.userRanks.matchesWon,
@@ -152,6 +173,8 @@ export class RankingsRepository {
         communityName: schema.communities.name,
         categoryId: schema.communityRankings.categoryId,
         categoryName: schema.categories.name,
+        matchType: schema.communityRankings.matchType,
+        genderRestriction: schema.communityRankings.genderRestriction,
         eloPoints: schema.communityRankings.eloPoints,
         matchesPlayed: schema.communityRankings.matchesPlayed,
         matchesWon: schema.communityRankings.matchesWon,
@@ -255,6 +278,10 @@ export class RankingsRepository {
         eq(schema.communityRankings.userId, userId),
         eq(schema.communityRankings.categoryId, categoryId),
         eq(schema.communityRankings.communityId, communityId),
+        eq(schema.communityRankings.matchType, matchType),
+        genderRestriction
+          ? eq(schema.communityRankings.genderRestriction, genderRestriction)
+          : isNull(schema.communityRankings.genderRestriction),
       ];
       
       const existing = forUpdate
@@ -269,6 +296,8 @@ export class RankingsRepository {
           userId,
           categoryId,
           communityId,
+          matchType,
+          genderRestriction: genderRestriction || null,
           eloPoints: 1000,
           matchesPlayed: 0,
           matchesWon: 0,
@@ -283,9 +312,9 @@ export class RankingsRepository {
         eq(schema.userRanks.categoryId, categoryId),
         eq(schema.userRanks.matchType, matchType),
         isNull(schema.userRanks.communityId),
-        // genderRestriction
-        //   ? eq(schema.userRanks.genderRestriction, genderRestriction)
-        //   : isNull(schema.userRanks.genderRestriction),
+        genderRestriction
+          ? eq(schema.userRanks.genderRestriction, genderRestriction)
+          : isNull(schema.userRanks.genderRestriction),
       ];
 
       const existing = forUpdate
@@ -300,7 +329,7 @@ export class RankingsRepository {
           userId,
           categoryId,
           matchType,
-          // genderRestriction: genderRestriction || null,
+          genderRestriction: genderRestriction || null,
           eloPoints: 1000,
           matchesPlayed: 0,
           matchesWon: 0,

@@ -24,6 +24,7 @@ export interface TournamentConfig {
   maxElo?: number | null;
   maxCombinedElo?: number | null;
   maxTeammateGap?: number | null;
+  registrationMode?: 'OPEN' | 'APPROVAL' | 'INVITE_ONLY';
 }
 
 export interface Prize {

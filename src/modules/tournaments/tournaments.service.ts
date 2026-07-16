@@ -42,6 +42,8 @@ import {
   buildRegistrationTimeoutNotification,
   buildTournamentCancelledNotification,
 } from '../notifications/notification-builder';
+import { StorageService } from '../../providers/storage/storage.service';
+import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
 
 @Injectable()
 export class TournamentsService {
@@ -49,10 +51,32 @@ export class TournamentsService {
     private readonly tournamentsRepository: TournamentsRepository,
     private readonly bracketGeneratorService: BracketGeneratorService,
     private readonly notificationsService: NotificationsService,
+    private readonly storageService: StorageService,
   ) {}
 
   private async sendNotificationBatch(notifications: Array<Promise<unknown>>) {
     await Promise.all(notifications);
+  }
+
+  private async cleanupTournamentImages(tournament: { galleryImages?: string[] | null; bannerUrl?: string | null; logoUrl?: string | null }) {
+    const urls: string[] = [];
+
+    if (tournament.bannerUrl) urls.push(tournament.bannerUrl);
+    if (tournament.logoUrl) urls.push(tournament.logoUrl);
+    if (tournament.galleryImages) urls.push(...tournament.galleryImages);
+
+    for (const url of urls) {
+      if (isStoredImageUrl(url)) {
+        try {
+          const publicId = extractStoredImagePublicId(url);
+          if (publicId) {
+            await this.storageService.deleteFile(publicId);
+          }
+        } catch (err) {
+          console.error('Failed to delete tournament image from storage:', err);
+        }
+      }
+    }
   }
 
   private readSupportedMatchTypes(categoryConfig: CategoryConfig | null | undefined) {
@@ -109,9 +133,26 @@ export class TournamentsService {
     return tournament;
   }
 
+  private validateRegistrationMode(config: unknown) {
+    if (!config || typeof config !== 'object') return;
+
+    const registrationMode = (config as Record<string, unknown>).registrationMode;
+    if (registrationMode !== undefined) {
+      if (typeof registrationMode !== 'string' || !['OPEN', 'APPROVAL', 'INVITE_ONLY'].includes(registrationMode)) {
+        throw new BadRequestException(
+          'registrationMode must be OPEN, APPROVAL, or INVITE_ONLY',
+        );
+      }
+    }
+  }
+
   async findAll(query: QueryTournamentDto) {
-    const result = await this.tournamentsRepository.findAll(query, {
-      defaultTournamentType: 'PUBLIC',
+    const result = await this.tournamentsRepository.findAll({
+      ...query,
+      visibility: 'PUBLIC',
+      createdBy: undefined,
+    }, {
+      defaultTournamentType: null,
       defaultVisibility: 'PUBLIC',
     });
     result.data = result.data.map(t => this.mapTournamentFormat(t));
@@ -121,7 +162,11 @@ export class TournamentsService {
   async findPublic(query: QueryTournamentDto) {
     // Lấy tất cả tournament hiển thị công khai trên app/web:
     // Mặc định lọc các giải đấu PUBLIC để ẩn giải đấu PRIVATE khỏi trang chủ
-    const result = await this.tournamentsRepository.findAll(query, {
+    const result = await this.tournamentsRepository.findAll({
+      ...query,
+      visibility: 'PUBLIC',
+      createdBy: undefined,
+    }, {
       defaultTournamentType: null,
       defaultVisibility: 'PUBLIC',
     });
@@ -163,6 +208,10 @@ export class TournamentsService {
     const isOwner = userId && tournament.createdBy === userId;
     const isAdmin = systemRoles.includes('ADMIN');
 
+    if (['DRAFT', 'PENDING_APPROVAL'].includes(tournament.status) && !isOwner && !isAdmin) {
+      throw new NotFoundException('Tournament not found');
+    }
+
     if (tournament.status === 'SUSPENDED' && !isOwner && !isAdmin) {
       throw new ForbiddenException('Giải đấu đang bị tạm đình chỉ do vi phạm điều khoản dịch vụ');
     }
@@ -197,6 +246,8 @@ export class TournamentsService {
   }
 
   async create(userId: string, createTournamentDto: CreateTournamentDto, systemRoles: string[] = []) {
+    this.validateRegistrationMode(createTournamentDto.tournamentConfig);
+
     // 1. Validate category existence and sportRules default fallback
     const category = await this.tournamentsRepository.findCategory(createTournamentDto.categoryId);
     if (!category) {
@@ -379,7 +430,7 @@ export class TournamentsService {
     Object.assign(fullDto, {
       name: dto.name,
       tournamentType: 'CLUB',
-      visibility: 'PRIVATE',
+      visibility: 'PUBLIC',
       communityId: dto.communityId,
       categoryId: category.id,
       matchType,
@@ -408,6 +459,8 @@ export class TournamentsService {
   }
 
   async update(id: string, userId: string, updateTournamentDto: UpdateTournamentDto, systemRoles: string[] = []) {
+    this.validateRegistrationMode(updateTournamentDto.tournamentConfig);
+
     const existing = await this.tournamentsRepository.findById(id);
     if (!existing) throw new NotFoundException('Tournament not found');
 
@@ -540,6 +593,33 @@ export class TournamentsService {
       });
     }
 
+    // Clean up old banner/logo from Cloudinary if they are being replaced
+    if (updateTournamentDto.bannerUrl !== undefined && existing.bannerUrl && existing.bannerUrl !== updateTournamentDto.bannerUrl) {
+      if (isStoredImageUrl(existing.bannerUrl)) {
+        try {
+          const publicId = extractStoredImagePublicId(existing.bannerUrl);
+          if (publicId) {
+            await this.storageService.deleteFile(publicId);
+          }
+        } catch (err) {
+          console.error('Failed to delete old banner from storage:', err);
+        }
+      }
+    }
+
+    if (updateTournamentDto.logoUrl !== undefined && existing.logoUrl && existing.logoUrl !== updateTournamentDto.logoUrl) {
+      if (isStoredImageUrl(existing.logoUrl)) {
+        try {
+          const publicId = extractStoredImagePublicId(existing.logoUrl);
+          if (publicId) {
+            await this.storageService.deleteFile(publicId);
+          }
+        } catch (err) {
+          console.error('Failed to delete old logo from storage:', err);
+        }
+      }
+    }
+
     const updated = await this.tournamentsRepository.update(id, userId, updateTournamentDto);
 
     // Thông báo cho người theo dõi khi dời lịch
@@ -623,6 +703,7 @@ export class TournamentsService {
 
     // If System ADMIN, delete immediately
     if (systemRoles.includes('ADMIN')) {
+      await this.cleanupTournamentImages(existing);
       return this.tournamentsRepository.softDelete(id, userId);
     }
 
@@ -643,6 +724,7 @@ export class TournamentsService {
       }
     }
 
+    await this.cleanupTournamentImages(existing);
     return this.tournamentsRepository.softDelete(id, userId);
   }
 
@@ -775,8 +857,7 @@ export class TournamentsService {
 
     const participants = await this.tournamentsRepository.findParticipantsForSeeding(tournament.id, divisionId);
 
-    // Get categoryId and matchType from tournament/division
-    let categoryId = tournament.categoryId;
+    // Get matchType from tournament/division
     let matchType = tournament.matchType || 'DOUBLES';
     if (divisionId) {
       const division = await this.tournamentsRepository.findDivisionById(divisionId);
@@ -796,7 +877,7 @@ export class TournamentsService {
 
       const elos = await Promise.all(
         members.map((m: { userId: string }) =>
-          this.tournamentsRepository.getUserElo(m.userId, tournament.categoryId, tournament.matchType || 'DOUBLES'),
+          this.tournamentsRepository.getUserElo(m.userId, tournament.categoryId, matchType),
         ),
       );
 
@@ -1317,6 +1398,21 @@ export class TournamentsService {
       throw new BadRequestException('Invalid gallery image index');
     }
 
+    const removedUrl = currentImages[index];
+
+    // Delete the image from Cloudinary before removing from DB
+    if (isStoredImageUrl(removedUrl)) {
+      try {
+        const publicId = extractStoredImagePublicId(removedUrl);
+        if (publicId) {
+          await this.storageService.deleteFile(publicId);
+        }
+      } catch (err) {
+        // Log error but don't stop the removal process
+        console.error('Failed to delete gallery image from storage:', err);
+      }
+    }
+
     const galleryImages = currentImages.filter((_, idx) => idx !== index);
     const updated = await this.tournamentsRepository.update(id, userId, { galleryImages });
     return this.mapTournamentFormat(updated);
@@ -1347,13 +1443,16 @@ export class TournamentsService {
     }
 
     // Ràng buộc thông tin cơ bản trước khi công bố
-    if (!existing.description || existing.description.trim() === '') {
-      throw new BadRequestException('Vui lòng nhập mô tả chi tiết của giải đấu trước khi công bố.');
+    if (!existing.description || existing.description.trim().length < 10) {
+      throw new BadRequestException('Mô tả giải đấu phải có ít nhất 10 ký tự trước khi công bố.');
     }
 
-    if (!existing.bannerUrl || existing.bannerUrl.trim() === '') {
-      throw new BadRequestException('Vui lòng tải lên ảnh bìa (banner) giải đấu trước khi công bố.');
-    }
+    // Tự động gán banner và logo mặc định nếu chưa có
+    const defaultBanner = 'https://qlgiaidau.vndcsport.vn/default-banner.png';
+    const defaultLogo = 'https://qlgiaidau.vndcsport.vn/default-logo.png';
+    const updateData: Record<string, unknown> = {};
+    if (!existing.bannerUrl) updateData.bannerUrl = defaultBanner;
+    if (!existing.logoUrl) updateData.logoUrl = defaultLogo;
 
     if (!existing.startDate) {
       throw new BadRequestException('Vui lòng cấu hình ngày bắt đầu giải đấu trước khi công bố.');
@@ -1361,6 +1460,12 @@ export class TournamentsService {
 
     if (!existing.endDate) {
       throw new BadRequestException('Vui lòng cấu hình ngày kết thúc giải đấu trước khi công bố.');
+    }
+
+    // Ràng buộc logic ngày tháng
+    if (existing.startDate && existing.endDate &&
+        new Date(existing.startDate) >= new Date(existing.endDate)) {
+      throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc giải đấu.');
     }
 
     if (!existing.registrationStartDate) {
@@ -1371,12 +1476,44 @@ export class TournamentsService {
       throw new BadRequestException('Vui lòng cấu hình ngày kết thúc đăng ký trước khi công bố.');
     }
 
+    if (existing.registrationStartDate && existing.registrationEndDate &&
+        new Date(existing.registrationStartDate) >= new Date(existing.registrationEndDate)) {
+      throw new BadRequestException('Ngày mở đăng ký phải trước ngày đóng đăng ký.');
+    }
+
+    if (existing.registrationEndDate && existing.startDate &&
+        new Date(existing.registrationEndDate) > new Date(existing.startDate)) {
+      throw new BadRequestException('Ngày đóng đăng ký phải trước ngày khởi tranh.');
+    }
+
     if (!existing.venueId) {
       throw new BadRequestException('Vui lòng cấu hình địa điểm thi đấu (sân đấu) trước khi công bố.');
     }
 
+    // Kiểm tra có ít nhất 1 thông tin liên hệ (email hoặc số điện thoại)
+    const contactInfo = existing.contactInfo as Record<string, unknown> | null | undefined;
+    const hasContact = contactInfo && (
+      (contactInfo.phone && typeof contactInfo.phone === 'string' && contactInfo.phone.trim() !== '') ||
+      (contactInfo.email && typeof contactInfo.email === 'string' && contactInfo.email.trim() !== '') ||
+      (contactInfo.phone && typeof contactInfo.phone === 'number')
+    );
+    if (!hasContact) {
+      throw new BadRequestException('Vui lòng cập nhật ít nhất 1 thông tin liên hệ (email hoặc số điện thoại) trước khi công bố.');
+    }
+
     if (existing.entryFee === undefined || existing.entryFee === null) {
       throw new BadRequestException('Vui lòng cấu hình lệ phí tham gia trước khi công bố giải đấu.');
+    }
+
+    // Kiểm tra có ít nhất 1 division
+    const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
+    if (!divisions || divisions.length === 0) {
+      throw new BadRequestException('Vui lòng tạo ít nhất 1 nội dung thi đấu trước khi công bố.');
+    }
+
+    // Cập nhật banner/logo mặc định nếu thiếu
+    if (Object.keys(updateData).length > 0) {
+      await this.tournamentsRepository.update(id, userId, updateData);
     }
 
     const publishFee = await this.getPublishFee(existing.tournamentType, existing.isRanked);
@@ -1849,14 +1986,14 @@ export class TournamentsService {
 
     const foundUser = await this.tournamentsRepository.findUserByEmailOrPhone(userEmailOrPhone);
     if (!foundUser) {
-      throw new NotFoundException('Không tìm thấy tài khoản Baseline cho người chơi thứ nhất');
+      throw new NotFoundException('Không tìm thấy tài khoản VNDC Sport cho người chơi thứ nhất');
     }
 
     let foundPartnerId: string | undefined = undefined;
     if (partnerEmailOrPhone) {
       const foundPartner = await this.tournamentsRepository.findUserByEmailOrPhone(partnerEmailOrPhone);
       if (!foundPartner) {
-        throw new NotFoundException('Không tìm thấy tài khoản Baseline cho đồng đội (người thứ 2)');
+        throw new NotFoundException('Không tìm thấy tài khoản VNDC Sport cho đồng đội (người thứ 2)');
       }
       if (foundPartner.id === foundUser.id) {
         throw new BadRequestException('Tài khoản đồng đội phải khác tài khoản người chơi thứ nhất');

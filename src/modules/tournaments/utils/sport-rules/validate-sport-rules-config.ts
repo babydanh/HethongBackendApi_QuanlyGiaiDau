@@ -76,6 +76,10 @@ const ROUND_STRUCTURE_KEYS = new Set([
   'rounds',
   'defaultOverride',
   'default_override',
+  'groupsConfig',
+  'advancementConfig',
+  'playoffConfig',
+  'tiebreakerRules',
 ]);
 
 const ROUND_METADATA_KEYS = new Set([
@@ -392,6 +396,68 @@ function validateScoringBlock(
   validateScoringSemantics(kind, block, sourceLabel);
 }
 
+function validateGroupStageStructure(payload: Record<string, unknown>, sourceLabel: string) {
+  const groupsConfig = asRecord(payload.groupsConfig);
+  if (payload.groupsConfig !== undefined && !groupsConfig) {
+    throw new BadRequestException(`${sourceLabel}: groupsConfig phải là object.`);
+  }
+  if (groupsConfig) {
+    assertPositiveInteger(groupsConfig, ['numGroups'], sourceLabel, 'số bảng');
+    assertPositiveInteger(groupsConfig, ['teamsPerGroup'], sourceLabel, 'số đội mỗi bảng');
+    assertPositiveInteger(groupsConfig, ['roundsToPlay'], sourceLabel, 'số lượt vòng bảng');
+    const numGroups = readNumber(groupsConfig, ['numGroups']);
+    const teamsPerGroup = readNumber(groupsConfig, ['teamsPerGroup']);
+    if (numGroups != null && numGroups < 2) {
+      throw new BadRequestException(`${sourceLabel}: vòng bảng + loại trực tiếp phải có ít nhất 2 bảng.`);
+    }
+    if (teamsPerGroup != null && teamsPerGroup < 2) {
+      throw new BadRequestException(`${sourceLabel}: mỗi bảng phải có ít nhất 2 đội.`);
+    }
+  }
+
+  const advancementConfig = asRecord(payload.advancementConfig);
+  if (payload.advancementConfig !== undefined && !advancementConfig) {
+    throw new BadRequestException(`${sourceLabel}: advancementConfig phải là object.`);
+  }
+  if (advancementConfig) {
+    assertPositiveInteger(advancementConfig, ['teamsAdvancing'], sourceLabel, 'số đội đi tiếp mỗi bảng');
+    const allowWildcard = advancementConfig.allowWildcardThird;
+    if (allowWildcard !== undefined && typeof allowWildcard !== 'boolean') {
+      throw new BadRequestException(`${sourceLabel}: allowWildcardThird phải là boolean.`);
+    }
+  }
+
+  const playoffConfig = asRecord(payload.playoffConfig);
+  if (payload.playoffConfig !== undefined && !playoffConfig) {
+    throw new BadRequestException(`${sourceLabel}: playoffConfig phải là object.`);
+  }
+  if (playoffConfig) {
+    if (playoffConfig.type !== undefined && !['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION'].includes(String(playoffConfig.type))) {
+      throw new BadRequestException(`${sourceLabel}: thể thức playoff không hợp lệ.`);
+    }
+    if (playoffConfig.seedingType !== undefined && !['SEEDED', 'RANDOM'].includes(String(playoffConfig.seedingType))) {
+      throw new BadRequestException(`${sourceLabel}: cách xếp hạt giống playoff không hợp lệ.`);
+    }
+  }
+
+  const tiebreakerRules = asRecord(payload.tiebreakerRules);
+  if (payload.tiebreakerRules !== undefined && !tiebreakerRules) {
+    throw new BadRequestException(`${sourceLabel}: tiebreakerRules phải là object.`);
+  }
+  if (tiebreakerRules) {
+    const allowedRules = ['SET_DIFF', 'H2H_POINTS', 'POINT_DIFF'];
+    if (tiebreakerRules.primary !== undefined && !allowedRules.includes(String(tiebreakerRules.primary))) {
+      throw new BadRequestException(`${sourceLabel}: tiêu chí phân hạng chính không hợp lệ.`);
+    }
+    if (tiebreakerRules.secondary !== undefined && (
+      !Array.isArray(tiebreakerRules.secondary) ||
+      tiebreakerRules.secondary.some((rule) => !allowedRules.includes(String(rule)))
+    )) {
+      throw new BadRequestException(`${sourceLabel}: danh sách tiêu chí phân hạng phụ không hợp lệ.`);
+    }
+  }
+}
+
 export function validateSportRuleConfig(
   payload: Record<string, unknown> | null | undefined,
   options: ValidateSportRuleConfigOptions,
@@ -457,6 +523,7 @@ export function validateSportRuleConfig(
   }
 
   if (options.allowRoundStructure) {
+    validateGroupStageStructure(payload, options.sourceLabel);
     const defaultOverride = asRecord(payload.defaultOverride ?? payload.default_override);
     if (defaultOverride) {
       validateSportRuleConfig(defaultOverride, {

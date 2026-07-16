@@ -10,6 +10,7 @@ import {
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -188,6 +189,39 @@ export class AuthController {
   }
 
   @Public()
+  @Get('facebook')
+  @UseGuards(AuthGuard('facebook'))
+  @ApiOperation({ summary: 'Đăng nhập bằng Facebook' })
+  facebookAuth() {
+    // Guard will automatically redirect to Facebook
+  }
+
+  @Public()
+  @Get('facebook/callback')
+  @UseGuards(AuthGuard('facebook'))
+  @ApiOperation({ summary: 'Facebook OAuth callback' })
+  async facebookCallback(
+    @Req() req: Request & { user: OAuthProfileDto },
+    @Res() res: Response,
+  ) {
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip;
+
+    const tokens = await this.authService.oauthLogin(
+      req.user,
+      userAgent,
+      ipAddress,
+    );
+
+    // Redirect to frontend
+    // Set cookies before redirect
+    this.setTokensCookies(res, tokens.accessToken, tokens.refreshToken);
+    
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    res.redirect(`${frontendUrl}/auth/callback`);
+  }
+
+  @Public()
   @Post('mobile/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Đăng nhập cho Mobile App (Trả về JSON chứa tokens)' })
@@ -232,6 +266,17 @@ export class AuthController {
     const userAgent = req.headers['user-agent'];
     const ipAddress = req.ip;
     return await this.authService.googleMobileLogin(body.idToken, userAgent, ipAddress);
+  }
+
+  @Public()
+  @Post('mobile/facebook')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đăng nhập bằng Facebook Access Token trên Mobile App' })
+  @ApiResponse({ status: 200, description: 'Đăng nhập Facebook thành công' })
+  async mobileFacebookLogin(@Body() body: { accessToken: string }, @Req() req: Request) {
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip;
+    return await this.authService.facebookMobileLogin(body.accessToken, userAgent, ipAddress);
   }
 
   @UseGuards(new RateLimitGuard(5, 60000))

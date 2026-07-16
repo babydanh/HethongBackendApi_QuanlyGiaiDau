@@ -32,10 +32,10 @@ export class CreateLiteTournamentDto {
   @IsIn(['singles', 'doubles'])
   format?: string;
 
-  @ApiPropertyOptional({ example: 'single_elimination', description: 'Thể thức thi đấu', enum: ['single_elimination', 'double_elimination', 'round_robin'] })
+  @ApiPropertyOptional({ example: 'single_elimination', description: 'Thể thức thi đấu', enum: ['single_elimination', 'double_elimination', 'round_robin', 'group_stage_knockout', 'group_stage_then_knockout'] })
   @IsString()
   @IsOptional()
-  @IsIn(['single_elimination', 'double_elimination', 'round_robin'])
+  @IsIn(['single_elimination', 'double_elimination', 'round_robin', 'group_stage_knockout', 'group_stage_then_knockout'])
   bracketType?: string;
 
   @ApiPropertyOptional({ example: 16, description: 'Số đội tối đa (2-32)' })

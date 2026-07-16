@@ -728,7 +728,6 @@ export class BracketGeneratorService {
       let maxGroupSize = (config.roundRobinGroupSize as number) || 8;
       let winPoints = 3, drawPoints = 1, lossPoints = 0;
       let tiebreakerRules: Record<string, unknown> = { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] };
-      let roundsToPlay = (config.roundRobinLegs as number) || 1;
       let roundRobinLegs = 1;
 
       if (divisionId) {
@@ -752,7 +751,7 @@ export class BracketGeneratorService {
               if (sc.lossPoints) lossPoints = Number(sc.lossPoints);
             }
             if (rc.tiebreakerRules) tiebreakerRules = rc.tiebreakerRules as Record<string, unknown>;
-            const rtp = (rc as Record<string, unknown>).roundsToPlay;
+            const rtp = rc.roundsToPlay;
             if (typeof rtp === 'number' && rtp > 0 && rtp <= 20) roundRobinLegs = rtp;
           }
         }
@@ -846,7 +845,9 @@ export class BracketGeneratorService {
           const teams = [...teamList];
 
           for (let round = 1; round <= roundsCount; round++) {
-            const currentRoundNumber = leg * roundsCount + round + (g * roundsCount * roundRobinLegs);
+            // Mỗi leg = 1 vòng đấu hoàn chỉnh (tất cả teams gặp nhau 1 lần)
+            // roundNumber = leg + 1 (Vòng 1: lượt đi, Vòng 2: lượt về...)
+            const currentRoundNumber = leg + 1;
 
             for (let i = 0; i < matchesPerRound; i++) {
               const home = teams[i];
@@ -949,8 +950,9 @@ export class BracketGeneratorService {
     stageId: string,
     groupId: string,
     standings: Array<{ participantId: string; totalPoints: number; pointsFor: number; pointsAgainst: number }>,
-    tiebreakerRules: { primary: string; secondary: string[] },
+    _tiebreakerRules: { primary: string; secondary: string[] },
   ): Promise<string[]> {
+    void _tiebreakerRules;
     // Nhóm các đội có cùng totalPoints
     const pointGroups = new Map<number, Array<{ participantId: string; pointsFor: number; pointsAgainst: number }>>();
     for (const s of standings) {
@@ -1129,7 +1131,7 @@ export class BracketGeneratorService {
       const scoring = (divConfig.scoring || config.scoring || { winPoints: 3, drawPoints: 1, lossPoints: 0 }) as Record<string, unknown>;
       const tiebreakerRules = (divConfig.tiebreakerRules || config.tiebreakerRules || { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] }) as Record<string, unknown>;
 
-      const numGroups = (groupsConfig.numGroups as number) || 2;
+      const requestedNumGroups = (groupsConfig.numGroups as number) || 2;
       const teamsPerGroup = (groupsConfig.teamsPerGroup as number) || 4;
       const teamsAdvancing = (advancementConfig.teamsAdvancing as number) || 1;
       const allowWildcard = (advancementConfig.allowWildcardThird as boolean) || false;
@@ -1141,13 +1143,26 @@ export class BracketGeneratorService {
         throw new BadRequestException('At least 2 participants required');
       }
 
-      // Validate groups config
-      const actualNumGroups = Math.min(
-        Math.max(Math.ceil(numParticipants / teamsPerGroup), 2),
-        Math.ceil(numParticipants / 3),
-      );
-      if (actualNumGroups < 2) {
+      // Validate groups config. Use the organizer's saved settings, not an inferred group count.
+      const actualNumGroups = requestedNumGroups;
+      if (!Number.isInteger(actualNumGroups) || actualNumGroups < 2) {
         throw new BadRequestException('Need at least 2 groups for group stage knockout');
+      }
+      if (!Number.isInteger(teamsPerGroup) || teamsPerGroup < 2) {
+        throw new BadRequestException('Each group needs at least 2 teams');
+      }
+      if (actualNumGroups > Math.floor(numParticipants / 2)) {
+        throw new BadRequestException('Too many groups for the current participant count');
+      }
+      if (actualNumGroups * teamsPerGroup < numParticipants) {
+        throw new BadRequestException('Group settings do not have enough slots for all participants');
+      }
+      const smallestGroupSize = Math.floor(numParticipants / actualNumGroups);
+      if (!Number.isInteger(teamsAdvancing) || teamsAdvancing < 1 || teamsAdvancing >= smallestGroupSize) {
+        throw new BadRequestException('Invalid teams advancing per group');
+      }
+      if (allowWildcard && (!Number.isInteger(wildcardTeams) || wildcardTeams < 1 || wildcardTeams > actualNumGroups)) {
+        throw new BadRequestException('Invalid wildcard teams advancing');
       }
 
       // 3. Soft-delete các Stage/Group/Matches cũ
@@ -1268,7 +1283,8 @@ export class BracketGeneratorService {
           const teams = [...teamList];
 
           for (let round = 1; round <= roundsCount; round++) {
-            const currentRoundNumber = leg * roundsCount + round + (g * roundsCount * rtp);
+            // Mỗi leg = 1 vòng hoàn chỉnh
+            const currentRoundNumber = leg + 1;
 
             for (let i = 0; i < matchesPerRound; i++) {
               const home = teams[i];
@@ -1399,8 +1415,6 @@ export class BracketGeneratorService {
           .returning();
 
         const shape = getDoubleEliminationShape(powerOf2);
-        const allMatchesList: (typeof schema.matches.$inferInsert)[] = [];
-
         // Winners bracket
         const winnersRounds = shape.winnersRounds;
         const winnersMatchesByRound: MatchNode[][] = [];

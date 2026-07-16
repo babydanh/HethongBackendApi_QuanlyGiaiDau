@@ -89,5 +89,15 @@ export class QueryTournamentDto {
   @IsOptional()
   @IsString()
   createdBy?: string;
+
+  @ApiPropertyOptional({ example: '2026-07-15', description: 'Lọc từ ngày bắt đầu giải đấu' })
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @ApiPropertyOptional({ example: '2026-07-30', description: 'Lọc đến ngày kết thúc giải đấu' })
+  @IsOptional()
+  @IsString()
+  endDate?: string;
 }
 
