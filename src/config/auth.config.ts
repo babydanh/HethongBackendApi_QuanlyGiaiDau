@@ -11,4 +11,9 @@ export default registerAs('auth', () => ({
     process.env.GOOGLE_CALLBACK_URL ||
     'http://localhost:3000/api/v1/auth/google/callback',
   googleMobileClientIds: process.env.GOOGLE_MOBILE_CLIENT_IDS || '',
+  facebookAppId: process.env.FACEBOOK_APP_ID,
+  facebookAppSecret: process.env.FACEBOOK_APP_SECRET,
+  facebookCallbackUrl:
+    process.env.FACEBOOK_CALLBACK_URL ||
+    'http://localhost:3000/api/v1/auth/facebook/callback',
 }));

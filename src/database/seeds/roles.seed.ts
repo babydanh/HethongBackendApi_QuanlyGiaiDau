@@ -3,9 +3,16 @@ import * as dotenv from 'dotenv';
 import { roles } from '../schema/users.schema';
 import { createPostgresClientFromEnv } from '../postgres-client';
 
-dotenv.config();
+import * as path from 'path';
+
+dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 async function run() {
+  console.log('DB Connection Debug:', {
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    database: process.env.DB_DATABASE
+  });
   const sql = createPostgresClientFromEnv();
   const db = drizzle(sql);
 

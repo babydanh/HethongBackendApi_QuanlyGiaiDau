@@ -16,6 +16,7 @@ import { StorageService } from '../../providers/storage/storage.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { QueryMyReportsDto } from './dto/query-my-reports.dto';
+import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
 
 @Injectable()
 export class UsersService {
@@ -90,9 +91,9 @@ export class UsersService {
     const avatarUrl = result.secure_url;
     
     // If old avatar was uploaded via the storage provider, delete it
-    if (this.isStoredImageUrl(oldAvatarUrl)) {
+    if (isStoredImageUrl(oldAvatarUrl)) {
       try {
-        const publicId = this.extractStoredImagePublicId(oldAvatarUrl);
+        const publicId = extractStoredImagePublicId(oldAvatarUrl);
         if (publicId) {
           await this.storageService.deleteFile(publicId);
         }
@@ -122,9 +123,9 @@ export class UsersService {
     const coverUrl = result.secure_url;
     
     // If old cover was uploaded via the storage provider, delete it
-    if (this.isStoredImageUrl(oldCoverUrl)) {
+    if (isStoredImageUrl(oldCoverUrl)) {
       try {
-        const publicId = this.extractStoredImagePublicId(oldCoverUrl);
+        const publicId = extractStoredImagePublicId(oldCoverUrl);
         if (publicId) {
           await this.storageService.deleteFile(publicId);
         }
@@ -309,41 +310,4 @@ export class UsersService {
     return { success: true, message: 'Tài khoản của bạn đã được xóa thành công' };
   }
 
-  private isStoredImageUrl(url?: string | null): boolean {
-    if (!url) {
-      return false;
-    }
-
-    try {
-      const parsedUrl = new URL(url);
-      return parsedUrl.pathname.includes('/image/upload/');
-    } catch {
-      return false;
-    }
-  }
-
-  private extractStoredImagePublicId(url?: string | null): string | null {
-    if (!url) {
-      return null;
-    }
-
-    try {
-      const parsedUrl = new URL(url);
-      const uploadIndex = parsedUrl.pathname.indexOf('/image/upload/');
-      if (uploadIndex === -1) {
-        return null;
-      }
-
-      const afterUpload = parsedUrl.pathname.slice(uploadIndex + '/image/upload/'.length);
-      const pathWithoutVersion = afterUpload.replace(/^v\d+\//, '');
-      const extensionIndex = pathWithoutVersion.lastIndexOf('.');
-      const pathWithoutExtension = extensionIndex >= 0
-        ? pathWithoutVersion.slice(0, extensionIndex)
-        : pathWithoutVersion;
-
-      return pathWithoutExtension || null;
-    } catch {
-      return null;
-    }
-  }
 }

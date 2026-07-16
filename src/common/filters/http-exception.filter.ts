@@ -32,9 +32,49 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const exceptionResponse = exception.getResponse();
       if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
         const resObj = exceptionResponse as Record<string, unknown>;
-        message = (resObj.message as string) || message;
+        if (Array.isArray(resObj.message)) {
+          const translatedMessages = resObj.message.map((msg: string) => {
+            let tMsg = msg;
+            
+            // Dịch lỗi 'property X should not exist'
+            if (tMsg.includes('property') && tMsg.includes('should not exist')) {
+              const prop = tMsg.match(/property\s+(\w+)\s+should not exist/);
+              tMsg = prop ? `Thuộc tính "${prop[1]}" không được phép tồn tại` : 'Thuộc tính không hợp lệ';
+            }
+            
+            // Dịch lỗi 'X must be one of the following values: Y'
+            if (tMsg.includes('must be one of the following values:')) {
+              tMsg = tMsg
+                .replace('purpose must be one of the following values:', 'Mục đích thanh toán phải là một trong các giá trị:')
+                .replace('REGISTRATION_FEE', 'Lệ phí đăng ký')
+                .replace('TOURNAMENT_PUBLISH_FEE', 'Lệ phí công bố giải đấu')
+                .replace('PLATFORM_FEE', 'Lệ phí nền tảng')
+                .replace('SINGLE_ELIMINATION', 'Loại trực tiếp đơn')
+                .replace('DOUBLE_ELIMINATION', 'Loại trực tiếp kép')
+                .replace('ROUND_ROBIN', 'Vòng tròn tính điểm')
+                .replace('GROUP_STAGE_KNOCKOUT', 'Vòng bảng + Loại trực tiếp');
+            }
+
+            // Dịch một số lỗi cơ bản khác
+            tMsg = tMsg
+              .replace('must be a string', 'phải là một chuỗi ký tự')
+              .replace('must be a number', 'phải là một số')
+              .replace('must be an UUID', 'phải là mã định danh dạng UUID hợp lệ')
+              .replace('must be a boolean', 'phải là kiểu đúng/sai')
+              .replace('should not be empty', 'không được để trống')
+              .replace('must be a valid date', 'phải là ngày tháng hợp lệ')
+              .replace('must be a valid email', 'phải là địa chỉ email hợp lệ');
+
+            return tMsg;
+          });
+
+          message = translatedMessages.join('; ');
+          details = resObj.message;
+        } else {
+          message = (resObj.message as string) || message;
+        }
         code = (resObj.error as string) || 'HTTP_EXCEPTION';
-        details = resObj.details || null;
+        details = details || resObj.details || null;
       }
     } else {
       console.error('[Unhandled Exception]:', exception);

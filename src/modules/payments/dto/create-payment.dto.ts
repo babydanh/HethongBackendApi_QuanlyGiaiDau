@@ -35,4 +35,11 @@ export class CreatePaymentDto {
   @IsOptional()
   divisionId?: string;
 
+  @ApiPropertyOptional({
+    example: 100000,
+    description: 'Số tiền thanh toán',
+  })
+  @IsOptional()
+  amount?: number;
+
 }

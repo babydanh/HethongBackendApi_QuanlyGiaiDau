@@ -21,6 +21,7 @@ import { PayoutRequestDto } from './dto/payout-request.dto';
 import type { PayoutReviewStatus } from './dto/review-payout.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { PaymentsRepository } from './payments.repository';
+import { RegistrationLockService } from '../tournaments/registration-lock.service';
 
 interface CalculatedPayment {
   amount: number;
@@ -45,6 +46,7 @@ export class PaymentsService {
     private readonly paymentsRepository: PaymentsRepository,
     private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
+    private readonly registrationLockService: RegistrationLockService,
   ) {
     const clientId = this.configService.get<string>('PAYOS_CLIENT_ID');
     const apiKey = this.configService.get<string>('PAYOS_API_KEY');
@@ -107,8 +109,13 @@ export class PaymentsService {
             reused: true,
           };
         }
-      } catch {}
+      } catch {
+        // Bỏ qua lỗi nếu PayOS không lấy được thông tin link cũ
+      }
 
+      if (reusable.purpose === 'REGISTRATION_FEE') {
+        await this.registrationLockService.releaseSlot(reusable.tournamentId, reusable.divisionId ?? undefined);
+      }
       await this.paymentsRepository.transitionPayment(
         reusable.id,
         'PENDING',
@@ -121,6 +128,11 @@ export class PaymentsService {
     const idempotencyKey = `${userId}:${clientIdempotencyKey?.trim() || randomUUID()}`;
     if (idempotencyKey.length > 255) {
       throw new BadRequestException('Idempotency-Key không được vượt quá 200 ký tự.');
+    }
+
+    // Giữ chỗ slot trên Redis trước khi tạo giao dịch thanh toán
+    if (data.purpose === PaymentPurpose.REGISTRATION_FEE) {
+      await this.registrationLockService.reserveSlot(data.tournamentId, calculated.divisionId);
     }
 
     let payment;
@@ -136,6 +148,10 @@ export class PaymentsService {
         expiresAt,
       });
     } catch (error: unknown) {
+      // Hoàn trả slot nếu tạo hóa đơn lỗi
+      if (data.purpose === PaymentPurpose.REGISTRATION_FEE) {
+        await this.registrationLockService.releaseSlot(data.tournamentId, calculated.divisionId);
+      }
       throw new BadRequestException(
         this.errorMessage(error, 'Không thể tạo payment intent hoặc yêu cầu đã bị lặp.'),
       );
@@ -172,6 +188,9 @@ export class PaymentsService {
         expiresAt,
       };
     } catch (error: unknown) {
+      if (data.purpose === PaymentPurpose.REGISTRATION_FEE) {
+        await this.registrationLockService.releaseSlot(data.tournamentId, calculated.divisionId);
+      }
       await this.paymentsRepository.transitionPayment(
         payment.id,
         'PENDING',
@@ -225,6 +244,9 @@ export class PaymentsService {
         this.sanitizeWebhookData(verified),
         verified.reference,
       );
+      if (payment.purpose === 'REGISTRATION_FEE') {
+        await this.registrationLockService.releaseSlot(payment.tournamentId, payment.divisionId ?? undefined);
+      }
       return { accepted: true, completed: false, invalidated: true };
     }
 
@@ -246,6 +268,9 @@ export class PaymentsService {
       );
     }
 
+    if (payment.purpose === 'REGISTRATION_FEE') {
+      await this.registrationLockService.confirmSlot(payment.tournamentId, payment.divisionId ?? undefined);
+    }
     await this.afterPaymentCompleted(result.payment);
     return { accepted: true, completed: true, idempotent: false };
   }
@@ -279,6 +304,9 @@ export class PaymentsService {
         { mock: true },
         `MOCK_CANCEL_${Date.now()}`,
       );
+      if (payment.purpose === 'REGISTRATION_FEE') {
+        await this.registrationLockService.releaseSlot(payment.tournamentId, payment.divisionId ?? undefined);
+      }
       throw new BadRequestException('Giao dịch không còn hợp lệ để hoàn tất thanh toán.');
     }
 
@@ -292,6 +320,9 @@ export class PaymentsService {
     );
     if (!result.transitioned && result.payment?.status !== 'COMPLETED') {
       throw new BadRequestException('Giao dịch không còn ở trạng thái chờ thanh toán.');
+    }
+    if (payment.purpose === 'REGISTRATION_FEE') {
+      await this.registrationLockService.confirmSlot(payment.tournamentId, payment.divisionId ?? undefined);
     }
     return { completed: true, idempotent: !result.transitioned };
   }
@@ -513,8 +544,8 @@ export class PaymentsService {
   private assertPublishConfiguration(
     tournament: NonNullable<Awaited<ReturnType<PaymentsRepository['findTournamentById']>>>,
   ) {
-    if (!tournament.description?.trim() || !tournament.bannerUrl?.trim()) {
-      throw new BadRequestException('Giải đấu phải có mô tả và ảnh bìa trước khi thanh toán.');
+    if (!tournament.description?.trim()) {
+      throw new BadRequestException('Giải đấu phải có mô tả trước khi thanh toán.');
     }
     if (
       !tournament.startDate ||
@@ -534,7 +565,7 @@ export class PaymentsService {
     if (!tournament) return;
 
     try {
-      if (payment.purpose === PaymentPurpose.REGISTRATION_FEE && payment.participantId) {
+      if (payment.purpose === 'REGISTRATION_FEE' && payment.participantId) {
         await this.notificationsService.sendNotification(
           buildParticipantPaymentCompletedNotification({
             receiverId: payment.userId,
@@ -553,7 +584,7 @@ export class PaymentsService {
             }),
           );
         }
-      } else if (payment.purpose === PaymentPurpose.TOURNAMENT_PUBLISH_FEE) {
+      } else if (payment.purpose === 'TOURNAMENT_PUBLISH_FEE') {
         const nextStatus = tournament.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
         await this.paymentsRepository.setTournamentStatus(tournament.id, nextStatus);
         await this.notificationsService.sendNotification(
@@ -563,7 +594,7 @@ export class PaymentsService {
             tournamentName: tournament.name,
           }),
         );
-      } else if (payment.purpose === PaymentPurpose.PLATFORM_FEE) {
+      } else if (payment.purpose === 'PLATFORM_FEE') {
         await this.paymentsRepository.setTournamentStatus(tournament.id, 'UPCOMING');
       }
     } catch (error: unknown) {
@@ -587,7 +618,7 @@ export class PaymentsService {
   private async ensurePaymentStillCompletable(
     payment: NonNullable<Awaited<ReturnType<PaymentsRepository['findPaymentById']>>>,
   ): Promise<string | null> {
-    if (payment.purpose !== PaymentPurpose.REGISTRATION_FEE || !payment.participantId) {
+    if (payment.purpose !== 'REGISTRATION_FEE' || !payment.participantId) {
       return null;
     }
 
