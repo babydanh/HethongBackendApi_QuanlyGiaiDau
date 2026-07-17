@@ -10,6 +10,7 @@ const uuidv4 = () => crypto.randomUUID();
 const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
 const db = drizzle(sqlClient, { schema });
 
+// Danh sách vận động viên mẫu với tên tuổi rõ ràng, mang tính chuyên nghiệp
 const MOCK_PLAYERS = [
   { name: 'Nguyễn Minh Danh', email: 'danh.nguyen@gmail.com' },
   { name: 'Phạm Hải Dũng', email: 'dung.pham@gmail.com' },
@@ -50,6 +51,7 @@ function generateScore(winner: 1 | 2) {
   }
 }
 
+// Giả lập chơi các trận đấu qua REST API
 async function simulateMatches(tournamentId: string, authHeaders: any, playAll = false) {
   const BASE_URL = 'http://127.0.0.1:3000/api/v1';
   let iteration = 0;
@@ -77,6 +79,7 @@ async function simulateMatches(tournamentId: string, authHeaders: any, playAll =
       break;
     }
 
+    // Nếu không phải playAll và chỉ còn đúng 1 trận duy nhất (Trận chung kết), chừa lại để giữ trạng thái IN_PROGRESS
     if (!playAll && playable.length === 1 && matches.filter((m: any) => m.status !== 'COMPLETED').length === 1) {
       break;
     }
@@ -111,7 +114,7 @@ async function createTournament(params: {
   organizerId: string;
   matchType: 'SINGLES' | 'DOUBLES';
   status: 'DRAFT' | 'REGISTRATION_OPEN' | 'IN_PROGRESS' | 'COMPLETED';
-  fillCount: number;
+  fillCount: number; // Số đội thực tế điền sẵn vào
   entryFee: string;
   description: string;
   prizeDescription: string;
@@ -120,13 +123,14 @@ async function createTournament(params: {
   const tourId = uuidv4();
   const inviteCode = `P-${bracketType.substring(0,2).toUpperCase()}-${Date.now().toString().slice(-4)}`;
 
+  // Tạo giải đấu chính (Tự động duyệt để hiển thị Public)
   await db.insert(schema.tournaments).values({
     id: tourId,
     name: name,
     description: description,
     categoryId: categoryId,
     createdBy: organizerId,
-    status: status === 'COMPLETED' ? 'IN_PROGRESS' : status,
+    status: status === 'COMPLETED' ? 'IN_PROGRESS' : status, // API chốt kết quả sẽ chuyển thành COMPLETED sau
     matchType: matchType,
     sportRules: { kind: 'PICKLEBALL_RALLY', setsToWin: 2, pointsPerSet: 11, winByTwo: true },
     tournamentConfig: {
@@ -147,6 +151,7 @@ async function createTournament(params: {
     prizeDescription: prizeDescription,
   });
 
+  // Tạo Division
   const divisionId = uuidv4();
   await db.insert(schema.tournamentDivisions).values({
     id: divisionId,
@@ -160,6 +165,7 @@ async function createTournament(params: {
 
   const isDoubles = matchType === 'DOUBLES';
 
+  // Thêm danh sách người chơi mẫu đăng ký giải
   for (let i = 1; i <= fillCount; i++) {
     const partId = uuidv4();
     
@@ -177,11 +183,12 @@ async function createTournament(params: {
         registeredBy: organizerId,
         teamName: teamName,
         teamStatus: 'COMPLETE',
-        seed: i,
+        seed: i, // Thêm hạt giống
         isMock: true,
         isPaid: true,
       });
 
+      // Tạo/Lấy User & Profile & Rank cho thành viên 1
       let [u1] = await db.select().from(schema.users).where(eq(schema.users.email, p1.email)).limit(1);
       if (!u1) {
         [u1] = await db.insert(schema.users).values({ id: uuidv4(), email: p1.email, isMock: true }).returning();
@@ -197,6 +204,7 @@ async function createTournament(params: {
       }).onConflictDoNothing();
       await db.insert(schema.tournamentRosters).values({ id: uuidv4(), participantId: partId, userId: u1.id, role: 'MAIN' });
 
+      // Tạo/Lấy User & Profile & Rank cho thành viên 2
       let [u2] = await db.select().from(schema.users).where(eq(schema.users.email, p2.email)).limit(1);
       if (!u2) {
         [u2] = await db.insert(schema.users).values({ id: uuidv4(), email: p2.email, isMock: true }).returning();
@@ -223,7 +231,7 @@ async function createTournament(params: {
         registeredBy: organizerId,
         teamName: teamName,
         teamStatus: 'COMPLETE',
-        seed: i,
+        seed: i, // Thêm hạt giống
         isMock: true,
         isPaid: true,
       });
@@ -251,26 +259,63 @@ async function createTournament(params: {
 async function main() {
   console.log('=== KHỞI CHẠY SEED DỮ LIỆU GIẢI ĐẤU MẪU PRODUCTION ===\n');
 
+  // 1. Lấy thông tin cơ bản
   const pickleballCat = await db.select().from(schema.categories).where(eq(schema.categories.slug, 'pickleball')).limit(1).then(r => r[0]);
   if (!pickleballCat) {
-    console.error('❌ Môn Pickleball chưa được tạo trong DB.');
+    console.error('❌ Môn Pickleball chưa được tạo trong DB. Vui lòng chạy seed categories trước.');
     return;
   }
 
-  // Sử dụng tài khoản Admin OAuth 2 làm Organizer chính thức
-  const adminEmail = 'vndcsport@gmail.com';
-  let [adminUser] = await db.select().from(schema.users).where(eq(schema.users.email, adminEmail)).limit(1);
+  // Khởi tạo các Role cần gán
+  const roles = await db.select().from(schema.roles);
+  const adminRole = roles.find(r => r.name === 'ADMIN');
+  const orgRole = roles.find(r => r.name === 'ORGANIZER');
+  const playerRole = roles.find(r => r.name === 'PLAYER');
   
-  if (!adminUser) {
-    console.error('❌ Không tìm thấy tài khoản admin hệ thống: vndcsport@gmail.com');
+  if (!adminRole || !orgRole) {
+    console.error('❌ Không tìm thấy Role ADMIN hoặc ORGANIZER trong hệ thống.');
     return;
   }
 
-  // Cập nhật pass tạm để login seed lấy token
+  // Khởi tạo/Cập nhật 2 Admin cần gán
+  const adminEmails = ['macter.970@gmail.com', 'hxlinh1683@gmail.com'];
+  const adminUsers: any[] = [];
   const hashedPassword = bcrypt.hashSync('Password123@', 12);
-  await db.update(schema.users).set({ passwordHash: hashedPassword }).where(eq(schema.users.id, adminUser.id));
 
-  // Venue
+  for (const email of adminEmails) {
+    let [user] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
+    if (!user) {
+      [user] = await db.insert(schema.users).values({
+        id: uuidv4(),
+        email: email,
+        passwordHash: hashedPassword,
+        isMock: false,
+      }).returning();
+      
+      await db.insert(schema.profiles).values({
+        userId: user.id,
+        fullName: email.split('@')[0],
+      });
+      console.log(`➜ Đã tạo tài khoản admin mới: ${email}`);
+    } else {
+      // Cập nhật lại mật khẩu để script seed đăng nhập được bằng token
+      await db.update(schema.users).set({ passwordHash: hashedPassword }).where(eq(schema.users.id, user.id));
+    }
+
+    // Gán các role cần thiết cho admin
+    await db.insert(schema.userToRoles).values({ userId: user.id, roleId: adminRole.id }).onConflictDoNothing();
+    await db.insert(schema.userToRoles).values({ userId: user.id, roleId: orgRole.id }).onConflictDoNothing();
+    if (playerRole) {
+      await db.insert(schema.userToRoles).values({ userId: user.id, roleId: playerRole.id }).onConflictDoNothing();
+    }
+
+    adminUsers.push(user);
+  }
+
+  const defaultOrganizerId = adminUsers[1].id; // hxlinh1683@gmail.com
+  const secondOrganizerId = adminUsers[0].id;  // macter.970@gmail.com
+
+  // 2. Tạo Sân đấu (Venue)
   let venue = await db.select().from(schema.tournamentVenues).limit(1).then(r => r[0]);
   if (!venue) {
     const venueId = uuidv4();
@@ -279,15 +324,16 @@ async function main() {
       name: 'VNDC Sport Club - Cụm sân Pickleball chuẩn Quốc tế',
       locationAddress: '154 Trần Não, Quận 2, TP. Hồ Chí Minh',
     }).returning();
+    console.log('➜ Đã tạo cụm sân đấu VNDC Sport Club.');
   }
 
-  // Gọi đúng API login của Mobile để lấy token (đồng bộ như dev)
+  // 3. Fake đăng nhập bằng tài khoản Admin để có Token gọi API sinh nhánh đấu
   const BASE_URL = 'http://127.0.0.1:3000/api/v1';
   console.log('Đang kết nối API Backend để tạo Token...');
-  const loginRes = await fetch(`${BASE_URL}/auth/mobile/login`, {
+  const loginRes = await fetch(`${BASE_URL}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: adminEmail, password: 'Password123@' }),
+    body: JSON.stringify({ email: 'macter.970@gmail.com', password: 'Password123@' }),
   }).catch(() => null);
 
   let token = '';
@@ -296,13 +342,11 @@ async function main() {
     token = loginData?.data?.accessToken || loginData?.accessToken || '';
   }
 
-  if (!token) {
-    console.error('❌ Không thể lấy token API để generate bracket.');
-  }
-
   const authHeaders = (token ? { 'Authorization': `Bearer ${token}` } : {}) as Record<string, string>;
 
+  // 4. Định nghĩa cấu hình 13 giải đấu mẫu chuyên nghiệp
   const tourConfigs = [
+    // 1-4. Vòng loại trực tiếp (Single Elimination)
     {
       name: '1. Giải loại trực tiếp 10 đội (Đơn)',
       bracketType: 'single_elimination',
@@ -329,7 +373,7 @@ async function main() {
       name: '3. Giải loại trực tiếp 12 đội (Đôi)',
       bracketType: 'single_elimination',
       numTeams: 12,
-      fillCount: 6,
+      fillCount: 6, // Đang mở đăng ký, mới có 6 đôi đăng ký
       matchType: 'DOUBLES' as const,
       status: 'REGISTRATION_OPEN' as const,
       entryFee: '250000.00',
@@ -347,6 +391,8 @@ async function main() {
       description: 'Giải đấu loại trực tiếp đơn nam đang diễn ra căng thẳng.',
       prizeDescription: 'Cúp + 2.000.000 VNĐ.',
     },
+    
+    // 5-8. Nhánh thắng nhánh thua (Double Elimination)
     {
       name: '5. Giải thắng/thua 10 đội (Đơn)',
       bracketType: 'double_elimination',
@@ -373,7 +419,7 @@ async function main() {
       name: '7. Giải thắng/thua 12 đội (Đơn)',
       bracketType: 'double_elimination',
       numTeams: 12,
-      fillCount: 4,
+      fillCount: 4, // Đang mở đăng ký, mới có 4 người
       matchType: 'SINGLES' as const,
       status: 'REGISTRATION_OPEN' as const,
       entryFee: '200000.00',
@@ -391,6 +437,8 @@ async function main() {
       description: 'Giải đấu đôi nhánh thắng nhánh thua đang diễn ra các vòng đấu knock-out.',
       prizeDescription: 'Cúp đôi + 5.000.000 VNĐ.',
     },
+
+    // 9-11. Vòng tròn tính điểm (Round Robin) - Max 8 đội
     {
       name: '9. Giải vòng tròn 6 đội (Đơn)',
       bracketType: 'round_robin',
@@ -417,16 +465,69 @@ async function main() {
       name: '11. Giải vòng tròn 8 đội (Đơn)',
       bracketType: 'round_robin',
       numTeams: 8,
-      fillCount: 3,
+      fillCount: 3, // Đang mở đăng ký
       matchType: 'SINGLES' as const,
       status: 'REGISTRATION_OPEN' as const,
       entryFee: '100000.00',
       description: 'Giải đấu vòng tròn đơn nam quy mô tối đa 8 vận động viên.',
       prizeDescription: 'Huy chương + Quà tặng lưu niệm.',
     },
+
+    // 12-13. Vòng bảng + Playoffs (Group Stage + Knockout)
+    {
+      name: '12. Vòng bảng + Playoffs 31 đội (Đơn)',
+      bracketType: 'group_stage_knockout',
+      numTeams: 31,
+      fillCount: 31,
+      matchType: 'SINGLES' as const,
+      status: 'IN_PROGRESS' as const,
+      entryFee: '200000.00',
+      description: 'Giải đấu chuyên nghiệp quy mô lớn chia làm 8 bảng đấu tranh suất vào Playoffs.',
+      prizeDescription: 'Cúp vô địch + Cờ lưu niệm + 7.000.000 VNĐ.',
+      groupConfig: {
+        groupsConfig: {
+          numGroups: 8,
+          teamsPerGroup: 4,
+          roundsToPlay: 1
+        },
+        advancementConfig: {
+          teamsAdvancing: 2
+        },
+        playoffConfig: {
+          type: 'SINGLE_ELIMINATION'
+        }
+      }
+    },
+    {
+      name: '13. Vòng bảng + Playoffs 35 đội (Đôi)',
+      bracketType: 'group_stage_knockout',
+      numTeams: 35,
+      fillCount: 35,
+      matchType: 'DOUBLES' as const,
+      status: 'IN_PROGRESS' as const,
+      entryFee: '400000.00',
+      description: 'Giải đôi nam nữ quy mô lớn nhất hệ thống, chia bảng đấu để lựa chọn cặp đấu xuất sắc nhất.',
+      prizeDescription: 'Cúp đôi vô địch + Cờ lưu niệm + 10.000.000 VNĐ.',
+      groupConfig: {
+        groupsConfig: {
+          numGroups: 8,
+          teamsPerGroup: 5,
+          roundsToPlay: 1
+        },
+        advancementConfig: {
+          teamsAdvancing: 2
+        },
+        playoffConfig: {
+          type: 'SINGLE_ELIMINATION'
+        }
+      }
+    }
   ];
 
+  let count = 0;
   for (const cfg of tourConfigs) {
+    count++;
+    const organizerId = (count % 2 === 0) ? secondOrganizerId : defaultOrganizerId;
     console.log(`\n➜ Đang tạo giải đấu: ${cfg.name}...`);
     const tour = await createTournament({
       name: cfg.name,
@@ -435,7 +536,7 @@ async function main() {
       fillCount: cfg.fillCount,
       venueId: venue.id,
       categoryId: pickleballCat.id,
-      organizerId: adminUser.id,
+      organizerId: organizerId,
       matchType: cfg.matchType,
       status: cfg.status,
       entryFee: cfg.entryFee,
@@ -443,12 +544,14 @@ async function main() {
       prizeDescription: cfg.prizeDescription,
     });
 
+    // Nếu giải đấu bắt đầu đấu (IN_PROGRESS hoặc COMPLETED), tự động sinh sơ đồ nhánh đấu và giả lập trận đấu
     if (cfg.status === 'IN_PROGRESS' || cfg.status === 'COMPLETED') {
       if (!token) {
-        console.log(`   ⚠ Không có token API (Không thể sinh sơ đồ).`);
+        console.log(`   ⚠ Không có token API (Vui lòng vào trang quản trị phê duyệt & Bắt đầu giải đấu này sau).`);
         continue;
       }
 
+      // Đưa giải đấu về nháp để sinh nhánh đấu qua API
       await db.update(schema.tournaments).set({ status: 'DRAFT' }).where(eq(schema.tournaments.id, tour.tourId));
       
       const gen = await fetch(`${BASE_URL}/tournaments/${tour.tourId}/generate-bracket`, {
@@ -461,18 +564,35 @@ async function main() {
         console.log('   ➜ Sinh sơ đồ thi đấu thành công.');
         await db.update(schema.tournaments).set({ status: 'IN_PROGRESS' }).where(eq(schema.tournaments.id, tour.tourId));
         
+        // Giả lập chơi các trận đấu
         const playAll = cfg.status === 'COMPLETED';
         await simulateMatches(tour.tourId, authHeaders, playAll);
         
+        // Với định dạng Group Stage + Playoffs, tự động đẩy các đội vượt qua vòng bảng vào vòng Playoffs
+        if (cfg.bracketType === 'group_stage_knockout') {
+          const stage = await db.select().from(schema.tournamentStages).where(and(eq(schema.tournamentStages.tournamentId, tour.tourId), eq(schema.tournamentStages.type, 'GROUP_STAGE'))).limit(1).then(r => r[0]);
+          if (stage) {
+            console.log(`   ➜ Đang tự động chuyển các đội đi tiếp từ Vòng bảng vào Playoffs...`);
+            const adv = await fetch(`${BASE_URL}/tournaments/${tour.tourId}/advance-standings`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...authHeaders },
+              body: JSON.stringify({ divisionId: tour.divisionId, stageId: stage.id }),
+            });
+            if (adv.ok) {
+              await simulateMatches(tour.tourId, authHeaders, playAll);
+            }
+          }
+        }
+        
         if (playAll) {
+          // Update trạng thái giải thành COMPLETED
           await db.update(schema.tournaments).set({ status: 'COMPLETED' }).where(eq(schema.tournaments.id, tour.tourId));
           console.log('   ➜ Giả lập hoàn thành toàn bộ giải đấu thành công!');
         } else {
           console.log('   ➜ Giả lập các trận đấu vòng ngoài thành công (Chừa lại trận chung kết để tiếp tục vận hành).');
         }
       } else {
-        const errorMsg = await gen.text();
-        console.error(`   ❌ Lỗi khi tự động sinh sơ đồ thi đấu: ${errorMsg}`);
+        console.error('   ❌ Lỗi khi tự động sinh sơ đồ thi đấu.');
       }
     }
   }
@@ -482,7 +602,6 @@ async function main() {
 }
 
 main().catch(async (err) => {
-  console.error('Lỗi khi chạy seed database:', err);
+  console.error('❌ Lỗi chạy seed:', err);
   await sqlClient.end();
-  process.exit(1);
 });
