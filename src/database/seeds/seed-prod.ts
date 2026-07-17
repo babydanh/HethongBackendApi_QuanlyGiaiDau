@@ -21,7 +21,8 @@ async function main() {
     { name: 'ADMIN', slug: 'admin', description: 'Quản trị viên tối cao hệ thống' },
     { name: 'ORGANIZER', slug: 'organizer', description: 'Ban tổ chức giải đấu' },
     { name: 'REFEREE', slug: 'referee', description: 'Trọng tài điều hành trận đấu' },
-    { name: 'USER', slug: 'user', description: 'Thành viên / Vận động viên' }
+    { name: 'MODERATOR', slug: 'moderator', description: 'Điều hành viên hệ thống' },
+    { name: 'PLAYER', slug: 'player', description: 'Người chơi / Vận động viên' }
   ];
 
   const roleMap = new Map<string, string>();
