@@ -38,6 +38,8 @@ export class AiController {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Turn off buffering on OpenLiteSpeed/Nginx proxy
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
     try {
       const stream = await this.aiService.getChatResponseStream(messages || [], userId, currentUrl);
