@@ -183,7 +183,6 @@ async function createTournament(params: {
         tournamentDivisionId: divisionId,
         registeredBy: organizerId,
         teamName: teamName,
-        status: 'APPROVED', // Rất quan trọng: Phải APPROVED thì bốc thăm mới nhận diện
         teamStatus: 'COMPLETE',
         isMock: true,
         isPaid: true,
@@ -231,7 +230,6 @@ async function createTournament(params: {
         tournamentDivisionId: divisionId,
         registeredBy: organizerId,
         teamName: teamName,
-        status: 'APPROVED', // Rất quan trọng: Phải APPROVED
         teamStatus: 'COMPLETE',
         isMock: true,
         isPaid: true,
