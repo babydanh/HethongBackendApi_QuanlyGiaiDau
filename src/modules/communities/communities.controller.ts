@@ -27,6 +27,7 @@ import { ReviewJoinDto } from './dto/review-join.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateGalleryItemDto } from './dto/create-gallery-item.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';

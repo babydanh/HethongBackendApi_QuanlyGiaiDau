@@ -16,6 +16,7 @@ import { QueryVenueDto } from './dto/query-venue.dto';
 import { CreateVenueCourtDto } from './dto/create-venue-court.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { UserRole } from '../../common/constants/enums';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';

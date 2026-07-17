@@ -17,6 +17,7 @@ import { QuerySeriesDto } from './dto/query-series.dto';
 import { CreateLegDto, LinkEventDto } from './dto/leg.dto';
 import { QueryStandingsDto } from './dto/query-standings.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
@@ -92,6 +93,7 @@ export class OrganizerSeriesController {
   constructor(private readonly seriesService: SeriesService) {}
 
   @Post()
+  @Verified()
   @ApiOperation({ summary: 'Tạo chuỗi giải đấu mới' })
   async create(
     @Body() data: CreateSeriesDto,
@@ -101,6 +103,7 @@ export class OrganizerSeriesController {
   }
 
   @Patch(':id')
+  @Verified()
   @ApiOperation({ summary: 'Cập nhật thông tin chuỗi giải đấu' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -111,6 +114,7 @@ export class OrganizerSeriesController {
   }
 
   @Delete(':id')
+  @Verified()
   @ApiOperation({ summary: 'Xóa chuỗi giải đấu (Soft Delete)' })
   async remove(
     @Param('id', ParseUUIDPipe) id: string,
@@ -120,6 +124,7 @@ export class OrganizerSeriesController {
   }
 
   @Post(':id/legs')
+  @Verified()
   @ApiOperation({ summary: 'Thêm chặng đấu mới vào chuỗi' })
   async createLeg(
     @Param('id', ParseUUIDPipe) id: string,
@@ -130,6 +135,7 @@ export class OrganizerSeriesController {
   }
 
   @Patch(':id/legs/:legId')
+  @Verified()
   @ApiOperation({ summary: 'Cập nhật chặng đấu' })
   async updateLeg(
     @Param('id', ParseUUIDPipe) id: string,
@@ -141,6 +147,7 @@ export class OrganizerSeriesController {
   }
 
   @Delete(':id/legs/:legId')
+  @Verified()
   @ApiOperation({ summary: 'Xóa chặng đấu' })
   async deleteLeg(
     @Param('id', ParseUUIDPipe) id: string,
@@ -151,6 +158,7 @@ export class OrganizerSeriesController {
   }
 
   @Post(':id/legs/:legId/events')
+  @Verified()
   @ApiOperation({ summary: 'Liên kết giải đấu vào chặng' })
   async linkTournament(
     @Param('id', ParseUUIDPipe) id: string,
@@ -162,6 +170,7 @@ export class OrganizerSeriesController {
   }
 
   @Delete(':id/legs/:legId/events/:eventId')
+  @Verified()
   @ApiOperation({ summary: 'Hủy liên kết giải đấu khỏi chặng' })
   async unlinkTournament(
     @Param('id', ParseUUIDPipe) id: string,
@@ -173,6 +182,7 @@ export class OrganizerSeriesController {
   }
 
   @Post(':id/reset-season')
+  @Verified()
   @ApiOperation({ summary: 'Reset điểm tích lũy của chuỗi giải đấu cho mùa giải mới' })
   async resetSeason(
     @Param('id', ParseUUIDPipe) id: string,

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ChallengesService } from './challenges.service';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
@@ -19,6 +20,7 @@ export class ChallengesController {
   constructor(private readonly challengesService: ChallengesService) {}
 
   @Post()
+  @Verified()
   @ApiOperation({ summary: 'Gửi lời mời thách đấu / giao lưu tới CLB khác' })
   async createChallenge(
     @Param('id', ParseUUIDPipe) challengerId: string,
@@ -38,6 +40,7 @@ export class ChallengesController {
   }
 
   @Patch(':challengeId')
+  @Verified()
   @ApiOperation({ summary: 'Chấp nhận hoặc từ chối lời mời thách đấu giao lưu' })
   async respondChallenge(
     @Param('id', ParseUUIDPipe) communityId: string,

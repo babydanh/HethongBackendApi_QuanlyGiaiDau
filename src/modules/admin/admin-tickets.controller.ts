@@ -2,6 +2,7 @@ import { Controller, Post, Get, Patch, Param, Body, Query, ParseUUIDPipe } from 
 import { AdminService } from './admin.service';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { UserRole } from '../../common/constants/enums';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';

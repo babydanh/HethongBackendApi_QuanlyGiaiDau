@@ -4,4 +4,6 @@ export interface JwtPayload {
   roles?: string[];
   role?: string;
   communityId?: string | null;
+  isEmailVerified?: boolean;
+  isMock?: boolean;
 }
