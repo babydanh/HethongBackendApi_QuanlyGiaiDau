@@ -309,7 +309,7 @@ export class TournamentsService {
     }
 
     // 3. CLUB vs PUBLIC validation rules & authorization
-    const isSystemAuthorized = systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER');
+    const isSystemAuthorized = systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER') || systemRoles.includes('PLAYER');
 
     if (createTournamentDto.tournamentType === 'CLUB') {
       if (!createTournamentDto.communityId) {
