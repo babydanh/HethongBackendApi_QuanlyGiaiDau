@@ -137,7 +137,7 @@ async function createTournament(params: {
     matchType: matchType,
     sportRules: { kind: 'PICKLEBALL_RALLY', setsToWin: 2, pointsPerSet: 11, winByTwo: true },
     tournamentConfig: {
-      bracketType: bracketType,
+      bracketType: bracketType.toUpperCase(),
       maxTeams: numTeams,
       ...(groupConfig || {}),
     },
@@ -162,7 +162,7 @@ async function createTournament(params: {
     tournamentId: tourId,
     name: name,
     matchType: matchType,
-    bracketType: bracketType,
+    bracketType: bracketType.toUpperCase(),
     status: 'ACTIVE',
     entryFee: entryFee,
   });
