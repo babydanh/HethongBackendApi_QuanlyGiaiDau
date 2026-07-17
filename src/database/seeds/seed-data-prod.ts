@@ -10,6 +10,9 @@ const uuidv4 = () => crypto.randomUUID();
 const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
 const db = drizzle(sqlClient, { schema });
 
+// Khai báo BASE_URL phạm vi toàn cục để dùng chung
+const BASE_URL = 'https://giaidau.vnvar.com/api/v1';
+
 // Danh sách vận động viên mẫu với tên tuổi rõ ràng, mang tính chuyên nghiệp
 const MOCK_PLAYERS = [
   { name: 'Nguyễn Minh Danh', email: 'danh.nguyen@gmail.com' },
@@ -53,7 +56,6 @@ function generateScore(winner: 1 | 2) {
 
 // Giả lập chơi các trận đấu qua REST API
 async function simulateMatches(tournamentId: string, authHeaders: any, playAll = false) {
-  const BASE_URL = 'http://127.0.0.1:3000/api/v1';
   let iteration = 0;
   let hasPlayableMatches = true;
 
@@ -587,7 +589,8 @@ async function main() {
           console.log('   ➜ Giả lập các trận đấu vòng ngoài thành công (Chừa lại trận chung kết để tiếp tục vận hành).');
         }
       } else {
-        console.error('   ❌ Lỗi khi tự động sinh sơ đồ thi đấu.');
+        const errorText = await gen.text();
+        console.error(`   ❌ Lỗi khi tự động sinh sơ đồ thi đấu: ${errorText}`);
       }
     }
   }
