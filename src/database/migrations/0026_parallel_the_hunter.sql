@@ -1,3 +1,17 @@
+CREATE TABLE IF NOT EXISTS "reports" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"reporter_id" uuid NOT NULL,
+	"target_type" varchar(50) NOT NULL,
+	"target_id" uuid NOT NULL,
+	"reason" text NOT NULL,
+	"evidence_urls" text[] DEFAULT '{}'::text[] NOT NULL,
+	"status" varchar(50) DEFAULT 'PENDING' NOT NULL,
+	"resolved_by" uuid,
+	"resolution_note" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"resolved_at" timestamp with time zone
+);
+--> statement-breakpoint
 CREATE TABLE "tournament_staff" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tournament_id" uuid NOT NULL,
