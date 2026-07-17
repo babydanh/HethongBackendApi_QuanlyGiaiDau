@@ -141,7 +141,6 @@ async function createTournament(params: {
     entryFee: entryFee,
     tournamentType: 'PUBLIC',
     visibility: 'PUBLIC',
-    approvalStatus: 'APPROVED', // Tự động duyệt giải
     maxParticipants: numTeams,
     registrationStartDate: new Date(Date.now() - 5 * 86400000),
     registrationEndDate: new Date(Date.now() + 10 * 86400000),
