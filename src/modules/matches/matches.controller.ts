@@ -18,6 +18,7 @@ import { UpdateMatchScheduleDto } from './dto/update-match-schedule.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
@@ -61,6 +62,7 @@ export class MatchesController {
   }
 
   @Patch(':id/score')
+  @Verified()
   @ApiBearerAuth()
   @Roles(UserRole.PLAYER, UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
@@ -73,6 +75,7 @@ export class MatchesController {
   }
 
   @Patch(':id/status')
+  @Verified()
   @ApiBearerAuth()
   @Roles(UserRole.PLAYER, UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({
@@ -87,6 +90,7 @@ export class MatchesController {
   }
 
   @Patch(':id/schedule')
+  @Verified()
   @ApiBearerAuth()
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật lịch thi đấu, sân đấu và trọng tài' })
@@ -99,6 +103,7 @@ export class MatchesController {
   }
 
   @Patch(':id/operation')
+  @Verified()
   @ApiBearerAuth()
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
@@ -111,6 +116,7 @@ export class MatchesController {
   }
 
   @Patch(':id/assign-referee')
+  @Verified()
   @ApiBearerAuth()
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Phân công trọng tài cho trận đấu' })

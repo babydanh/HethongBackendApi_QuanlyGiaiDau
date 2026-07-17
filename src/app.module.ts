@@ -16,6 +16,7 @@ import aiConfig from './config/ai.config';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { CsrfGuard } from './common/guards/csrf.guard';
+import { VerifiedGuard } from './common/guards/verified.guard';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { CommunitiesModule } from './modules/communities/communities.module';
 import { VenuesModule } from './modules/venues/venues.module';
@@ -98,6 +99,10 @@ import { LivestreamModule } from './modules/livestream/livestream.module';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: VerifiedGuard,
     },
     {
       provide: APP_GUARD,

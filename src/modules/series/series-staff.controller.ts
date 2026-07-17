@@ -10,6 +10,7 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SeriesService } from './series.service';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -21,6 +22,7 @@ export class SeriesInvitationsController {
   constructor(private readonly seriesService: SeriesService) {}
 
   @Post(':id/accept')
+  @Verified()
   @ApiOperation({ summary: 'Chấp nhận lời mời làm nhân sự chuỗi giải đấu' })
   async acceptInvitation(
     @Param('id', ParseUUIDPipe) id: string,
@@ -30,6 +32,7 @@ export class SeriesInvitationsController {
   }
 
   @Post(':id/reject')
+  @Verified()
   @ApiOperation({ summary: 'Từ chối lời mời làm nhân sự chuỗi giải đấu' })
   async rejectInvitation(
     @Param('id', ParseUUIDPipe) id: string,
@@ -47,6 +50,7 @@ export class OrganizerSeriesStaffController {
   constructor(private readonly seriesService: SeriesService) {}
 
   @Post(':id/invitations')
+  @Verified()
   @ApiOperation({ summary: 'Mời một nhân sự tham gia vận hành chuỗi giải đấu' })
   async inviteStaff(
     @Param('id', ParseUUIDPipe) id: string,
@@ -78,6 +82,7 @@ export class OrganizerSeriesStaffController {
   }
 
   @Delete(':id/managers/:userId')
+  @Verified()
   @ApiOperation({ summary: 'Thu hồi quyền quản trị viên/nhân sự chặng' })
   async revokeManager(
     @Param('id', ParseUUIDPipe) id: string,

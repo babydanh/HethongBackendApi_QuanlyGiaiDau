@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
@@ -23,6 +24,7 @@ export class LivestreamController {
   }
 
   @Post('tournaments/:tournamentId/cameras')
+  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo camera/stream key cho giải' })
   createCamera(
@@ -34,6 +36,7 @@ export class LivestreamController {
   }
 
   @Delete('cameras/:cameraId')
+  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lưu trữ camera, không xoá cứng dữ liệu' })
   deleteCamera(
@@ -44,6 +47,7 @@ export class LivestreamController {
   }
 
   @Post('matches/:matchId/assign-camera')
+  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'BTC gán camera cho trận' })
   assignCamera(
@@ -55,6 +59,7 @@ export class LivestreamController {
   }
 
   @Post('matches/:matchId/start')
+  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'BTC hoặc trọng tài được phân công bắt đầu livestream nếu trận đã có camera' })
   startMatchStream(
@@ -65,6 +70,7 @@ export class LivestreamController {
   }
 
   @Post('matches/:matchId/stop')
+  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'BTC hoặc trọng tài được phân công dừng livestream' })
   stopMatchStream(

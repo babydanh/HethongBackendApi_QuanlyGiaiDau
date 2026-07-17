@@ -18,7 +18,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: { sub: string; email: string; roles: string[] }) {
+  validate(payload: {
+    sub: string;
+    email: string;
+    roles: string[];
+    isEmailVerified?: boolean;
+    isMock?: boolean;
+  }) {
     if (!payload.sub || !payload.email) {
       throw new UnauthorizedException();
     }
@@ -27,6 +33,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       sub: payload.sub,
       email: payload.email,
       roles: payload.roles,
+      isEmailVerified: payload.isEmailVerified,
+      isMock: payload.isMock,
     };
   }
 }
