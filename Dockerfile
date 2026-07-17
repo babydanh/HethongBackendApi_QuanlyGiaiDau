@@ -13,7 +13,7 @@ FROM base AS build
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm install -g @nestjs/cli
+RUN pnpm add -g @nestjs/cli
 RUN pnpm build
 # Prune dev dependencies
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
