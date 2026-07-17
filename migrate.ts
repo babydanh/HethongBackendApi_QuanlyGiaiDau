@@ -15,7 +15,14 @@ async function run() {
     const db = drizzle(sql);
 
     console.log('Running migrations...');
+    // Tắt kiểm tra khóa ngoại tạm thời cho session này
+    await sql`SET CONSTRAINTS ALL DEFERRED;`; 
+    await sql`SET session_replication_role = 'replica';`;
+    
     await migrate(db, { migrationsFolder: './src/database/migrations' });
+    
+    // Bật lại kiểm tra khóa ngoại
+    await sql`SET session_replication_role = 'origin';`;
     console.log('Migrations complete!');
   } finally {
     await sql.end();
