@@ -1,3 +1,37 @@
+CREATE TABLE IF NOT EXISTS "tournament_divisions" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"tournament_id" uuid NOT NULL,
+	"name" varchar(255) NOT NULL,
+	"match_type" varchar(50) NOT NULL,
+	"gender_restriction" varchar(20),
+	"max_participants" integer,
+	"entry_fee" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"is_config_override" boolean DEFAULT false NOT NULL,
+	"venue_id" uuid,
+	"bracket_type" varchar(50),
+	"round_config" jsonb,
+	"start_date" timestamp with time zone,
+	"registration_end_date" timestamp with time zone,
+	"min_elo" integer,
+	"max_elo" integer,
+	"prize_description" text,
+	"status" varchar(50) DEFAULT 'DRAFT' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "tournament_division_unique_idx" UNIQUE ("tournament_id", "match_type", "gender_restriction")
+);
+--> statement-breakpoint
+ALTER TABLE "tournament_divisions" ADD CONSTRAINT "tournament_divisions_tournament_id_tournaments_id_fk" FOREIGN KEY ("tournament_id") REFERENCES "public"."tournaments"("id") ON DELETE cascade ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "tournament_divisions" ADD CONSTRAINT "tournament_divisions_venue_id_tournament_venues_id_fk" FOREIGN KEY ("venue_id") REFERENCES "public"."tournament_venues"("id") ON DELETE set null ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "tournament_stages" ADD COLUMN IF NOT EXISTS "tournament_division_id" uuid;
+--> statement-breakpoint
+ALTER TABLE "tournament_stages" ADD CONSTRAINT "tournament_stages_tournament_division_id_tournament_divisions_id_fk" FOREIGN KEY ("tournament_division_id") REFERENCES "public"."tournament_divisions"("id") ON DELETE cascade ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "tournament_participants" ADD COLUMN IF NOT EXISTS "tournament_division_id" uuid;
+--> statement-breakpoint
+ALTER TABLE "tournament_participants" ADD CONSTRAINT "tournament_participants_tournament_division_id_tournament_divisions_id_fk" FOREIGN KEY ("tournament_division_id") REFERENCES "public"."tournament_divisions"("id") ON DELETE cascade ON UPDATE no action;
+--> statement-breakpoint
 CREATE TABLE "livestream_cameras" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tournament_id" uuid NOT NULL,
