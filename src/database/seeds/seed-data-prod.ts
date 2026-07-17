@@ -184,6 +184,7 @@ async function createTournament(params: {
         registeredBy: organizerId,
         teamName: teamName,
         teamStatus: 'COMPLETE',
+        seed: i, // Thêm hạt giống
         isMock: true,
         isPaid: true,
       });
@@ -231,6 +232,7 @@ async function createTournament(params: {
         registeredBy: organizerId,
         teamName: teamName,
         teamStatus: 'COMPLETE',
+        seed: i, // Thêm hạt giống
         isMock: true,
         isPaid: true,
       });
