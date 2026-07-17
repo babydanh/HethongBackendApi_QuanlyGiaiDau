@@ -204,6 +204,13 @@
       "when": 1784197325200,
       "tag": "0028_funny_fenris",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784285000000,
+      "tag": "0029_add_missing_columns",
+      "breakpoints": true
     }
   ]
 }
