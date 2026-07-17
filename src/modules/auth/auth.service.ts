@@ -227,11 +227,12 @@ export class AuthService {
         });
       } else {
         const updateData: Partial<typeof schema.profiles.$inferInsert> = {};
-        if (!profile.fullName || profile.fullName === 'User') {
-          updateData.fullName = oauthProfile.displayName || undefined;
+        // Luôn luôn cập nhật tên thật và avatar mới nhất từ Google OAuth
+        if (oauthProfile.displayName) {
+          updateData.fullName = oauthProfile.displayName;
         }
-        if (!profile.avatarUrl) {
-          updateData.avatarUrl = oauthProfile.avatarUrl || undefined;
+        if (oauthProfile.avatarUrl) {
+          updateData.avatarUrl = oauthProfile.avatarUrl;
         }
         if (Object.keys(updateData).length > 0) {
           await this.db.update(schema.profiles).set(updateData).where(eq(schema.profiles.userId, user.id));
