@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { createPostgresClientFromEnv } from '../postgres-client';
 
 const sql = createPostgresClientFromEnv({
@@ -267,6 +267,9 @@ async function main() {
     }
   }
 
+  // Lấy ID của một admin làm người cập nhật cho System Configs
+  const [defaultAdmin] = await db.select().from(schema.users).where(eq(schema.users.email, 'macter.970@gmail.com')).limit(1);
+
   // 5. Setup System Configs
   console.log('\n5. Đang khởi tạo cấu hình hệ thống mặc định (System Configs)...');
   const systemConfigsList = [
@@ -285,7 +288,7 @@ async function main() {
         key: config.key,
         value: config.value,
         description: config.description,
-        updatedBy: adminUser.id // Gán người cập nhật là tài khoản Admin hệ thống
+        updatedBy: defaultAdmin?.id // Gán người cập nhật là tài khoản Admin hệ thống
       });
       console.log(`   ➜ Đã tạo cấu hình: ${config.key} = ${config.value}`);
     } else {
