@@ -92,6 +92,9 @@ importers:
       joi:
         specifier: ^18.2.1
         version: 18.2.1
+      jsonwebtoken:
+        specifier: ^9.0.3
+        version: 9.0.3
       nodemailer:
         specifier: ^9.0.1
         version: 9.0.1
@@ -153,6 +156,9 @@ importers:
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
+      '@types/jsonwebtoken':
+        specifier: ^9.0.10
+        version: 9.0.10
       '@types/multer':
         specifier: ^2.1.0
         version: 2.1.0
