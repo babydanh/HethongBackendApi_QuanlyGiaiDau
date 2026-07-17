@@ -120,8 +120,9 @@ async function createTournament(params: {
   entryFee: string;
   description: string;
   prizeDescription: string;
+  groupConfig?: Record<string, unknown>; // Cấu hình group stage nếu có
 }) {
-  const { name, bracketType, numTeams, venueId, categoryId, organizerId, matchType, status, fillCount, entryFee, description, prizeDescription } = params;
+  const { name, bracketType, numTeams, venueId, categoryId, organizerId, matchType, status, fillCount, entryFee, description, prizeDescription, groupConfig } = params;
   const tourId = uuidv4();
   const inviteCode = `P-${bracketType.substring(0,2).toUpperCase()}-${Date.now().toString().slice(-4)}`;
 
@@ -138,6 +139,7 @@ async function createTournament(params: {
     tournamentConfig: {
       bracketType: bracketType,
       maxTeams: numTeams,
+      ...(groupConfig || {}),
     },
     venueId: venueId,
     entryFee: entryFee,
@@ -472,10 +474,10 @@ async function main() {
 
     // 12-13. Vòng bảng + Playoffs (Group Stage + Knockout)
     {
-      name: '12. Vòng bảng + Playoffs 31 đội (Đơn)',
+      name: '12. Vòng bảng + Playoffs 32 đội (Đơn)',
       bracketType: 'group_stage_knockout',
-      numTeams: 31,
-      fillCount: 31,
+      numTeams: 32,
+      fillCount: 32,
       matchType: 'SINGLES' as const,
       status: 'IN_PROGRESS' as const,
       entryFee: '200000.00',
@@ -496,10 +498,10 @@ async function main() {
       }
     },
     {
-      name: '13. Vòng bảng + Playoffs 35 đội (Đôi)',
+      name: '13. Vòng bảng + Playoffs 40 đội (Đôi)',
       bracketType: 'group_stage_knockout',
-      numTeams: 35,
-      fillCount: 35,
+      numTeams: 40,
+      fillCount: 40,
       matchType: 'DOUBLES' as const,
       status: 'IN_PROGRESS' as const,
       entryFee: '400000.00',
@@ -539,6 +541,7 @@ async function main() {
       entryFee: cfg.entryFee,
       description: cfg.description,
       prizeDescription: cfg.prizeDescription,
+      groupConfig: (cfg as Record<string, unknown>).groupConfig as Record<string, unknown> | undefined,
     });
 
     // Nếu giải đấu bắt đầu đấu (IN_PROGRESS hoặc COMPLETED), tự động sinh sơ đồ nhánh đấu và giả lập trận đấu
