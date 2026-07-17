@@ -168,6 +168,8 @@ async function createTournament(params: {
 
   // Thêm danh sách người chơi mẫu đăng ký giải
   for (let i = 1; i <= fillCount; i++) {
+    const partId = uuidv4();
+    
     if (isDoubles) {
       const idx1 = ((i - 1) * 2) % MOCK_PLAYERS.length;
       const idx2 = ((i - 1) * 2 + 1) % MOCK_PLAYERS.length;
@@ -175,19 +177,19 @@ async function createTournament(params: {
       const p2 = MOCK_PLAYERS[idx2];
       const teamName = `${p1.name} - ${p2.name}`;
 
-      const partId = uuidv4();
       await db.insert(schema.tournamentParticipants).values({
         id: partId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
         registeredBy: organizerId,
         teamName: teamName,
+        status: 'APPROVED', // Rất quan trọng: Phải APPROVED thì bốc thăm mới nhận diện
         teamStatus: 'COMPLETE',
         isMock: true,
         isPaid: true,
       });
 
-      // Tạo User & Profile & Rank cho thành viên 1
+      // Tạo/Lấy User & Profile & Rank cho thành viên 1
       let [u1] = await db.select().from(schema.users).where(eq(schema.users.email, p1.email)).limit(1);
       if (!u1) {
         [u1] = await db.insert(schema.users).values({ id: uuidv4(), email: p1.email, isMock: true }).returning();
@@ -201,9 +203,9 @@ async function createTournament(params: {
         matchesPlayed: 8,
         matchesWon: 5,
       }).onConflictDoNothing();
-      await db.insert(schema.tournamentRosters).values({ participantId: partId, userId: u1.id, role: 'MAIN' });
+      await db.insert(schema.tournamentRosters).values({ id: uuidv4(), participantId: partId, userId: u1.id, role: 'MAIN' });
 
-      // Tạo User & Profile & Rank cho thành viên 2
+      // Tạo/Lấy User & Profile & Rank cho thành viên 2
       let [u2] = await db.select().from(schema.users).where(eq(schema.users.email, p2.email)).limit(1);
       if (!u2) {
         [u2] = await db.insert(schema.users).values({ id: uuidv4(), email: p2.email, isMock: true }).returning();
@@ -217,19 +219,19 @@ async function createTournament(params: {
         matchesPlayed: 6,
         matchesWon: 4,
       }).onConflictDoNothing();
-      await db.insert(schema.tournamentRosters).values({ participantId: partId, userId: u2.id, role: 'MAIN' });
+      await db.insert(schema.tournamentRosters).values({ id: uuidv4(), participantId: partId, userId: u2.id, role: 'MAIN' });
 
     } else {
       const p = MOCK_PLAYERS[(i - 1) % MOCK_PLAYERS.length];
       const teamName = p.name;
 
-      const partId = uuidv4();
       await db.insert(schema.tournamentParticipants).values({
         id: partId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
         registeredBy: organizerId,
         teamName: teamName,
+        status: 'APPROVED', // Rất quan trọng: Phải APPROVED
         teamStatus: 'COMPLETE',
         isMock: true,
         isPaid: true,
@@ -248,7 +250,7 @@ async function createTournament(params: {
         matchesPlayed: 10,
         matchesWon: 6,
       }).onConflictDoNothing();
-      await db.insert(schema.tournamentRosters).values({ participantId: partId, userId: u.id, role: 'MAIN' });
+      await db.insert(schema.tournamentRosters).values({ id: uuidv4(), participantId: partId, userId: u.id, role: 'MAIN' });
     }
   }
 
