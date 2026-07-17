@@ -228,16 +228,21 @@ async function main() {
   const organizerRoleId = roleMap.get('organizer');
 
   for (const email of adminOAuthEmails) {
-    const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
+    let [user] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
+    
+    // Nếu chưa tồn tại trong DB, tạo sẵn user
     if (!user) {
-      console.log(`   ⚠ Chưa tìm thấy tài khoản ${email} — Vui lòng đăng nhập OAuth2 trước để tạo account.`);
-      continue;
+      [user] = await db.insert(schema.users).values({
+        email: email,
+        isEmailVerified: true,
+      }).returning();
+      console.log(`   ➜ Đã tạo sẵn tài khoản cho OAuth2: ${email}`);
     }
 
     // Gán ADMIN role
     if (adminRoleId) {
       const [existingAdminRole] = await db.select().from(schema.userToRoles)
-        .where(eq(schema.userToRoles.userId, user.id)).limit(1);
+        .where(and(eq(schema.userToRoles.userId, user.id), eq(schema.userToRoles.roleId, adminRoleId))).limit(1);
       if (!existingAdminRole) {
         await db.insert(schema.userToRoles).values({ userId: user.id, roleId: adminRoleId }).onConflictDoNothing();
         console.log(`   ➜ Đã gán ADMIN cho: ${email}`);
@@ -249,6 +254,16 @@ async function main() {
     // Gán ORGANIZER role
     if (organizerRoleId) {
       await db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRoleId }).onConflictDoNothing();
+    }
+
+    // Tạo sẵn Profile trống để đồng bộ khi login OAuth2
+    const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, user.id)).limit(1);
+    if (!profile) {
+      await db.insert(schema.profiles).values({
+        userId: user.id,
+        fullName: email.split('@')[0], // Tạm thời lấy phần trước @ làm tên
+      });
+      console.log(`   ➜ Đã khởi tạo Profile mặc định cho: ${email}`);
     }
   }
 
