@@ -99,5 +99,15 @@ export class QueryTournamentDto {
   @IsOptional()
   @IsString()
   endDate?: string;
+
+  @ApiPropertyOptional({
+    example: 'GROUP_STAGE_KNOCKOUT',
+    description: 'Lọc theo thể thức thi đấu: SINGLE_ELIMINATION, DOUBLE_ELIMINATION, ROUND_ROBIN, GROUP_STAGE_KNOCKOUT',
+    enum: ['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'],
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'])
+  bracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT';
 }
 
