@@ -26,6 +26,7 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/migrate.ts ./migrate.ts
 COPY --from=build /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=build /app/src/database/migrations ./src/database/migrations
+COPY --from=build /app/run-prod-migration.js ./run-prod-migration.js
 
 EXPOSE 3000
 CMD ["node", "dist/main"]
