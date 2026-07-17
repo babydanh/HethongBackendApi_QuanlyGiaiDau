@@ -134,15 +134,20 @@ async function main() {
   }
 
   // 3. Setup Elo Tiers mặc định
-  console.log('\n3. Đang khởi tạo các phân hạng ELO Tiers (1000 - 1800)...');
+  console.log('\n3. Đang khởi tạo các phân hạng ELO Tiers (Tier S -> Low Tier D)...');
   for (const [slug, categoryId] of categoryMap.entries()) {
     const existingTiers = await db.select().from(schema.eloTiers).where(eq(schema.eloTiers.categoryId, categoryId));
     if (existingTiers.length === 0) {
       await db.insert(schema.eloTiers).values([
-        { categoryId, name: 'Phong trào (Beginner)', minElo: 0, maxElo: 1200 },
-        { categoryId, name: 'Bán chuyên (Intermediate)', minElo: 1200, maxElo: 1600 },
-        { categoryId, name: 'Chuyên nghiệp (Advanced)', minElo: 1600, maxElo: 2200 },
-        { categoryId, name: 'Siêu cấp (Pro)', minElo: 2200, maxElo: 4000 }
+        { categoryId, name: 'Tier S', minElo: 1800, maxElo: 9999 },
+        { categoryId, name: 'High Tier A', minElo: 1700, maxElo: 1799 },
+        { categoryId, name: 'Low Tier A', minElo: 1600, maxElo: 1699 },
+        { categoryId, name: 'High Tier B', minElo: 1500, maxElo: 1599 },
+        { categoryId, name: 'Low Tier B', minElo: 1400, maxElo: 1499 },
+        { categoryId, name: 'High Tier C', minElo: 1300, maxElo: 1399 },
+        { categoryId, name: 'Low Tier C', minElo: 1200, maxElo: 1299 },
+        { categoryId, name: 'High Tier D', minElo: 1100, maxElo: 1199 },
+        { categoryId, name: 'Low Tier D', minElo: 0, maxElo: 1099 }
       ]);
       console.log(`   ➜ Đã tạo ELO Tiers cho môn: ${slug}`);
     } else {
