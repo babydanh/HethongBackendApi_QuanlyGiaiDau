@@ -187,17 +187,17 @@ async function createTournament(params: {
         registeredBy: organizerId,
         teamName: teamName,
         teamStatus: 'COMPLETE',
-        seed: i, // Thêm hạt giống
+        seed: i,
         isMock: true,
         isPaid: true,
       });
 
-      // Tạo/Lấy User & Profile & Rank cho thành viên 1
-      let [u1] = await db.select().from(schema.users).where(eq(schema.users.email, p1.email)).limit(1);
-      if (!u1) {
-        [u1] = await db.insert(schema.users).values({ id: uuidv4(), email: p1.email, isMock: true }).returning();
-        await db.insert(schema.profiles).values({ userId: u1.id, fullName: p1.name });
-      }
+      // Tạo Email duy nhất bằng cách đính kèm ID hoặc chỉ số vòng lặp i để tránh trùng User
+      const uniqueEmail1 = `p_${tourId.substring(0, 4)}_${i}_1@vndcsport.vn`;
+      const uniqueEmail2 = `p_${tourId.substring(0, 4)}_${i}_2@vndcsport.vn`;
+
+      let [u1] = await db.insert(schema.users).values({ id: uuidv4(), email: uniqueEmail1, isMock: true }).returning();
+      await db.insert(schema.profiles).values({ userId: u1.id, fullName: `${p1.name} (${i}A)` });
       await db.insert(schema.userRanks).values({
         userId: u1.id,
         categoryId: categoryId,
@@ -208,12 +208,8 @@ async function createTournament(params: {
       }).onConflictDoNothing();
       await db.insert(schema.tournamentRosters).values({ id: uuidv4(), participantId: partId, userId: u1.id, role: 'MAIN' });
 
-      // Tạo/Lấy User & Profile & Rank cho thành viên 2
-      let [u2] = await db.select().from(schema.users).where(eq(schema.users.email, p2.email)).limit(1);
-      if (!u2) {
-        [u2] = await db.insert(schema.users).values({ id: uuidv4(), email: p2.email, isMock: true }).returning();
-        await db.insert(schema.profiles).values({ userId: u2.id, fullName: p2.name });
-      }
+      let [u2] = await db.insert(schema.users).values({ id: uuidv4(), email: uniqueEmail2, isMock: true }).returning();
+      await db.insert(schema.profiles).values({ userId: u2.id, fullName: `${p2.name} (${i}B)` });
       await db.insert(schema.userRanks).values({
         userId: u2.id,
         categoryId: categoryId,
@@ -235,16 +231,17 @@ async function createTournament(params: {
         registeredBy: organizerId,
         teamName: teamName,
         teamStatus: 'COMPLETE',
-        seed: i, // Thêm hạt giống
+        seed: i,
         isMock: true,
         isPaid: true,
       });
 
-      let [u] = await db.select().from(schema.users).where(eq(schema.users.email, p.email)).limit(1);
-      if (!u) {
-        [u] = await db.insert(schema.users).values({ id: uuidv4(), email: p.email, isMock: true }).returning();
-        await db.insert(schema.profiles).values({ userId: u.id, fullName: p.name });
-      }
+      // Tạo Email duy nhất cho người chơi đơn
+      const uniqueEmail = `p_${tourId.substring(0, 4)}_${i}@vndcsport.vn`;
+
+      let [u] = await db.insert(schema.users).values({ id: uuidv4(), email: uniqueEmail, isMock: true }).returning();
+      await db.insert(schema.profiles).values({ userId: u.id, fullName: `${p.name} (VĐV ảo)` });
+      
       await db.insert(schema.userRanks).values({
         userId: u.id,
         categoryId: categoryId,
