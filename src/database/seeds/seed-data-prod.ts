@@ -4,7 +4,7 @@ import * as schema from '../schema';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { createPostgresClientFromEnv } from '../postgres-client';
 import * as crypto from 'crypto';
-import * as bcrypt from 'bcrypt';
+import * as jwt from 'jsonwebtoken';
 
 const uuidv4 = () => crypto.randomUUID();
 const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
@@ -280,7 +280,6 @@ async function main() {
   // Khởi tạo/Cập nhật 2 Admin cần gán
   const adminEmails = ['macter.970@gmail.com', 'hxlinh1683@gmail.com'];
   const adminUsers: any[] = [];
-  const hashedPassword = bcrypt.hashSync('Password123@', 12);
 
   for (const email of adminEmails) {
     let [user] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
@@ -288,8 +287,9 @@ async function main() {
       [user] = await db.insert(schema.users).values({
         id: uuidv4(),
         email: email,
-        passwordHash: hashedPassword,
+        passwordHash: null, // Tài khoản Google OAuth 2 không có mật khẩu
         isMock: false,
+        isEmailVerified: true,
       }).returning();
       
       await db.insert(schema.profiles).values({
@@ -297,9 +297,6 @@ async function main() {
         fullName: email.split('@')[0],
       });
       console.log(`➜ Đã tạo tài khoản admin mới: ${email}`);
-    } else {
-      // Cập nhật lại mật khẩu để script seed đăng nhập được bằng token
-      await db.update(schema.users).set({ passwordHash: hashedPassword }).where(eq(schema.users.id, user.id));
     }
 
     // Gán các role cần thiết cho admin
@@ -327,21 +324,19 @@ async function main() {
     console.log('➜ Đã tạo cụm sân đấu VNDC Sport Club.');
   }
 
-  // 3. Fake đăng nhập bằng tài khoản Admin để có Token gọi API sinh nhánh đấu
-  const BASE_URL = 'http://127.0.0.1:3000/api/v1';
-  console.log('Đang kết nối API Backend để tạo Token...');
-  const loginRes = await fetch(`${BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'macter.970@gmail.com', password: 'Password123@' }),
-  }).catch(() => null);
+  // 3. Tự tạo Token JWT hợp lệ từ khóa bí mật JWT_ACCESS_SECRET thay vì gọi API login
+  console.log('Đang tự tạo Token JWT xác thực Admin từ Env...');
+  const jwtSecret = process.env.JWT_ACCESS_SECRET || 'your-production-access-secret-key-change-me';
+  
+  // Payload JWT đồng bộ như auth.service.ts
+  const tokenPayload = {
+    sub: secondOrganizerId, // macter.970@gmail.com
+    email: 'macter.970@gmail.com',
+    roles: ['ADMIN', 'ORGANIZER', 'PLAYER'],
+    jti: crypto.randomUUID(),
+  };
 
-  let token = '';
-  if (loginRes && loginRes.ok) {
-    const loginData = await loginRes.json().catch(() => ({}));
-    token = loginData?.data?.accessToken || loginData?.accessToken || '';
-  }
-
+  const token = jwt.sign(tokenPayload, jwtSecret, { expiresIn: '15m' });
   const authHeaders = (token ? { 'Authorization': `Bearer ${token}` } : {}) as Record<string, string>;
 
   // 4. Định nghĩa cấu hình 13 giải đấu mẫu chuyên nghiệp
@@ -602,6 +597,7 @@ async function main() {
 }
 
 main().catch(async (err) => {
-  console.error('❌ Lỗi chạy seed:', err);
+  console.error('Lỗi khi chạy seed database:', err);
   await sqlClient.end();
+  process.exit(1);
 });
