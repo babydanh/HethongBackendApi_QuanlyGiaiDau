@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
-import * as bcrypt from 'bcrypt';
 import { eq } from 'drizzle-orm';
 import { createPostgresClientFromEnv } from '../postgres-client';
 
@@ -222,44 +221,35 @@ async function main() {
     console.error('   ❌ Lỗi khi tải dữ liệu địa giới từ API:', error);
   }
 
-  // 5. Setup Admin Account
-  console.log('\n5. Đang khởi tạo tài khoản quản trị hệ thống (Admin)...');
-  // 5. Setup Admin Account
-  const adminEmail = 'vndcsport@gmail.com';
-
-  let [adminUser] = await db.select().from(schema.users).where(eq(schema.users.email, adminEmail)).limit(1);
-  if (!adminUser) {
-    [adminUser] = await db.insert(schema.users).values({
-      email: adminEmail,
-      isEmailVerified: true
-    }).returning();
-    console.log(`   ➜ Đã tạo tài khoản Admin cho OAuth Google: ${adminEmail}`);
-  } else {
-    console.log(`   ➜ Tài khoản Admin đã tồn tại: ${adminEmail}`);
-  }
-
-  // Gán quyền ADMIN
+  // 5. Gán quyền ADMIN cho 2 tài khoản OAuth2 của hệ thống
+  console.log('\n5. Đang gán quyền ADMIN cho tài khoản quản trị hệ thống...');
+  const adminOAuthEmails = ['macter.970@gmail.com', 'hxlinh1683@gmail.com'];
   const adminRoleId = roleMap.get('admin');
-  if (adminRoleId) {
-    const [userRole] = await db.select().from(schema.userToRoles).where(eq(schema.userToRoles.userId, adminUser.id)).limit(1);
-    if (!userRole) {
-      await db.insert(schema.userToRoles).values({
-        userId: adminUser.id,
-        roleId: adminRoleId
-      });
-      console.log('   ➜ Đã gán vai trò quản trị (ADMIN) thành công.');
-    }
-  }
+  const organizerRoleId = roleMap.get('organizer');
 
-  // Tạo Profile Admin
-  const [adminProfile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, adminUser.id)).limit(1);
-  if (!adminProfile) {
-    await db.insert(schema.profiles).values({
-      userId: adminUser.id,
-      fullName: 'Quản trị viên Hệ thống',
-      bio: 'Administrator account'
-    });
-    console.log('   ➜ Đã khởi tạo Profile Admin.');
+  for (const email of adminOAuthEmails) {
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
+    if (!user) {
+      console.log(`   ⚠ Chưa tìm thấy tài khoản ${email} — Vui lòng đăng nhập OAuth2 trước để tạo account.`);
+      continue;
+    }
+
+    // Gán ADMIN role
+    if (adminRoleId) {
+      const [existingAdminRole] = await db.select().from(schema.userToRoles)
+        .where(eq(schema.userToRoles.userId, user.id)).limit(1);
+      if (!existingAdminRole) {
+        await db.insert(schema.userToRoles).values({ userId: user.id, roleId: adminRoleId }).onConflictDoNothing();
+        console.log(`   ➜ Đã gán ADMIN cho: ${email}`);
+      } else {
+        console.log(`   ➜ ${email} đã có quyền ADMIN.`);
+      }
+    }
+
+    // Gán ORGANIZER role
+    if (organizerRoleId) {
+      await db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRoleId }).onConflictDoNothing();
+    }
   }
 
   // 5. Setup System Configs

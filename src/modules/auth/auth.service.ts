@@ -216,6 +216,27 @@ export class AuthService {
         },
         defaultRole?.id || '',
       );
+    } else {
+      // Nếu user đã tồn tại, kiểm tra và cập nhật Profile nếu bị thiếu fullName hoặc avatarUrl
+      const [profile] = await this.db.select().from(schema.profiles).where(eq(schema.profiles.userId, user.id)).limit(1);
+      if (!profile) {
+        await this.db.insert(schema.profiles).values({
+          userId: user.id,
+          fullName: oauthProfile.displayName || 'User',
+          avatarUrl: oauthProfile.avatarUrl,
+        });
+      } else {
+        const updateData: Partial<typeof schema.profiles.$inferInsert> = {};
+        if (!profile.fullName || profile.fullName === 'User') {
+          updateData.fullName = oauthProfile.displayName || undefined;
+        }
+        if (!profile.avatarUrl) {
+          updateData.avatarUrl = oauthProfile.avatarUrl || undefined;
+        }
+        if (Object.keys(updateData).length > 0) {
+          await this.db.update(schema.profiles).set(updateData).where(eq(schema.profiles.userId, user.id));
+        }
+      }
     }
 
     // 4. Link provider
