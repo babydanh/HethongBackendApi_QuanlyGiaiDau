@@ -63,11 +63,22 @@ export class AuthRepository {
         .limit(1);
 
       if (existing.length === 0) {
+        // Find the matching tier for ELO 1000 (Low Tier D)
+        const [lowestTier] = await this.db
+          .select()
+          .from(schema.eloTiers)
+          .where(and(
+            eq(schema.eloTiers.categoryId, cat.id),
+            eq(schema.eloTiers.name, 'Low Tier D'),
+          ))
+          .limit(1);
+
         await this.db.insert(schema.userRanks).values({
           userId,
           categoryId: cat.id,
           matchType: 'SINGLES',
           eloPoints: 1000,
+          tierId: lowestTier?.id,
         }).onConflictDoNothing();
       }
     }
