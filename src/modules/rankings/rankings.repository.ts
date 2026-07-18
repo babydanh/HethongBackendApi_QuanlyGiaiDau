@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -28,6 +28,7 @@ export class RankingsRepository {
         eq(schema.communityRankings.categoryId, categoryId),
         eq(schema.communityRankings.communityId, communityId),
         eq(schema.users.isMock, false),
+        gt(schema.communityRankings.matchesPlayed, 0),
       ];
       if (matchType) {
         conditions.push(eq(schema.communityRankings.matchType, matchType));
@@ -82,6 +83,7 @@ export class RankingsRepository {
         eq(schema.userRanks.categoryId, categoryId),
         isNull(schema.userRanks.communityId),
         eq(schema.users.isMock, false),
+        gt(schema.userRanks.matchesPlayed, 0),
       ];
       if (matchType) {
         conditions.push(eq(schema.userRanks.matchType, matchType));
