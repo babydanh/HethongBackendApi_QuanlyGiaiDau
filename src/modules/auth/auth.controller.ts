@@ -342,7 +342,7 @@ export class AuthController {
   }
 
   @Public()
-  @UseGuards(new RateLimitGuard(5, 60000))
+  @UseGuards(new RateLimitGuard(3, 60000, true))
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Yêu cầu đặt lại mật khẩu' })

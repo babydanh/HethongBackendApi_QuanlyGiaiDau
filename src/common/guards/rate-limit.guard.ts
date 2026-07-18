@@ -11,10 +11,10 @@ export class RateLimitGuard implements CanActivate {
   private readonly maxRequests: number;
   private readonly windowMs: number;
 
-  constructor(maxRequests = 10, windowMs = 60000) {
-    // Always use high limit for non-production environments
+  constructor(maxRequests = 10, windowMs = 60000, forceLimit = false) {
+    // Always use high limit for non-production environments unless forceLimit is true
     const env = (process.env.NODE_ENV || 'development').toLowerCase();
-    this.maxRequests = env === 'production' ? maxRequests : 100000;
+    this.maxRequests = (env === 'production' || forceLimit) ? maxRequests : 100000;
     this.windowMs = windowMs;
   }
 
