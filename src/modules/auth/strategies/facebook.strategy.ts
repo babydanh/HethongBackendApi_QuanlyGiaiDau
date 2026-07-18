@@ -17,7 +17,7 @@ export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
         configService.get<string>('auth.facebookCallbackUrl') ||
         'http://localhost:3000/api/v1/auth/facebook/callback',
       profileFields: ['id', 'emails', 'name', 'photos'],
-      scope: ['email', 'public_profile'],
+      scope: ['email'],
     });
   }
 
