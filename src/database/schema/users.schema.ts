@@ -7,6 +7,7 @@ import {
   timestamp,
   date,
   integer,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { provinces } from './regions.schema';
 import { tournaments } from './tournaments.schema';
@@ -48,7 +49,9 @@ export const authProviders = pgTable('auth_providers', {
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  providerUserUnique: unique().on(table.provider, table.providerUserId),
+}));
 
 export const roles = pgTable('roles', {
   id: uuid('id').primaryKey().defaultRandom(),
