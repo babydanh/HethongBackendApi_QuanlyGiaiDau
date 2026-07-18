@@ -1086,7 +1086,7 @@ async function main() {
       await db.insert(schema.tournamentGroups).values({
         id: groupId,
         stageId,
-        name: 'Bang A',
+        name: 'Bảng A',
       });
 
       for (const pid of participantIdsBySeed) {
@@ -1147,7 +1147,7 @@ async function main() {
         id: gsStageId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
-        name: 'Vong bang',
+        name: 'Vòng bảng',
         type: 'GROUP_STAGE',
         order: 1,
       });
@@ -1161,7 +1161,7 @@ async function main() {
         await db.insert(schema.tournamentGroups).values({
           id: groupId,
           stageId: gsStageId,
-          name: `Bang ${tags[g]}`,
+          name: `Bảng ${tags[g]}`,
         });
 
         const start = g * teamsPerGroup;
@@ -1196,7 +1196,7 @@ async function main() {
         id: koStageId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
-        name: 'Vong Playoffs',
+        name: 'Vòng Playoffs',
         type: 'KNOCKOUT',
         order: 2,
       });
