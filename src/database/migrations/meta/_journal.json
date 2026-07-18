@@ -218,6 +218,13 @@
       "when": 1784303470733,
       "tag": "0030_wide_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784359912076,
+      "tag": "0031_deep_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }
