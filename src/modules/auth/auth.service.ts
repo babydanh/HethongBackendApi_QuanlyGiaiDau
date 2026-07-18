@@ -95,6 +95,9 @@ export class AuthService {
 
     const roles = await this.authRepository.findUserRoles(user.id);
 
+    // Tạo userRanks mặc định nếu chưa có
+    await this.authRepository.createDefaultUserRanks(user.id);
+
     return this.generateTokens(
       user.id,
       user.email,
@@ -199,6 +202,9 @@ export class AuthService {
           .set(updateData)
           .where(eq(schema.profiles.userId, existingProvider.userId));
       }
+
+      // Tạo userRanks mặc định nếu chưa có (kể cả đã OAuth trước đó)
+      await this.authRepository.createDefaultUserRanks(existingProvider.userId);
 
       const roles = await this.authRepository.findUserRoles(
         existingProvider.userId,
