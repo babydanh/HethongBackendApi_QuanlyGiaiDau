@@ -960,7 +960,7 @@ async function main() {
         id: stageId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
-        name: 'Vong loai truc tiep',
+        name: 'Vòng loại trực tiếp',
         type: 'BRACKET',
         order: 1,
       });
@@ -991,7 +991,7 @@ async function main() {
         id: wbStageId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
-        name: 'Nhanh thang',
+        name: 'Nhánh thắng',
         type: 'BRACKET',
         order: 1,
       });
@@ -1001,7 +1001,7 @@ async function main() {
         id: lbStageId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
-        name: 'Nhanh thua',
+        name: 'Nhánh thua',
         type: 'BRACKET',
         order: 2,
       });
@@ -1077,7 +1077,7 @@ async function main() {
         id: stageId,
         tournamentId: tourId,
         tournamentDivisionId: divisionId,
-        name: 'Vong tron tinh diem',
+        name: 'Vòng tròn tính điểm',
         type: 'GROUP',
         order: 1,
       });
