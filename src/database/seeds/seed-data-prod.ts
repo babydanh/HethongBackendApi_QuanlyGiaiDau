@@ -247,7 +247,7 @@ function buildSingleEliminationTree(
     }
     prevStart += prevCount;
     prevCount = cnt;
-    cnt = Math.ceil(cnt / 2);
+    cnt = Math.floor(cnt / 2);
     if (cnt < 1) break;
   }
 
