@@ -615,8 +615,11 @@ export class AuthService {
   async forgotPassword(email: string) {
     const user = await this.authRepository.findUserByEmail(email);
     if (!user) {
-      // Không tiết lộ user có tồn tại hay không — trả về success chung
-      return { message: 'Nếu email tồn tại, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu.' };
+      throw new BadRequestException('Email này chưa được đăng ký tài khoản.');
+    }
+
+    if (!user.passwordHash) {
+      throw new BadRequestException('Tài khoản này được đăng ký qua Google. Vui lòng đăng nhập bằng Google.');
     }
 
     // Rate limit: max 5 lần gửi mail reset password trong 24h
