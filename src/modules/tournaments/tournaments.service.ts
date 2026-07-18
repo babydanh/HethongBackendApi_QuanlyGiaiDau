@@ -167,7 +167,7 @@ export class TournamentsService {
       visibility: 'PUBLIC',
       createdBy: undefined,
     }, {
-      defaultTournamentType: null,
+      defaultTournamentType: 'PUBLIC',
       defaultVisibility: 'PUBLIC',
     });
     result.data = result.data
