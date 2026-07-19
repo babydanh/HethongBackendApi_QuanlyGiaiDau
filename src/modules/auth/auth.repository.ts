@@ -188,9 +188,9 @@ export class AuthRepository {
       const [newUser] = await tx
         .insert(schema.users)
         .values({
-          ...userData,
+          email: userData.email,
           passwordHash: userData.passwordHash,
-          isEmailVerified: true, // Google email is verified
+          isEmailVerified: userData.isEmailVerified ?? true,
         })
         .returning();
 
