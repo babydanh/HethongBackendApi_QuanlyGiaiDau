@@ -247,6 +247,15 @@ export class TournamentsService {
   }
 
   async create(userId: string, createTournamentDto: CreateTournamentDto, systemRoles: string[] = []) {
+    // 0. Hard limit check: Max 100 tournaments per creator (except ADMIN)
+    const isAdmin = systemRoles.includes('ADMIN');
+    if (!isAdmin) {
+      const createdCount = await this.tournamentsRepository.countCreatedTournaments(userId);
+      if (createdCount >= 100) {
+        throw new BadRequestException('Bạn đã đạt giới hạn tối đa 100 giải đấu được phép tạo.');
+      }
+    }
+
     this.validateRegistrationMode(createTournamentDto.tournamentConfig);
 
     // 1. Validate category existence and sportRules default fallback
@@ -372,6 +381,15 @@ export class TournamentsService {
   }
 
   async createLite(userId: string, dto: CreateLiteTournamentDto, systemRoles: string[] = []) {
+    // 0. Hard limit check: Max 100 tournaments per creator (except ADMIN)
+    const isAdmin = systemRoles.includes('ADMIN');
+    if (!isAdmin) {
+      const createdCount = await this.tournamentsRepository.countCreatedTournaments(userId);
+      if (createdCount >= 100) {
+        throw new BadRequestException('Bạn đã đạt giới hạn tối đa 100 giải đấu được phép tạo.');
+      }
+    }
+
     // 1. Map sport slug → category
     const category = await this.tournamentsRepository.findCategoryBySlug(dto.sport);
     if (!category) {

@@ -2203,6 +2203,19 @@ export class TournamentsRepository {
     return Number(result[0]?.count || 0);
   }
 
+  async countCreatedTournaments(userId: string): Promise<number> {
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(schema.tournaments)
+      .where(
+        and(
+          eq(schema.tournaments.createdBy, userId),
+          isNull(schema.tournaments.deletedAt)
+        )
+      );
+    return Number(result?.count || 0);
+  }
+
   async findMyTournaments(userId: string) {
     // 1. Tournaments created by user
     const created = await this.db
