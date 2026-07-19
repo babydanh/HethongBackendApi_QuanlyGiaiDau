@@ -1029,6 +1029,14 @@ export class TournamentsService {
 
     this.assertRegistrationAccessible(tournament, { inviteCode });
 
+    // Nếu là giải nội bộ CLB, chỉ member mới đăng ký được
+    if (tournament.communityId && tournament.tournamentType === 'CLUB') {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (!member || member.status !== 'JOINED') {
+        throw new ForbiddenException('Giải đấu này chỉ dành cho thành viên của câu lạc bộ.');
+      }
+    }
+
     const userIds = [userId];
     if (registerTournamentDto.partnerEmailOrPhone) {
       const partnerUser = await this.tournamentsRepository.findUserByEmailOrPhone(registerTournamentDto.partnerEmailOrPhone);
@@ -1142,6 +1150,14 @@ export class TournamentsService {
     }
 
     this.assertRegistrationAccessible(tournament, { allowDraft: true });
+
+    // Nếu là giải nội bộ CLB, chỉ member mới join team được
+    if (tournament.communityId && tournament.tournamentType === 'CLUB') {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (!member || member.status !== 'JOINED') {
+        throw new ForbiddenException('Giải đấu này chỉ dành cho thành viên của câu lạc bộ.');
+      }
+    }
 
     const leaderRoster = await this.tournamentsRepository.findLeaderByParticipantId(participantId);
     const userIds = [userId];

@@ -35,6 +35,39 @@ export class RankingsService {
     }
   }
 
+  /**
+   * Trích xuất scoreRatio (winnerPoints / totalPoints) từ scoreDetails của match.
+   * @returns scoreRatio từ 0.5 đến 0.85, hoặc undefined nếu không có dữ liệu set.
+   */
+  private extractScoreRatio(
+    scoreDetails: Record<string, unknown> | null | undefined,
+    winnerParticipantId: string,
+    participant1Id: string | null,
+  ): number | undefined {
+    if (!scoreDetails?.sets || !Array.isArray(scoreDetails.sets) || scoreDetails.sets.length === 0) {
+      return undefined;
+    }
+
+    let team1Total = 0;
+    let team2Total = 0;
+
+    for (const set of scoreDetails.sets as Array<Record<string, unknown>>) {
+      team1Total += Number(set.team1Score) || 0;
+      team2Total += Number(set.team2Score) || 0;
+    }
+
+    const total = team1Total + team2Total;
+    if (total === 0) return undefined;
+
+    // Xác định bên nào là winner dựa trên participant IDs
+    const isWinnerTeam1 = participant1Id === winnerParticipantId;
+    const winnerPoints = isWinnerTeam1 ? team1Total : team2Total;
+    const loserPoints = isWinnerTeam1 ? team2Total : team1Total;
+
+    // Clamp: 0.5 (sát nút) → 0.85 (hủy diệt tối đa)
+    return Math.min(0.85, Math.max(0.5, winnerPoints / (winnerPoints + loserPoints)));
+  }
+
   async getLeaderboard(query: QueryRankingDto) {
     const cacheKey = `leaderboard:cat:${query.categoryId}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:page:${query.page || 1}:limit:${query.limit || 20}`;
     try {
@@ -78,7 +111,30 @@ export class RankingsService {
   async updateMatchElo(dto: UpdateEloDto) {
     const db = this.rankingsRepository.getDbInstance();
     const scope = dto.communityId ? 'COMMUNITY' : 'PUBLIC';
-    
+
+    // Fetch scoreDetails để tính Score Factor Modifier
+    let scoreRatio: number | undefined;
+    try {
+      const [matchData] = await db
+        .select({
+          participant1Id: schema.matches.participant1Id,
+          scoreDetails: schema.matches.scoreDetails,
+        })
+        .from(schema.matches)
+        .where(eq(schema.matches.id, dto.matchId))
+        .limit(1);
+
+      if (matchData) {
+        scoreRatio = this.extractScoreRatio(
+          matchData.scoreDetails as Record<string, unknown> | null | undefined,
+          dto.winnerId, // winnerParticipantId = winnerId (người thắng trong DTO)
+          matchData.participant1Id,
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to fetch scoreDetails for admin ELO update, scoreFactor disabled:', err.message);
+    }
+
     const result = await db.transaction(async (tx) => {
       // 1. Lock records
       const winnerRank = await this.rankingsRepository.getOrCreateUserRank(
@@ -109,6 +165,7 @@ export class RankingsService {
         true,
         winnerRank.matchesPlayed,
         winnerRank.winStreak,
+        scoreRatio,
       );
 
       const loserResult = this.eloEngineService.calculateElo(
@@ -117,6 +174,7 @@ export class RankingsService {
         false,
         loserRank.matchesPlayed,
         loserRank.winStreak,
+        scoreRatio,
       );
 
       // 3. Update ranks with shield logic
@@ -156,6 +214,7 @@ export class RankingsService {
           matchesWon: winnerRank.matchesWon + 1,
           winStreak: winnerResult.newWinStreak,
           shieldActive: isWinnerShieldActive,
+          peakElo: winnerResult.newPeakElo,
         },
         scope,
       );
@@ -169,6 +228,7 @@ export class RankingsService {
           matchesWon: loserRank.matchesWon,
           winStreak: 0,
           shieldActive: isLoserShieldActive,
+          peakElo: loserResult.newPeakElo,
         },
         scope,
       );
@@ -274,6 +334,29 @@ export class RankingsService {
 
     const winnerUserIds = winnerRosters.map((r) => r.userId);
     const loserUserIds = loserRosters.map((r) => r.userId);
+
+    // 2a. Fetch match scoreDetails để tính Score Factor Modifier
+    let scoreRatio: number | undefined;
+    try {
+      const [matchData] = await db
+        .select({
+          participant1Id: schema.matches.participant1Id,
+          scoreDetails: schema.matches.scoreDetails,
+        })
+        .from(schema.matches)
+        .where(eq(schema.matches.id, matchId))
+        .limit(1);
+
+      if (matchData) {
+        scoreRatio = this.extractScoreRatio(
+          matchData.scoreDetails as Record<string, unknown> | null | undefined,
+          winnerParticipantId,
+          matchData.participant1Id,
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to fetch scoreDetails for match, scoreFactor disabled:', err.message);
+    }
 
     const result = await db.transaction(async (tx) => {
       if (['DOUBLES', 'MIXED_DOUBLES'].includes(matchType) && winnerUserIds.length === 2 && loserUserIds.length === 2) {
@@ -384,6 +467,7 @@ export class RankingsService {
           true,
           winnerPair.matchesPlayed,
           winnerPair.winStreak,
+          scoreRatio,
         );
 
         const loserPairResult = this.eloEngineService.calculateElo(
@@ -392,6 +476,7 @@ export class RankingsService {
           false,
           loserPair.matchesPlayed,
           loserPair.winStreak,
+          scoreRatio,
         );
 
         // 5. Update pair ranks
@@ -473,6 +558,7 @@ export class RankingsService {
               matchesWon: rank.matchesWon + 1,
               winStreak: rank.winStreak + 1,
               shieldActive: isWinnerShieldActive,
+              peakElo: Math.max(rank.peakElo ?? rank.eloPoints, newElo),
             },
             scope,
           );
@@ -522,6 +608,7 @@ export class RankingsService {
               matchesWon: rank.matchesWon,
               winStreak: 0,
               shieldActive: isLoserShieldActive,
+              peakElo: rank.peakElo ?? rank.eloPoints,
             },
             scope,
           );
@@ -603,6 +690,7 @@ export class RankingsService {
           true,
           rank.matchesPlayed,
           rank.winStreak,
+          scoreRatio,
         );
 
         let isWinnerShieldActive = false;
@@ -624,6 +712,7 @@ export class RankingsService {
             matchesWon: rank.matchesWon + 1,
             winStreak: result.newWinStreak,
             shieldActive: isWinnerShieldActive,
+            peakElo: result.newPeakElo,
           },
           scope,
         );
@@ -647,6 +736,7 @@ export class RankingsService {
           false,
           rank.matchesPlayed,
           rank.winStreak,
+          scoreRatio,
         );
 
         let finalLoserElo = result.newElo;
@@ -674,6 +764,7 @@ export class RankingsService {
             matchesWon: rank.matchesWon,
             winStreak: 0,
             shieldActive: isLoserShieldActive,
+            peakElo: result.newPeakElo,
           },
           scope,
         );
@@ -908,6 +999,7 @@ export class RankingsService {
       matchesWon: number;
       winStreak: number;
       shieldActive: boolean;
+      peakElo: number;
     }>();
 
     const getPlayerState = async (userId: string, completedAt: Date) => {
@@ -1016,7 +1108,7 @@ export class RankingsService {
         }
       }
 
-      const state = { elo: startingElo, matchesPlayed, matchesWon, winStreak, shieldActive };
+      const state = { elo: startingElo, matchesPlayed, matchesWon, winStreak, shieldActive, peakElo: startingElo };
       playerStates.set(userId, state);
       return state;
     };
@@ -1058,6 +1150,15 @@ export class RankingsService {
       const avgWinnerElo = winnerStates.reduce((sum, s) => sum + s.elo, 0) / winnerStates.length;
       const avgLoserElo = loserStates.reduce((sum, s) => sum + s.elo, 0) / loserStates.length;
 
+      // Tính scoreRatio từ scoreDetails của match (nếu có)
+      const matchScoreRatio = match.scoreDetails
+        ? this.extractScoreRatio(
+            match.scoreDetails as Record<string, unknown> | null | undefined,
+            winnerParticipantId,
+            match.participant1Id,
+          )
+        : undefined;
+
       for (let i = 0; i < winnerUserIds.length; i++) {
         const uid = winnerUserIds[i];
         const state = winnerStates[i];
@@ -1067,7 +1168,8 @@ export class RankingsService {
           avgLoserElo,
           true,
           state.matchesPlayed,
-          state.winStreak
+          state.winStreak,
+          matchScoreRatio,
         );
 
         const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
@@ -1103,6 +1205,7 @@ export class RankingsService {
         state.matchesWon += 1;
         state.winStreak = result.newWinStreak;
         state.shieldActive = isWinnerShieldActive;
+        state.peakElo = Math.max(state.peakElo, result.newElo);
 
         affectedPlayers.add(uid);
       }
@@ -1116,7 +1219,8 @@ export class RankingsService {
           avgWinnerElo,
           false,
           state.matchesPlayed,
-          state.winStreak
+          state.winStreak,
+          matchScoreRatio,
         );
 
         const boundaries = [1100, 1200, 1300, 1500, 1700, 1800];
@@ -1156,6 +1260,7 @@ export class RankingsService {
         state.matchesPlayed += 1;
         state.winStreak = 0;
         state.shieldActive = isLoserShieldActive;
+        state.peakElo = Math.max(state.peakElo, finalLoserElo);
 
         affectedPlayers.add(uid);
       }
@@ -1170,6 +1275,7 @@ export class RankingsService {
           matchesWon: state.matchesWon,
           winStreak: state.winStreak,
           shieldActive: state.shieldActive,
+          peakElo: state.peakElo,
           updatedAt: new Date(),
         })
         .where(

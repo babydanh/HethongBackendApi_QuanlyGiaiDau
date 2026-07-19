@@ -19,6 +19,8 @@ export class CommunitiesRepository {
     if (query.status) {
       conditions.push(eq(schema.communities.status, query.status));
     }
+    // Mặc định: không hiện cộng đồng Riêng tư (PRIVATE) trong danh sách công khai
+    conditions.push(sql`${schema.communities.visibility} != 'PRIVATE'`);
     if (query.search) {
       conditions.push(ilike(schema.communities.name, `%${query.search}%`));
     }

@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, desc, and, isNull, SQL, sql, gt } from 'drizzle-orm';
+import { eq, desc, and, isNull, SQL, sql, gt, aliasedTable } from 'drizzle-orm';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 
 @Injectable()
@@ -19,6 +19,86 @@ export class RankingsRepository {
   async getLeaderboard(query: QueryRankingDto) {
     const { page = 1, limit = 50, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode, genderRestriction } = query;
     const offset = (page - 1) * limit;
+
+    const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+
+    if (isDoubles) {
+      // Setup aliases for pair ranks joining users and profiles
+      const user1 = aliasedTable(schema.users, 'user1');
+      const user2 = aliasedTable(schema.users, 'user2');
+      const profile1 = aliasedTable(schema.profiles, 'profile1');
+      const profile2 = aliasedTable(schema.profiles, 'profile2');
+
+      const conditions: SQL[] = [
+        eq(schema.pairRanks.categoryId, categoryId),
+        eq(schema.pairRanks.scope, scope),
+        gt(schema.pairRanks.matchesPlayed, 0),
+        eq(user1.isMock, false),
+        eq(user2.isMock, false),
+      ];
+
+      if (matchType) {
+        conditions.push(eq(schema.pairRanks.matchType, matchType));
+      }
+      if (genderRestriction) {
+        conditions.push(eq(schema.pairRanks.genderRestriction, genderRestriction));
+      }
+      if (communityId && scope === 'COMMUNITY') {
+        conditions.push(eq(schema.pairRanks.communityId, communityId));
+      } else {
+        conditions.push(isNull(schema.pairRanks.communityId));
+      }
+
+      // Filter by province code of either of the players if requested
+      if (provinceCode) {
+        conditions.push(
+          sql`(${profile1.provinceCode} = ${provinceCode} OR ${profile2.provinceCode} = ${provinceCode})`
+        );
+      }
+
+      const whereClause = and(...conditions);
+
+      const data = await this.db
+        .select({
+          id: schema.pairRanks.id,
+          categoryId: schema.pairRanks.categoryId,
+          communityId: schema.pairRanks.communityId,
+          matchType: schema.pairRanks.matchType,
+          genderRestriction: schema.pairRanks.genderRestriction,
+          eloPoints: schema.pairRanks.eloPoints,
+          matchesPlayed: schema.pairRanks.matchesPlayed,
+          matchesWon: schema.pairRanks.matchesWon,
+          winStreak: schema.pairRanks.winStreak,
+          updatedAt: schema.pairRanks.updatedAt,
+          user1: {
+            id: user1.id,
+            fullName: profile1.fullName,
+            avatarUrl: profile1.avatarUrl,
+          },
+          user2: {
+            id: user2.id,
+            fullName: profile2.fullName,
+            avatarUrl: profile2.avatarUrl,
+          },
+        })
+        .from(schema.pairRanks)
+        .innerJoin(user1, eq(schema.pairRanks.user1Id, user1.id))
+        .innerJoin(user2, eq(schema.pairRanks.user2Id, user2.id))
+        .leftJoin(profile1, eq(user1.id, profile1.userId))
+        .leftJoin(profile2, eq(user2.id, profile2.userId))
+        .where(whereClause)
+        .orderBy(desc(schema.pairRanks.eloPoints))
+        .limit(limit)
+        .offset(offset);
+
+      return {
+        data,
+        meta: {
+          page,
+          limit,
+        },
+      };
+    }
 
     if (scope === 'COMMUNITY') {
       if (!communityId) {
@@ -157,6 +237,9 @@ export class RankingsRepository {
         matchType: schema.userRanks.matchType,
         genderRestriction: schema.userRanks.genderRestriction,
         eloPoints: schema.userRanks.eloPoints,
+        shieldActive: schema.userRanks.shieldActive,
+        peakElo: schema.userRanks.peakElo,
+        lastActiveAt: schema.userRanks.lastActiveAt,
         matchesPlayed: schema.userRanks.matchesPlayed,
         matchesWon: schema.userRanks.matchesWon,
         winStreak: schema.userRanks.winStreak,
@@ -178,6 +261,8 @@ export class RankingsRepository {
         matchType: schema.communityRankings.matchType,
         genderRestriction: schema.communityRankings.genderRestriction,
         eloPoints: schema.communityRankings.eloPoints,
+        peakElo: schema.communityRankings.peakElo,
+        lastActiveAt: schema.communityRankings.lastActiveAt,
         matchesPlayed: schema.communityRankings.matchesPlayed,
         matchesWon: schema.communityRankings.matchesWon,
         winStreak: schema.communityRankings.winStreak,
@@ -344,6 +429,37 @@ export class RankingsRepository {
   }
 
   async updateUserRank(
+    tx: AppTx,
+    id: string,
+    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean; peakElo?: number; lastActiveAt?: Date },
+    scope: 'PUBLIC' | 'COMMUNITY',
+  ) {
+    const setData: Record<string, unknown> = {
+      eloPoints: data.eloPoints,
+      matchesPlayed: data.matchesPlayed,
+      matchesWon: data.matchesWon,
+      winStreak: data.winStreak,
+      updatedAt: new Date(),
+    };
+    if (data.peakElo !== undefined) setData.peakElo = data.peakElo;
+    if (data.lastActiveAt !== undefined) setData.lastActiveAt = data.lastActiveAt;
+
+    if (scope === 'COMMUNITY') {
+      return tx
+        .update(schema.communityRankings)
+        .set(setData)
+        .where(eq(schema.communityRankings.id, id))
+        .returning();
+    } else {
+      return tx
+        .update(schema.userRanks)
+        .set(setData)
+        .where(eq(schema.userRanks.id, id))
+        .returning();
+    }
+  }
+
+  private async _updateUserRank(
     tx: AppTx,
     id: string,
     data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean },

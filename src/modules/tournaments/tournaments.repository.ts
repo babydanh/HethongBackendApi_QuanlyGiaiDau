@@ -1828,6 +1828,7 @@ export class TournamentsRepository {
         avatarUrl: string | null;
       } | null;
       members: RosterMember[];
+      eloPoints?: number;
     }[]
   > {
     // 1. Fetch participants and their registeredBy info
@@ -1926,10 +1927,54 @@ export class TournamentsRepository {
       rostersMap.set(r.participantId, list);
     }
 
-    return participants.map((p) => ({
-      ...p,
-      members: rostersMap.get(p.id) || [],
-    }));
+    // 3. Batch query pair ELO if there are doubles teams
+    const pairQueries: SQL[] = [];
+    for (const members of rostersMap.values()) {
+      if (members.length === 2) {
+        const uids = members.map((m) => m.userId).sort();
+        const andQuery = and(
+          eq(schema.pairRanks.user1Id, uids[0]),
+          eq(schema.pairRanks.user2Id, uids[1]),
+          eq(schema.pairRanks.categoryId, categoryId)
+        );
+        if (andQuery) {
+          pairQueries.push(andQuery);
+        }
+      }
+    }
+
+    const pairEloMap = new Map<string, number>();
+    if (pairQueries.length > 0) {
+      const dbPairs = await this.db
+        .select({
+          user1Id: schema.pairRanks.user1Id,
+          user2Id: schema.pairRanks.user2Id,
+          eloPoints: schema.pairRanks.eloPoints,
+        })
+        .from(schema.pairRanks)
+        .where(or(...pairQueries));
+
+      for (const p of dbPairs) {
+        pairEloMap.set(`${p.user1Id}_${p.user2Id}`, p.eloPoints);
+      }
+    }
+
+    return participants.map((p) => {
+      const members = rostersMap.get(p.id) || [];
+      let eloPoints = 1000;
+      if (members.length === 1) {
+        eloPoints = members[0].elo?.eloPoints ?? 1000;
+      } else if (members.length === 2) {
+        const sortedUids = members.map((m) => m.userId).sort();
+        const pairKey = `${sortedUids[0]}_${sortedUids[1]}`;
+        eloPoints = pairEloMap.get(pairKey) ?? 1000;
+      }
+      return {
+        ...p,
+        members,
+        eloPoints,
+      };
+    });
   }
 
   async findPublicParticipants(
