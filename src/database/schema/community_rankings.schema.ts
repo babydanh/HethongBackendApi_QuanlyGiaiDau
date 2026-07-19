@@ -23,6 +23,8 @@ export const communityRankings = pgTable('community_rankings', {
   matchesPlayed: integer('matches_played').default(0).notNull(),
   matchesWon: integer('matches_won').default(0).notNull(),
   winStreak: integer('win_streak').default(0).notNull(),
+  peakElo: integer('peak_elo').default(1000).notNull(),
+  lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   communityRankNullGenderIdx: uniqueIndex('community_rank_null_gender_idx')

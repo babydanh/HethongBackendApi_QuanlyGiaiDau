@@ -151,7 +151,8 @@ export class LiveScoreGateway
 
     this.pendingViewerUpdates.forEach((matchId) => {
       const room = `match:${matchId}`;
-      const rooms = this.server.sockets?.adapter?.rooms;
+      const serverInstance = this.server as unknown as Record<string, { rooms: Map<string, { size: number }> }>;
+      const rooms = serverInstance.adapter?.rooms;
       const viewerCount = rooms?.get(room)?.size ?? 0;
       
       const payload = JSON.stringify({ matchId, viewerCount });
