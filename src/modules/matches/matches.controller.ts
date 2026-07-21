@@ -54,6 +54,8 @@ export class MatchesController {
     return await this.matchesService.getComments(id);
   }
 
+  @Public()
+  @SkipThrottle()
   @Post(':id/comments')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo bình luận trận đấu' })

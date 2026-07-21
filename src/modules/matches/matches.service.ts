@@ -653,9 +653,10 @@ export class MatchesService {
       throw new NotFoundException('Match not found');
     }
 
+    const userId = user?.sub ?? null;
     const comment = await this.matchesRepository.createComment(
       id,
-      user.sub,
+      userId as string,
       createMatchCommentDto.commentText.trim(),
     );
 
@@ -844,6 +845,13 @@ export class MatchesService {
     const updated = await this.matchesRepository.incrementCheerCount(id);
     if (!updated) {
       throw new NotFoundException('Match not found after cheer update');
+    }
+
+    // Invalidate Redis list cache so home page gets fresh cheerCount
+    try {
+      await this.redisService.delByPattern('matches:list:*');
+    } catch (e) {
+      // Ignore redis errors
     }
 
     // Broadcast cheer update realtime
