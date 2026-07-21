@@ -42,6 +42,7 @@ import {
   buildRegistrationTimeoutNotification,
   buildTournamentCancelledNotification,
 } from '../notifications/notification-builder';
+import { RedisService } from '../../providers/redis/redis.service';
 import { StorageService } from '../../providers/storage/storage.service';
 import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
 
@@ -52,6 +53,7 @@ export class TournamentsService {
     private readonly bracketGeneratorService: BracketGeneratorService,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
+    private readonly redisService: RedisService,
   ) {}
 
   private async sendNotificationBatch(notifications: Array<Promise<unknown>>) {
@@ -147,6 +149,14 @@ export class TournamentsService {
   }
 
   async findAll(query: QueryTournamentDto) {
+    const cacheKey = `tournaments:list:${JSON.stringify(query)}`;
+    try {
+      const cached = await this.redisService.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (e) {
+      // Redis down — ignore cache, fall through to DB
+    }
+
     const result = await this.tournamentsRepository.findAll({
       ...query,
       visibility: 'PUBLIC',
@@ -156,6 +166,13 @@ export class TournamentsService {
       defaultVisibility: 'PUBLIC',
     });
     result.data = result.data.map(t => this.mapTournamentFormat(t));
+
+    try {
+      await this.redisService.set(cacheKey, JSON.stringify(result), 60);
+    } catch (e) {
+      // Redis down — ignore
+    }
+
     return result;
   }
 
@@ -377,6 +394,14 @@ export class TournamentsService {
     }
 
     const record = await this.tournamentsRepository.create(userId, createTournamentDto);
+
+    // Invalidate tournament list cache
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+    } catch (e) {
+      // Redis down — ignore
+    }
+
     return this.mapTournamentFormat(record);
   }
 
@@ -470,6 +495,14 @@ export class TournamentsService {
     });
 
     // 11. Trả về response gọn
+
+    // Invalidate tournament list cache
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+    } catch (e) {
+      // Redis down — ignore
+    }
+
     return {
       id: record.id,
       name: record.name,
@@ -684,6 +717,13 @@ export class TournamentsService {
       }
     }
 
+    // Invalidate tournament list cache
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+    } catch (e) {
+      // Redis down — ignore
+    }
+
     return this.mapTournamentFormat(updated);
   }
 
@@ -723,7 +763,14 @@ export class TournamentsService {
     // If System ADMIN, delete immediately
     if (systemRoles.includes('ADMIN')) {
       await this.cleanupTournamentImages(existing);
-      return this.tournamentsRepository.softDelete(id, userId);
+      const result = await this.tournamentsRepository.softDelete(id, userId);
+      // Invalidate tournament list cache
+      try {
+        await this.redisService.delByPattern('tournaments:list:*');
+      } catch (e) {
+        // Redis down — ignore
+      }
+      return result;
     }
 
     // Non-draft tournaments with participants or locked/live states must go through admin review
@@ -744,7 +791,16 @@ export class TournamentsService {
     }
 
     await this.cleanupTournamentImages(existing);
-    return this.tournamentsRepository.softDelete(id, userId);
+    const result = await this.tournamentsRepository.softDelete(id, userId);
+
+    // Invalidate tournament list cache
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+    } catch (e) {
+      // Redis down — ignore
+    }
+
+    return result;
   }
 
   async removeParent(id: string, userId: string, systemRoles: string[] = []) {
@@ -759,7 +815,14 @@ export class TournamentsService {
 
     // If System ADMIN, delete immediately
     if (systemRoles.includes('ADMIN')) {
-      return this.tournamentsRepository.softDeleteParent(id, userId);
+      const result = await this.tournamentsRepository.softDeleteParent(id, userId);
+      // Invalidate tournament list cache
+      try {
+        await this.redisService.delByPattern('tournaments:list:*');
+      } catch (e) {
+        // Redis down — ignore
+      }
+      return result;
     }
 
     // Parent tournaments with participants or locked/live child divisions must go through admin review
@@ -782,6 +845,13 @@ export class TournamentsService {
           };
         }
       }
+    }
+
+    // Invalidate tournament list cache
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+    } catch (e) {
+      // Redis down — ignore
     }
 
     return this.tournamentsRepository.softDeleteParent(id, userId);

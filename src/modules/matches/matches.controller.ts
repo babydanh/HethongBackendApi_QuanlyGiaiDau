@@ -17,6 +17,7 @@ import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { UpdateMatchScheduleDto } from './dto/update-match-schedule.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -30,6 +31,7 @@ export class MatchesController {
   constructor(private readonly matchesService: MatchesService) {}
 
   @Public()
+  @SkipThrottle()
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách trận đấu' })
   async findAll(@Query() query: QueryMatchDto) {
@@ -37,6 +39,7 @@ export class MatchesController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết trận đấu' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -44,6 +47,7 @@ export class MatchesController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get(':id/comments')
   @ApiOperation({ summary: 'Lấy danh sách bình luận trận đấu' })
   async getComments(@Param('id', ParseUUIDPipe) id: string) {
@@ -157,5 +161,21 @@ export class MatchesController {
   @ApiOperation({ summary: 'Danh sách người dùng bị mute/ban' })
   async getMutedUsers(@Param('id', ParseUUIDPipe) id: string) {
     return await this.matchesService.getMutedUsers(id);
+  }
+
+  @Public()
+  @SkipThrottle()
+  @Post(':id/cheer')
+  @ApiOperation({ summary: 'Cổ vũ trận đấu (tăng cheer count)' })
+  async cheerMatch(@Param('id', ParseUUIDPipe) id: string) {
+    return await this.matchesService.cheerMatch(id);
+  }
+
+  @Public()
+  @SkipThrottle()
+  @Get(':id/cheer-count')
+  @ApiOperation({ summary: 'Lấy số lượng cổ vũ của trận đấu' })
+  async getCheerCount(@Param('id', ParseUUIDPipe) id: string) {
+    return await this.matchesService.getCheerCount(id);
   }
 }

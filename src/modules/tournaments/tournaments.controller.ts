@@ -12,7 +12,7 @@
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
@@ -94,8 +94,9 @@ export class TournamentsController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get()
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Lấy danh sách giải đấu' })
   async findAll(@Query() query: QueryTournamentDto) {
     return this.tournamentsService.findAll(query);
   }

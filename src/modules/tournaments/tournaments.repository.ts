@@ -105,7 +105,7 @@ export class TournamentsRepository {
       defaultVisibility?: 'PUBLIC' | 'PRIVATE' | null;
     },
   ) {
-    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType, genderRestriction } = query;
+    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType, genderRestriction, isRanked } = query;
     const offset = (page - 1) * limit;
     const defaultTournamentType = options?.defaultTournamentType;
     const defaultVisibility = options?.defaultVisibility;
@@ -144,15 +144,37 @@ export class TournamentsRepository {
         conditions.push(eq(schema.tournaments.tournamentType, type));
       }
     }
-    if (matchType) {
-      conditions.push(eq(schema.tournaments.matchType, matchType));
+    if (matchType || genderRestriction) {
+      const matchConds: SQL[] = [];
+      if (matchType) {
+        matchConds.push(eq(schema.tournaments.matchType, matchType));
+      }
+      if (genderRestriction) {
+        matchConds.push(
+          or(
+            eq(schema.tournaments.genderRestriction, genderRestriction),
+            isNull(schema.tournaments.genderRestriction)
+          ) as SQL
+        );
+      }
+
+      conditions.push(
+        or(
+          and(...matchConds) as SQL,
+          sql`exists (
+            select 1 from ${schema.tournamentDivisions} d
+            where d.tournament_id = ${schema.tournaments.id}
+            ${matchType ? sql`and d.match_type = ${matchType}` : sql``}
+            ${genderRestriction ? sql`and (d.gender_restriction = ${genderRestriction} or d.gender_restriction is null)` : sql``}
+          )`
+        ) as SQL
+      );
     }
     if (bracketType) {
       conditions.push(sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`);
     }
-
-    if (genderRestriction) {
-      conditions.push(eq(schema.tournaments.genderRestriction, genderRestriction));
+    if (isRanked !== undefined) {
+      conditions.push(eq(schema.tournaments.isRanked, isRanked));
     }
 
     if (createdBy) {
