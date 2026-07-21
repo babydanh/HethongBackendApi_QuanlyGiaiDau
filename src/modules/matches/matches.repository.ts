@@ -99,15 +99,6 @@ export class MatchesRepository {
     if (tId) stageConditions.push(eq(schema.tournamentStages.tournamentId, tId));
     if (divisionId) stageConditions.push(eq(schema.tournamentStages.tournamentDivisionId, divisionId));
 
-    console.log('🔍 [FindAll Matches Query Params]:', {
-      tId,
-      divisionId,
-      bracketType,
-      genderRestriction,
-      matchType,
-      isRanked,
-    });
-
     const stagesQuery = this.db
       .select({ 
         id: schema.tournamentStages.id, 
@@ -153,22 +144,8 @@ export class MatchesRepository {
         ...(isRanked !== undefined ? [eq(schema.tournaments.isRanked, isRanked)] : []),
       ));
 
-    console.log("🔍 [SQL Raw Stages Query]:", stagesQuery.toSQL().sql);
-    console.log("🔍 [SQL Raw Stage Params]:", stagesQuery.toSQL().params);
-
     const stages = await stagesQuery;
     const stageIds = stages.map(s => s.id);
-    console.log("🔍 All found stages with types:", stages.map(s => ({ 
-      id: s.id, 
-      type: s.type, 
-      name: s.tournamentName,
-      tMatchType: s.tMatchType,
-      tGender: s.tGender,
-      dMatchType: s.dMatchType,
-      dGender: s.dGender,
-      bType: s.bracketType,
-    })));
-    console.log(`🔍 Found ${stageIds.length} stage ids:`, stageIds);
     
     if (stageIds.length === 0) {
       return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
@@ -179,7 +156,6 @@ export class MatchesRepository {
       .from(schema.tournamentGroups)
       .where(inArray(schema.tournamentGroups.stageId, stageIds));
     const groupIds = groups.map(g => g.id);
-    console.log(`🔍 Found ${groupIds.length} group ids:`, groupIds);
 
     if (groupIds.length === 0) {
       return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
@@ -237,6 +213,7 @@ export class MatchesRepository {
           participantId: schema.tournamentRosters.participantId,
           userId: schema.tournamentRosters.userId,
           fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
           eloPoints: schema.userRanks.eloPoints,
         })
         .from(schema.tournamentRosters)
@@ -256,12 +233,13 @@ export class MatchesRepository {
         )
         .where(inArray(schema.tournamentRosters.participantId, Array.from(participantIds)));
 
-      const rostersMap = new Map<string, { userId: string; fullName: string | null; elo?: { eloPoints: number } }[]>();
+      const rostersMap = new Map<string, { userId: string; fullName: string | null; avatarUrl: string | null; elo?: { eloPoints: number } }[]>();
       for (const r of rosters) {
         const list = rostersMap.get(r.participantId) || [];
         list.push({ 
           userId: r.userId, 
           fullName: r.fullName,
+          avatarUrl: r.avatarUrl,
           elo: r.eloPoints !== null && r.eloPoints !== undefined ? { eloPoints: r.eloPoints } : undefined
         });
         rostersMap.set(r.participantId, list);
@@ -332,6 +310,7 @@ export class MatchesRepository {
 
       return {
         ...match,
+        cheerCount: match.cheerCount ?? 0,
         participant1: p1 ? { id: p1.id, teamName: p1.teamName, seed: p1.seed, members: p1.members } : null,
         participant2: p2 ? { id: p2.id, teamName: p2.teamName, seed: p2.seed, members: p2.members } : null,
         group: groupStage ? {
