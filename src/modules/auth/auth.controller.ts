@@ -32,7 +32,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
-  @UseGuards(new RateLimitGuard(5, 60000))
+  @UseGuards(new RateLimitGuard(15, 60000))
   @Post('register')
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, description: 'User successfully registered' })
@@ -42,7 +42,7 @@ export class AuthController {
   }
 
   @Public()
-  @UseGuards(new RateLimitGuard(10, 60000))
+  @UseGuards(new RateLimitGuard(30, 60000))
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login user' })

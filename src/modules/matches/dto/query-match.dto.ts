@@ -89,4 +89,53 @@ export class QueryMatchDto {
   @IsOptional()
   @IsString()
   bracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT';
+
+  @ApiPropertyOptional({
+    example: '2026-07-20',
+    description: 'Lọc trận đấu từ ngày (YYYY-MM-DD)',
+  })
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-07-25',
+    description: 'Lọc trận đấu đến ngày (YYYY-MM-DD)',
+  })
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+
+  @ApiPropertyOptional({
+    example: 'MALE',
+    description: 'Lọc theo giới tính giải đấu (MALE/FEMALE)',
+  })
+  @IsOptional()
+  @IsString()
+  genderRestriction?: string;
+
+  @ApiPropertyOptional({
+    example: 'SINGLES',
+    description: 'Lọc theo hình thức thi đấu (SINGLES/DOUBLES/MIXED_DOUBLES)',
+  })
+  @IsOptional()
+  @IsString()
+  matchType?: string;
+
+  @ApiPropertyOptional({
+    example: 'Hà Nội',
+    description: 'Lọc theo thành phố của giải đấu',
+  })
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Lọc theo giải đấu xếp hạng (isRanked)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true' || value === true)
+  isRanked?: boolean;
 }

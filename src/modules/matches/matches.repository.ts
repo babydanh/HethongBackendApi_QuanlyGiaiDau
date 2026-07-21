@@ -21,7 +21,7 @@ export class MatchesRepository {
   ) {}
 
   async findAll(query: QueryMatchDto) {
-    const { page = 1, limit = 10, groupId, status, userId, publicOnly, bracketType } = query;
+    const { page = 1, limit = 10, groupId, status, userId, publicOnly, bracketType, genderRestriction, city, isRanked, matchType } = query;
     const offset = (page - 1) * limit;
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
@@ -55,11 +55,26 @@ export class MatchesRepository {
       );
     }
 
+    if (city) {
+      conditions.push(
+        sql`exists (
+          select 1 from ${schema.tournaments} t
+          where t.id = ${schema.matches.tournamentId}
+          and t."city" = ${city}
+        )`
+      );
+    }
+
     if (groupId) {
       conditions.push(eq(schema.matches.groupId, groupId));
     }
     if (status) {
-      conditions.push(eq(schema.matches.status, status));
+      const statuses = status.split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        conditions.push(eq(schema.matches.status, statuses[0]));
+      } else if (statuses.length > 1) {
+        conditions.push(inArray(schema.matches.status, statuses));
+      }
     }
 
     if (userId) {
@@ -79,34 +94,98 @@ export class MatchesRepository {
       );
     }
 
-    if (tId || divisionId || bracketType) {
-      const stages = await this.db
-        .select({ id: schema.tournamentStages.id })
-        .from(schema.tournamentStages)
-        .where(and(
-          ...(tId ? [eq(schema.tournamentStages.tournamentId, tId)] : []),
-          ...(divisionId ? [eq(schema.tournamentStages.tournamentDivisionId, divisionId)] : []),
-          ...(bracketType ? [eq(schema.tournamentStages.type, bracketType)] : []),
-          isNull(schema.tournamentStages.deletedAt),
-        ));
-      const stageIds = stages.map(s => s.id);
-      
-      if (stageIds.length === 0) {
-        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
-      }
+    // Luôn lọc qua stages để áp dụng: tournamentId, divisionId, matchType, genderRestriction, isRanked
+    const stageConditions: SQL[] = [isNull(schema.tournamentStages.deletedAt)];
+    if (tId) stageConditions.push(eq(schema.tournamentStages.tournamentId, tId));
+    if (divisionId) stageConditions.push(eq(schema.tournamentStages.tournamentDivisionId, divisionId));
 
-      const groups = await this.db
-        .select({ id: schema.tournamentGroups.id })
-        .from(schema.tournamentGroups)
-        .where(inArray(schema.tournamentGroups.stageId, stageIds));
-      const groupIds = groups.map(g => g.id);
+    console.log('🔍 [FindAll Matches Query Params]:', {
+      tId,
+      divisionId,
+      bracketType,
+      genderRestriction,
+      matchType,
+      isRanked,
+    });
 
-      if (groupIds.length === 0) {
-        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
-      }
+    const stagesQuery = this.db
+      .select({ 
+        id: schema.tournamentStages.id, 
+        type: schema.tournamentStages.type,
+        tournamentId: schema.tournamentStages.tournamentId,
+        tournamentName: schema.tournaments.name,
+        tMatchType: schema.tournaments.matchType,
+        tGender: schema.tournaments.genderRestriction,
+        dMatchType: schema.tournamentDivisions.matchType,
+        dGender: schema.tournamentDivisions.genderRestriction,
+        bracketType: sql`${schema.tournaments.tournamentConfig}->>'bracketType'`,
+      })
+      .from(schema.tournamentStages)
+      .leftJoin(schema.tournamentDivisions, eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id))
+      .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+      .where(and(
+        ...stageConditions,
+        ...(bracketType ? [
+          sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`
+        ] : []),
+        ...(genderRestriction ? [
+          or(
+            eq(schema.tournamentDivisions.genderRestriction, genderRestriction),
+            isNull(schema.tournamentDivisions.genderRestriction),
+            and(
+              or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.genderRestriction)),
+              or(
+                eq(schema.tournaments.genderRestriction, genderRestriction),
+                isNull(schema.tournaments.genderRestriction)
+              )
+            )
+          )
+        ] : []),
+        ...(matchType ? [
+          or(
+            eq(schema.tournamentDivisions.matchType, matchType),
+            and(
+              or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.matchType)),
+              eq(schema.tournaments.matchType, matchType)
+            )
+          )
+        ] : []),
+        ...(isRanked !== undefined ? [eq(schema.tournaments.isRanked, isRanked)] : []),
+      ));
 
-      conditions.push(inArray(schema.matches.groupId, groupIds));
+    console.log("🔍 [SQL Raw Stages Query]:", stagesQuery.toSQL().sql);
+    console.log("🔍 [SQL Raw Stage Params]:", stagesQuery.toSQL().params);
+
+    const stages = await stagesQuery;
+    const stageIds = stages.map(s => s.id);
+    console.log("🔍 All found stages with types:", stages.map(s => ({ 
+      id: s.id, 
+      type: s.type, 
+      name: s.tournamentName,
+      tMatchType: s.tMatchType,
+      tGender: s.tGender,
+      dMatchType: s.dMatchType,
+      dGender: s.dGender,
+      bType: s.bracketType,
+    })));
+    console.log(`🔍 Found ${stageIds.length} stage ids:`, stageIds);
+    
+    if (stageIds.length === 0) {
+      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
     }
+
+    const groups = await this.db
+      .select({ id: schema.tournamentGroups.id })
+      .from(schema.tournamentGroups)
+      .where(inArray(schema.tournamentGroups.stageId, stageIds));
+    const groupIds = groups.map(g => g.id);
+    console.log(`🔍 Found ${groupIds.length} group ids:`, groupIds);
+
+    if (groupIds.length === 0) {
+      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+    }
+
+    conditions.push(inArray(schema.matches.groupId, groupIds));
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -1047,5 +1126,17 @@ export class MatchesRepository {
       .from(schema.tournamentFollows)
       .where(eq(schema.tournamentFollows.tournamentId, tournamentId));
     return rows.map(r => r.userId);
+  }
+
+  async incrementCheerCount(id: string) {
+    const [updated] = await this.db
+      .update(schema.matches)
+      .set({
+        cheerCount: sql`${schema.matches.cheerCount} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.matches.id, id))
+      .returning({ id: schema.matches.id, cheerCount: schema.matches.cheerCount });
+    return updated ?? null;
   }
 }

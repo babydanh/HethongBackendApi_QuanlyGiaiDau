@@ -168,6 +168,12 @@ export class LiveScoreGateway
     this.server.volatile.to(`match:${matchId}`).emit('comment:new', rawPayload);
   }
 
+  broadcastCheerUpdate(matchId: string, cheerCount: number) {
+    if (!this.server) return;
+    const rawPayload = JSON.stringify({ matchId, cheerCount });
+    this.server.volatile.to(`match:${matchId}`).emit('cheer:update', rawPayload);
+  }
+
   // Tối ưu hoá: Thu thập & Phát thông số hiệu năng
   private broadcastSystemMetrics() {
     if (!this.server) return;

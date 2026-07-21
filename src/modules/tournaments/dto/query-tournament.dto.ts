@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsOptional, IsInt, Min, Max, IsUUID, IsIn } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class QueryTournamentDto {
   @ApiPropertyOptional({ example: 1, description: 'Trang hiện tại' })
@@ -119,5 +119,16 @@ export class QueryTournamentDto {
   @IsString()
   @IsIn(['MALE', 'FEMALE', 'MIXED'])
   genderRestriction?: 'MALE' | 'FEMALE' | 'MIXED';
+
+  @ApiPropertyOptional({
+    description: 'Lọc giải đấu xếp hạng ELO hoặc phong trào',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
+  })
+  isRanked?: boolean;
 }
 

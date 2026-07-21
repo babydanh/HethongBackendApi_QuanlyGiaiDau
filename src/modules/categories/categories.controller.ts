@@ -9,12 +9,8 @@ import {
   Query,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -33,6 +29,7 @@ export class CategoriesController {
   // --- CATEGORIES ---
 
   @Public()
+  @SkipThrottle()
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách môn thể thao (categories)' })
   @ApiResponse({ status: 200, description: 'Danh sách môn thể thao' })
@@ -41,6 +38,7 @@ export class CategoriesController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết 1 môn thể thao' })
   @ApiResponse({ status: 200, description: 'Chi tiết môn thể thao' })
@@ -83,6 +81,7 @@ export class CategoriesController {
   // --- ELO TIERS ---
 
   @Public()
+  @SkipThrottle()
   @Get(':id/elo-tiers')
   @ApiOperation({ summary: 'Lấy danh sách các bậc ELO của 1 môn thể thao' })
   @ApiResponse({ status: 200, description: 'Danh sách bậc ELO' })

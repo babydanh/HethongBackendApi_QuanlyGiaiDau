@@ -88,6 +88,13 @@ export class MatchesService {
       console.error('Failed to delete live score cache:', err);
     }
 
+    // Invalidate matches list cache
+    try {
+      await this.redisService.delByPattern('matches:list:*');
+    } catch (err) {
+      console.error('Failed to invalidate matches list cache:', err);
+    }
+
     if (existing.tournament) {
       const tournament = existing.tournament;
       const scope = tournament.tournamentType === 'CLUB' ? 'COMMUNITY' : 'PUBLIC';
@@ -332,7 +339,23 @@ export class MatchesService {
   }
 
   async findAll(query: QueryMatchDto) {
-    return this.matchesRepository.findAll(query);
+    const cacheKey = `matches:list:${JSON.stringify(query)}`;
+    try {
+      const cached = await this.redisService.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (e) {
+      // Redis down — ignore cache, fall through to DB
+    }
+
+    const result = await this.matchesRepository.findAll(query);
+
+    try {
+      await this.redisService.set(cacheKey, JSON.stringify(result), 30);
+    } catch (e) {
+      // Redis down — ignore
+    }
+
+    return result;
   }
 
   async findOne(id: string) {
@@ -482,6 +505,13 @@ export class MatchesService {
     // Broadcast score real-time
     this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
 
+    // Invalidate matches list cache
+    try {
+      await this.redisService.delByPattern('matches:list:*');
+    } catch (err) {
+      console.error('Failed to invalidate matches list cache:', err);
+    }
+
     return updatedMatch;
   }
 
@@ -543,6 +573,13 @@ export class MatchesService {
 
       // Broadcast status real-time
       this.liveScoreGateway.broadcastMatchStatus(id, updatedMatch);
+
+      // Invalidate matches list cache
+      try {
+        await this.redisService.delByPattern('matches:list:*');
+      } catch (err) {
+        console.error('Failed to invalidate matches list cache:', err);
+      }
 
       return updatedMatch;
     }
@@ -727,6 +764,13 @@ export class MatchesService {
       }
     }
 
+    // Invalidate matches list cache
+    try {
+      await this.redisService.delByPattern('matches:list:*');
+    } catch (err) {
+      console.error('Failed to invalidate matches list cache:', err);
+    }
+
     return updatedMatch;
   }
 
@@ -791,5 +835,26 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
     return this.matchesRepository.getMutedUsers(id);
+  }
+
+  async cheerMatch(id: string) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const updated = await this.matchesRepository.incrementCheerCount(id);
+    if (!updated) {
+      throw new NotFoundException('Match not found after cheer update');
+    }
+
+    // Broadcast cheer update realtime
+    this.liveScoreGateway.broadcastCheerUpdate(id, updated.cheerCount);
+
+    return { cheerCount: updated.cheerCount };
+  }
+
+  async getCheerCount(id: string) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+    return { cheerCount: existing.cheerCount ?? 0 };
   }
 }
