@@ -760,6 +760,25 @@ export class TournamentsService {
       throw new ForbiddenException('You do not have permission to delete this tournament');
     }
 
+    // Check payment safety before allowing deletion
+    const paidPayments = await this.tournamentsRepository.countPaidPayments(id);
+    const pendingRefunds = await this.tournamentsRepository.countPendingRefunds(id);
+    const fullyRefunded = await this.tournamentsRepository.isFullyRefunded(id);
+
+    if (paidPayments > 0 && !fullyRefunded) {
+      throw new BadRequestException(
+        `Giải đấu có ${paidPayments} thanh toán đã thành công chưa được hoàn tiền. ` +
+        `Vui lòng hoàn tiền trước khi xóa giải đấu.`,
+      );
+    }
+
+    if (pendingRefunds > 0) {
+      throw new BadRequestException(
+        `Giải đấu có ${pendingRefunds} giao dịch đang chờ hoàn tiền. ` +
+        `Vui lòng hoàn thành hoàn tiền trước khi xóa.`,
+      );
+    }
+
     // If System ADMIN, delete immediately
     if (systemRoles.includes('ADMIN')) {
       await this.cleanupTournamentImages(existing);
@@ -813,6 +832,28 @@ export class TournamentsService {
       throw new ForbiddenException('You do not have permission to delete this parent tournament');
     }
 
+    // Check payment safety across all child tournaments before allowing deletion
+    const divisions = await this.tournamentsRepository.findByParentId(id);
+    for (const div of divisions) {
+      const paidPayments = await this.tournamentsRepository.countPaidPayments(div.id);
+      const pendingRefunds = await this.tournamentsRepository.countPendingRefunds(div.id);
+      const fullyRefunded = await this.tournamentsRepository.isFullyRefunded(div.id);
+
+      if (paidPayments > 0 && !fullyRefunded) {
+        throw new BadRequestException(
+          `Hình thức "${div.name}" có ${paidPayments} thanh toán đã thành công chưa được hoàn tiền. ` +
+          `Vui lòng hoàn tiền trước khi xóa giải đấu.`,
+        );
+      }
+
+      if (pendingRefunds > 0) {
+        throw new BadRequestException(
+          `Hình thức "${div.name}" có ${pendingRefunds} giao dịch đang chờ hoàn tiền. ` +
+          `Vui lòng hoàn thành hoàn tiền trước khi xóa.`,
+        );
+      }
+    }
+
     // If System ADMIN, delete immediately
     if (systemRoles.includes('ADMIN')) {
       const result = await this.tournamentsRepository.softDeleteParent(id, userId);
@@ -826,7 +867,6 @@ export class TournamentsService {
     }
 
     // Parent tournaments with participants or locked/live child divisions must go through admin review
-    const divisions = await this.tournamentsRepository.findByParentId(id);
     for (const div of divisions) {
       if (div.status !== 'DRAFT') {
         const activeParticipants = await this.tournamentsRepository.countActiveParticipants(div.id);

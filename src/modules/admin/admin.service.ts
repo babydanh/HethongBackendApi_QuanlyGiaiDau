@@ -1314,6 +1314,59 @@ export class AdminService {
       throw new BadRequestException('Tournament deletion is not pending approval');
     }
 
+    // Check payment safety before approving delete
+    const [paidCount] = await this.db
+      .select({ count: count() })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.status, 'COMPLETED'),
+        ),
+      );
+    const paidPayments = paidCount?.count || 0;
+
+    const [nonRefundedCount] = await this.db
+      .select({ count: count() })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.status, 'COMPLETED'),
+          sql`${schema.payments.refundStatus} IS DISTINCT FROM 'REFUNDED'`,
+        ),
+      );
+    const nonRefundedPayments = nonRefundedCount?.count || 0;
+    const fullyRefunded = nonRefundedPayments === 0;
+
+    if (paidPayments > 0 && !fullyRefunded) {
+      throw new BadRequestException(
+        'Không thể xóa giải đấu vì chưa hoàn tiền đầy đủ cho tất cả vận động viên.',
+      );
+    }
+
+    // Check for pending refund requests
+    const [pendingRefundCount] = await this.db
+      .select({ count: count() })
+      .from(schema.paymentRefunds)
+      .innerJoin(
+        schema.payments,
+        eq(schema.paymentRefunds.paymentId, schema.payments.id),
+      )
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.paymentRefunds.status, 'REQUESTED'),
+        ),
+      );
+    const pendingRefunds = pendingRefundCount?.count || 0;
+
+    if (pendingRefunds > 0) {
+      throw new BadRequestException(
+        'Không thể xóa giải đấu vì còn giao dịch đang chờ hoàn tiền.',
+      );
+    }
+
     const deletedTournament = await this.db.transaction(async (tx) => {
       const [deleted] = await tx
         .update(schema.tournaments)
