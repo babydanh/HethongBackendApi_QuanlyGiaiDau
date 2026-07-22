@@ -1,0 +1,38 @@
+name: Deploy Backend to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy NestJS Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 203.167.15.81
+          port: 36789
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # 1. Đi tới thư mục chứa Backend trên VPS
+            cd /usr/local/lsws/giaidau.vnvar.com/backend-api_qlgiaidau
+
+            # 2. Pull code mới nhất của Backend
+            git pull origin main
+
+            # 3. Quay lại root dự án và rebuild/restart Backend
+            cd /usr/local/lsws/giaidau.vnvar.com
+            docker compose build --no-cache backend
+            docker compose run --rm migrate
+            docker compose up -d backend
+
+            # 4. Dọn dẹp Docker Image rác
+            docker image prune -f
