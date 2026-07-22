@@ -59,12 +59,12 @@ import { LivestreamModule } from './modules/livestream/livestream.module';
     RedisModule,
     MailModule,
     ThrottlerModule.forRoot([
-      // Dev: thoải mái; Production: 300 req/10s (user load trang ~10-15 req, 20 user đồng thời OK)
-      { name: 'default', ttl: 10000, limit: process.env.NODE_ENV === 'production' ? 300 : 1000 },
+      // Nâng giới hạn mặc định lên 1000 req/60s để tránh bẫy ThrottlerException khi cuộn/refresh ứng dụng
+      { name: 'default', ttl: 60000, limit: 1000 },
       // Endpoint nhạy cảm (auth, payment)
-      { name: 'sensitive', ttl: 30000, limit: process.env.NODE_ENV === 'production' ? 30 : 200 },
+      { name: 'sensitive', ttl: 30000, limit: 200 },
       // Endpoint cực nhạy (login, register) — chống brute force
-      { name: 'strict', ttl: 60000, limit: process.env.NODE_ENV === 'production' ? 15 : 100 },
+      { name: 'strict', ttl: 60000, limit: 100 },
     ]),
     ScheduleModule.forRoot(),
     DatabaseModule,

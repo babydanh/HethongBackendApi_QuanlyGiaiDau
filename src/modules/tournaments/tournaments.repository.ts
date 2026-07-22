@@ -851,6 +851,52 @@ export class TournamentsRepository {
     return result?.count || 0;
   }
 
+  async countPaidPayments(tournamentId: string): Promise<number> {
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.status, 'COMPLETED'),
+        ),
+      );
+    return result?.count || 0;
+  }
+
+  async countPendingRefunds(tournamentId: string): Promise<number> {
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(schema.paymentRefunds)
+      .innerJoin(
+        schema.payments,
+        eq(schema.paymentRefunds.paymentId, schema.payments.id),
+      )
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.paymentRefunds.status, 'REQUESTED'),
+        ),
+      );
+    return result?.count || 0;
+  }
+
+  async isFullyRefunded(tournamentId: string): Promise<boolean> {
+    // Check if all COMPLETED payments have refundStatus = 'REFUNDED'
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.status, 'COMPLETED'),
+          sql`${schema.payments.refundStatus} IS DISTINCT FROM 'REFUNDED'`,
+        ),
+      );
+    // If there are no non-refunded COMPLETED payments → fully refunded
+    return (result?.count || 0) === 0;
+  }
+
   async updateStatus(id: string, status: string) {
     return this.db
       .update(schema.tournaments)
