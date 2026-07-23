@@ -69,23 +69,20 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 15m
           script: |
-            # 1. Đi tới thư mục chứa code dự án trên VPS
+            # 1. Đi tới thư mục chứa docker-compose.yml trên VPS
             cd /usr/local/lsws/giaidau.vnvar.com
 
-            # 2. Pull file docker-compose.yml mới nhất
-            git pull origin main
+            # 2. Đăng nhập GHCR trên VPS
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # 3. Đăng nhập vào GHCR trên VPS để tải Image private
-            echo "${{ secrets.GHCR_PAT }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-
-            # 4. Pull image backend mới từ Registry về
+            # 3. Pull image backend mới nhất từ Registry về
             docker pull ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest
 
-            # 5. Chạy migration cơ sở dữ liệu
+            # 4. Chạy migration cơ sở dữ liệu
             docker compose run --rm migrate
 
-            # 6. Khởi động lại service backend với image mới (không ảnh hưởng dịch vụ khác)
+            # 5. Khởi động lại service backend với image mới
             docker compose up -d --no-deps backend
 
-            # 7. Dọn dẹp các Docker Image cũ không dùng
+            # 6. Dọn dẹp các Docker Image cũ
             docker image prune -f
