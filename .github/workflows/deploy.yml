@@ -4,16 +4,60 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'Dockerfile'
+      - '.github/workflows/deploy.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  deploy:
-    name: Deploy NestJS Backend
+  # Job 1: Build Docker Image cho Backend trên GitHub và Push lên GHCR
+  build-and-push:
+    name: Build & Push Backend Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend-api_qlgiaidau
+          file: ./backend-api_qlgiaidau/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 2: Chỉ kéo bản build Backend về chạy trên VPS và chạy migration
+  deploy:
+    name: Deploy to VPS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -21,18 +65,25 @@ jobs:
           port: 36789
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 15m
           script: |
-            # 1. Đi tới thư mục chứa Backend trên VPS
-            cd /usr/local/lsws/giaidau.vnvar.com/backend-api_qlgiaidau
+            # 1. Đi tới thư mục chứa code dự án trên VPS
+            cd /usr/local/lsws/giaidau.vnvar.com
 
-            # 2. Pull code mới nhất của Backend
+            # 2. Pull file docker-compose.yml mới nhất
             git pull origin main
 
-            # 3. Quay lại root dự án và rebuild/restart Backend
-            cd /usr/local/lsws/giaidau.vnvar.com
-            docker compose build --no-cache backend
-            docker compose run --rm migrate
-            docker compose up -d backend
+            # 3. Đăng nhập vào GHCR trên VPS để tải Image private
+            echo "${{ secrets.GHCR_PAT }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-            # 4. Dọn dẹp Docker Image rác
+            # 4. Pull image backend mới từ Registry về
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+            # 5. Chạy migration cơ sở dữ liệu
+            docker compose run --rm migrate
+
+            # 6. Khởi động lại service backend với image mới (không ảnh hưởng dịch vụ khác)
+            docker compose up -d --no-deps backend
+
+            # 7. Dọn dẹp các Docker Image cũ không dùng
             docker image prune -f
