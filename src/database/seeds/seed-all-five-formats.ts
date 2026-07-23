@@ -111,12 +111,38 @@ async function createTournament(params: {
   venueId: string;
   categoryId: string;
   organizerId: string;
+  genderRestriction?: string;
   roundRobinLegs?: number;
-  groupConfig?: any;
+  groupConfig?: {
+    numGroups: number;
+    teamsPerGroup: number;
+    roundsToPlay?: number;
+  };
+  playoffType?: string;
 }) {
-  const { name, bracketType, numTeams, venueId, categoryId, organizerId, roundRobinLegs = 1, groupConfig } = params;
+  const { name, bracketType, numTeams, venueId, categoryId, organizerId, genderRestriction, roundRobinLegs = 1, groupConfig, playoffType } = params;
   const tourId = uuidv4();
   const inviteCode = `TC-${bracketType.substring(0,2).toUpperCase()}-${numTeams}-${Date.now().toString().slice(-4)}`;
+
+  // Build tournamentConfig với groupsConfig shape đúng cho bracket-generator
+  const tournamentConfig: Record<string, unknown> = {
+    bracketType,
+    maxTeams: numTeams,
+    roundRobinLegs: bracketType === 'round_robin' ? roundRobinLegs : undefined,
+  };
+  if (groupConfig) {
+    tournamentConfig.groupsConfig = {
+      numGroups: groupConfig.numGroups,
+      teamsPerGroup: groupConfig.teamsPerGroup,
+      roundsToPlay: groupConfig.roundsToPlay ?? 1,
+    };
+    tournamentConfig.advancementConfig = {
+      teamsAdvancing: 2,
+    };
+    tournamentConfig.playoffConfig = {
+      type: playoffType || 'SINGLE_ELIMINATION',
+    };
+  }
 
   await db.insert(schema.tournaments).values({
     id: tourId,
@@ -126,12 +152,8 @@ async function createTournament(params: {
     status: 'IN_PROGRESS',
     matchType: 'SINGLES',
     sportRules: { kind: 'BADMINTON', setsToWin: 2, pointsPerSet: 21, winByTwo: true },
-    tournamentConfig: {
-      bracketType,
-      maxTeams: numTeams,
-      roundRobinLegs: bracketType === 'round_robin' ? roundRobinLegs : undefined,
-      groupConfig,
-    },
+    genderRestriction: genderRestriction ?? null,
+    tournamentConfig,
     venueId,
     entryFee: '0',
     tournamentType: 'PUBLIC',
@@ -284,23 +306,13 @@ async function main() {
     venueId: venue.id,
     categoryId: badmintonCat.id,
     organizerId: orgUser.id,
+    genderRestriction: 'MALE',
     groupConfig: {
-      stages: [
-        {
-          stageName: 'Vòng Bảng',
-          groups: [
-            { groupName: 'Bảng A', teams: 4 }, { groupName: 'Bảng B', teams: 4 },
-            { groupName: 'Bảng C', teams: 4 }, { groupName: 'Bảng D', teams: 4 },
-            { groupName: 'Bảng E', teams: 4 }, { groupName: 'Bảng F', teams: 4 },
-            { groupName: 'Bảng G', teams: 4 }, { groupName: 'Bảng H', teams: 4 }
-          ],
-          advanceConfig: {
-            teamsPerGroupToAdvance: 2, // 16 đội vào vòng 1/8
-            playoffFormat: 'SINGLE_ELIMINATION'
-          }
-        }
-      ]
-    }
+      numGroups: 8,
+      teamsPerGroup: 4,
+      roundsToPlay: 1,
+    },
+    playoffType: 'SINGLE_ELIMINATION',
   });
   await generateAndPlayGroupStage(gpEvenSE);
 
@@ -316,22 +328,11 @@ async function main() {
     categoryId: badmintonCat.id,
     organizerId: orgUser.id,
     groupConfig: {
-      stages: [
-        {
-          stageName: 'Vòng Bảng',
-          groups: [
-            { groupName: 'Bảng A', teams: 5 }, { groupName: 'Bảng B', teams: 4 },
-            { groupName: 'Bảng C', teams: 4 }, { groupName: 'Bảng D', teams: 4 },
-            { groupName: 'Bảng E', teams: 4 }, { groupName: 'Bảng F', teams: 4 },
-            { groupName: 'Bảng G', teams: 4 }, { groupName: 'Bảng H', teams: 4 }
-          ],
-          advanceConfig: {
-            teamsPerGroupToAdvance: 2, // 16 đội vào vòng 1/8
-            playoffFormat: 'SINGLE_ELIMINATION'
-          }
-        }
-      ]
-    }
+      numGroups: 8,
+      teamsPerGroup: 5,
+      roundsToPlay: 1,
+    },
+    playoffType: 'SINGLE_ELIMINATION',
   });
   await generateAndPlayGroupStage(gpOddSE);
 
@@ -346,23 +347,13 @@ async function main() {
     venueId: venue.id,
     categoryId: badmintonCat.id,
     organizerId: orgUser.id,
+    genderRestriction: 'MALE',
     groupConfig: {
-      stages: [
-        {
-          stageName: 'Vòng Bảng',
-          groups: [
-            { groupName: 'Bảng A', teams: 4 }, { groupName: 'Bảng B', teams: 4 },
-            { groupName: 'Bảng C', teams: 4 }, { groupName: 'Bảng D', teams: 4 },
-            { groupName: 'Bảng E', teams: 4 }, { groupName: 'Bảng F', teams: 4 },
-            { groupName: 'Bảng G', teams: 4 }, { groupName: 'Bảng H', teams: 4 }
-          ],
-          advanceConfig: {
-            teamsPerGroupToAdvance: 2, // 16 đội vào Playoffs nhánh thắng/thua
-            playoffFormat: 'DOUBLE_ELIMINATION'
-          }
-        }
-      ]
-    }
+      numGroups: 8,
+      teamsPerGroup: 4,
+      roundsToPlay: 1,
+    },
+    playoffType: 'DOUBLE_ELIMINATION',
   });
   await generateAndPlayGroupStage(gpEvenDE);
 
@@ -377,23 +368,13 @@ async function main() {
     venueId: venue.id,
     categoryId: badmintonCat.id,
     organizerId: orgUser.id,
+    genderRestriction: 'FEMALE',
     groupConfig: {
-      stages: [
-        {
-          stageName: 'Vòng Bảng',
-          groups: [
-            { groupName: 'Bảng A', teams: 5 }, { groupName: 'Bảng B', teams: 5 },
-            { groupName: 'Bảng C', teams: 5 }, { groupName: 'Bảng D', teams: 4 },
-            { groupName: 'Bảng E', teams: 4 }, { groupName: 'Bảng F', teams: 4 },
-            { groupName: 'Bảng G', teams: 4 }, { groupName: 'Bảng H', teams: 4 }
-          ],
-          advanceConfig: {
-            teamsPerGroupToAdvance: 2, // 16 đội vào Playoffs nhánh thắng/thua
-            playoffFormat: 'DOUBLE_ELIMINATION'
-          }
-        }
-      ]
-    }
+      numGroups: 8,
+      teamsPerGroup: 5,
+      roundsToPlay: 1,
+    },
+    playoffType: 'DOUBLE_ELIMINATION',
   });
   await generateAndPlayGroupStage(gpOddDE);
 
