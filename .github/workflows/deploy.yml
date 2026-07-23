@@ -79,7 +79,7 @@ jobs:
             echo "${{ secrets.GHCR_PAT }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
             # 4. Pull image backend mới từ Registry về
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            docker pull ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest
 
             # 5. Chạy migration cơ sở dữ liệu
             docker compose run --rm migrate
