@@ -2860,6 +2860,14 @@ export class TournamentsRepository {
         }
       }
 
+      // Gán seed dựa trên thứ tự tên (i+1) để hỗ trợ SEEDED bracket
+      for (let idx = 0; idx < createdParticipants.length; idx++) {
+        await tx
+          .update(schema.tournamentParticipants)
+          .set({ seed: idx + 1 })
+          .where(eq(schema.tournamentParticipants.id, createdParticipants[idx].id));
+      }
+
       return createdParticipants;
     });
   }
@@ -4205,5 +4213,95 @@ export class TournamentsRepository {
         eq(schema.tournamentFollows.tournamentId, schema.tournaments.id),
       )
       .where(eq(schema.tournamentFollows.userId, userId));
+  }
+
+  async findGroupStandings(tournamentId: string, divisionId?: string) {
+    // Tìm các stage Round Robin (vòng bảng) của tournament
+    const stages = await this.db
+      .select()
+      .from(schema.tournamentStages)
+      .where(
+        divisionId
+          ? and(
+              eq(schema.tournamentStages.tournamentId, tournamentId),
+              eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              eq(schema.tournamentStages.type, 'ROUND_ROBIN'),
+              isNull(schema.tournamentStages.deletedAt),
+            )
+          : and(
+              eq(schema.tournamentStages.tournamentId, tournamentId),
+              eq(schema.tournamentStages.type, 'ROUND_ROBIN'),
+              isNull(schema.tournamentStages.deletedAt),
+            ),
+      )
+      .orderBy(schema.tournamentStages.order);
+
+    if (stages.length === 0) return [];
+
+    const stageIds = stages.map(s => s.id);
+
+    const groups = await this.db
+      .select()
+      .from(schema.tournamentGroups)
+      .where(
+        and(
+          inArray(schema.tournamentGroups.stageId, stageIds),
+          isNull(schema.tournamentGroups.deletedAt),
+        ),
+      )
+      .orderBy(schema.tournamentGroups.name);
+
+    if (groups.length === 0) return [];
+
+    const groupIds = groups.map(g => g.id);
+
+    const standings = await this.db
+      .select()
+      .from(schema.groupStandings)
+      .where(inArray(schema.groupStandings.groupId, groupIds))
+      .orderBy(schema.groupStandings.groupId, sql`total_points DESC, (points_for - points_against) DESC`);
+
+    // Lấy participant info kèm seed
+    const participantIds = [...new Set(standings.map(s => s.participantId))];
+    const participants = participantIds.length > 0
+      ? await this.db
+          .select({
+            id: schema.tournamentParticipants.id,
+            teamName: schema.tournamentParticipants.teamName,
+            seed: schema.tournamentParticipants.seed,
+          })
+          .from(schema.tournamentParticipants)
+          .where(inArray(schema.tournamentParticipants.id, participantIds))
+      : [];
+
+    const participantMap = new Map(participants.map(p => [p.id, { teamName: p.teamName, seed: p.seed }]));
+
+    return {
+      stages: stages.map(s => ({
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        order: s.order,
+      })),
+      groups: groups.map(g => ({
+        id: g.id,
+        name: g.name,
+        stageId: g.stageId,
+      })),
+      standings: standings.map(s => ({
+        id: s.id,
+        groupId: s.groupId,
+        participantId: s.participantId,
+        teamName: participantMap.get(s.participantId)?.teamName || 'Unknown',
+        seed: participantMap.get(s.participantId)?.seed || null,
+        played: s.played,
+        won: s.won,
+        lost: s.lost,
+        draws: s.draws,
+        pointsFor: s.pointsFor,
+        pointsAgainst: s.pointsAgainst,
+        totalPoints: s.totalPoints,
+      })),
+    };
   }
 }

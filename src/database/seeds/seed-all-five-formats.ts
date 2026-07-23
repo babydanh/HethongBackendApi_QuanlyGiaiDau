@@ -171,6 +171,7 @@ async function createTournament(params: {
       teamStatus: 'COMPLETE',
       isMock: true,
       isPaid: true,
+      seed: i, // seed = index để hỗ trợ SEEDED bracket
     });
   }
 

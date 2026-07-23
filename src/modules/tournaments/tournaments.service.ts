@@ -2686,6 +2686,14 @@ export class TournamentsService {
     }
   }
 
+  async getGroupStandings(tournamentId: string, divisionId?: string) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+    return this.tournamentsRepository.findGroupStandings(tournamentId, divisionId);
+  }
+
   async addReferee(
     id: string,
     email: string,

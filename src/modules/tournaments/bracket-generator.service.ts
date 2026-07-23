@@ -794,8 +794,12 @@ export class BracketGeneratorService {
 
       const numGroups = Math.max(1, Math.ceil(numParticipants / maxGroupSize));
       const groupParticipants: Array<Array<typeof participants[0]>> = Array.from({ length: numGroups }, () => []);
+      // Snake draft: vòng 0 forward (G0→Gn), vòng 1 backward (Gn→G0), vòng 2 forward...
       for (let i = 0; i < sortedParticipants.length; i++) {
-        groupParticipants[i % numGroups].push(sortedParticipants[i]);
+        const round = Math.floor(i / numGroups);
+        const pos = i % numGroups;
+        const groupIndex = round % 2 === 0 ? pos : (numGroups - 1 - pos);
+        groupParticipants[groupIndex].push(sortedParticipants[i]);
       }
 
       // Tạo groups + standings
@@ -1225,11 +1229,15 @@ export class BracketGeneratorService {
         groupSizes.push(g < extra ? baseSize + 1 : baseSize);
       }
 
-      // Snake-draft participants into groups
+      // Snake-draft participants into groups (alternating direction per round)
       const groupParticipants: Array<Array<typeof participants[0]>> = Array.from({ length: actualNumGroups }, () => []);
       let participantIndex = 0;
-      for (let round = 0; round < Math.max(...groupSizes); round++) {
-        for (let g = 0; g < actualNumGroups; g++) {
+      const maxRound = Math.max(...groupSizes);
+      for (let round = 0; round < maxRound; round++) {
+        const groupsInOrder = round % 2 === 0
+          ? Array.from({ length: actualNumGroups }, (_, i) => i)          // forward
+          : Array.from({ length: actualNumGroups }, (_, i) => actualNumGroups - 1 - i); // backward
+        for (const g of groupsInOrder) {
           if (round < groupSizes[g] && participantIndex < sortedParticipants.length) {
             groupParticipants[g].push(sortedParticipants[participantIndex++]);
           }

@@ -797,6 +797,16 @@ export class TournamentsController {
   }
 
   @Public()
+  @Get(':id/standings')
+  @ApiOperation({ summary: 'Lấy bảng xếp hạng vòng bảng (group standings) cho giải đấu' })
+  async getGroupStandings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('divisionId') divisionId?: string,
+  ) {
+    return this.tournamentsService.getGroupStandings(id, divisionId);
+  }
+
+  @Public()
   @Get(':id/staff')
   @ApiOperation({ summary: 'Lay danh sach nhan su (BTC, trong tai, khach xem)' })
   async findStaff(@Param('id', ParseUUIDPipe) id: string) {
