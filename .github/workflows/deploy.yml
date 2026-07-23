@@ -41,6 +41,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
@@ -48,8 +50,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest,ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
