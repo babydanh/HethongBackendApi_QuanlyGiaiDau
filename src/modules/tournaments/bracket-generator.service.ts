@@ -1450,6 +1450,7 @@ export class BracketGeneratorService {
               stageId: stage2.id,
             });
           }
+          winnersMatchesByRound.push(roundMatches);
         }
 
         // Losers bracket
