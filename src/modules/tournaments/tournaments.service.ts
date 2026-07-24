@@ -405,6 +405,22 @@ export class TournamentsService {
     return this.mapTournamentFormat(record);
   }
 
+
+  private buildLiteSportPreset(sport: string): { sportPreset: string; sportRules: Record<string, unknown> } {
+    switch (sport) {
+      case 'pickleball':
+        return { sportPreset: 'PICKLEBALL_STANDARD', sportRules: { kind: 'PICKLEBALL', setsToWin: 2, pointsPerSet: 11, winByTwo: true } };
+      case 'badminton':
+        return { sportPreset: 'BADMINTON_STANDARD', sportRules: { kind: 'BADMINTON', setsToWin: 2, pointsPerSet: 21, winByTwo: true } };
+      case 'table_tennis':
+        return { sportPreset: 'TABLE_TENNIS_STANDARD', sportRules: { kind: 'TABLE_TENNIS', setsToWin: 3, pointsPerSet: 11, winByTwo: true } };
+      case 'tennis':
+        return { sportPreset: 'TENNIS_SUPER_TIEBREAK', sportRules: { kind: 'TENNIS', setsToWin: 1, pointsPerSet: 10, winByTwo: true } };
+      default:
+        return { sportPreset: 'BADMINTON_STANDARD', sportRules: { kind: 'BADMINTON', setsToWin: 2, pointsPerSet: 21, winByTwo: true } };
+    }
+  }
+
   async createLite(userId: string, dto: CreateLiteTournamentDto, systemRoles: string[] = []) {
     // 0. Hard limit check: Max 100 tournaments per creator (except ADMIN)
     const isAdmin = systemRoles.includes('ADMIN');
@@ -441,21 +457,22 @@ export class TournamentsService {
     };
     const finalBracketType = bracketTypeMap[bracketType] || 'SINGLE_ELIMINATION';
 
-    // 5. Build sportRules mặc định
-    const config = category.categoryConfig as CategoryConfig | null | undefined;
-    const defaultSportRules = config?.defaultSportRules || {};
-    const sportRules = {
-      ...defaultSportRules,
-      kind: dto.sport === 'badminton' ? 'BADMINTON'
-        : dto.sport === 'tennis' ? 'TENNIS'
-        : dto.sport === 'pickleball' ? 'PICKLEBALL'
-        : dto.sport === 'table_tennis' ? 'TABLE_TENNIS'
-        : 'BADMINTON',
-    };
+    // 5. Build Lite sport preset + rules
+    const litePreset = this.buildLiteSportPreset(dto.sport);
+    const sportRules = { ...litePreset.sportRules };
 
-    // 6. Build tournamentConfig
+    // 6. Build Lite tournamentConfig shared by App/Web
     const maxTeams = dto.maxTeams || 16;
+    const registrationMode = dto.registrationMode || 'OPEN';
     const tournamentConfig = {
+      mode: 'LITE',
+      sportPreset: litePreset.sportPreset,
+      registrationMode,
+      liteJoinPolicy: 'COMMUNITY_MEMBERS',
+      liteVisibility: 'COMMUNITY',
+      bracketSetupMode: 'RANDOM',
+      allowPlayerReferee: true,
+      hideAdvancedSettings: true,
       bracketType: finalBracketType,
       maxTeams,
     };
@@ -484,17 +501,19 @@ export class TournamentsService {
       isRanked: false,
       sportRules,
       tournamentConfig,
+      startDate: dto.startDate || undefined,
+      city: dto.location || undefined,
     });
 
     // 9. Gọi repository.create() — dùng chung logic insert
     const record = await this.tournamentsRepository.create(userId, fullDto);
 
     // 10. Auto-publish: set status REGISTRATION_OPEN để đăng ký & bracket được luôn
-    await this.tournamentsRepository.update(record.id, userId, {
+    const updated = await this.tournamentsRepository.update(record.id, userId, {
       status: 'REGISTRATION_OPEN',
     });
 
-    // 11. Trả về response gọn
+    const inviteCode = updated.inviteCode ?? record.inviteCode;
 
     // Invalidate tournament list cache
     try {
@@ -507,6 +526,9 @@ export class TournamentsService {
       id: record.id,
       name: record.name,
       status: 'REGISTRATION_OPEN',
+      inviteCode,
+      joinUrl: `/lite/tournaments/join/${inviteCode}`,
+      qrPayload: `/lite/tournaments/join/${inviteCode}`,
     };
   }
 
