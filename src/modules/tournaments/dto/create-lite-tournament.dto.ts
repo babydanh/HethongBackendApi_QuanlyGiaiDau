@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsNumber,
   IsUUID,
+  IsDateString,
   Min,
   Max,
   IsIn,
@@ -49,4 +50,21 @@ export class CreateLiteTournamentDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @ApiPropertyOptional({ example: 'OPEN', description: 'Chế độ đăng ký', enum: ['OPEN', 'APPROVAL', 'INVITE_ONLY'] })
+  @IsString()
+  @IsOptional()
+  @IsIn(['OPEN', 'APPROVAL', 'INVITE_ONLY'])
+  registrationMode?: string;
+
+  @ApiPropertyOptional({ example: 'Hải Dương', description: 'Địa điểm tổ chức' })
+  @IsString()
+  @IsOptional()
+  location?: string;
+
+  @ApiPropertyOptional({ example: '2026-10-15T00:00:00Z', description: 'Ngày bắt đầu' })
+  @IsDateString()
+  @IsOptional()
+  startDate?: string;
 }
+
