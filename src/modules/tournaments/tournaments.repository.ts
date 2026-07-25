@@ -1867,6 +1867,41 @@ export class TournamentsRepository {
     };
   }
 
+  async findParticipantByTournamentAndUser(tournamentId: string, userId: string) {
+    const [participant] = await this.db
+      .select()
+      .from(schema.tournamentParticipants)
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          eq(schema.tournamentParticipants.registeredBy, userId),
+        ),
+      )
+      .limit(1);
+    return participant || null;
+  }
+
+  async countParticipants(tournamentId: string) {
+    const [result] = await this.db
+      .select({ count: count() })
+      .from(schema.tournamentParticipants)
+      .where(eq(schema.tournamentParticipants.tournamentId, tournamentId));
+    return result?.count ?? 0;
+  }
+
+  async findCommunityById(communityId: string) {
+    const [record] = await this.db
+      .select({
+        id: schema.communities.id,
+        name: schema.communities.name,
+        joinMode: schema.communities.joinMode,
+      })
+      .from(schema.communities)
+      .where(eq(schema.communities.id, communityId))
+      .limit(1);
+    return record || null;
+  }
+
   async findCommunityMember(communityId: string, userId: string) {
     const records = await this.db
       .select()

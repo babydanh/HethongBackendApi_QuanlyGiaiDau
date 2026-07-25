@@ -532,6 +532,115 @@ export class TournamentsService {
     };
   }
 
+  async getLiteJoinStatus(inviteCode: string, userId?: string) {
+    const tournament = await this.tournamentsRepository.findByInviteCode(inviteCode);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+    if (tournament.status === 'DRAFT') throw new NotFoundException('Giải chưa được công bố');
+    if (tournament.status === 'CANCELLED') throw new NotFoundException('Giải đã bị hủy');
+
+    const t = this.mapTournamentFormat(tournament);
+
+    // Lấy category name
+    let categoryName: string | undefined;
+    if (t.categoryId) {
+      const cat = await this.tournamentsRepository.findCategory(t.categoryId);
+      categoryName = cat?.name;
+    }
+
+    const base = {
+      tournament: {
+        id: t.id,
+        name: t.name,
+        status: t.status,
+        category: categoryName,
+        matchType: t.matchType,
+        maxParticipants: t.maxParticipants,
+      },
+    };
+
+    if (!userId) return { ...base, requiresAuth: true };
+
+    // Check club membership
+    if (tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (!member) {
+        const community = await this.tournamentsRepository.findCommunityById(tournament.communityId);
+        return {
+          ...base,
+          requiresClubJoin: true,
+          communityId: tournament.communityId,
+          communityName: community?.name || '',
+          clubPolicy: community?.joinMode || 'OPEN',
+        };
+      }
+      if (member.status === 'PENDING') {
+        return { ...base, clubJoinPending: true };
+      }
+      if (member.status !== 'JOINED') {
+        const community = await this.tournamentsRepository.findCommunityById(tournament.communityId);
+        return {
+          ...base,
+          requiresClubJoin: true,
+          communityId: tournament.communityId,
+          communityName: community?.name || '',
+          clubPolicy: community?.joinMode || 'OPEN',
+        };
+      }
+    }
+
+    // Already joined?
+    const participant = await this.tournamentsRepository.findParticipantByTournamentAndUser(tournament.id, userId);
+    if (participant) return { ...base, alreadyJoined: true, participantId: participant.id };
+
+    // Registration closed?
+    if (tournament.status === 'REGISTRATION_CLOSED' || tournament.status === 'UPCOMING' || tournament.status === 'IN_PROGRESS' || tournament.status === 'COMPLETED') {
+      return { ...base, registrationClosed: true };
+    }
+
+    // Full?
+    if (tournament.maxParticipants) {
+      const count = await this.tournamentsRepository.countParticipants(tournament.id);
+      if (count >= tournament.maxParticipants) return { ...base, tournamentFull: true };
+    }
+
+    return { ...base, canJoin: true };
+  }
+
+  async joinLite(inviteCode: string, userId: string) {
+    const tournament = await this.tournamentsRepository.findByInviteCode(inviteCode);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+    if (tournament.status !== 'REGISTRATION_OPEN') throw new BadRequestException('Giải không đang mở đăng ký');
+
+    // Check club membership
+    if (tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      if (!member) throw new ForbiddenException('Bạn chưa là thành viên câu lạc bộ');
+      if (member.status === 'PENDING') throw new ForbiddenException('Yêu cầu vào CLB đang chờ duyệt');
+      if (member.status !== 'JOINED') throw new ForbiddenException('Bạn chưa là thành viên câu lạc bộ');
+    }
+
+    // Already joined?
+    const existing = await this.tournamentsRepository.findParticipantByTournamentAndUser(tournament.id, userId);
+    if (existing) throw new BadRequestException('Bạn đã tham gia giải này');
+
+    // Full?
+    if (tournament.maxParticipants) {
+      const count = await this.tournamentsRepository.countParticipants(tournament.id);
+      if (count >= tournament.maxParticipants) throw new BadRequestException('Giải đã đủ số lượng');
+    }
+
+    // Get user name
+    const profile = await this.tournamentsRepository.findUserProfile(userId);
+    const name = profile?.fullName || 'Vận động viên';
+
+    // Register
+    const result = await this.tournamentsRepository.registerParticipant(
+      tournament.id, userId, { teamName: name }, inviteCode,
+    );
+
+    return { id: result.participant.id, name, status: result.participant.teamStatus, tournamentId: tournament.id };
+  }
+
   async update(id: string, userId: string, updateTournamentDto: UpdateTournamentDto, systemRoles: string[] = []) {
     this.validateRegistrationMode(updateTournamentDto.tournamentConfig);
 
@@ -1190,9 +1299,12 @@ export class TournamentsService {
     const userIds = [userId];
     if (registerTournamentDto.partnerEmailOrPhone) {
       const partnerUser = await this.tournamentsRepository.findUserByEmailOrPhone(registerTournamentDto.partnerEmailOrPhone);
-      if (partnerUser) {
-        userIds.push(partnerUser.id);
+      if (!partnerUser) {
+        throw new BadRequestException(
+          `Không tìm thấy tài khoản VNSport với email/SĐT "${registerTournamentDto.partnerEmailOrPhone}". Đồng đội cần đăng ký tài khoản trước khi tham gia.`
+        );
       }
+      userIds.push(partnerUser.id);
     }
 
     const requestedDivisionId = registerTournamentDto.tournamentDivisionId ?? registerTournamentDto.divisionId;
