@@ -1064,7 +1064,9 @@ export class TournamentsRepository {
           : divisions.find(
               (division) =>
                 division.matchType === targetMatchType &&
-                division.genderRestriction === targetGenderRestriction,
+                (division.genderRestriction === targetGenderRestriction ||
+                 !division.genderRestriction ||
+                 division.genderRestriction.toUpperCase() === 'OPEN'),
             );
 
         if (!selectedDivision) {
@@ -1076,9 +1078,10 @@ export class TournamentsRepository {
           throw new BadRequestException(`Không có hình thức thi đấu ${fallbackLabel} phù hợp cho giải này.`);
         }
 
+        const divGender = (selectedDivision.genderRestriction || '').toUpperCase();
         if (
           selectedDivision.matchType !== targetMatchType ||
-          selectedDivision.genderRestriction !== targetGenderRestriction
+          (divGender && divGender !== 'OPEN' && divGender !== targetGenderRestriction)
         ) {
           throw new BadRequestException('Hình thức thi đấu đã chọn không phù hợp với giới tính hoặc loại đăng ký.');
         }
@@ -1275,13 +1278,23 @@ export class TournamentsRepository {
             : 'COMPLETE';
       const isPaid = payableEntryFeeAmount === 0;
 
+      let finalTeamName = (data.teamName || '').trim();
+      if (!finalTeamName) {
+        const [leaderProfile] = await tx
+          .select({ fullName: schema.profiles.fullName })
+          .from(schema.profiles)
+          .where(eq(schema.profiles.userId, userId))
+          .limit(1);
+        finalTeamName = leaderProfile?.fullName || 'Vận động viên';
+      }
+
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
         .values({
           tournamentId,
           tournamentDivisionId: selectedDivision?.id ?? null,
           registeredBy: userId,
-          teamName: data.teamName,
+          teamName: finalTeamName,
           isPaid,
           teamInviteToken: partnerId ? null : teamInviteToken,
           teamStatus,
