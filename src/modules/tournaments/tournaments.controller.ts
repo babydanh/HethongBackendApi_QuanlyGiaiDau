@@ -326,19 +326,34 @@ export class TournamentsController {
   @Post('lite')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Táº¡o giáº£i Ä‘áº¥u nhanh trong CLB (Lite) â€” chá»‰ cáº§n sport slug, khÃ´ng cáº§n categoryId UUID' })
+  @ApiOperation({ summary: 'Tạo giải đấu nhanh trong CLB (Lite) — chỉ cần sport slug, không cần categoryId UUID' })
   async createLite(
     @Body() dto: CreateLiteTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!user?.sub) {
-      throw new UnauthorizedException('Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ táº¡o giáº£i Ä‘áº¥u.');
+      throw new UnauthorizedException('Bạn cần đăng nhập để tạo giải đấu.');
     }
     return this.tournamentsService.createLite(
       user.sub,
       dto,
       this.getSystemRoles(user),
     );
+  }
+
+  @Public()
+  @Get('lite/join/:inviteCode')
+  @ApiOperation({ summary: 'Kiểm tra trạng thái tham gia Lite tournament' })
+  async getLiteJoinStatus(@Param('inviteCode') inviteCode: string, @CurrentUser() user: JwtPayload | null) {
+    return this.tournamentsService.getLiteJoinStatus(inviteCode, user?.sub);
+  }
+
+  @Post('lite/join/:inviteCode')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tham gia Lite tournament 1 chạm' })
+  async joinLite(@Param('inviteCode') inviteCode: string, @CurrentUser() user: JwtPayload) {
+    return this.tournamentsService.joinLite(inviteCode, user.sub);
   }
 
   @Patch(':id')
