@@ -994,7 +994,11 @@ export class TournamentsRepository {
           .where(eq(schema.profiles.userId, targetUserId))
           .limit(1);
 
-        const gender = profile?.gender?.toUpperCase();
+        const rawGender = (profile?.gender || '').trim().toUpperCase();
+        let gender = rawGender;
+        if (rawGender === 'NAM' || rawGender === 'MALE') gender = 'MALE';
+        else if (rawGender === 'NỮ' || rawGender === 'NU' || rawGender === 'FEMALE') gender = 'FEMALE';
+
         if (gender !== 'MALE' && gender !== 'FEMALE') {
           throw new BadRequestException(`${label} cần cập nhật giới tính trong hồ sơ cá nhân để đăng ký.`);
         }
@@ -1221,8 +1225,11 @@ export class TournamentsRepository {
           }
 
           const leaderProfileRes = await tx.select({ gender: schema.profiles.gender }).from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
-          const leaderGenderVal = leaderProfileRes[0]?.gender?.toUpperCase();
-          const partnerGenderVal = partnerProfile.gender.toUpperCase();
+          const rawLeaderG = (leaderProfileRes[0]?.gender || '').trim().toUpperCase();
+          const leaderGenderVal = (rawLeaderG === 'NAM' || rawLeaderG === 'MALE') ? 'MALE' : (rawLeaderG === 'NỮ' || rawLeaderG === 'NU' || rawLeaderG === 'FEMALE') ? 'FEMALE' : rawLeaderG;
+
+          const rawPartnerG = (partnerProfile.gender || '').trim().toUpperCase();
+          const partnerGenderVal = (rawPartnerG === 'NAM' || rawPartnerG === 'MALE') ? 'MALE' : (rawPartnerG === 'NỮ' || rawPartnerG === 'NU' || rawPartnerG === 'FEMALE') ? 'FEMALE' : rawPartnerG;
           const restriction = tournament.genderRestriction.toUpperCase();
 
           if (restriction === 'MALE' && partnerGenderVal !== 'MALE') {
@@ -1555,7 +1562,7 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentParticipants.id, participantId))
         .limit(1);
 
-      if (!oldParticipant) throw new NotFoundException('Participant not found');
+      if (!oldParticipant) throw new NotFoundException('Không tìm thấy người tham gia');
 
       // 2. Kiểm tra giải đấu chưa bắt đầu
       const [tournament] = await tx
@@ -1665,7 +1672,7 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentParticipants.id, participantId))
         .limit(1);
 
-      if (!participant) throw new NotFoundException('Participant not found');
+      if (!participant) throw new NotFoundException('Không tìm thấy người tham gia');
 
       // 3. Cập nhật trạng thái sang KICKED
       const [updatedParticipant] = await tx
@@ -2963,7 +2970,7 @@ export class TournamentsRepository {
         .limit(1);
 
       if (!participant) {
-        throw new BadRequestException('Participant not found');
+        throw new BadRequestException('Không tìm thấy người tham gia');
       }
 
       if (!participant.isMock) {
@@ -3782,7 +3789,7 @@ export class TournamentsRepository {
           .limit(1);
 
         if (!oldRecord) {
-          throw new NotFoundException('Division not found');
+          throw new NotFoundException('Không tìm thấy nội dung thi đấu');
         }
 
         const [updated] = await tx
@@ -3850,7 +3857,7 @@ export class TournamentsRepository {
           .limit(1);
 
         if (!oldRecord) {
-          throw new NotFoundException('Division not found');
+          throw new NotFoundException('Không tìm thấy nội dung thi đấu');
         }
 
         const [{ value: remainingDivisions }] = await tx
