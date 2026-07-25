@@ -160,7 +160,7 @@ export class TournamentsRepository {
 
       conditions.push(
         or(
-          and(...matchConds) as SQL,
+          and(...matchConds),
           sql`exists (
             select 1 from ${schema.tournamentDivisions} d
             where d.tournament_id = ${schema.tournaments.id}
