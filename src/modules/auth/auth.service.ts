@@ -453,10 +453,36 @@ export class AuthService {
     if (!user) {
       throw new BadRequestException('Không tìm thấy người dùng');
     }
-    const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
-    // Lưu OTP vào DB thay vì in-memory Map
+    // Anti-spam cooldown check (120s)
+    const cooldownPeriod = new Date(Date.now() - 120 * 1000);
+    const [recentOtp] = await this.db
+      .select()
+      .from(schema.otpCodes)
+      .where(
+        and(
+          eq(schema.otpCodes.userId, userId),
+          eq(schema.otpCodes.type, 'EMAIL_VERIFY'),
+          gt(schema.otpCodes.createdAt, cooldownPeriod),
+        ),
+      )
+      .orderBy(sql`${schema.otpCodes.createdAt} DESC`)
+      .limit(1);
+
+    if (recentOtp) {
+      const remainingSeconds = Math.max(
+        1,
+        Math.ceil((recentOtp.createdAt.getTime() + 120 * 1000 - Date.now()) / 1000),
+      );
+      throw new BadRequestException(
+        `Vui lòng chờ ${remainingSeconds} giây trước khi yêu cầu gửi lại email xác thực.`,
+      );
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 120 * 1000); // Hiệu lực 120 giây (2 phút)
+
+    // Lưu OTP vào DB
     await this.db.insert(schema.otpCodes).values({
       userId,
       type: 'EMAIL_VERIFY',
@@ -464,14 +490,15 @@ export class AuthService {
       expiresAt,
     });
 
-    const activationLink = `http://localhost:3001/auth/verify-email?token=${token}`;
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
+    const activationLink = `${frontendUrl}/auth/verify-email?token=${token}`;
 
     // Add job to BullMQ queue
     await this.emailQueue.add('send-verification', {
       to: user.email,
-      subject: 'Xác thực Email tài khoản VNDC Sport',
+      subject: 'Xác thực Email tài khoản VNDC Sport (Có hiệu lực 120s)',
       html: `
-        <div style="font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; rounded: 8px;">
+        <div style="font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
           <h2 style="color: #2563eb; margin-bottom: 20px;">Xác thực Email tài khoản</h2>
           <p>Chào <strong>${user.profile?.fullName || 'bạn'}</strong>,</p>
           <p>Cảm ơn bạn đã tham gia hệ thống quản lý giải đấu VNDC Sport. Vui lòng nhấp vào nút hoặc đường dẫn bên dưới để xác minh địa chỉ Email của bạn:</p>
@@ -480,12 +507,17 @@ export class AuthService {
           </div>
           <p>Hoặc sao chép đường dẫn này vào trình duyệt của bạn:</p>
           <p style="word-break: break-all; color: #4b5563;"><a href="${activationLink}">${activationLink}</a></p>
-          <p style="margin-top: 30px; font-size: 12px; color: #6b7280; border-t: 1px solid #e5e7eb; padding-top: 20px;">Đường dẫn này có hiệu lực trong vòng 15 phút. Nếu bạn không yêu cầu hành động này, vui lòng bỏ qua email.</p>
+          <p style="margin-top: 30px; font-size: 12px; color: #dc2626; border-top: 1px solid #e5e7eb; padding-top: 20px; font-weight: bold;">
+            ⏱️ Đường dẫn này có hiệu lực trong vòng 120 giây (2 phút). Nếu quá 120 giây vui lòng yêu cầu gửi lại email mới.
+          </p>
         </div>
       `,
     });
 
-    return { message: 'Mã xác minh email đã được gửi qua hàng đợi' };
+    return {
+      message: 'Mã xác minh email đã được gửi qua email. Có hiệu lực trong 120 giây.',
+      cooldownSeconds: 120,
+    };
   }
 
   async confirmEmailVerification(token: string) {
@@ -585,25 +617,33 @@ export class AuthService {
       throw new BadRequestException('Tài khoản này được đăng ký qua Google. Vui lòng đăng nhập bằng Google.');
     }
 
-    // Rate limit: max 5 lần gửi mail reset password trong 24h
-    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [recentCount] = await this.db
-      .select({ count: sql<number>`count(*)::int` })
+    // Rate limit: Cooldown 120 giây giữa các lần gửi
+    const cooldownPeriod = new Date(Date.now() - 120 * 1000);
+    const [recentOtp] = await this.db
+      .select()
       .from(schema.otpCodes)
       .where(
         and(
           eq(schema.otpCodes.userId, user.id),
           eq(schema.otpCodes.type, 'PASSWORD_RESET'),
-          gt(schema.otpCodes.createdAt, last24h),
+          gt(schema.otpCodes.createdAt, cooldownPeriod),
         ),
-      );
+      )
+      .orderBy(sql`${schema.otpCodes.createdAt} DESC`)
+      .limit(1);
 
-    if (recentCount.count >= 5) {
-      return { message: 'Bạn đã yêu cầu quá nhiều lần. Vui lòng thử lại sau 24h.' };
+    if (recentOtp) {
+      const remainingSeconds = Math.max(
+        1,
+        Math.ceil((recentOtp.createdAt.getTime() + 120 * 1000 - Date.now()) / 1000),
+      );
+      throw new BadRequestException(
+        `Vui lòng chờ ${remainingSeconds} giây trước khi yêu cầu gửi lại email đặt lại mật khẩu.`,
+      );
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+    const expiresAt = new Date(Date.now() + 120 * 1000); // Hiệu lực 120s (2 phút)
 
     await this.db.insert(schema.otpCodes).values({
       userId: user.id,
