@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsNumber,
+  IsBoolean,
   IsUUID,
   IsDateString,
   Min,
@@ -66,5 +67,10 @@ export class CreateLiteTournamentDto {
   @IsDateString()
   @IsOptional()
   startDate?: string;
+
+  @ApiPropertyOptional({ example: false, description: 'Giải đấu xếp hạng ELO (true) hay phong trào (false)' })
+  @IsBoolean()
+  @IsOptional()
+  isRanked?: boolean;
 }
 
