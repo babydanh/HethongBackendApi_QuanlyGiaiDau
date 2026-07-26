@@ -498,7 +498,7 @@ export class TournamentsService {
       description: dto.description || '',
       maxParticipants: maxTeams,
       entryFee: 0,
-      isRanked: false,
+      isRanked: dto.isRanked ?? false,
       sportRules,
       tournamentConfig,
       startDate: dto.startDate || undefined,
