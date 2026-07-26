@@ -49,7 +49,14 @@ export class CsrfGuard implements CanActivate {
       return true;
     }
 
-    // 3. Kiểm tra Double Submit Cookie
+    // 3. Skip nếu request sử dụng Bearer Token (Mobile app / API client)
+    // Vì CSRF chỉ áp dụng cho Cookie-based Auth
+    const authHeader = request.headers?.['authorization'];
+    if (authHeader && typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+      return true;
+    }
+
+    // 4. Kiểm tra Double Submit Cookie cho Cookie Auth
     const csrfCookie = request.cookies?.['csrf-token'];
     const csrfHeader = request.headers?.['x-csrf-token'];
 
