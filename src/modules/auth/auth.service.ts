@@ -479,6 +479,23 @@ export class AuthService {
       );
     }
 
+    // Rate limit: Tối đa 5 lần gửi mail trong 24h
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [recentCount] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.otpCodes)
+      .where(
+        and(
+          eq(schema.otpCodes.userId, userId),
+          eq(schema.otpCodes.type, 'EMAIL_VERIFY'),
+          gt(schema.otpCodes.createdAt, last24h),
+        ),
+      );
+
+    if (recentCount.count >= 5) {
+      throw new BadRequestException('Bạn đã yêu cầu gửi email xác thực quá 5 lần trong 24h. Vui lòng quay lại sau 24h.');
+    }
+
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 120 * 1000); // Hiệu lực 120 giây (2 phút)
 
@@ -640,6 +657,23 @@ export class AuthService {
       throw new BadRequestException(
         `Vui lòng chờ ${remainingSeconds} giây trước khi yêu cầu gửi lại email đặt lại mật khẩu.`,
       );
+    }
+
+    // Rate limit: Tối đa 5 lần gửi mail reset password trong 24h
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [recentCount] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.otpCodes)
+      .where(
+        and(
+          eq(schema.otpCodes.userId, user.id),
+          eq(schema.otpCodes.type, 'PASSWORD_RESET'),
+          gt(schema.otpCodes.createdAt, last24h),
+        ),
+      );
+
+    if (recentCount.count >= 5) {
+      throw new BadRequestException('Bạn đã yêu cầu đặt lại mật khẩu quá 5 lần trong 24h. Vui lòng quay lại sau 24h.');
     }
 
     const token = crypto.randomBytes(32).toString('hex');
