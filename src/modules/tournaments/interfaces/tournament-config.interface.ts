@@ -12,7 +12,7 @@ export interface SportRules {
 }
 
 export interface TournamentConfig {
-  bracketType: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_THEN_KNOCKOUT';
+  bracketType: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT';
   maxTeams: number;
   seedingMethod: 'RANDOM' | 'MANUAL' | 'ELO_BASED';
   thirdPlaceMatch: boolean;

@@ -20,7 +20,11 @@ export const envValidationSchema = Joi.object({
 
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().default(6379),
-  FRONTEND_URL: Joi.string().uri().optional(),
+  FRONTEND_URL: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().uri({ scheme: ['https'] }).required(),
+    otherwise: Joi.string().uri().default('http://localhost:3001'),
+  }),
   OPENROUTER_API_KEY: Joi.string().allow('').optional().default(''),
   OPENROUTER_BASE_URL: Joi.string().uri().default('https://openrouter.ai/api/v1'),
   AI_MODEL: Joi.string().default('meta-llama/llama-3-8b-instruct:free'),
