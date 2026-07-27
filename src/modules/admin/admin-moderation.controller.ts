@@ -100,6 +100,7 @@ export class AdminModerationController {
       dto.status,
       dto.resolutionNote,
       (admin.roles ?? []).includes(UserRole.ADMIN),
+      dto.category,
     );
   }
 
