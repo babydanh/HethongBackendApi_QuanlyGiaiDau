@@ -2014,6 +2014,8 @@ export class TournamentsRepository {
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
               eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ...(onlyEligible
                 ? [
                     eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
@@ -2024,6 +2026,8 @@ export class TournamentsRepository {
           : and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ...(onlyEligible
                 ? [
                     eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
@@ -4346,7 +4350,14 @@ export class TournamentsRepository {
     const participants = await this.db
       .select()
       .from(schema.tournamentParticipants)
-      .where(eq(schema.tournamentParticipants.tournamentId, tournamentId))
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+          ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+        ),
+      )
       .orderBy(schema.tournamentParticipants.registeredAt);
 
     const pIds = participants.map((p) => p.id);
