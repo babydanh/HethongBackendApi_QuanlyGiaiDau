@@ -2140,7 +2140,7 @@ export class TournamentsRepository {
     categoryId: string,
     divisionId?: string,
   ) {
-    return this.findParticipants(tournamentId, categoryId, divisionId, true);
+    return this.findParticipants(tournamentId, categoryId, divisionId, false);
   }
 
   async findOpsAuditLogs(
