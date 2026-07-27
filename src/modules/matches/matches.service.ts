@@ -100,7 +100,7 @@ export class MatchesService {
       const scope = tournament.tournamentType === 'CLUB' ? 'COMMUNITY' : 'PUBLIC';
       const loserId = winnerId === existing.participant1Id ? existing.participant2Id : existing.participant1Id;
 
-      if (winnerId && loserId) {
+      if (tournament.isRanked && winnerId && loserId) {
         try {
           await this.rankingsService.processMatchResult(
             matchId,
