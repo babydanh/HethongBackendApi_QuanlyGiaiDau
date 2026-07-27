@@ -20,6 +20,8 @@ import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
+import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
+import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
@@ -354,6 +356,55 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Tham gia Lite tournament 1 chạm' })
   async joinLite(@Param('inviteCode') inviteCode: string, @CurrentUser() user: JwtPayload) {
     return this.tournamentsService.joinLite(inviteCode, user.sub);
+  }
+
+  // ──── Lite pairing management ────
+
+  @Get('lite/:id/participants')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách participants cho ghép cặp Lite' })
+  async getLiteParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.getLiteParticipants(id, user.sub, this.getSystemRoles(user));
+  }
+
+  @Post('lite/:id/pairs')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Ghép cặp 2 participant thủ công (Lite doubles)' })
+  async pairLiteParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PairLiteParticipantsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.pairLiteParticipants(id, user.sub, this.getSystemRoles(user), dto);
+  }
+
+  @Post('lite/:id/pairs/generate')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tự động ghép cặp (RANDOM hoặc ELO_BALANCED) cho Lite doubles' })
+  async generateLitePairs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: GenerateLitePairsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.generateLitePairs(id, user.sub, this.getSystemRoles(user), dto);
+  }
+
+  @Post('lite/:id/pairs/:participantId/unpair')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tách cặp participant đã ghép (Lite doubles)' })
+  async unpairLiteParticipant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.unpairLiteParticipant(id, participantId, user.sub, this.getSystemRoles(user));
   }
 
   @Patch(':id')
