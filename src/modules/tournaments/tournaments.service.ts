@@ -1661,6 +1661,10 @@ export class TournamentsService {
     if (!tournament) {
       throw new NotFoundException('Tournament not found');
     }
+    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    if (config.mode === 'LITE') {
+      return this.tournamentsRepository.findLiteParticipantsWithRosters(id);
+    }
     return this.tournamentsRepository.findPublicParticipants(id, tournament.categoryId, divisionId);
   }
 
