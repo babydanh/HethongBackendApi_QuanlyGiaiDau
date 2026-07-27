@@ -35,11 +35,15 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { JwtService } from '@nestjs/jwt';
 
 @ApiTags('tournaments')
 @Controller('tournaments')
 export class TournamentsController {
-  constructor(private readonly tournamentsService: TournamentsService) {}
+  constructor(
+    private readonly tournamentsService: TournamentsService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   private getSystemRoles(user: JwtPayload): string[] {
     if (Array.isArray(user.roles) && user.roles.length > 0) {
@@ -346,8 +350,15 @@ export class TournamentsController {
   @Public()
   @Get('lite/join/:inviteCode')
   @ApiOperation({ summary: 'Kiểm tra trạng thái tham gia Lite tournament' })
-  async getLiteJoinStatus(@Param('inviteCode') inviteCode: string, @CurrentUser() user: JwtPayload | null) {
-    return this.tournamentsService.getLiteJoinStatus(inviteCode, user?.sub);
+  async getLiteJoinStatus(@Param('inviteCode') inviteCode: string, @CurrentUser() user: JwtPayload | null, @Req() req: any) {
+    let userId = user?.sub;
+    if (!userId && req?.cookies?.accessToken) {
+      try {
+        const payload = await this.jwtService.verifyAsync(req.cookies.accessToken);
+        userId = payload.sub;
+      } catch {}
+    }
+    return this.tournamentsService.getLiteJoinStatus(inviteCode, userId);
   }
 
   @Post('lite/join/:inviteCode')
