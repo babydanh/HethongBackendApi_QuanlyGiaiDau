@@ -871,6 +871,7 @@ export class AdminService {
     expectedStatuses: ReportStatus[];
     targetStatus: ReportStatus;
     note: string;
+    category?: ReportCategory;
   }) {
     const updatedReport = await this.db.transaction(async (tx) => {
       const [current] = await tx
@@ -893,6 +894,7 @@ export class AdminService {
         .update(schema.reports)
         .set({
           status: params.targetStatus,
+          category: params.category ?? current.category,
           assignedTo: params.actorId,
           triagedAt:
             params.targetStatus === 'TRIAGED'
@@ -968,7 +970,7 @@ export class AdminService {
     }
   }
 
-  async triageReport(reportId: string, moderatorId: string, note: string) {
+  async triageReport(reportId: string, moderatorId: string, note: string, category?: ReportCategory) {
     return this.transitionReport({
       reportId,
       actorId: moderatorId,
@@ -976,6 +978,7 @@ export class AdminService {
       expectedStatuses: ['SUBMITTED'],
       targetStatus: 'TRIAGED',
       note,
+      category,
     });
   }
 
@@ -1009,8 +1012,8 @@ export class AdminService {
     isAdmin: boolean,
   ) {
     const expectedStatuses: ReportStatus[] = isAdmin
-      ? ['TRIAGED', 'UNDER_REVIEW', 'ESCALATED']
-      : ['TRIAGED', 'UNDER_REVIEW'];
+      ? ['SUBMITTED', 'TRIAGED', 'UNDER_REVIEW', 'ESCALATED']
+      : ['SUBMITTED', 'TRIAGED', 'UNDER_REVIEW'];
 
     if (status === 'RESOLVED' && !isAdmin) {
       const [report] = await this.db
