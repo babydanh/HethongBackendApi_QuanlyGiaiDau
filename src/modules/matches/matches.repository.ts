@@ -361,6 +361,7 @@ export class MatchesRepository {
         tournamentId: schema.tournaments.id,
         tournamentName: schema.tournaments.name,
         tournamentType: schema.tournaments.tournamentType,
+        isRanked: schema.tournaments.isRanked,
         communityId: schema.tournaments.communityId,
         categoryId: schema.tournaments.categoryId,
         matchType: schema.tournaments.matchType,
