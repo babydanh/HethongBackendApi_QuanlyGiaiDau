@@ -61,7 +61,7 @@ export class AdminModerationController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReportWorkflowNoteDto,
   ) {
-    return this.adminService.triageReport(id, moderator.sub, dto.note);
+    return this.adminService.triageReport(id, moderator.sub, dto.note, dto.category);
   }
 
   @Post('reports/:id/start-review')

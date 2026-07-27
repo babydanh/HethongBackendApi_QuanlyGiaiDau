@@ -82,6 +82,11 @@ export class ResolveReportDto {
   @MinLength(3)
   @MaxLength(2000)
   resolutionNote: string;
+
+  @ApiPropertyOptional({ enum: REPORT_CATEGORIES })
+  @IsEnum(REPORT_CATEGORIES)
+  @IsOptional()
+  category?: ReportCategory;
 }
 
 export class ReportWorkflowNoteDto {
@@ -90,6 +95,11 @@ export class ReportWorkflowNoteDto {
   @MinLength(3)
   @MaxLength(2000)
   note: string;
+
+  @ApiPropertyOptional({ enum: REPORT_CATEGORIES })
+  @IsEnum(REPORT_CATEGORIES)
+  @IsOptional()
+  category?: ReportCategory;
 }
 
 export class QueryReportsDto {
