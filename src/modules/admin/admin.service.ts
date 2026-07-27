@@ -8,6 +8,7 @@ import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { QueryReportsDto } from './dto/admin.dto';
 import type { ReportStatus } from '../users/dto/query-my-reports.dto';
+import type { ReportCategory } from '../users/dto/create-report.dto';
 import {
   buildTournamentDeleteApprovedNotification,
   buildTournamentDeleteRejectedNotification,
