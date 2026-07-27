@@ -352,11 +352,24 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Kiểm tra trạng thái tham gia Lite tournament' })
   async getLiteJoinStatus(@Param('inviteCode') inviteCode: string, @CurrentUser() user: JwtPayload | null, @Req() req: any) {
     let userId = user?.sub;
-    if (!userId && req?.cookies?.accessToken) {
-      try {
-        const payload = await this.jwtService.verifyAsync(req.cookies.accessToken);
-        userId = payload.sub;
-      } catch {}
+    if (!userId) {
+      // Web: cookie-based auth
+      if (req?.cookies?.accessToken) {
+        try {
+          const payload = await this.jwtService.verifyAsync(req.cookies.accessToken);
+          userId = payload.sub;
+        } catch {}
+      }
+      // App: Bearer token in Authorization header
+      if (!userId && req?.headers?.authorization) {
+        const parts = req.headers.authorization.split(' ');
+        if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+          try {
+            const payload = await this.jwtService.verifyAsync(parts[1]);
+            userId = payload.sub;
+          } catch {}
+        }
+      }
     }
     return this.tournamentsService.getLiteJoinStatus(inviteCode, userId);
   }
