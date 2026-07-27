@@ -987,7 +987,7 @@ export class AdminService {
       reportId,
       actorId: moderatorId,
       action: 'START_REVIEW',
-      expectedStatuses: ['TRIAGED'],
+      expectedStatuses: ['SUBMITTED', 'TRIAGED'],
       targetStatus: 'UNDER_REVIEW',
       note,
     });
@@ -998,7 +998,7 @@ export class AdminService {
       reportId,
       actorId: moderatorId,
       action: 'ESCALATE',
-      expectedStatuses: ['TRIAGED', 'UNDER_REVIEW'],
+      expectedStatuses: ['SUBMITTED', 'TRIAGED', 'UNDER_REVIEW'],
       targetStatus: 'ESCALATED',
       note,
     });
@@ -1010,6 +1010,7 @@ export class AdminService {
     status: 'RESOLVED' | 'REJECTED',
     resolutionNote: string,
     isAdmin: boolean,
+    category?: ReportCategory,
   ) {
     const expectedStatuses: ReportStatus[] = isAdmin
       ? ['SUBMITTED', 'TRIAGED', 'UNDER_REVIEW', 'ESCALATED']
@@ -1035,6 +1036,7 @@ export class AdminService {
       expectedStatuses,
       targetStatus: status,
       note: resolutionNote,
+      category,
     });
   }
 
