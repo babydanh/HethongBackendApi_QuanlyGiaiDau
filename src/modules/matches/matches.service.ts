@@ -535,6 +535,15 @@ export class MatchesService {
       if (!existing.participant1Id || !existing.participant2Id) {
         throw new BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
       }
+
+      // Auto-assign referee when starting a match if not already assigned
+      // IMPORTANT: assign referee BEFORE updateStatus to avoid partial state
+      if (!existing.refereeId && (this.isAdmin(user) || isCreator || user.role === 'REFEREE')) {
+        const updated = await this.matchesRepository.updateRefereeId(id, user.sub, user.sub);
+        if (updated) {
+          existing.refereeId = updated.refereeId;
+        }
+      }
     }
 
     if (updateMatchStatusDto.status === 'COMPLETED') {
