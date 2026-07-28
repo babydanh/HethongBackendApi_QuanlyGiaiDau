@@ -353,6 +353,17 @@ export class MatchesRepository {
     if (result.length === 0) return null;
     const match = result[0];
 
+    // Fetch referee name if refereeId is set
+    let refereeName: string | null = null;
+    if (match.refereeId) {
+      const [refereeProfile] = await this.db
+        .select({ fullName: schema.profiles.fullName })
+        .from(schema.profiles)
+        .where(eq(schema.profiles.userId, match.refereeId))
+        .limit(1);
+      refereeName = refereeProfile?.fullName ?? null;
+    }
+
     // Find the group to get stage and tournament details
     const [group] = await this.db
       .select({
@@ -412,6 +423,7 @@ export class MatchesRepository {
 
     return {
       ...match,
+      refereeName,
       groupName: group?.name || '',
       tournamentId: group?.tournamentId || '',
       tournament: group
@@ -1119,5 +1131,35 @@ export class MatchesRepository {
       .where(eq(schema.matches.id, id))
       .returning({ id: schema.matches.id, cheerCount: schema.matches.cheerCount });
     return updated ?? null;
+  }
+
+  async updateRefereeId(id: string, refereeId: string, userId: string | null) {
+    return this.db.transaction(async (tx) => {
+      // Use conditional UPDATE with WHERE referee_id IS NULL to prevent race (TOCTOU)
+      const [updated] = await tx
+        .update(schema.matches)
+        .set({ refereeId, updatedAt: new Date() })
+        .where(and(
+          eq(schema.matches.id, id),
+          isNull(schema.matches.refereeId),
+        ))
+        .returning();
+
+      if (!updated) {
+        // Referee already assigned by another concurrent request
+        return null;
+      }
+
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'matches',
+        id,
+        { refereeId: null },
+        { refereeId },
+      );
+
+      return updated;
+    });
   }
 }
