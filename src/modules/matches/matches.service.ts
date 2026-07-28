@@ -388,7 +388,9 @@ export class MatchesService {
     if (!existing) throw new NotFoundException('Match not found');
 
     const isCreator = existing.tournament?.createdBy === user.sub;
-    const isReferee = existing.refereeId === user.sub;
+    // A tournament referee may claim any scheduled match by starting it.
+    // The repository assignment below records the first referee atomically.
+    const isReferee = existing.refereeId === user.sub || user.role === 'REFEREE';
     const isAdmin = this.isAdmin(user);
 
     if (!isAdmin && !isCreator && !isReferee) {
