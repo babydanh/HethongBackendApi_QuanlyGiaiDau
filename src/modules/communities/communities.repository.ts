@@ -118,7 +118,17 @@ export class CommunitiesRepository {
   }
 
   async findMyCommunities(userId: string) {
-    const results = await this.db
+    const created = await this.db
+      .select()
+      .from(schema.communities)
+      .where(
+        and(
+          eq(schema.communities.creatorId, userId),
+          isNull(schema.communities.deletedAt),
+        ),
+      );
+
+    const joined = await this.db
       .select({
         community: schema.communities,
       })
@@ -130,10 +140,16 @@ export class CommunitiesRepository {
       .where(
         and(
           eq(schema.communityMembers.userId, userId),
+          eq(schema.communityMembers.status, 'JOINED'),
+          sql`${schema.communities.creatorId} != ${userId}`,
           isNull(schema.communities.deletedAt),
         ),
       );
-    return results.map(r => r.community);
+
+    return {
+      created,
+      joined: joined.map((result) => result.community),
+    };
   }
 
   async findById(id: string) {
