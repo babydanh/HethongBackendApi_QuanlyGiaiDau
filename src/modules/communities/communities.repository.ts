@@ -519,18 +519,21 @@ export class CommunitiesRepository {
   async getRankings(communityId: string, limit: number = 100) {
     return await this.db
       .select({
-        rank: schema.userRanks,
+        rank: schema.communityRankings,
         user: {
           id: schema.users.id,
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
         }
       })
-      .from(schema.userRanks)
-      .innerJoin(schema.users, eq(schema.userRanks.userId, schema.users.id))
+      .from(schema.communityRankings)
+      .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .where(eq(schema.userRanks.communityId, communityId))
-      .orderBy(sql`${schema.userRanks.eloPoints} DESC`)
+      .where(and(
+        eq(schema.communityRankings.communityId, communityId),
+        sql`${schema.communityRankings.matchesPlayed} > 0`,
+      ))
+      .orderBy(sql`${schema.communityRankings.eloPoints} DESC`)
       .limit(limit);
   }
 
