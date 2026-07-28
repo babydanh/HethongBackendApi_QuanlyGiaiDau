@@ -2119,8 +2119,9 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
-    if (tournament.status !== 'DRAFT') {
-      throw new BadRequestException('Chỉ có thể tạo dữ liệu ảo khi giải đấu đang ở trạng thái Nháp.');
+    const isLite = (tournament.tournamentConfig as any)?.mode === 'LITE' || (tournament as any).configMode === 'LITE';
+    if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
+      throw new BadRequestException('Chỉ có thể tạo dữ liệu ảo khi giải đấu ở trạng thái Nháp hoặc Mở đăng ký.');
     }
 
     const isAuthorized =
@@ -2141,7 +2142,8 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
-    if (tournament.status !== 'DRAFT' && tournament.status !== 'REGISTRATION_OPEN') {
+    const isLite = (tournament.tournamentConfig as any)?.mode === 'LITE' || (tournament as any).configMode === 'LITE';
+    if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể xóa dữ liệu ảo ở trạng thái Nháp hoặc Đang mở đăng ký.');
     }
 
@@ -2163,7 +2165,8 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
-    if (tournament.status !== 'DRAFT' && tournament.status !== 'REGISTRATION_OPEN') {
+    const isLite = (tournament.tournamentConfig as any)?.mode === 'LITE' || (tournament as any).configMode === 'LITE';
+    if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể xoá dữ liệu giả lập ở trạng thái Nháp hoặc Đang mở đăng ký.');
     }
 
