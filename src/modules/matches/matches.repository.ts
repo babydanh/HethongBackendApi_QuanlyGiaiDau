@@ -419,6 +419,7 @@ export class MatchesRepository {
             id: group.tournamentId,
             name: group.tournamentName,
             tournamentType: group.tournamentType,
+            isRanked: group.isRanked,
             communityId: group.communityId,
             categoryId: group.categoryId,
             categoryName: group.categoryName,

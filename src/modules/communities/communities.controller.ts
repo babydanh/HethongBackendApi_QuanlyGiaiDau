@@ -41,11 +41,12 @@ export class CommunitiesController {
 
   @Public()
   @Get()
-  @ApiOperation({ summary: 'Lấy danh sách các cộng đồng đã duyệt' })
+  @ApiOperation({ summary: 'Lấy danh sách các cộng đồng' })
   @ApiResponse({ status: 200, description: 'Danh sách cộng đồng' })
   async findAll(@Query() query: QueryCommunityDto) {
-    // Force status to ACTIVE for public listing
-    query.status = 'ACTIVE';
+    if (!query.all && !query.status) {
+      query.status = 'ACTIVE';
+    }
     return await this.communitiesService.findAll(query);
   }
 
