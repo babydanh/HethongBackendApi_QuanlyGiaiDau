@@ -73,11 +73,22 @@ export class CommunitiesController {
     return await this.communitiesService.findAll(query);
   }
 
+  @Get('admin')
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy tất cả cộng đồng (Admin) - bao gồm đã khoá' })
+  async findAllAdmin(@Query() query: QueryCommunityDto) {
+    return await this.communitiesService.findAll(query);
+  }
+
   @Public()
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết 1 cộng đồng' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return await this.communitiesService.findById(id);
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user?: { id: string; roles: string[] },
+  ) {
+    return await this.communitiesService.findById(id, user);
   }
 
   @Post()

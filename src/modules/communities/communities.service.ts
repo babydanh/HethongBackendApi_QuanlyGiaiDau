@@ -48,10 +48,17 @@ export class CommunitiesService {
     return await this.communitiesRepository.findMyCommunities(userId);
   }
 
-  async findById(id: string) {
+  async findById(id: string, user?: { id: string; roles: string[] }) {
     const community = await this.communitiesRepository.findById(id);
     if (!community) {
       throw new NotFoundException('Community not found');
+    }
+    // Nếu community bị khoá (REJECTED), chỉ ADMIN/MODERATOR mới xem được
+    if (community.status === 'REJECTED') {
+      const isAdmin = user?.roles?.some(r => r === UserRole.ADMIN || r === UserRole.MODERATOR);
+      if (!isAdmin) {
+        throw new ForbiddenException('Cộng đồng này đã bị vô hiệu hoá.');
+      }
     }
     return community;
   }
