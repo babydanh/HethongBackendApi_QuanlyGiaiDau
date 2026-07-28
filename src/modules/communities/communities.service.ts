@@ -100,13 +100,14 @@ export class CommunitiesService {
     );
   }
 
-  async review(adminId: string, id: string, dto: ReviewCommunityDto) {
-    await this.findById(id);
+  async review(adminId: string, id: string, dto: ReviewCommunityDto, roles: string[] = [UserRole.ADMIN]) {
+    await this.findById(id, { id: adminId, roles });
+    const targetStatus = dto.status === 'APPROVED' ? 'ACTIVE' : 'REJECTED';
     const updateData = {
-      status: dto.status,
+      status: targetStatus,
       approvedBy: adminId,
       reviewedAt: new Date(),
-      rejectedReason: dto.rejectedReason || null,
+      rejectedReason: dto.status === 'APPROVED' ? null : (dto.rejectedReason || null),
     };
     return await this.communitiesRepository.update(id, updateData);
   }
