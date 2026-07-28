@@ -1353,6 +1353,7 @@ export class TournamentsRepository {
 
       return {
         participant,
+        entryFee: payableEntryFeeAmount,
         paymentUrl,
         teamInviteLink: (isDoubles && !partnerId)
           ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
@@ -1881,6 +1882,7 @@ export class TournamentsRepository {
         teamName: participant.teamName,
         teamStatus: participant.teamStatus,
         isPaid: participant.isPaid,
+        tournamentDivisionId: participant.tournamentDivisionId,
         registeredAt: participant.registeredAt,
         teamInviteToken: participant.teamInviteToken,
         members,
