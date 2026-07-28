@@ -126,7 +126,7 @@ export class CommunitiesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() reviewDto: ReviewCommunityDto,
   ) {
-    return await this.communitiesService.review(user.id, id, reviewDto);
+    return await this.communitiesService.review(user.id, id, reviewDto, user.roles);
   }
 
   @Delete(':id')
