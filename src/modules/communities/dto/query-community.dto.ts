@@ -35,14 +35,18 @@ export class QueryCommunityDto {
   @IsOptional()
   search?: string;
 
+  @ApiPropertyOptional({ description: 'Lấy tất cả không giới hạn status' })
+  @IsOptional()
+  all?: boolean | string;
+
   @ApiPropertyOptional({
-    enum: ['ACTIVE', 'PENDING', 'APPROVED', 'REJECTED'],
+    enum: ['ACTIVE', 'PENDING', 'APPROVED', 'REJECTED', 'INACTIVE', 'DEACTIVATED', 'SUSPENDED'],
     description: 'Lọc theo trạng thái',
   })
   @IsString()
-  @IsIn(['ACTIVE', 'PENDING', 'APPROVED', 'REJECTED'])
+  @IsIn(['ACTIVE', 'PENDING', 'APPROVED', 'REJECTED', 'INACTIVE', 'DEACTIVATED', 'SUSPENDED'])
   @IsOptional()
-  status?: 'ACTIVE' | 'PENDING' | 'APPROVED' | 'REJECTED';
+  status?: string;
 
   @ApiPropertyOptional({ description: 'Vĩ độ để tìm quanh đây' })
   @IsLatitude()
