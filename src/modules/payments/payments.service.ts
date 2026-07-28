@@ -101,6 +101,7 @@ export class PaymentsService {
         ) {
           return {
             paymentId: reusable.id,
+            orderCode: Number(reusable.providerOrderCode),
             paymentUrl: existingLink.checkoutUrl ?? null,
             qrCode: existingLink.qrCode ?? undefined,
             status: reusable.status,
@@ -180,11 +181,13 @@ export class PaymentsService {
       });
       return {
         paymentId: payment.id,
+        orderCode,
         paymentUrl: result.checkoutUrl,
         qrCode: result.qrCode,
         status: payment.status,
         amount: calculated.amount,
         purpose: data.purpose,
+        description: `${prefix}${cleanName}`.slice(0, 25),
         expiresAt,
       };
     } catch (error: unknown) {
