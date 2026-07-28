@@ -168,6 +168,28 @@ export class CommunitiesRepository {
     }
     const community = records[0];
 
+    const [memberCount, tournamentCount] = await Promise.all([
+      this.db
+        .select({ count: count() })
+        .from(schema.communityMembers)
+        .where(
+          and(
+            eq(schema.communityMembers.communityId, id),
+            eq(schema.communityMembers.status, 'JOINED'),
+          ),
+        ),
+      this.db
+        .select({ count: count() })
+        .from(schema.tournaments)
+        .where(
+          and(
+            eq(schema.tournaments.communityId, id),
+            isNull(schema.tournaments.deletedAt),
+            sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`,
+          ),
+        ),
+    ]);
+
     // Fetch categories for this community
     const sportsLinks = await this.db
       .select({
@@ -180,6 +202,10 @@ export class CommunitiesRepository {
     return {
       ...community,
       categories: sportsLinks.map((link) => link.category),
+      _count: {
+        members: Number(memberCount[0]?.count ?? 0),
+        tournaments: Number(tournamentCount[0]?.count ?? 0),
+      },
     };
   }
 
