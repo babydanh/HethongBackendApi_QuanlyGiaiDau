@@ -10,7 +10,13 @@ export default registerAs('auth', () => ({
   googleCallbackUrl:
     process.env.GOOGLE_CALLBACK_URL ||
     'http://localhost:3000/api/v1/auth/google/callback',
-  googleMobileClientIds: process.env.GOOGLE_MOBILE_CLIENT_IDS || '',
+  googleAndroidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID || '',
+  googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID || '',
+  googleMobileClientIds: [
+    process.env.GOOGLE_ANDROID_CLIENT_ID,
+    process.env.GOOGLE_IOS_CLIENT_ID,
+    process.env.GOOGLE_MOBILE_CLIENT_IDS,
+  ].filter(Boolean).join(','),
   facebookAppId: process.env.FACEBOOK_APP_ID,
   facebookAppSecret: process.env.FACEBOOK_APP_SECRET,
   facebookCallbackUrl:
