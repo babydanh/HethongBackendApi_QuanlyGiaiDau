@@ -411,14 +411,17 @@ export class AuthService {
   async verifyGoogleIdToken(idToken: string): Promise<OAuthProfileDto> {
     try {
       const webClientId = this.configService.get<string>('auth.googleClientId');
-      // Lấy danh sách client ID của Mobile từ cấu hình ConfigService
+      const androidClientId = this.configService.get<string>('auth.googleAndroidClientId');
+      const iosClientId = this.configService.get<string>('auth.googleIosClientId');
       const mobileClientIdsStr = this.configService.get<string>('auth.googleMobileClientIds') || '';
-      const mobileClientIds = mobileClientIdsStr
+      const extraMobileClientIds = mobileClientIdsStr
         .split(',')
         .map((id) => id.trim())
         .filter((id) => id.length > 0);
 
-      const audiences = [webClientId, ...mobileClientIds].filter((id): id is string => !!id);
+      const audiences = [webClientId, androidClientId, iosClientId, ...extraMobileClientIds].filter(
+        (id): id is string => !!id && id.length > 0,
+      );
 
       const ticket = await this.googleClient.verifyIdToken({
         idToken,
