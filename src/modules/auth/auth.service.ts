@@ -454,7 +454,7 @@ export class AuthService {
   async verifyAppleIdToken(idToken: string, fullName?: string): Promise<OAuthProfileDto> {
     try {
       const appleClientId = this.configService.get<string>('auth.appleClientId');
-      const decoded = jwt.decode(idToken) as {
+      const decoded = (await Promise.resolve(jwt.decode(idToken))) as {
         sub: string;
         email?: string;
         aud?: string;
@@ -462,6 +462,10 @@ export class AuthService {
 
       if (!decoded || !decoded.sub) {
         throw new UnauthorizedException('Apple Identity Token không hợp lệ.');
+      }
+
+      if (decoded.aud && appleClientId && decoded.aud !== appleClientId) {
+        this.logger.warn(`Apple Token audience mismatch: ${decoded.aud} vs ${appleClientId}`);
       }
 
       return {
