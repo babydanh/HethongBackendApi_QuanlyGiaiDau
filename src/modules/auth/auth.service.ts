@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import * as jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -447,6 +448,36 @@ export class AuthService {
 
   async googleMobileLogin(idToken: string, userAgent?: string, ipAddress?: string) {
     const oauthProfile = await this.verifyGoogleIdToken(idToken);
+    return this.oauthLogin(oauthProfile, userAgent, ipAddress);
+  }
+
+  async verifyAppleIdToken(idToken: string, fullName?: string): Promise<OAuthProfileDto> {
+    try {
+      const decoded = jwt.decode(idToken) as {
+        sub: string;
+        email?: string;
+      } | null;
+
+      if (!decoded || !decoded.sub) {
+        throw new UnauthorizedException('Apple Identity Token không hợp lệ.');
+      }
+
+      return {
+        provider: 'APPLE',
+        providerUserId: decoded.sub,
+        email: decoded.email || `${decoded.sub}@privaterelay.appleid.com`,
+        displayName: fullName || (decoded.email ? decoded.email.split('@')[0] : 'Apple User'),
+        avatarUrl: undefined,
+        accessToken: undefined,
+        refreshToken: undefined,
+      };
+    } catch {
+      throw new UnauthorizedException('Xác thực Apple Token thất bại.');
+    }
+  }
+
+  async appleMobileLogin(idToken: string, fullName?: string, userAgent?: string, ipAddress?: string) {
+    const oauthProfile = await this.verifyAppleIdToken(idToken, fullName);
     return this.oauthLogin(oauthProfile, userAgent, ipAddress);
   }
 
