@@ -70,7 +70,7 @@ export class MatchesController {
   @Patch(':id/score')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.PLAYER, UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.PLAYER, UserRole.REFEREE, UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
   async updateScore(
     @Param('id', ParseUUIDPipe) id: string,
