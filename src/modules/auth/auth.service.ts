@@ -129,10 +129,57 @@ export class AuthService {
       .returning();
 
     if (revokeResult.length === 0) {
-      // Token đã được sử dụng (replay detected!) — revoke tất cả sessions của user
-      // Tìm user từ token cũ (dù đã revoked, ta vẫn có thể tra cứu để revoke all)
+      // Grace period check: Nếu session vừa bị revoke trong 15s qua (do race condition giữa các request đồng thời)
       const oldSession = await this.authRepository.findSessionByRefreshToken(refreshToken);
       if (oldSession) {
+        const fifteenSecondsAgo = new Date(Date.now() - 15000);
+        if (oldSession.revokedAt && oldSession.revokedAt > fifteenSecondsAgo) {
+          // Token này vừa mới được refresh thành công bởi một request song song!
+          // Lấy session active mới nhất của user để cấp token mới mà không hủy phiên
+          const [latestSession] = await this.db
+            .select()
+            .from(schema.sessions)
+            .where(
+              and(
+                eq(schema.sessions.userId, oldSession.userId),
+                eq(schema.sessions.isRevoked, false),
+                gt(schema.sessions.expiresAt, new Date()),
+              ),
+            )
+            .orderBy(sql`${schema.sessions.createdAt} DESC`)
+            .limit(1);
+
+          if (latestSession) {
+            const roles = await this.authRepository.findUserRoles(oldSession.userId);
+            const [userRecord] = await this.db
+              .select({ email: schema.users.email, isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
+              .from(schema.users)
+              .where(eq(schema.users.id, oldSession.userId))
+              .limit(1);
+
+            return {
+              accessToken: await this.jwtService.signAsync({
+                sub: oldSession.userId,
+                email: userRecord?.email || '',
+                roles,
+                jti: crypto.randomUUID(),
+                isEmailVerified: userRecord?.isEmailVerified ?? false,
+                isMock: userRecord?.isMock ?? false,
+              }, {
+                secret: this.configService.get<string>('auth.jwtAccessSecret')!,
+                expiresIn: (this.configService.get<string>('auth.jwtAccessExpiresIn') || '15m') as unknown as never,
+              }),
+              refreshToken: latestSession.refreshToken,
+              user: {
+                id: oldSession.userId,
+                email: userRecord?.email || '',
+                roles,
+              },
+            };
+          }
+        }
+
+        // Nếu token đã bị hỏng/sử dụng lại từ lâu (>15s) -> Phát hiện replay attack -> Revoke tất cả sessions
         await this.db
           .update(schema.sessions)
           .set({ isRevoked: true, revokedAt: new Date() })
