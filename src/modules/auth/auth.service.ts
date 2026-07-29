@@ -453,9 +453,11 @@ export class AuthService {
 
   async verifyAppleIdToken(idToken: string, fullName?: string): Promise<OAuthProfileDto> {
     try {
+      const appleClientId = this.configService.get<string>('auth.appleClientId');
       const decoded = jwt.decode(idToken) as {
         sub: string;
         email?: string;
+        aud?: string;
       } | null;
 
       if (!decoded || !decoded.sub) {
