@@ -451,21 +451,49 @@ export class AuthService {
     return this.oauthLogin(oauthProfile, userAgent, ipAddress);
   }
 
-  async verifyAppleIdToken(idToken: string, fullName?: string): Promise<OAuthProfileDto> {
+  async verifyAppleIdToken(idToken: string, nonce?: string, fullName?: string): Promise<OAuthProfileDto> {
     try {
       const appleClientId = this.configService.get<string>('auth.appleClientId');
-      const decoded = (await Promise.resolve(jwt.decode(idToken))) as {
+      const decodedHeader = jwt.decode(idToken, { complete: true }) as {
+        header?: { kid?: string; alg?: string };
+      } | null;
+      const keyId = decodedHeader?.header?.kid;
+      if (!keyId || decodedHeader?.header?.alg !== 'RS256') {
+        throw new UnauthorizedException('Apple Identity Token header không hợp lệ.');
+      }
+
+      const keysResponse = await fetch('https://appleid.apple.com/auth/keys');
+      if (!keysResponse.ok) {
+        throw new UnauthorizedException('Không tải được public key của Apple.');
+      }
+      const keys = (await keysResponse.json()) as {
+        keys?: Array<{ kid?: string; kty?: string; n?: string; e?: string }>;
+      };
+      const appleKey = keys.keys?.find((key) => key.kid === keyId);
+      if (!appleKey?.n || !appleKey.e || appleKey.kty !== 'RSA') {
+        throw new UnauthorizedException('Không tìm thấy public key Apple phù hợp.');
+      }
+
+      const publicKey = crypto.createPublicKey({
+        key: { kty: 'RSA', n: appleKey.n, e: appleKey.e },
+        format: 'jwk',
+      });
+      const decoded = jwt.verify(idToken, publicKey, {
+        algorithms: ['RS256'],
+        issuer: 'https://appleid.apple.com',
+        audience: appleClientId,
+      }) as {
         sub: string;
         email?: string;
         aud?: string;
+        nonce?: string;
       } | null;
 
       if (!decoded || !decoded.sub) {
         throw new UnauthorizedException('Apple Identity Token không hợp lệ.');
       }
-
-      if (decoded.aud && appleClientId && decoded.aud !== appleClientId) {
-        this.logger.warn(`Apple Token audience mismatch: ${decoded.aud} vs ${appleClientId}`);
+      if (nonce && decoded.nonce !== nonce) {
+        throw new UnauthorizedException('Apple nonce không hợp lệ.');
       }
 
       return {
@@ -482,8 +510,8 @@ export class AuthService {
     }
   }
 
-  async appleMobileLogin(idToken: string, fullName?: string, userAgent?: string, ipAddress?: string) {
-    const oauthProfile = await this.verifyAppleIdToken(idToken, fullName);
+  async appleMobileLogin(idToken: string, nonce?: string, fullName?: string, userAgent?: string, ipAddress?: string) {
+    const oauthProfile = await this.verifyAppleIdToken(idToken, nonce, fullName);
     return this.oauthLogin(oauthProfile, userAgent, ipAddress);
   }
 
