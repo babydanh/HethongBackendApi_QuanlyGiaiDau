@@ -256,6 +256,25 @@ export class AuthController {
     return await this.authService.googleMobileLogin(body.idToken, userAgent, ipAddress);
   }
 
+  @Public()
+  @Post('mobile/apple')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đăng nhập bằng Apple Identity Token trên iOS App' })
+  @ApiResponse({ status: 200, description: 'Đăng nhập Apple thành công' })
+  async mobileAppleLogin(
+    @Body() body: { idToken: string; fullName?: string },
+    @Req() req: Request,
+  ) {
+    const userAgent = req.headers['user-agent'];
+    const ipAddress = req.ip;
+    return await this.authService.appleMobileLogin(
+      body.idToken,
+      body.fullName,
+      userAgent,
+      ipAddress,
+    );
+  }
+
 
   @UseGuards(new RateLimitGuard(5, 60000))
   @Post('verify-email/request')
