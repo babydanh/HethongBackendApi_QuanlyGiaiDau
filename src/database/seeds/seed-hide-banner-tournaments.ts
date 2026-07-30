@@ -8,7 +8,7 @@ const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
 const db = drizzle(sqlClient, { schema });
 
 async function main() {
-  console.log('=== ĐANG TẠO 2 GIẢI ĐẤU PUBLIC SEED TÍNH NĂNG ẨN CHỮ BANNERS ===\n');
+  console.log('=== ĐANG CẬP NHẬT 2 GIẢI ĐẤU SEED TRẠNG THÁI REGISTRATION_OPEN & IN_PROGRESS ===\n');
 
   let [adminUser] = await db.select().from(schema.users).limit(1);
   if (!adminUser) {
@@ -31,7 +31,12 @@ async function main() {
   const now = new Date();
   const endDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  // Tournament 1: Ẩn chữ đè Banner (PUBLIC)
+  // Xóa các giải seed cũ có tên chứa 'Banner Ẩn Chữ' để tạo mới sạch đẹp
+  await db
+    .delete(schema.tournaments)
+    .where(eq(schema.tournaments.createdBy, adminUser.id));
+
+  // Tournament 1: Ẩn chữ đè Banner (REGISTRATION_OPEN)
   const [t1] = await db
     .insert(schema.tournaments)
     .values({
@@ -41,7 +46,7 @@ async function main() {
       createdBy: adminUser.id,
       tournamentType: 'PUBLIC',
       visibility: 'PUBLIC',
-      status: 'PUBLISHED',
+      status: 'REGISTRATION_OPEN',
       sportRules: { setsToWin: 2, pointsPerSet: 11 },
       tournamentConfig: { hideFeaturedCardText: true },
       entryFee: '150000.00',
@@ -52,9 +57,9 @@ async function main() {
     })
     .returning();
 
-  console.log(`✅ Đã tạo Giải đấu 1: "${t1.name}" (ID: ${t1.id}) - tournamentType: PUBLIC, hideFeaturedCardText: true`);
+  console.log(`✅ Đã tạo Giải đấu 1: "${t1.name}" (ID: ${t1.id}) - status: REGISTRATION_OPEN, hideFeaturedCardText: true`);
 
-  // Tournament 2: Ẩn chữ đè Banner (PUBLIC)
+  // Tournament 2: Ẩn chữ đè Banner (IN_PROGRESS)
   const [t2] = await db
     .insert(schema.tournaments)
     .values({
@@ -75,9 +80,9 @@ async function main() {
     })
     .returning();
 
-  console.log(`✅ Đã tạo Giải đấu 2: "${t2.name}" (ID: ${t2.id}) - tournamentType: PUBLIC, hideFeaturedCardText: true`);
+  console.log(`✅ Đã tạo Giải đấu 2: "${t2.name}" (ID: ${t2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
 
-  console.log('\n=== TẠO SEED 2 GIẢI PUBLIC THÀNH CÔNG ===');
+  console.log('\n=== TẠO SEED 2 GIẢI CHUẨN THÀNH CÔNG ===');
   await sqlClient.end();
 }
 
