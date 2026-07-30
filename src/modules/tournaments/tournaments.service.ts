@@ -1244,6 +1244,35 @@ export class TournamentsService {
     }
   }
 
+  async generateLiteBracket(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+    reset = false,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    if (String(config.mode || '').toUpperCase() !== 'LITE') {
+      throw new BadRequestException('Chỉ giải Lite mới dùng được luồng quản lý này.');
+    }
+
+    const bracket = reset ? await this.tournamentsRepository.findBracket(id) : null;
+    const started = bracket?.stages.some((stage) =>
+      stage.groups?.some((group) =>
+        group.matches?.some((match) => match.status !== 'SCHEDULED'),
+      ),
+    ) ?? false;
+    if (started) {
+      throw new BadRequestException('Không thể reset bracket sau khi đã bắt đầu ít nhất một trận.');
+    }
+
+    // generateBracket performs the same BTC/community authorization and persists
+    // stages, groups and matches in one generator transaction.
+    return this.generateBracket(id, userId, systemRoles, undefined, 'RANDOM');
+  }
+
   async autoSeedFromElo(
     tournamentId: string,
     userId: string,
