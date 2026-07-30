@@ -107,12 +107,36 @@ export class CommunitiesRepository {
       membersCountMap[mc.communityId] = Number(mc.count);
     });
 
+    // 3. Fetch tournament counts for each community
+    const tournamentsCount = await this.db
+      .select({
+        communityId: schema.tournaments.communityId,
+        count: sql<number>`count(${schema.tournaments.id})`,
+      })
+      .from(schema.tournaments)
+      .where(
+        and(
+          sql`${schema.tournaments.communityId} IN ${communityIds}`,
+          isNull(schema.tournaments.deletedAt),
+          sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`
+        )
+      )
+      .groupBy(schema.tournaments.communityId);
+
+    const tournamentsCountMap: Record<string, number> = {};
+    tournamentsCount.forEach((tc) => {
+      if (tc.communityId) {
+        tournamentsCountMap[tc.communityId] = Number(tc.count);
+      }
+    });
+
     // Map them together
     return communitiesList.map((community) => ({
       ...community,
       categories: categoriesMap[community.id] || [],
       _count: {
         members: membersCountMap[community.id] || 0,
+        tournaments: tournamentsCountMap[community.id] || 0,
       },
     })) as any;
   }
