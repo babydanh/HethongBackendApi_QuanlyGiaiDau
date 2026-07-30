@@ -9,7 +9,7 @@ const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
 const db = drizzle(sqlClient, { schema });
 
 async function main() {
-  console.log('=== ĐANG CẬP NHẬT 2 GIẢI ĐẤU SEED MÔN BÓNG BÀN (BÁN NỔI BẬT & BANNER ẨN CHỮ) ===\n');
+  console.log('=== ĐANG TẠO SEED GIẢI ĐẤU (BÓNG BÀN & CẦU LÔNG - BANNER ẨN CHỮ) ===\n');
 
   let [adminUser] = await db.select().from(schema.users).limit(1);
   if (!adminUser) {
@@ -17,7 +17,21 @@ async function main() {
     process.exit(1);
   }
 
-  // Lấy danh mục môn Bóng bàn (Table Tennis)
+  // 1. Lấy danh mục Cầu lông
+  let [badmintonCat] = await db
+    .select()
+    .from(schema.categories)
+    .where(
+      or(
+        ilike(schema.categories.slug, '%badminton%'),
+        ilike(schema.categories.slug, '%cau-long%'),
+        ilike(schema.categories.name, '%cầu lông%'),
+        ilike(schema.categories.name, '%badminton%')
+      )
+    )
+    .limit(1);
+
+  // 2. Lấy danh mục Bóng bàn
   let [tableTennisCat] = await db
     .select()
     .from(schema.categories)
@@ -25,23 +39,18 @@ async function main() {
       or(
         ilike(schema.categories.slug, '%table%'),
         ilike(schema.categories.slug, '%table-tennis%'),
+        ilike(schema.categories.slug, '%bong-ban%'),
         ilike(schema.categories.name, '%bóng bàn%'),
         ilike(schema.categories.name, '%table tennis%')
       )
     )
     .limit(1);
 
-  if (!tableTennisCat) {
-    [tableTennisCat] = await db.select().from(schema.categories).limit(1);
-  }
+  const badmintonCatId = badmintonCat?.id;
+  const tableTennisCatId = tableTennisCat?.id;
 
-  const catId = tableTennisCat?.id;
-  if (!catId) {
-    console.error('Không tìm thấy danh mục thể thao nào!');
-    process.exit(1);
-  }
-
-  console.log(`📌 Sử dụng danh mục: "${tableTennisCat.name}" (ID: ${catId})`);
+  console.log(`📌 Danh mục Cầu lông: "${badmintonCat?.name || 'N/A'}" (ID: ${badmintonCatId})`);
+  console.log(`📌 Danh mục Bóng bàn: "${tableTennisCat?.name || 'N/A'}" (ID: ${tableTennisCatId})\n`);
 
   const now = new Date();
   const startDate = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
@@ -49,84 +58,156 @@ async function main() {
   const regStart = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
   const regEnd = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
 
-  // Chỉ xóa các giải seed cũ có tên chứa 'Banner Ẩn Chữ' để tránh đụng chạm giải khác
+  // Xóa các giải seed thử nghiệm cũ có tên 'Banner Ẩn Chữ'
   await db
     .delete(schema.tournaments)
     .where(ilike(schema.tournaments.name, '%Banner Ẩn Chữ%'));
 
-  // Tournament 1: Bóng bàn - Ẩn chữ đè Banner (REGISTRATION_OPEN)
-  const [t1] = await db
-    .insert(schema.tournaments)
-    .values({
-      name: '🏓 VNSPORT Table Tennis Open (Banner Ẩn Chữ 1)',
-      description: 'Giải đấu Bóng bàn mở rộng thử nghiệm tính năng Ẩn Chữ Đè Trên Banner.',
-      categoryId: catId,
-      createdBy: adminUser.id,
-      tournamentType: 'PUBLIC',
-      visibility: 'PUBLIC',
-      status: 'REGISTRATION_OPEN',
-      sportRules: { setsToWin: 3, pointsPerSet: 11 },
-      tournamentConfig: { hideFeaturedCardText: true },
+  // --- MÔN CẦU LÔNG ---
+  if (badmintonCatId) {
+    // Giải Cầu Lông 1 (REGISTRATION_OPEN)
+    const [b1] = await db
+      .insert(schema.tournaments)
+      .values({
+        name: '🏸 VNSPORT Badminton Championship (Banner Ẩn Chữ 1)',
+        description: 'Giải đấu Cầu lông mở rộng thử nghiệm tính năng Ẩn Chữ Đè Trên Banner.',
+        categoryId: badmintonCatId,
+        createdBy: adminUser.id,
+        tournamentType: 'PUBLIC',
+        visibility: 'PUBLIC',
+        status: 'REGISTRATION_OPEN',
+        sportRules: { setsToWin: 2, pointsPerSet: 21 },
+        tournamentConfig: { hideFeaturedCardText: true },
+        entryFee: '150000.00',
+        maxParticipants: 16,
+        registrationStartDate: regStart,
+        registrationEndDate: regEnd,
+        startDate: startDate,
+        endDate: endDate,
+        bannerUrl: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=1200&auto=format&fit=crop',
+        isRanked: true,
+      })
+      .returning();
+
+    await db.insert(schema.tournamentDivisions).values({
+      tournamentId: b1.id,
+      name: 'Đôi Nam Nữ Cầu Lông',
+      matchType: 'MIXED_DOUBLES',
+      genderRestriction: 'MIXED',
       entryFee: '150000.00',
       maxParticipants: 16,
-      registrationStartDate: regStart,
       registrationEndDate: regEnd,
-      startDate: startDate,
-      endDate: endDate,
-      bannerUrl: 'https://images.unsplash.com/photo-1534158914592-062992fbe900?q=80&w=1200&auto=format&fit=crop',
-      isRanked: true,
-    })
-    .returning();
+    });
+    console.log(`✅ Đã tạo Giải Cầu lông 1: "${b1.name}" (ID: ${b1.id}) - status: REGISTRATION_OPEN, hideFeaturedCardText: true`);
 
-  // Tạo division cho Giải 1
-  await db.insert(schema.tournamentDivisions).values({
-    tournamentId: t1.id,
-    name: 'Đơn Nam Chuyên Nghiệp Bóng Bàn',
-    matchType: 'SINGLES',
-    genderRestriction: 'MALE',
-    entryFee: '150000.00',
-    maxParticipants: 16,
-    registrationEndDate: regEnd,
-  });
+    // Giải Cầu Lông 2 (IN_PROGRESS)
+    const [b2] = await db
+      .insert(schema.tournaments)
+      .values({
+        name: '⚡ Badminton Super League 2026 (Banner Ẩn Chữ 2)',
+        description: 'Giải đấu Cầu lông chuyên nghiệp thử nghiệm tính năng Ẩn Chữ Đè Trên Banner số 2.',
+        categoryId: badmintonCatId,
+        createdBy: adminUser.id,
+        tournamentType: 'PUBLIC',
+        visibility: 'PUBLIC',
+        status: 'IN_PROGRESS',
+        sportRules: { setsToWin: 2, pointsPerSet: 21 },
+        tournamentConfig: { hideFeaturedCardText: true },
+        entryFee: '200000.00',
+        maxParticipants: 32,
+        registrationStartDate: regStart,
+        registrationEndDate: regEnd,
+        startDate: startDate,
+        endDate: endDate,
+        bannerUrl: 'https://images.unsplash.com/photo-1521537634581-0ddea2eed2b0?q=80&w=1200&auto=format&fit=crop',
+        isRanked: true,
+      })
+      .returning();
 
-  console.log(`✅ Đã tạo Giải đấu Bóng bàn 1: "${t1.name}" (ID: ${t1.id}) - status: REGISTRATION_OPEN, hideFeaturedCardText: true`);
-
-  // Tournament 2: Bóng bàn - Ẩn chữ đè Banner (IN_PROGRESS)
-  const [t2] = await db
-    .insert(schema.tournaments)
-    .values({
-      name: '⚡ Table Tennis Super League 2026 (Banner Ẩn Chữ 2)',
-      description: 'Giải đấu Bóng bàn chuyên nghiệp thử nghiệm tính năng Ẩn Chữ Đè Trên Banner số 2.',
-      categoryId: catId,
-      createdBy: adminUser.id,
-      tournamentType: 'PUBLIC',
-      visibility: 'PUBLIC',
-      status: 'IN_PROGRESS',
-      sportRules: { setsToWin: 3, pointsPerSet: 11 },
-      tournamentConfig: { hideFeaturedCardText: true },
+    await db.insert(schema.tournamentDivisions).values({
+      tournamentId: b2.id,
+      name: 'Đơn Nam Cầu Lông',
+      matchType: 'SINGLES',
+      genderRestriction: 'MALE',
       entryFee: '200000.00',
       maxParticipants: 32,
-      registrationStartDate: regStart,
       registrationEndDate: regEnd,
-      startDate: startDate,
-      endDate: endDate,
-      bannerUrl: 'https://images.unsplash.com/photo-1609710228159-0fa9bd7c0827?q=80&w=1200&auto=format&fit=crop',
-      isRanked: true,
-    })
-    .returning();
+    });
+    console.log(`✅ Đã tạo Giải Cầu lông 2: "${b2.name}" (ID: ${b2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
+  }
 
-  // Tạo division cho Giải 2
-  await db.insert(schema.tournamentDivisions).values({
-    tournamentId: t2.id,
-    name: 'Đôi Nam Nữ Bóng Bàn',
-    matchType: 'MIXED_DOUBLES',
-    genderRestriction: 'MIXED',
-    entryFee: '200000.00',
-    maxParticipants: 32,
-    registrationEndDate: regEnd,
-  });
+  // --- MÔN BÓNG BÀN ---
+  if (tableTennisCatId) {
+    // Giải Bóng Bàn 1 (REGISTRATION_OPEN)
+    const [t1] = await db
+      .insert(schema.tournaments)
+      .values({
+        name: '🏓 VNSPORT Table Tennis Open (Banner Ẩn Chữ 3)',
+        description: 'Giải đấu Bóng bàn mở rộng thử nghiệm tính năng Ẩn Chữ Đè Trên Banner.',
+        categoryId: tableTennisCatId,
+        createdBy: adminUser.id,
+        tournamentType: 'PUBLIC',
+        visibility: 'PUBLIC',
+        status: 'REGISTRATION_OPEN',
+        sportRules: { setsToWin: 3, pointsPerSet: 11 },
+        tournamentConfig: { hideFeaturedCardText: true },
+        entryFee: '150000.00',
+        maxParticipants: 16,
+        registrationStartDate: regStart,
+        registrationEndDate: regEnd,
+        startDate: startDate,
+        endDate: endDate,
+        bannerUrl: 'https://images.unsplash.com/photo-1534158914592-062992fbe900?q=80&w=1200&auto=format&fit=crop',
+        isRanked: true,
+      })
+      .returning();
 
-  console.log(`✅ Đã tạo Giải đấu Bóng bàn 2: "${t2.name}" (ID: ${t2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
+    await db.insert(schema.tournamentDivisions).values({
+      tournamentId: t1.id,
+      name: 'Đơn Nam Chuyên Nghiệp Bóng Bàn',
+      matchType: 'SINGLES',
+      genderRestriction: 'MALE',
+      entryFee: '150000.00',
+      maxParticipants: 16,
+      registrationEndDate: regEnd,
+    });
+    console.log(`✅ Đã tạo Giải Bóng bàn 1: "${t1.name}" (ID: ${t1.id}) - status: REGISTRATION_OPEN, hideFeaturedCardText: true`);
+
+    // Giải Bóng Bàn 2 (IN_PROGRESS)
+    const [t2] = await db
+      .insert(schema.tournaments)
+      .values({
+        name: '⚡ Table Tennis Super League 2026 (Banner Ẩn Chữ 4)',
+        description: 'Giải đấu Bóng bàn chuyên nghiệp thử nghiệm tính năng Ẩn Chữ Đè Trên Banner số 4.',
+        categoryId: tableTennisCatId,
+        createdBy: adminUser.id,
+        tournamentType: 'PUBLIC',
+        visibility: 'PUBLIC',
+        status: 'IN_PROGRESS',
+        sportRules: { setsToWin: 3, pointsPerSet: 11 },
+        tournamentConfig: { hideFeaturedCardText: true },
+        entryFee: '200000.00',
+        maxParticipants: 32,
+        registrationStartDate: regStart,
+        registrationEndDate: regEnd,
+        startDate: startDate,
+        endDate: endDate,
+        bannerUrl: 'https://images.unsplash.com/photo-1609710228159-0fa9bd7c0827?q=80&w=1200&auto=format&fit=crop',
+        isRanked: true,
+      })
+      .returning();
+
+    await db.insert(schema.tournamentDivisions).values({
+      tournamentId: t2.id,
+      name: 'Đôi Nam Nữ Bóng Bàn',
+      matchType: 'MIXED_DOUBLES',
+      genderRestriction: 'MIXED',
+      entryFee: '200000.00',
+      maxParticipants: 32,
+      registrationEndDate: regEnd,
+    });
+    console.log(`✅ Đã tạo Giải Bóng bàn 2: "${t2.name}" (ID: ${t2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
+  }
 
   // Invalidate Redis cache
   try {
@@ -135,18 +216,18 @@ async function main() {
     const redisPass = process.env.REDIS_PASSWORD || undefined;
     const redis = new Redis({ host: redisHost, port: redisPort, password: redisPass });
     await redis.flushall();
-    console.log('🧹 Đã xóa sạch Redis cache thành công!');
+    console.log('\n🧹 Đã xóa sạch Redis cache thành công!');
     await redis.quit();
   } catch (err) {
     console.warn('Lỗi khi xóa Redis cache trong seed (bỏ qua):', err);
   }
 
-  console.log('\n=== TẠO SEED 2 GIẢI BÓNG BÀN CHUẨN THÀNH CÔNG ===');
+  console.log('\n=== TẠO SEED CÁC GIẢI BANNER ẨN CHỮ CHUẨN THÀNH CÔNG ===');
   await sqlClient.end();
 }
 
 main().catch(async (e) => {
-  console.error('Lỗi khi chạy seed hide-banner bóng bàn:', e);
+  console.error('Lỗi khi chạy seed hide-banner:', e);
   await sqlClient.end();
   process.exit(1);
 });
