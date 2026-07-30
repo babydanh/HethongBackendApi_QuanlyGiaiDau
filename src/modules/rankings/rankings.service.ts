@@ -634,6 +634,15 @@ export class RankingsService {
           for (const uid of loserUserIds) {
             await this.recalculateUserRankTier(tx, uid, categoryId, matchType, genderRestriction);
           }
+
+          // Update lastActiveAt
+          const now = new Date();
+          for (const uid of [...winnerUserIds, ...loserUserIds]) {
+            await tx
+              .update(schema.userRanks)
+              .set({ lastActiveAt: now } as any)
+              .where(eq(schema.userRanks.userId, uid));
+          }
         } else if (scope === 'COMMUNITY') {
           for (const uid of winnerUserIds) {
             await this.recalculateCommunityRankTier(tx, uid, categoryId, matchType, communityId, genderRestriction);
