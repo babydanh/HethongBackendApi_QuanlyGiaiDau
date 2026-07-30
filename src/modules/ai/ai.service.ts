@@ -228,7 +228,7 @@ ${userContext}`;
             tournament._summary?.participantCount !== undefined ? `- Số đội đã đăng ký: ${tournament._summary.participantCount}` : '',
           ].filter(Boolean).join('\n');
 
-          tournamentContext = `
+          pageContext += `
 --- THÔNG TIN GIẢI ĐẤU HIỆN TẠI ---
 Người dùng đang xem trang giải đấu sau:
 

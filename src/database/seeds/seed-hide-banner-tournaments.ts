@@ -86,7 +86,6 @@ async function main() {
     genderRestriction: 'MALE',
     entryFee: '150000.00',
     maxParticipants: 16,
-    registrationStartDate: regStart,
     registrationEndDate: regEnd,
   });
 
@@ -124,7 +123,6 @@ async function main() {
     genderRestriction: 'MIXED',
     entryFee: '200000.00',
     maxParticipants: 32,
-    registrationStartDate: regStart,
     registrationEndDate: regEnd,
   });
 
