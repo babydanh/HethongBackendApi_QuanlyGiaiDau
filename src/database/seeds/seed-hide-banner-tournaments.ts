@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
 import { createPostgresClientFromEnv } from '../postgres-client';
-import { ilike, or } from 'drizzle-orm';
+import { eq, ilike, or } from 'drizzle-orm';
 import Redis from 'ioredis';
 
 const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
@@ -48,6 +48,14 @@ async function main() {
 
   const badmintonCatId = badmintonCat?.id;
   const tableTennisCatId = tableTennisCat?.id;
+
+  if (!badmintonCatId || !tableTennisCatId) {
+    throw new Error(
+      `Không tìm thấy category cần seed: badminton=${badmintonCatId ?? 'missing'}, tableTennis=${tableTennisCatId ?? 'missing'}`,
+    );
+  }
+
+  const seededTournamentIds: string[] = [];
 
   console.log(`📌 Danh mục Cầu lông: "${badmintonCat?.name || 'N/A'}" (ID: ${badmintonCatId})`);
   console.log(`📌 Danh mục Bóng bàn: "${tableTennisCat?.name || 'N/A'}" (ID: ${tableTennisCatId})\n`);
@@ -99,6 +107,7 @@ async function main() {
       registrationEndDate: regEnd,
     });
     console.log(`✅ Đã tạo Giải Cầu lông 1: "${b1.name}" (ID: ${b1.id}) - status: REGISTRATION_OPEN, hideFeaturedCardText: true`);
+    seededTournamentIds.push(b1.id);
 
     // Giải Cầu Lông 2 (IN_PROGRESS)
     const [b2] = await db
@@ -134,6 +143,7 @@ async function main() {
       registrationEndDate: regEnd,
     });
     console.log(`✅ Đã tạo Giải Cầu lông 2: "${b2.name}" (ID: ${b2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
+    seededTournamentIds.push(b2.id);
   }
 
   // --- MÔN BÓNG BÀN ---
@@ -172,6 +182,7 @@ async function main() {
       registrationEndDate: regEnd,
     });
     console.log(`✅ Đã tạo Giải Bóng bàn 1: "${t1.name}" (ID: ${t1.id}) - status: REGISTRATION_OPEN, hideFeaturedCardText: true`);
+    seededTournamentIds.push(t1.id);
 
     // Giải Bóng Bàn 2 (IN_PROGRESS)
     const [t2] = await db
@@ -207,7 +218,23 @@ async function main() {
       registrationEndDate: regEnd,
     });
     console.log(`✅ Đã tạo Giải Bóng bàn 2: "${t2.name}" (ID: ${t2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
+    seededTournamentIds.push(t2.id);
   }
+
+  const verificationRows = await db
+    .select({ id: schema.tournaments.id, name: schema.tournaments.name, tournamentConfig: schema.tournaments.tournamentConfig })
+    .from(schema.tournaments)
+    .where(or(...seededTournamentIds.map((id) => eq(schema.tournaments.id, id))));
+
+  const invalidRows = verificationRows.filter((row) => {
+    const config = row.tournamentConfig;
+    return !(typeof config === 'object' && config !== null && !Array.isArray(config) &&
+      (config as Record<string, unknown>).hideFeaturedCardText === true);
+  });
+  if (verificationRows.length !== seededTournamentIds.length || invalidRows.length > 0) {
+    throw new Error(`Seed verification failed: ${verificationRows.length}/${seededTournamentIds.length} rows contain hideFeaturedCardText=true`);
+  }
+  console.log(`✅ Verified ${verificationRows.length} tournament records with hideFeaturedCardText=true`);
 
   // Invalidate Redis cache
   try {

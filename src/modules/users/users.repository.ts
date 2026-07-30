@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, count, inArray, type SQL } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, sql, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -221,9 +221,11 @@ export class UsersRepository {
         matchesPlayed: schema.userRanks.matchesPlayed,
         matchesWon: schema.userRanks.matchesWon,
         winStreak: schema.userRanks.winStreak,
+        tierName: schema.eloTiers.name,
       })
       .from(schema.userRanks)
       .innerJoin(schema.categories, eq(schema.userRanks.categoryId, schema.categories.id))
+      .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
       .where(
         and(
           eq(schema.userRanks.userId, userId),
@@ -231,11 +233,57 @@ export class UsersRepository {
         )
       );
 
+    // Pair ELO is intentionally kept separate from individual ELO. It is
+    // only used for the player's doubles badge/profile context.
+    const pairUser1 = aliasedTable(schema.users, 'public_pair_user1');
+    const pairUser2 = aliasedTable(schema.users, 'public_pair_user2');
+    const pairProfile1 = aliasedTable(schema.profiles, 'public_pair_profile1');
+    const pairProfile2 = aliasedTable(schema.profiles, 'public_pair_profile2');
+    const pairRanks = await this.db
+      .select({
+        id: schema.pairRanks.id,
+        categoryId: schema.pairRanks.categoryId,
+        categoryName: schema.categories.name,
+        matchType: schema.pairRanks.matchType,
+        eloPoints: schema.pairRanks.eloPoints,
+        matchesPlayed: schema.pairRanks.matchesPlayed,
+        matchesWon: schema.pairRanks.matchesWon,
+        winStreak: schema.pairRanks.winStreak,
+        updatedAt: schema.pairRanks.updatedAt,
+        partnerId: sql`CASE WHEN ${schema.pairRanks.user1Id} = ${userId} THEN ${pairUser2.id} ELSE ${pairUser1.id} END`.as('partner_id'),
+        partnerName: sql`CASE WHEN ${schema.pairRanks.user1Id} = ${userId} THEN ${pairProfile2.fullName} ELSE ${pairProfile1.fullName} END`.as('partner_name'),
+        partnerAvatarUrl: sql`CASE WHEN ${schema.pairRanks.user1Id} = ${userId} THEN ${pairProfile2.avatarUrl} ELSE ${pairProfile1.avatarUrl} END`.as('partner_avatar_url'),
+      })
+      .from(schema.pairRanks)
+      .innerJoin(schema.categories, eq(schema.pairRanks.categoryId, schema.categories.id))
+      .innerJoin(pairUser1, eq(schema.pairRanks.user1Id, pairUser1.id))
+      .innerJoin(pairUser2, eq(schema.pairRanks.user2Id, pairUser2.id))
+      .leftJoin(pairProfile1, eq(pairUser1.id, pairProfile1.userId))
+      .leftJoin(pairProfile2, eq(pairUser2.id, pairProfile2.userId))
+      .where(
+        and(
+          or(eq(schema.pairRanks.user1Id, userId), eq(schema.pairRanks.user2Id, userId)),
+          eq(schema.pairRanks.scope, 'PUBLIC'),
+          isNull(schema.pairRanks.communityId),
+          eq(pairUser1.isMock, false),
+          eq(pairUser2.isMock, false),
+          gt(schema.pairRanks.matchesPlayed, 0),
+        ),
+      )
+      .orderBy(desc(schema.pairRanks.eloPoints));
+
+    const activeRanks = ranks.filter((rank) => rank.matchesPlayed > 0);
+    const activePairRanks = pairRanks.filter((rank) => rank.matchesPlayed > 0);
+    const highlightRank = [...activeRanks.map((rank) => ({ ...rank, source: 'SINGLES' as const })), ...activePairRanks.map((rank) => ({ ...rank, source: 'DOUBLES' as const }))]
+      .sort((a, b) => b.eloPoints - a.eloPoints || b.matchesPlayed - a.matchesPlayed)[0] ?? null;
+
     const achievements = await this.getPublicProfileAchievements(userId);
 
     return {
       ...user,
       ranks: user.isMock ? [] : ranks,
+      pairRanks: user.isMock ? [] : pairRanks,
+      highlightRank: user.isMock ? null : highlightRank,
       achievements,
     };
   }
