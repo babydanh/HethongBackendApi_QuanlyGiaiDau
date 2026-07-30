@@ -1,8 +1,9 @@
-import { Controller, Post, Body, Req, Res } from '@nestjs/common';
+import { Controller, Post, Body, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { AiService } from './ai.service';
 import type { Request, Response } from 'express';
+import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 
 @ApiTags('ai')
 @Controller('ai')
@@ -26,6 +27,7 @@ export class AiController {
 
   @Public()
   @Post('chat')
+  @UseGuards(new RateLimitGuard(12, 60000))
   @ApiOperation({ summary: 'Gửi tin nhắn hội thoại và nhận phản hồi từ Trợ lý ảo AI' })
   async chat(
     @Body('messages') messages: any[],

@@ -91,7 +91,7 @@ export class ChatService {
         roomId: room.id,
         messageText,
       });
-      this.chatGateway.broadcastMessage(room.id, message);
+      this.chatGateway.broadcastSupportMessage(room.id, message);
     }
 
     return {
@@ -109,6 +109,13 @@ export class ChatService {
     return this.chatRepository.getMessagesByRoom(roomId);
   }
 
+  async markAdminSupportRoomRead(roomId: string) {
+    await this.ensureSupportRoom(roomId);
+    await this.chatRepository.markSupportRoomRead(roomId);
+    this.chatGateway.broadcastSupportRead(roomId);
+    return { success: true };
+  }
+
   async sendAdminSupportMessage(
     adminId: string,
     roomId: string,
@@ -123,7 +130,7 @@ export class ChatService {
       roomId,
       messageText: content,
     });
-    this.chatGateway.broadcastMessage(roomId, message);
+    this.chatGateway.broadcastSupportMessage(roomId, message);
     return message;
   }
 

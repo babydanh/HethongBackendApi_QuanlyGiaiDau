@@ -20,7 +20,11 @@ export class RateLimitGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
-    const key = (request.ip || request.ips?.[0]) || 'unknown';
+    const authenticatedUserId = request.user?.sub || request.user?.id;
+    const clientAddress = (request.ip || request.ips?.[0]) || 'unknown';
+    const key = authenticatedUserId
+      ? `user:${authenticatedUserId}`
+      : `ip:${clientAddress}`;
     const now = Date.now();
 
     const entry = this.store.get(key);
@@ -31,7 +35,7 @@ export class RateLimitGuard implements CanActivate {
 
     if (entry.count >= this.maxRequests) {
       throw new HttpException(
-        'Too many requests. Please try again later.',
+        'Bạn thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại.',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
