@@ -470,6 +470,10 @@ export class MatchesService {
           }
         : scoreDetails;
 
+    if (existing.status === 'COMPLETED') {
+      throw new BadRequestException('Trận đấu đã kết thúc');
+    }
+
     // Nếu trận đấu đã xác định được đội thắng, tiến hành chốt kết quả và tự động đi tiếp (advancement logic)
     if (winnerId) {
       return await this.finalizeCompletedMatch(existing, id, winnerId, user.sub, {
