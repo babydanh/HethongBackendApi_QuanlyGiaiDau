@@ -431,6 +431,37 @@ export class TournamentsController {
     return this.tournamentsService.unpairLiteParticipant(id, participantId, user.sub, this.getSystemRoles(user));
   }
 
+  @Post('lite/:id/bracket')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo hoặc lưu bracket cho giải Lite' })
+  async generateLiteBracket(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.generateLiteBracket(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post('lite/:id/bracket/reset')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reset bracket Lite trước khi có trận bắt đầu' })
+  async resetLiteBracket(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.generateLiteBracket(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      true,
+    );
+  }
+
   @Patch(':id')
   @Verified()
   @ApiBearerAuth()
