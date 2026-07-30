@@ -119,7 +119,6 @@ export class ChatService {
     if (!content) {
       throw new BadRequestException('Nội dung tin nhắn không được để trống.');
     }
-    await this.chatRepository.addRoomMemberIfMissing(roomId, adminId);
     const message = await this.chatRepository.saveMessage(adminId, {
       roomId,
       messageText: content,
