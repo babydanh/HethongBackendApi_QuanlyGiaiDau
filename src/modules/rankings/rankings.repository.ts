@@ -497,7 +497,9 @@ export class RankingsRepository {
     tx: AppTx,
     logs: (typeof schema.eloHistoryLogs.$inferInsert)[],
   ) {
-    return tx.insert(schema.eloHistoryLogs).values(logs);
+    return tx.insert(schema.eloHistoryLogs).values(logs).onConflictDoNothing({
+      target: [schema.eloHistoryLogs.matchId, schema.eloHistoryLogs.userId],
+    });
   }
 
   async getEloTiersByCategory(categoryId: string) {
