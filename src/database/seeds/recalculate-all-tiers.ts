@@ -62,27 +62,18 @@ async function run() {
 
       let targetTier: typeof allTiers[0] | undefined;
 
-      const tierS = categoryTiers.find(t => t.name === 'Tier S');
-      const tierAHigh = categoryTiers.find(t => t.name === 'High Tier A');
-      const tierALow = categoryTiers.find(t => t.name === 'Low Tier A');
-      const tierBHigh = categoryTiers.find(t => t.name === 'High Tier B');
-      const tierBLow = categoryTiers.find(t => t.name === 'Low Tier B');
-      const tierCHigh = categoryTiers.find(t => t.name === 'High Tier C');
-      const tierCLow = categoryTiers.find(t => t.name === 'Low Tier C');
-      const tierDHigh = categoryTiers.find(t => t.name === 'High Tier D');
-      const tierDLow = categoryTiers.find(t => t.name === 'Low Tier D');
+      // Sort tiers by minElo descending
+      const sortedTiers = [...categoryTiers].sort((a, b) => b.minElo - a.minElo);
+      for (const tier of sortedTiers) {
+        if (tier.minElo !== null && elo >= tier.minElo) {
+          targetTier = tier;
+          break;
+        }
+      }
 
-      if (isTop1Player && elo >= 2200 && tierS) {
-        targetTier = tierS;
-      } else {
-        if (elo >= 2100 && tierAHigh) targetTier = tierAHigh;
-        else if (elo >= 2000 && tierALow) targetTier = tierALow;
-        else if (elo >= 1900 && tierBHigh) targetTier = tierBHigh;
-        else if (elo >= 1800 && tierBLow) targetTier = tierBLow;
-        else if (elo >= 1700 && tierCHigh) targetTier = tierCHigh;
-        else if (elo >= 1600 && tierCLow) targetTier = tierCLow;
-        else if (elo >= 1500 && tierDHigh) targetTier = tierDHigh;
-        else if (tierDLow) targetTier = tierDLow;
+      // If top player and no tier matched (ELO < lowest minElo), use lowest tier
+      if (!targetTier && sortedTiers.length > 0) {
+        targetTier = sortedTiers[sortedTiers.length - 1];
       }
 
       if (targetTier) {
