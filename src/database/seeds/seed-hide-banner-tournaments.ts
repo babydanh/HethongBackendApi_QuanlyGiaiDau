@@ -8,7 +8,7 @@ const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
 const db = drizzle(sqlClient, { schema });
 
 async function main() {
-  console.log('=== ĐANG TẠO 2 GIẢI ĐẤU SEED TÍNH NĂNG ẨN CHỮ BANNERS ===\n');
+  console.log('=== ĐANG TẠO 2 GIẢI ĐẤU PUBLIC SEED TÍNH NĂNG ẨN CHỮ BANNERS ===\n');
 
   let [adminUser] = await db.select().from(schema.users).limit(1);
   if (!adminUser) {
@@ -31,7 +31,7 @@ async function main() {
   const now = new Date();
   const endDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  // Tournament 1: Ẩn chữ đè Banner
+  // Tournament 1: Ẩn chữ đè Banner (PUBLIC)
   const [t1] = await db
     .insert(schema.tournaments)
     .values({
@@ -39,6 +39,8 @@ async function main() {
       description: 'Giải đấu thử nghiệm tính năng Ẩn Chữ Đè Trên Banner.',
       categoryId: catId,
       createdBy: adminUser.id,
+      tournamentType: 'PUBLIC',
+      visibility: 'PUBLIC',
       status: 'PUBLISHED',
       sportRules: { setsToWin: 2, pointsPerSet: 11 },
       tournamentConfig: { hideFeaturedCardText: true },
@@ -50,9 +52,9 @@ async function main() {
     })
     .returning();
 
-  console.log(`✅ Đã tạo Giải đấu 1: "${t1.name}" (ID: ${t1.id}) - hideFeaturedCardText: true`);
+  console.log(`✅ Đã tạo Giải đấu 1: "${t1.name}" (ID: ${t1.id}) - tournamentType: PUBLIC, hideFeaturedCardText: true`);
 
-  // Tournament 2: Ẩn chữ đè Banner
+  // Tournament 2: Ẩn chữ đè Banner (PUBLIC)
   const [t2] = await db
     .insert(schema.tournaments)
     .values({
@@ -60,6 +62,8 @@ async function main() {
       description: 'Giải đấu thử nghiệm tính năng Ẩn Chữ Đè Trên Banner số 2.',
       categoryId: catId,
       createdBy: adminUser.id,
+      tournamentType: 'PUBLIC',
+      visibility: 'PUBLIC',
       status: 'IN_PROGRESS',
       sportRules: { setsToWin: 2, pointsPerSet: 11 },
       tournamentConfig: { hideFeaturedCardText: true },
@@ -71,9 +75,9 @@ async function main() {
     })
     .returning();
 
-  console.log(`✅ Đã tạo Giải đấu 2: "${t2.name}" (ID: ${t2.id}) - hideFeaturedCardText: true`);
+  console.log(`✅ Đã tạo Giải đấu 2: "${t2.name}" (ID: ${t2.id}) - tournamentType: PUBLIC, hideFeaturedCardText: true`);
 
-  console.log('\n=== TẠO SEED 2 GIẢI THÀNH CÔNG ===');
+  console.log('\n=== TẠO SEED 2 GIẢI PUBLIC THÀNH CÔNG ===');
   await sqlClient.end();
 }
 
