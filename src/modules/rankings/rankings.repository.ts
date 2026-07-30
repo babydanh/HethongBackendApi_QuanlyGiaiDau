@@ -151,7 +151,7 @@ export class RankingsRepository {
         .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
         .leftJoin(schema.eloTiers, eq(schema.communityRankings.tierId, schema.eloTiers.id))
-        .leftJoin(schema.communityMembers, and(
+        .innerJoin(schema.communityMembers, and(
           eq(schema.communityRankings.userId, schema.communityMembers.userId),
           eq(schema.communityRankings.communityId, schema.communityMembers.communityId),
         ))
@@ -507,9 +507,7 @@ export class RankingsRepository {
     tx: AppTx,
     logs: (typeof schema.eloHistoryLogs.$inferInsert)[],
   ) {
-    return tx.insert(schema.eloHistoryLogs).values(logs).onConflictDoNothing({
-      target: [schema.eloHistoryLogs.matchId, schema.eloHistoryLogs.userId],
-    });
+    return tx.insert(schema.eloHistoryLogs).values(logs).onConflictDoNothing();
   }
 
   async getEloTiersByCategory(categoryId: string) {

@@ -646,23 +646,34 @@ export class RankingsService {
             // Update lastActiveAt for all doubles players
             const dNow = new Date();
             if (scope === 'PUBLIC') {
-            for (const uid of [...winnerUserIds, ...loserUserIds]) {
-            await tx.update(schema.userRanks).set({ lastActiveAt: dNow } as any).where(eq(schema.userRanks.userId, uid));
-            }
+              for (const uid of [...winnerUserIds, ...loserUserIds]) {
+                await tx
+                  .update(schema.userRanks)
+                  .set({ lastActiveAt: dNow } as any)
+                  .where(
+                    and(
+                      eq(schema.userRanks.userId, uid),
+                      eq(schema.userRanks.categoryId, categoryId),
+                    ),
+                  );
+              }
             } else if (scope === 'COMMUNITY') {
-            for (const uid of [...winnerUserIds, ...loserUserIds]) {
-            await tx.update(schema.communityRankings).set({ lastActiveAt: dNow } as any).where(
-              and(
-                eq(schema.communityRankings.userId, uid),
-                eq(schema.communityRankings.categoryId, categoryId),
-                communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
-              ),
-            );
-            }
+              for (const uid of [...winnerUserIds, ...loserUserIds]) {
+                await tx
+                  .update(schema.communityRankings)
+                  .set({ lastActiveAt: dNow } as any)
+                  .where(
+                    and(
+                      eq(schema.communityRankings.userId, uid),
+                      eq(schema.communityRankings.categoryId, categoryId),
+                      communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
+                    ),
+                  );
+              }
             }
 
             return {
-            success: true,
+              success: true,
             winnerPlayerCount: winnerRanksList.length,
           loserPlayerCount: loserRanksList.length,
           doublesMode: true,
@@ -842,7 +853,12 @@ export class RankingsService {
           await tx
             .update(schema.userRanks)
             .set({ lastActiveAt: now } as any)
-            .where(eq(schema.userRanks.userId, userId));
+            .where(
+              and(
+                eq(schema.userRanks.userId, userId),
+                eq(schema.userRanks.categoryId, categoryId),
+              ),
+            );
         }
       }
 
