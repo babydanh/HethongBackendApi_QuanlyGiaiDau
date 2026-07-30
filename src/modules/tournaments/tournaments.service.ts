@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isDeepStrictEqual } from 'node:util';
 import { TournamentsRepository } from './tournaments.repository';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
@@ -698,6 +699,8 @@ export class TournamentsService {
 
     const existing = await this.tournamentsRepository.findById(id);
     if (!existing) throw new NotFoundException('Tournament not found');
+    const existingConfig = (existing.tournamentConfig || {}) as Record<string, unknown>;
+    const incomingConfigPatch = updateTournamentDto.tournamentConfig;
 
     const categoryId = updateTournamentDto.categoryId ?? existing.categoryId;
     const category = await this.tournamentsRepository.findCategory(categoryId);
@@ -739,12 +742,13 @@ export class TournamentsService {
         }
       }
       // Check tournamentConfig core fields
-      if (updateTournamentDto.tournamentConfig) {
-        const existingConfig = (existing.tournamentConfig || {}) as Record<string, unknown>;
-        const incomingConfig = updateTournamentDto.tournamentConfig;
+      if (incomingConfigPatch) {
         const configCoreFields = ['bracketType', 'minElo', 'maxElo', 'maxCombinedElo', 'maxTeammateGap'];
         for (const key of configCoreFields) {
-          if (incomingConfig[key] !== undefined && incomingConfig[key] !== existingConfig[key]) {
+          if (
+            incomingConfigPatch[key] !== undefined &&
+            !isDeepStrictEqual(incomingConfigPatch[key], existingConfig[key])
+          ) {
             throw new BadRequestException(`Cannot modify tournament configuration key '${key}' after tournament is published`);
           }
         }
@@ -753,7 +757,7 @@ export class TournamentsService {
 
     if (existing.status === 'IN_PROGRESS' || existing.status === 'COMPLETED') {
       const unsafeFields: (keyof UpdateTournamentDto)[] = [
-        'matchType', 'maxParticipants', 'categoryId', 'tournamentConfig', 
+        'matchType', 'maxParticipants', 'categoryId',
         'entryFee', 'platformFeePercentage', 'registrationStartDate', 'registrationEndDate',
         'sportRules', 'isRanked'
       ];
@@ -762,6 +766,26 @@ export class TournamentsService {
           throw new BadRequestException(`Cannot modify field '${field}' when tournament is in progress or completed`);
         }
       }
+
+      if (incomingConfigPatch) {
+        const changedUnsafeConfigKey = Object.keys(incomingConfigPatch).find(
+          (key) =>
+            key !== 'hideFeaturedCardText' &&
+            !isDeepStrictEqual(incomingConfigPatch[key], existingConfig[key]),
+        );
+        if (changedUnsafeConfigKey) {
+          throw new BadRequestException(
+            `Cannot modify tournament configuration key '${changedUnsafeConfigKey}' when tournament is in progress or completed`,
+          );
+        }
+      }
+    }
+
+    if (incomingConfigPatch) {
+      updateTournamentDto.tournamentConfig = {
+        ...existingConfig,
+        ...incomingConfigPatch,
+      };
     }
 
     const regStartVal = updateTournamentDto.registrationStartDate !== undefined

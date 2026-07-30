@@ -75,58 +75,89 @@ export class AiService {
   }
 
   private async buildUserContext(userId: string): Promise<string> {
-    let ctx = '\n--- THÔNG TIN CÁ NHÂN CỦA BẠN ---\n';
+    const ctxLines: string[] = [];
+    ctxLines.push('\n--- THÔNG TIN CÁ NHÂN CỦA BẠN ---');
 
-    // Thông báo chưa đọc
-    try {
-      const unread = await this.notificationsService.getUnreadCount(userId);
-      ctx += `- Thông báo chưa đọc: ${unread.count}\n`;
-    } catch { ctx += '- Thông báo: Không thể tải\n'; }
+    // Chạy song song tất cả queries
+    const [unreadResult, workspaceResult, rankingResult, upcomingResult] = await Promise.allSettled([
+      this.notificationsService.getUnreadCount(userId),
+      this.tournamentsService.getMyWorkspace(userId),
+      this.rankingsService.getUserRankings(userId),
+      (async () => {
+        const query = new QueryMatchDto();
+        query.userId = userId;
+        return this.matchesService.findAll(query);
+      })(),
+    ]);
 
-    // Giải đấu đang tham gia
-    try {
-      const myTours = await this.tournamentsService.findMy(userId);
-      const ACTIVE_STATUSES = ['IN_PROGRESS', 'REGISTRATION_OPEN', 'UPCOMING'] as const;
-      const active = myTours.filter(
-        (t: { status?: string }) => t.status && ACTIVE_STATUSES.includes(t.status as typeof ACTIVE_STATUSES[number])
-      );
-      if (active.length > 0) {
-        ctx += `- Giải đấu đang tham gia:\n`;
-        active.slice(0, 5).forEach((t: { name?: string; status?: string }) => {
-          const statusText = t.status === 'IN_PROGRESS' ? 'Đang thi đấu'
-            : t.status === 'REGISTRATION_OPEN' ? 'Đang mở đăng ký' : 'Sắp diễn ra';
-          ctx += `  • ${t.name || 'Không tên'}: ${statusText}\n`;
+    // 1. Thông báo chưa đọc
+    if (unreadResult.status === 'fulfilled') {
+      ctxLines.push(`- Thông báo chưa đọc: ${unreadResult.value.count}`);
+    }
+
+    // 2. Workspace — phân loại role dùng getMyWorkspace
+    const ACTIVE_STATUSES = ['IN_PROGRESS', 'REGISTRATION_OPEN', 'UPCOMING'] as const;
+    const isActive = (t: { status?: string }) => t.status && ACTIVE_STATUSES.includes(t.status as typeof ACTIVE_STATUSES[number]);
+
+    if (workspaceResult.status === 'fulfilled') {
+      const w = workspaceResult.value;
+
+      const orgActive = (w.organizedTournaments || []).filter(isActive);
+      const partActive = (w.participatingTournaments || []).filter(isActive);
+      const coOrgActive = (w.coOrganizerTournaments || []).filter(isActive);
+      const refTournaments = w.refereeTournaments || [];
+      const refInvites = w.refereeInvites || [];
+
+      ctxLines.push(`- Vai trò hiện tại: ${orgActive.length > 0 ? 'Ban tổ chức' : partActive.length > 0 ? 'Vận động viên' : 'Người dùng'}`);
+
+      if (orgActive.length > 0) {
+        ctxLines.push(`- Giải đang tổ chức (${orgActive.length}):`);
+        orgActive.slice(0, 3).forEach((t: any) => {
+          const st = t.status === 'IN_PROGRESS' ? '🟢 Đang đấu' : t.status === 'REGISTRATION_OPEN' ? '📝 Đang đăng ký' : '⏳ Sắp diễn ra';
+          ctxLines.push(`  • ${t.name || 'Không tên'} — ${st}`);
         });
       }
-    } catch { /* silently ignore */ }
 
-    // ELO hiện tại
-    try {
-      const ranking = await this.rankingsService.getUserRankings(userId);
-      if (ranking?.publicRanks && ranking.publicRanks.length > 0) {
-        const top = ranking.publicRanks[0];
-        ctx += `- ELO hiện tại: ${top.eloPoints ?? 'Chưa có'} (${top.tierName || 'Chưa xếp hạng'})\n`;
+      if (partActive.length > 0) {
+        ctxLines.push(`- Giải đang tham gia (${partActive.length}):`);
+        partActive.slice(0, 3).forEach((t: any) => {
+          const st = t.status === 'IN_PROGRESS' ? '🟢 Đang đấu' : t.status === 'REGISTRATION_OPEN' ? '📝 Đang đăng ký' : '⏳ Sắp diễn ra';
+          ctxLines.push(`  • ${t.name || 'Không tên'} — ${st}`);
+        });
       }
-    } catch { /* silently ignore */ }
 
-    // Trận sắp tới
-    try {
-      const query = new QueryMatchDto();
-      query.userId = userId;
-      const matches = await this.matchesService.findAll(query);
+      if (coOrgActive.length > 0) {
+        ctxLines.push(`- Đồng tổ chức: ${coOrgActive.length} giải`);
+      }
+
+      if (refInvites.length > 0) {
+        ctxLines.push(`- Lời mời làm trọng tài: ${refInvites.length} lời mời`);
+      }
+    }
+
+    // 3. ELO hiện tại
+    if (rankingResult.status === 'fulfilled' && rankingResult.value?.publicRanks?.length > 0) {
+      const top = rankingResult.value.publicRanks[0];
+      ctxLines.push(`- ELO hiện tại: ${top.eloPoints ?? 'Chưa có'} (${top.tierName || 'Chưa xếp hạng'})`);
+    }
+
+    // 4. Trận sắp tới
+    if (upcomingResult.status === 'fulfilled') {
+      const matches = upcomingResult.value;
       if (Array.isArray(matches)) {
         const upcoming = matches.filter((m: { status?: string }) => m.status === 'SCHEDULED').slice(0, 3);
         if (upcoming.length > 0) {
-          ctx += `- Trận sắp tới:\n`;
-          upcoming.forEach((m: { participant1?: { teamName?: string }; participant2?: { teamName?: string }; scheduledAt?: string }) => {
-            ctx += `  • ${m.participant1?.teamName || 'TBD'} vs ${m.participant2?.teamName || 'TBD'}: ${m.scheduledAt ? new Date(m.scheduledAt).toLocaleString('vi-VN') : 'Chưa xếp lịch'}\n`;
+          ctxLines.push('- Trận sắp tới:');
+          upcoming.forEach((m: any) => {
+            const time = m.scheduledAt ? new Date(m.scheduledAt).toLocaleString('vi-VN') : 'Chưa xếp lịch';
+            ctxLines.push(`  • ${m.participant1?.teamName || 'TBD'} vs ${m.participant2?.teamName || 'TBD'} — ${time}`);
           });
         }
       }
-    } catch { /* silently ignore */ }
+    }
 
-    ctx += '---\n';
-    return ctx;
+    ctxLines.push('---');
+    return ctxLines.join('\n');
   }
 
   /**
@@ -146,8 +177,15 @@ ${tournamentContext}
 ${userContext}`;
   }
 
-  private async buildOpenAiMessages(messages: any[], userId?: string, currentUrl?: string): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
-    let tournamentContext = '';
+  private async buildOpenAiMessages(
+    messages: any[],
+    userId?: string,
+    currentUrl?: string,
+    pageTitle?: string,
+    isMobile?: boolean,
+    searchParams?: string,
+  ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
+    let pageContext = '';
     const tournamentId = this.extractTournamentId(currentUrl);
 
     if (tournamentId) {
@@ -185,6 +223,9 @@ ${userContext}`;
             tournament.endDate ? `- Kết thúc: ${new Date(tournament.endDate).toLocaleDateString('vi-VN')}` : '',
             `- Địa điểm: ${tournament.venue?.name || 'Chưa cập nhật'}${tournament.venue?.locationAddress ? ` (${tournament.venue.locationAddress})` : ''}`,
             `- Người tạo: ${tournament.organizer?.fullName || 'Chưa xác định'}`,
+            tournament.description ? `- Mô tả: ${tournament.description.replace(/\n/g, ' ').substring(0, 200)}${tournament.description.length > 200 ? '...' : ''}` : '',
+            tournament.prizeDescription ? `- Giải thưởng: ${tournament.prizeDescription.replace(/\n/g, ' ').substring(0, 200)}` : '',
+            tournament._summary?.participantCount !== undefined ? `- Số đội đã đăng ký: ${tournament._summary.participantCount}` : '',
           ].filter(Boolean).join('\n');
 
           tournamentContext = `
@@ -203,12 +244,22 @@ ${divisionsStr}
       }
     }
 
+    // Thêm context về trang hiện tại (pageTitle, device type, search params)
+    if (pageTitle || isMobile !== undefined || searchParams) {
+      const deviceLabel = isMobile ? 'Điện thoại' : 'Máy tính';
+      pageContext += `\n--- TRANG HIỆN TẠI ---\n`;
+      if (pageTitle) pageContext += `- Bạn đang ở: ${pageTitle}\n`;
+      pageContext += `- Thiết bị: ${deviceLabel}\n`;
+      if (searchParams) pageContext += `- Query params: ${searchParams}\n`;
+      pageContext += `---\n`;
+    }
+
     let userContext = '';
     if (userId) {
       userContext = await this.buildUserContext(userId);
     }
 
-    const systemPrompt = this.buildSystemPromptWithContext(tournamentContext, userContext);
+    const systemPrompt = this.buildSystemPromptWithContext(pageContext, userContext);
 
     return [
       { role: 'system', content: systemPrompt },
@@ -222,13 +273,20 @@ ${divisionsStr}
     ];
   }
 
-  async getChatResponse(messages: any[], userId?: string, currentUrl?: string): Promise<string> {
+  async getChatResponse(
+    messages: any[],
+    userId?: string,
+    currentUrl?: string,
+    pageTitle?: string,
+    isMobile?: boolean,
+    searchParams?: string,
+  ): Promise<string> {
     if (!this.openai) {
       return 'Hệ thống trợ lý AI hiện chưa được cấu hình API Key từ OpenRouter. Vui lòng liên hệ quản trị viên.';
     }
 
     try {
-      const openAiMessages = await this.buildOpenAiMessages(messages, userId, currentUrl);
+      const openAiMessages = await this.buildOpenAiMessages(messages, userId, currentUrl, pageTitle, isMobile, searchParams);
 
       const response = await this.openai.chat.completions.create({
         model: this.modelName,
@@ -242,13 +300,20 @@ ${divisionsStr}
     }
   }
 
-  async getChatResponseStream(messages: any[], userId?: string, currentUrl?: string) {
+  async getChatResponseStream(
+    messages: any[],
+    userId?: string,
+    currentUrl?: string,
+    pageTitle?: string,
+    isMobile?: boolean,
+    searchParams?: string,
+  ) {
     if (!this.openai) {
       throw new InternalServerErrorException('Hệ thống trợ lý AI hiện chưa được cấu hình API Key từ OpenRouter. Vui lòng liên hệ quản trị viên.');
     }
 
     try {
-      const openAiMessages = await this.buildOpenAiMessages(messages, userId, currentUrl);
+      const openAiMessages = await this.buildOpenAiMessages(messages, userId, currentUrl, pageTitle, isMobile, searchParams);
 
       return await this.openai.chat.completions.create({
         model: this.modelName,

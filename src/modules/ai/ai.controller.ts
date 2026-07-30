@@ -32,11 +32,14 @@ export class AiController {
   async chat(
     @Body('messages') messages: any[],
     @Body('currentUrl') currentUrl: string,
+    @Body('pageTitle') pageTitle: string,
+    @Body('isMobile') isMobile: boolean,
+    @Body('searchParams') searchParams: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
     const userId = req ? this.getUserIdFromRequest(req) : undefined;
-    
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -44,7 +47,7 @@ export class AiController {
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
     try {
-      const stream = await this.aiService.getChatResponseStream(messages || [], userId, currentUrl);
+      const stream = await this.aiService.getChatResponseStream(messages || [], userId, currentUrl, pageTitle, isMobile, searchParams);
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content || '';
         if (content) {
