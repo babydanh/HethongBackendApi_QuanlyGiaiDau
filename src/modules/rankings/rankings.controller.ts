@@ -12,7 +12,7 @@ import { UserRole } from '../../common/constants/enums';
 export class RankingsController {
   constructor(private readonly rankingsService: RankingsService) {}
 
-  @Public()
+  @ApiBearerAuth()
   @Get()
   @ApiOperation({ summary: 'Lấy bảng xếp hạng theo môn thể thao' })
   async getLeaderboard(@Query() query: QueryRankingDto) {
