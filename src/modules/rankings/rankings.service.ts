@@ -634,6 +634,13 @@ export class RankingsService {
           for (const uid of loserUserIds) {
             await this.recalculateUserRankTier(tx, uid, categoryId, matchType, genderRestriction);
           }
+        } else if (scope === 'COMMUNITY') {
+          for (const uid of winnerUserIds) {
+            await this.recalculateCommunityRankTier(tx, uid, categoryId, matchType, communityId, genderRestriction);
+          }
+          for (const uid of loserUserIds) {
+            await this.recalculateCommunityRankTier(tx, uid, categoryId, matchType, communityId, genderRestriction);
+          }
         }
 
         return {
@@ -790,6 +797,13 @@ export class RankingsService {
         for (const userId of loserUserIds) {
           await this.recalculateUserRankTier(tx, userId, categoryId, matchType, genderRestriction);
         }
+      } else if (scope === 'COMMUNITY') {
+        for (const userId of winnerUserIds) {
+          await this.recalculateCommunityRankTier(tx, userId, categoryId, matchType, communityId, genderRestriction);
+        }
+        for (const userId of loserUserIds) {
+          await this.recalculateCommunityRankTier(tx, userId, categoryId, matchType, communityId, genderRestriction);
+        }
       }
 
       return {
@@ -924,6 +938,52 @@ export class RankingsService {
           .set({ tierId: targetTier ? targetTier.id : null })
           .where(eq(schema.userRanks.id, rank.id));
       }
+    }
+  }
+
+  async recalculateCommunityRankTier(
+    tx: Transaction,
+    userId: string,
+    categoryId: string,
+    matchType: string,
+    communityId?: string,
+    genderRestriction?: string,
+  ) {
+    const tiers = await tx
+      .select()
+      .from(schema.eloTiers)
+      .where(eq(schema.eloTiers.categoryId, categoryId))
+      .orderBy(schema.eloTiers.minElo);
+    if (tiers.length === 0) return;
+
+    const genderCondition = genderRestriction
+      ? eq(schema.communityRankings.genderRestriction, genderRestriction)
+      : isNull(schema.communityRankings.genderRestriction);
+
+    const [rank] = await tx
+      .select()
+      .from(schema.communityRankings)
+      .where(
+        and(
+          eq(schema.communityRankings.userId, userId),
+          eq(schema.communityRankings.categoryId, categoryId),
+          eq(schema.communityRankings.matchType, matchType),
+          genderCondition,
+          eq(schema.communityRankings.communityId, communityId ?? ''),
+        ),
+      )
+      .limit(1);
+
+    if (rank) {
+      const elo = rank.eloPoints;
+      let targetTier: typeof schema.eloTiers.$inferSelect | null = null;
+      for (const t of tiers) {
+        if (elo >= t.minElo) targetTier = t;
+      }
+      await tx
+        .update(schema.communityRankings)
+        .set({ tierId: targetTier ? targetTier.id : null })
+        .where(eq(schema.communityRankings.id, rank.id));
     }
   }
 

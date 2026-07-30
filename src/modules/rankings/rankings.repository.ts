@@ -137,6 +137,10 @@ export class RankingsRepository {
           matchesWon: schema.communityRankings.matchesWon,
           winStreak: schema.communityRankings.winStreak,
           updatedAt: schema.communityRankings.updatedAt,
+          tier: {
+            id: schema.eloTiers.id,
+            name: schema.eloTiers.name,
+          },
           user: {
             id: schema.users.id,
             fullName: schema.profiles.fullName,
@@ -146,6 +150,7 @@ export class RankingsRepository {
         .from(schema.communityRankings)
         .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+        .leftJoin(schema.eloTiers, eq(schema.communityRankings.tierId, schema.eloTiers.id))
         .leftJoin(schema.communityMembers, and(
           eq(schema.communityRankings.userId, schema.communityMembers.userId),
           eq(schema.communityRankings.communityId, schema.communityMembers.communityId),

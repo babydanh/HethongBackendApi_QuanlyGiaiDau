@@ -10,7 +10,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
 import { communities } from './communities.schema';
-import { categories } from './categories.schema';
+import { categories, eloTiers } from './categories.schema';
 
 export const communityRankings = pgTable('community_rankings', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -24,6 +24,9 @@ export const communityRankings = pgTable('community_rankings', {
   matchesWon: integer('matches_won').default(0).notNull(),
   winStreak: integer('win_streak').default(0).notNull(),
   peakElo: integer('peak_elo').default(1000).notNull(),
+  tierId: uuid('tier_id').references(() => eloTiers.id, {
+    onDelete: 'set null',
+  }),
   lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
