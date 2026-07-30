@@ -155,6 +155,19 @@ export class TournamentsService {
     return tournament;
   }
 
+  /** Keep the public banner flag stable for Web/App clients. */
+  private mapPublicTournament<T extends { tournamentConfig?: unknown }>(
+    tournament: T,
+  ): T & { hideFeaturedCardText: boolean } {
+    const config = tournament.tournamentConfig;
+    const hideFeaturedCardText =
+      typeof config === 'object' && config !== null && !Array.isArray(config)
+        ? (config as Record<string, unknown>).hideFeaturedCardText === true
+        : false;
+
+    return { ...tournament, hideFeaturedCardText };
+  }
+
   private validateRegistrationMode(config: unknown) {
     if (!config || typeof config !== 'object') return;
 
@@ -210,7 +223,7 @@ export class TournamentsService {
     });
     result.data = result.data
       .filter((t) => t.status !== 'DRAFT' && t.status !== 'CANCELLED')
-      .map(t => this.mapTournamentFormat(t));
+      .map(t => this.mapPublicTournament(this.mapTournamentFormat(t)));
     return result;
   }
 
