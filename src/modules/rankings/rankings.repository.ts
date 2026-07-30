@@ -109,6 +109,7 @@ export class RankingsRepository {
         eq(schema.communityRankings.communityId, communityId),
         eq(schema.users.isMock, false),
         gt(schema.communityRankings.matchesPlayed, 0),
+        eq(schema.communityMembers.status, 'JOINED'),
       ];
       if (matchType) {
         conditions.push(eq(schema.communityRankings.matchType, matchType));
@@ -145,6 +146,10 @@ export class RankingsRepository {
         .from(schema.communityRankings)
         .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+        .leftJoin(schema.communityMembers, and(
+          eq(schema.communityRankings.userId, schema.communityMembers.userId),
+          eq(schema.communityRankings.communityId, schema.communityMembers.communityId),
+        ))
         .where(whereClause)
         .orderBy(desc(schema.communityRankings.eloPoints))
         .limit(limit)
