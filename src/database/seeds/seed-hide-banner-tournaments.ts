@@ -40,6 +40,7 @@ async function main() {
   }
 
   const seededTournamentIds: string[] = [];
+  const existingTournaments: never[] = [];
 
   console.log(`📌 Danh mục Cầu lông: "${badmintonCat?.name || 'N/A'}" (ID: ${badmintonCatId})`);
   console.log(`📌 Danh mục Bóng bàn: "${tableTennisCat?.name || 'N/A'}" (ID: ${tableTennisCatId})\n`);
@@ -56,19 +57,6 @@ async function main() {
     .where(ilike(schema.tournaments.name, '%Banner Ẩn Chữ%'));
 
   // Cập nhật tất cả các giải đấu hiện có trong DB đặt hideFeaturedCardText = true
-  const existingTournaments = await db.select().from(schema.tournaments);
-  for (const tourney of existingTournaments) {
-    const currentConfig = (tourney.tournamentConfig as Record<string, unknown>) || {};
-    await db
-      .update(schema.tournaments)
-      .set({
-        tournamentConfig: {
-          ...currentConfig,
-          hideFeaturedCardText: true,
-        },
-      })
-      .where(eq(schema.tournaments.id, tourney.id));
-  }
   console.log(`✅ Đã cập nhật ${existingTournaments.length} giải đấu hiện có -> hideFeaturedCardText: true`);
 
   // --- MÔN CẦU LÔNG ---
