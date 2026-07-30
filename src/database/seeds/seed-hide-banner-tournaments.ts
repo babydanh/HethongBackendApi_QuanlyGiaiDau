@@ -17,34 +17,18 @@ async function main() {
     process.exit(1);
   }
 
-  // 1. Lấy danh mục Cầu lông
-  let [badmintonCat] = await db
-    .select()
-    .from(schema.categories)
-    .where(
-      or(
-        ilike(schema.categories.slug, '%badminton%'),
-        ilike(schema.categories.slug, '%cau-long%'),
-        ilike(schema.categories.name, '%cầu lông%'),
-        ilike(schema.categories.name, '%badminton%')
-      )
-    )
-    .limit(1);
-
-  // 2. Lấy danh mục Bóng bàn
-  let [tableTennisCat] = await db
-    .select()
-    .from(schema.categories)
-    .where(
-      or(
-        ilike(schema.categories.slug, '%table%'),
-        ilike(schema.categories.slug, '%table-tennis%'),
-        ilike(schema.categories.slug, '%bong-ban%'),
-        ilike(schema.categories.name, '%bóng bàn%'),
-        ilike(schema.categories.name, '%table tennis%')
-      )
-    )
-    .limit(1);
+  // 1. Lấy tất cả danh mục để match chính xác
+  const allCategories = await db.select().from(schema.categories);
+  const badmintonCat = allCategories.find((c) =>
+    c.slug.toLowerCase().includes('badminton') ||
+    c.slug.toLowerCase().includes('cau-long') ||
+    c.name.toLowerCase().includes('cầu lông'),
+  );
+  const tableTennisCat = allCategories.find((c) =>
+    c.slug.toLowerCase().includes('table') ||
+    c.slug.toLowerCase().includes('bong-ban') ||
+    c.name.toLowerCase().includes('bóng bàn'),
+  );
 
   const badmintonCatId = badmintonCat?.id;
   const tableTennisCatId = tableTennisCat?.id;
