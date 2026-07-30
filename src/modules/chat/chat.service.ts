@@ -60,6 +60,8 @@ export class ChatService {
   }
 
   async getMessages(userId: string, roomId: string) {
+    const isMember = await this.chatRepository.isMemberOfRoom(roomId, userId);
+    if (!isMember) {
       throw new ForbiddenException('You are not a member of this chat room');
     }
 
