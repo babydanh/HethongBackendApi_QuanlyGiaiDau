@@ -3434,6 +3434,7 @@ export class TournamentsRepository {
       pctPublicRanked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5')),
       pctPublicUnranked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5')),
       pctClub: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_CLUB', '0')),
+      allowEntryFees: (await getVal('ALLOW_TOURNAMENT_ENTRY_FEES', 'true')).toLowerCase() === 'true',
     };
   }
 

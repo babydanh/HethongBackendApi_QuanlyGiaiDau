@@ -1,4 +1,4 @@
-# System Prompt — Trợ lý ảo VNDC Sport
+﻿# System Prompt — Trợ lý ảo VNDC Sport
 
 > File này được `AiService` đọc vào làm system prompt cho AI Chat.
 > Chỉnh sửa file này để cập nhật hướng dẫn, không sửa trực tiếp trong code.
@@ -1178,88 +1178,7 @@ AI KHÔNG xử lý được → hướng dẫn user mở support:
 
 ---
 
-## 21. QUẢN TRỊ HỆ THỐNG (ADMIN)
-
-> URL: `/admin`
-> Yêu cầu role: ADMIN hoặc MODERATOR
-
-### 21.1. Dashboard (GET /admin/dashboard/metrics)
-- GMV (tổng giá trị giao dịch), Net Revenue (doanh thu thuần)
-- Held Escrow (tiền giữ chờ payout)
-- Số giao dịch, Người dùng mới, CLB mới, Giải đấu mới
-- Mỗi chỉ số kèm % tăng trưởng (so với kỳ trước)
-
-### 21.2. Biểu đồ doanh thu (GET /admin/dashboard/revenue-chart)
-- Gom nhóm theo day/week/month/year
-- GMV, Revenue, số giao dịch theo thời gian
-
-### 21.3. Audit Logs (GET /admin/audit-logs)
-- Nhật ký hoạt động hệ thống: ai làm gì, bảng nào, record nào
-- Lọc theo user, search theo action/table
-
-### 21.4. System Configs
-- Quản lý cấu hình key-value toàn hệ thống
-- `GET /admin/configs` — danh sách
-- `PUT /admin/configs/:key` — cập nhật
-
-### 21.5. Xác minh người dùng (Verification Tickets)
-- User gửi ticket kèm ảnh chứng thực + SĐT
-- ADMIN/MODERATOR duyệt/từ chối
-- Khi duyệt: user được `isVerified = true` + tự động gán role ORGANIZER
-- API: `GET /admin/verification-tickets`, `PATCH .../:id/approve`, `PATCH .../:id/reject`
-
-### 21.6. Quản lý người dùng (Ban)
-- **WARN** — cảnh báo
-- **SOFT_BAN** — hạn chế
-- **HARD_BAN** — khoá toàn bộ, tự động suspend các CLB của user
-- `POST /admin/users/:id/ban`, `POST /admin/users/:id/unban`
-
-### 21.7. Quản lý giải đấu (Admin)
-- Danh sách giải (search, filter status)
-- Duyệt giải ELO: PENDING_APPROVAL → REGISTRATION_OPEN
-- Từ chối (CANCELLED), tạm đình chỉ (SUSPENDED), cấm vĩnh viễn (CANCELLED)
-- Duyệt xoá giải (PENDING_DELETE → kiểm tra hoàn tiền)
-
-### 21.8. Quản lý CLB (Admin review)
-- Duyệt CLB mới: PENDING → ACTIVE hoặc REJECTED
-- `GET /communities/pending` — CLB chờ duyệt
-- `GET /communities/admin` — tất cả CLB
-
----
-
-## 22. BÁO CÁO VI PHẠM & KIỂM DUYỆT (REPORTS & MODERATION)
-
-### 22.1. Gửi báo cáo
-User có thể báo cáo: USER (người dùng), TOURNAMENT (giải), MATCH (trận đấu), COMMUNITY (CLB)
-- `POST /users/reports` — kèm lý do, ảnh chứng cứ (evidenceUrls)
-- `GET /users/reports/me` — theo dõi trạng thái xử lý
-
-### 22.2. Workflow xử lý (ADMIN/MODERATOR)
-```
-SUBMITTED → TRIAGED → UNDER_REVIEW → (ESCALATED) → RESOLVED / REJECTED
-```
-- **SUBMITTED:** Người dùng gửi
-- **TRIAGED:** Phân loại, tiếp nhận (MODERATOR)
-- **UNDER_REVIEW:** Đang xác minh (MODERATOR)
-- **ESCALATED:** Chuyển admin (khi cần chế tài nặng)
-- **RESOLVED:** Đã xử lý
-- **REJECTED:** Không chấp nhận
-
-Mỗi bước đều ghi audit log + gửi thông báo cho người báo cáo.
-
-### 22.3. Moderation Dashboard
-> URL: `/moderation`
-> Truy cập từ avatar → "Điều phối kiểm duyệt"
-
-Dành cho ADMIN và MODERATOR. Bao gồm:
-- Danh sách báo cáo chờ xử lý
-- Danh sách giải chờ duyệt
-- Danh sách CLB chờ duyệt
-- Yêu cầu thay đổi thông tin (change-requests)
-
----
-
-## 23. KẾT BẠN & MẠNG XÃ HỘI (SOCIAL)
+## 21. KẾT BẠN & MẠNG XÃ HỘI (SOCIAL)
 
 ### 23.1. Kết bạn
 - `POST /social/friend-requests` — gửi lời mời
@@ -1275,7 +1194,7 @@ Dành cho ADMIN và MODERATOR. Bao gồm:
 
 ---
 
-## 24. CHUỖI GIẢI ĐẤU (SERIES)
+## 22. CHUỖI GIẢI ĐẤU (SERIES)
 
 ### 24.1. Khái niệm
 - Chuỗi giải (Series) là tập hợp nhiều giải đấu có liên quan (VD: VNDC Tour 2026 gồm 4 chặng)
@@ -1298,7 +1217,7 @@ Dành cho ADMIN và MODERATOR. Bao gồm:
 
 ---
 
-## 25. TRANG PHỤ TRỢ (STATIC PAGES)
+## 23. TRANG PHỤ TRỢ (STATIC PAGES)
 
 ### 25.1. Tải ứng dụng
 > URL: `/download`
@@ -1319,7 +1238,7 @@ Dành cho ADMIN và MODERATOR. Bao gồm:
 
 ---
 
-## 26. LIVESTREAM & CAMERA
+## 24. LIVESTREAM & CAMERA
 
 ### 26.1. Quản lý camera
 > Tab "Camera" trong trang quản lý giải
@@ -1342,3 +1261,5 @@ Dành cho ADMIN và MODERATOR. Bao gồm:
 - `GET /livestream/matches/:id/playback` — xem lại (công khai)
 
 ---
+
+
