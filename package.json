@@ -19,6 +19,7 @@
     "seed:brackets": "npx ts-node src/database/seeds/generate-brackets.ts",
     "seed:play": "npx ts-node src/database/seeds/play-matches.ts",
     "seed:data": "npx ts-node src/database/seeds/seed-data-prod.ts",
+    "seed:hide-banner": "npx ts-node src/database/seeds/seed-hide-banner-tournaments.ts",
     "repair:brackets": "npx ts-node src/database/seeds/repair-double-elim-brackets.ts",
     "test": "jest",
     "test:watch": "jest --watch",
