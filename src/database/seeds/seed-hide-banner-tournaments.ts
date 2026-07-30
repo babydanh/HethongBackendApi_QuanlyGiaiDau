@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
 import { createPostgresClientFromEnv } from '../postgres-client';
 import { ilike, or } from 'drizzle-orm';
+import Redis from 'ioredis';
 
 const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
 const db = drizzle(sqlClient, { schema });
@@ -128,6 +129,19 @@ async function main() {
   });
 
   console.log(`✅ Đã tạo Giải đấu Bóng bàn 2: "${t2.name}" (ID: ${t2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
+
+  // Invalidate Redis cache
+  try {
+    const redisHost = process.env.REDIS_HOST || 'localhost';
+    const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+    const redisPass = process.env.REDIS_PASSWORD || undefined;
+    const redis = new Redis({ host: redisHost, port: redisPort, password: redisPass });
+    await redis.flushall();
+    console.log('🧹 Đã xóa sạch Redis cache thành công!');
+    await redis.quit();
+  } catch (err) {
+    console.warn('Lỗi khi xóa Redis cache trong seed (bỏ qua):', err);
+  }
 
   console.log('\n=== TẠO SEED 2 GIẢI BÓNG BÀN CHUẨN THÀNH CÔNG ===');
   await sqlClient.end();
