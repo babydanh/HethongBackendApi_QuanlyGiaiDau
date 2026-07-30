@@ -634,27 +634,36 @@ export class RankingsService {
           for (const uid of loserUserIds) {
             await this.recalculateUserRankTier(tx, uid, categoryId, matchType, genderRestriction);
           }
-
-          // Update lastActiveAt
-          const now = new Date();
-          for (const uid of [...winnerUserIds, ...loserUserIds]) {
-            await tx
-              .update(schema.userRanks)
-              .set({ lastActiveAt: now } as any)
-              .where(eq(schema.userRanks.userId, uid));
-          }
         } else if (scope === 'COMMUNITY') {
           for (const uid of winnerUserIds) {
             await this.recalculateCommunityRankTier(tx, uid, categoryId, matchType, communityId, genderRestriction);
           }
           for (const uid of loserUserIds) {
             await this.recalculateCommunityRankTier(tx, uid, categoryId, matchType, communityId, genderRestriction);
-          }
-        }
+            }
+            }
 
-        return {
-          success: true,
-          winnerPlayerCount: winnerRanksList.length,
+            // Update lastActiveAt for all doubles players
+            const dNow = new Date();
+            if (scope === 'PUBLIC') {
+            for (const uid of [...winnerUserIds, ...loserUserIds]) {
+            await tx.update(schema.userRanks).set({ lastActiveAt: dNow } as any).where(eq(schema.userRanks.userId, uid));
+            }
+            } else if (scope === 'COMMUNITY') {
+            for (const uid of [...winnerUserIds, ...loserUserIds]) {
+            await tx.update(schema.communityRankings).set({ lastActiveAt: dNow } as any).where(
+              and(
+                eq(schema.communityRankings.userId, uid),
+                eq(schema.communityRankings.categoryId, categoryId),
+                communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
+              ),
+            );
+            }
+            }
+
+            return {
+            success: true,
+            winnerPlayerCount: winnerRanksList.length,
           loserPlayerCount: loserRanksList.length,
           doublesMode: true,
         };
@@ -812,6 +821,28 @@ export class RankingsService {
         }
         for (const userId of loserUserIds) {
           await this.recalculateCommunityRankTier(tx, userId, categoryId, matchType, communityId, genderRestriction);
+        }
+      }
+
+      // Update lastActiveAt for both scopes
+      const now = new Date();
+      for (const userId of [...winnerUserIds, ...loserUserIds]) {
+        if (scope === 'COMMUNITY') {
+          await tx
+            .update(schema.communityRankings)
+            .set({ lastActiveAt: now } as any)
+            .where(
+              and(
+                eq(schema.communityRankings.userId, userId),
+                eq(schema.communityRankings.categoryId, categoryId),
+                communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
+              ),
+            );
+        } else {
+          await tx
+            .update(schema.userRanks)
+            .set({ lastActiveAt: now } as any)
+            .where(eq(schema.userRanks.userId, userId));
         }
       }
 
