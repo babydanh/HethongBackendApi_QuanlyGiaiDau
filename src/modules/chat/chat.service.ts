@@ -33,6 +33,7 @@ export class ChatService {
       data.memberIds.push(userId);
     }
     
+    
     if (data.type === 'DIRECT' && data.memberIds.length !== 2) {
       throw new BadRequestException('Direct room must have exactly 2 members');
     }
@@ -48,15 +49,17 @@ export class ChatService {
 
     const message = await this.chatRepository.saveMessage(userId, data);
     
-    // Broadcast the message
-    this.chatGateway.broadcastMessage(data.roomId, message);
+    const room = await this.chatRepository.findRoomById(data.roomId);
+    if (room?.type === RoomType.SUPPORT) {
+      this.chatGateway.broadcastSupportMessage(data.roomId, message);
+    } else {
+      this.chatGateway.broadcastMessage(data.roomId, message);
+    }
     
     return message;
   }
 
   async getMessages(userId: string, roomId: string) {
-    const isMember = await this.chatRepository.isMemberOfRoom(roomId, userId);
-    if (!isMember) {
       throw new ForbiddenException('You are not a member of this chat room');
     }
 

@@ -67,6 +67,7 @@ describe('TournamentsService — Lite pairing guards', () => {
   beforeEach(() => {
     mockRepo = {
       findById: jest.fn(),
+      findCategory: jest.fn(),
       findCommunityMember: jest.fn(),
       hasNonDeletedStagesOrMatches: jest.fn(),
       findLitePendingPartnerParticipants: jest.fn(),
@@ -78,12 +79,15 @@ describe('TournamentsService — Lite pairing guards', () => {
       lockTournamentAndUnpair: jest.fn(),
       registerParticipant: jest.fn(),
       countLiteActiveRosterUsers: jest.fn(),
+      update: jest.fn(),
     };
 
     mockBracketGenerator = {};
     mockNotifications = {};
     mockStorage = {};
-    mockRedis = {};
+    mockRedis = {
+      delByPattern: jest.fn(),
+    };
     mockConfig = {
       get: jest.fn().mockImplementation((key: string) => {
         if (key === 'FRONTEND_URL') return 'http://localhost:3001';
@@ -137,6 +141,73 @@ describe('TournamentsService — Lite pairing guards', () => {
       await expect(
         (service as any).checkLiteAuthorization('tournament-1', 'other-user', []),
       ).rejects.toThrow();
+    });
+  });
+
+  describe('update banner presentation settings', () => {
+    const inProgressTournament = {
+      ...liteTournament,
+      status: 'IN_PROGRESS',
+      tournamentType: 'PUBLIC',
+      tournamentConfig: {
+        mode: 'ADVANCED',
+        bracketType: 'SINGLE_ELIMINATION',
+        registrationMode: 'OPEN',
+        hideFeaturedCardText: false,
+      },
+      registrationStartDate: null,
+      registrationEndDate: null,
+      startDate: null,
+      endDate: null,
+      genderRestriction: null,
+      bannerUrl: null,
+      logoUrl: null,
+      parentId: null,
+    } as any;
+
+    beforeEach(() => {
+      mockRepo.findById!.mockResolvedValue(inProgressTournament);
+      mockRepo.findCategory!.mockResolvedValue({
+        id: 'cat-1',
+        name: 'Pickleball',
+        slug: 'pickleball',
+        categoryConfig: null,
+      } as any);
+      mockRepo.update!.mockImplementation(async (_id, _userId, dto) => ({
+        ...inProgressTournament,
+        ...dto,
+      }) as any);
+    });
+
+    it('allows hiding public banner text while preserving tournament configuration', async () => {
+      await service.update(
+        'tournament-1',
+        'user-1',
+        { tournamentConfig: { hideFeaturedCardText: true } } as any,
+      );
+
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        'tournament-1',
+        'user-1',
+        expect.objectContaining({
+          tournamentConfig: {
+            ...inProgressTournament.tournamentConfig,
+            hideFeaturedCardText: true,
+          },
+        }),
+      );
+    });
+
+    it('still rejects gameplay configuration changes while in progress', async () => {
+      await expect(
+        service.update(
+          'tournament-1',
+          'user-1',
+          { tournamentConfig: { registrationMode: 'APPROVAL' } } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });
 
