@@ -4,6 +4,7 @@ import { IsString, IsEnum, IsOptional, IsArray, IsUUID } from 'class-validator';
 export enum RoomType {
   DIRECT = 'DIRECT',
   GROUP = 'GROUP',
+  SUPPORT = 'SUPPORT',
 }
 
 export class CreateRoomDto {

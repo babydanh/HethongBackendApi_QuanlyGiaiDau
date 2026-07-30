@@ -5,6 +5,10 @@ import { CreateMessageDto } from './dto/create-message.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { CreateSupportConversationDto } from './dto/create-support-conversation.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/constants/enums';
+import { SendSupportMessageDto } from './dto/send-support-message.dto';
 
 @ApiTags('chat')
 @ApiBearerAuth()
@@ -43,5 +47,49 @@ export class ChatController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.chatService.getMessages(user.sub, id);
+  }
+
+  @Get('support/me')
+  @ApiOperation({ summary: 'Lấy cuộc hội thoại hỗ trợ của người dùng hiện tại' })
+  async getMySupportConversation(@CurrentUser() user: JwtPayload) {
+    return this.chatService.getMySupportConversation(user.sub);
+  }
+
+  @Post('support')
+  @ApiOperation({ summary: 'Mở cuộc hội thoại và gửi tin nhắn cho admin' })
+  async openSupportConversation(
+    @Body() dto: CreateSupportConversationDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.openSupportConversation(user.sub, dto);
+  }
+
+  @Get('admin/support/rooms')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Danh sách hội thoại hỗ trợ dành cho admin' })
+  async getAdminSupportRooms() {
+    return this.chatService.getAdminSupportRooms();
+  }
+
+  @Get('admin/support/rooms/:id/messages')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Đọc hội thoại hỗ trợ dành cho admin' })
+  async getAdminSupportMessages(@Param('id', ParseUUIDPipe) id: string) {
+    return this.chatService.getAdminSupportMessages(id);
+  }
+
+  @Post('admin/support/rooms/:id/messages')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Admin trả lời hội thoại hỗ trợ' })
+  async sendAdminSupportMessage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: SendSupportMessageDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.sendAdminSupportMessage(
+      user.sub,
+      id,
+      body.messageText,
+    );
   }
 }

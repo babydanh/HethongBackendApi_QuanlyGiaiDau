@@ -2,7 +2,7 @@
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, asc } from 'drizzle-orm';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 
@@ -162,9 +162,107 @@ export class ChatRepository {
       .from(schema.chatMessages)
       .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
       .where(eq(schema.chatMessages.roomId, roomId))
+      .orderBy(asc(schema.chatMessages.createdAt))
       .limit(limit);
 
     return result;
+  }
+
+  async findSupportRoomForUser(userId: string) {
+    const [room] = await this.db
+      .select({
+        id: schema.chatRooms.id,
+        name: schema.chatRooms.name,
+        type: schema.chatRooms.type,
+        createdAt: schema.chatRooms.createdAt,
+      })
+      .from(schema.chatRoomMembers)
+      .innerJoin(schema.chatRooms, eq(schema.chatRoomMembers.roomId, schema.chatRooms.id))
+      .where(
+        and(
+          eq(schema.chatRoomMembers.userId, userId),
+          eq(schema.chatRooms.type, 'SUPPORT'),
+        ),
+      )
+      .limit(1);
+
+    return room;
+  }
+
+  async findRoomById(roomId: string) {
+    const [room] = await this.db
+      .select()
+      .from(schema.chatRooms)
+      .where(eq(schema.chatRooms.id, roomId))
+      .limit(1);
+    return room;
+  }
+
+  async addRoomMemberIfMissing(roomId: string, userId: string) {
+    const exists = await this.isMemberOfRoom(roomId, userId);
+    if (exists) return;
+    await this.db.insert(schema.chatRoomMembers).values({ roomId, userId });
+  }
+
+  async getSupportRooms() {
+    const rooms = await this.db
+      .select({
+        id: schema.chatRooms.id,
+        name: schema.chatRooms.name,
+        type: schema.chatRooms.type,
+        createdAt: schema.chatRooms.createdAt,
+      })
+      .from(schema.chatRooms)
+      .where(eq(schema.chatRooms.type, 'SUPPORT'));
+
+    const result = await Promise.all(
+      rooms.map(async (room) => {
+        const participants = await this.db
+          .select({
+            id: schema.users.id,
+            email: schema.users.email,
+            fullName: schema.profiles.fullName,
+            avatarUrl: schema.profiles.avatarUrl,
+          })
+          .from(schema.chatRoomMembers)
+          .innerJoin(schema.users, eq(schema.chatRoomMembers.userId, schema.users.id))
+          .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+          .where(eq(schema.chatRoomMembers.roomId, room.id));
+
+        const [lastMessage] = await this.db
+          .select({
+            id: schema.chatMessages.id,
+            senderId: schema.chatMessages.senderId,
+            messageText: schema.chatMessages.messageText,
+            createdAt: schema.chatMessages.createdAt,
+            senderName: schema.profiles.fullName,
+          })
+          .from(schema.chatMessages)
+          .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
+          .where(eq(schema.chatMessages.roomId, room.id))
+          .orderBy(sql`${schema.chatMessages.createdAt} DESC`)
+          .limit(1);
+
+        return {
+          ...room,
+          participants,
+          lastMessage: lastMessage
+            ? {
+                id: lastMessage.id,
+                senderId: lastMessage.senderId,
+                senderName: lastMessage.senderName,
+                content: lastMessage.messageText ?? '',
+                createdAt: lastMessage.createdAt.toISOString(),
+              }
+            : null,
+          updatedAt: (lastMessage?.createdAt ?? room.createdAt).toISOString(),
+        };
+      }),
+    );
+
+    return result.sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
   }
 }
 
