@@ -11,6 +11,9 @@ import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { ChatMessagePayload } from './interfaces/chat-message-payload.interface';
 import { corsOptions } from '../../config/cors.config';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { UserRole } from '../../common/constants/enums';
+import { ChatRepository } from './chat.repository';
 
 @WebSocketGateway({
   cors: corsOptions,
@@ -18,14 +21,34 @@ import { corsOptions } from '../../config/cors.config';
 })
 @UseGuards(WsJwtGuard)
 export class ChatGateway {
+  private readonly supportStaffRoom = 'support:staff';
+
+  constructor(private readonly chatRepository: ChatRepository) {}
+
   @WebSocketServer()
   server: Server;
 
   @SubscribeMessage('joinChatRoom')
-  handleJoinRoom(
+  async handleJoinRoom(
     @MessageBody() roomId: string,
     @ConnectedSocket() client: Socket,
   ) {
+    const user = client.data.user as JwtPayload | undefined;
+    const roles = user?.roles ?? (user?.role ? [user.role] : []);
+    const isSupportStaff = roles.some(
+      (role) => role === UserRole.ADMIN || role === UserRole.MODERATOR,
+    );
+    const isMember = user?.sub
+      ? await this.chatRepository.isMemberOfRoom(roomId, user.sub)
+      : false;
+    const roomRecord = !isMember && isSupportStaff
+      ? await this.chatRepository.findRoomById(roomId)
+      : null;
+
+    if (!isMember && (!roomRecord || roomRecord.type !== 'SUPPORT')) {
+      return { event: 'chat:error', data: 'Forbidden' };
+    }
+
     const room = `chat:${roomId}`;
     client.join(room);
     return { event: 'joined', data: room };
@@ -39,6 +62,42 @@ export class ChatGateway {
     const room = `chat:${roomId}`;
     client.leave(room);
     return { event: 'left', data: room };
+  }
+
+  @SubscribeMessage('subscribeSupportInbox')
+  handleSubscribeSupportInbox(@ConnectedSocket() client: Socket) {
+    const user = client.data.user as JwtPayload | undefined;
+    const roles = user?.roles ?? (user?.role ? [user.role] : []);
+    const canManageSupport = roles.some(
+      (role) => role === UserRole.ADMIN || role === UserRole.MODERATOR,
+    );
+
+    if (!canManageSupport) {
+      return { event: 'support:error', data: 'Forbidden' };
+    }
+
+    client.join(this.supportStaffRoom);
+    return { event: 'support:subscribed', data: this.supportStaffRoom };
+  }
+
+  @SubscribeMessage('subscribeMySupport')
+  async handleSubscribeMySupport(@ConnectedSocket() client: Socket) {
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub) {
+      return { event: 'support:error', data: 'Unauthorized' };
+    }
+
+    const supportRoom = await this.chatRepository.findSupportRoomForUser(user.sub);
+    if (!supportRoom) {
+      return { event: 'support:subscribed', data: null };
+    }
+
+    const room = `chat:${supportRoom.id}`;
+    client.join(room);
+    return {
+      event: 'support:subscribed',
+      data: { roomId: supportRoom.id, room },
+    };
   }
 
   @SubscribeMessage('sendMessage')
@@ -64,5 +123,17 @@ export class ChatGateway {
 
   broadcastMessage(roomId: string, message: ChatMessagePayload) {
     this.server.to(`chat:${roomId}`).emit('chat:message', message);
+  }
+
+  broadcastSupportMessage(roomId: string, message: ChatMessagePayload) {
+    this.broadcastMessage(roomId, message);
+    this.server.to(this.supportStaffRoom).emit('support:message', {
+      roomId,
+      message,
+    });
+  }
+
+  broadcastSupportRead(roomId: string) {
+    this.server.to(this.supportStaffRoom).emit('support:read', { roomId });
   }
 }
