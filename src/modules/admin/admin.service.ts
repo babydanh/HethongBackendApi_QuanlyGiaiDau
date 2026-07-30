@@ -615,10 +615,25 @@ export class AdminService {
   // ─── System Configs ───────────────────────────────────────────
 
   async getConfigs() {
+    await this.getOrInitConfig(
+      'ALLOW_TOURNAMENT_ENTRY_FEES',
+      'true',
+      'Cho phép ban tổ chức đặt lệ phí đăng ký cho giải đấu mới hoặc khi chỉnh sửa giải.',
+    );
     return this.db.select().from(schema.systemConfigs);
   }
 
   async updateConfig(key: string, value: string, description: string, adminId: string) {
+    if (
+      key === 'ALLOW_TOURNAMENT_ENTRY_FEES' &&
+      !['true', 'false'].includes(value.trim().toLowerCase())
+    ) {
+      throw new BadRequestException('ALLOW_TOURNAMENT_ENTRY_FEES chỉ nhận giá trị true hoặc false');
+    }
+
+    const normalizedValue = key === 'ALLOW_TOURNAMENT_ENTRY_FEES'
+      ? value.trim().toLowerCase()
+      : value;
     const [existing] = await this.db
       .select()
       .from(schema.systemConfigs)
@@ -630,7 +645,7 @@ export class AdminService {
       [configRecord] = await this.db
         .update(schema.systemConfigs)
         .set({
-          value,
+          value: normalizedValue,
           description: description || existing.description,
           updatedBy: adminId,
           updatedAt: new Date(),
@@ -642,7 +657,7 @@ export class AdminService {
         .insert(schema.systemConfigs)
         .values({
           key,
-          value,
+          value: normalizedValue,
           description,
           updatedBy: adminId,
         })
@@ -696,6 +711,11 @@ export class AdminService {
       pctPublicRanked: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5')),
       pctPublicUnranked: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5')),
       pctClub: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_CLUB', '0')),
+      allowEntryFees: (await this.getOrInitConfig(
+        'ALLOW_TOURNAMENT_ENTRY_FEES',
+        'true',
+        'Cho phép ban tổ chức đặt lệ phí đăng ký cho giải đấu mới hoặc khi chỉnh sửa giải.',
+      )).toLowerCase() === 'true',
     };
   }
 

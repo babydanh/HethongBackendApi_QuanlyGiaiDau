@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
 import { createPostgresClientFromEnv } from '../postgres-client';
-import { eq } from 'drizzle-orm';
+import { ilike } from 'drizzle-orm';
 
 const sqlClient = createPostgresClientFromEnv({ ssl: undefined });
 const db = drizzle(sqlClient, { schema });
@@ -19,7 +19,7 @@ async function main() {
   let [pickleballCategory] = await db
     .select()
     .from(schema.categories)
-    .where(eq(schema.categories.slug, 'pickleball'))
+    .where(ilike(schema.categories.slug, '%pickleball%'))
     .limit(1);
 
   const catId = pickleballCategory?.id;
@@ -29,12 +29,15 @@ async function main() {
   }
 
   const now = new Date();
+  const startDate = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
   const endDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const regStart = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+  const regEnd = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
 
-  // Xóa các giải seed cũ có tên chứa 'Banner Ẩn Chữ' để tạo mới sạch đẹp
+  // Chỉ xóa các giải seed cũ có tên chứa 'Banner Ẩn Chữ' để tránh đụng chạm giải khác
   await db
     .delete(schema.tournaments)
-    .where(eq(schema.tournaments.createdBy, adminUser.id));
+    .where(ilike(schema.tournaments.name, '%Banner Ẩn Chữ%'));
 
   // Tournament 1: Ẩn chữ đè Banner (REGISTRATION_OPEN)
   const [t1] = await db
@@ -51,11 +54,26 @@ async function main() {
       tournamentConfig: { hideFeaturedCardText: true },
       entryFee: '150000.00',
       maxParticipants: 16,
-      startDate: now,
+      registrationStartDate: regStart,
+      registrationEndDate: regEnd,
+      startDate: startDate,
       endDate: endDate,
       bannerUrl: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=1200&auto=format&fit=crop',
+      isRanked: true,
     })
     .returning();
+
+  // Tạo division cho Giải 1
+  await db.insert(schema.tournamentDivisions).values({
+    tournamentId: t1.id,
+    name: 'Đôi Nam Nữ Mở Rộng',
+    matchType: 'MIXED_DOUBLES',
+    genderRestriction: 'MIXED',
+    entryFee: '150000.00',
+    maxParticipants: 16,
+    registrationStartDate: regStart,
+    registrationEndDate: regEnd,
+  });
 
   console.log(`✅ Đã tạo Giải đấu 1: "${t1.name}" (ID: ${t1.id}) - status: REGISTRATION_OPEN, hideFeaturedCardText: true`);
 
@@ -74,11 +92,26 @@ async function main() {
       tournamentConfig: { hideFeaturedCardText: true },
       entryFee: '200000.00',
       maxParticipants: 32,
-      startDate: now,
+      registrationStartDate: regStart,
+      registrationEndDate: regEnd,
+      startDate: startDate,
       endDate: endDate,
       bannerUrl: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=1200&auto=format&fit=crop',
+      isRanked: true,
     })
     .returning();
+
+  // Tạo division cho Giải 2
+  await db.insert(schema.tournamentDivisions).values({
+    tournamentId: t2.id,
+    name: 'Đơn Nam Chuyên Nghiệp',
+    matchType: 'SINGLES',
+    genderRestriction: 'MALE',
+    entryFee: '200000.00',
+    maxParticipants: 32,
+    registrationStartDate: regStart,
+    registrationEndDate: regEnd,
+  });
 
   console.log(`✅ Đã tạo Giải đấu 2: "${t2.name}" (ID: ${t2.id}) - status: IN_PROGRESS, hideFeaturedCardText: true`);
 

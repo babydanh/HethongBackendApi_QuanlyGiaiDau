@@ -67,6 +67,19 @@ export class TournamentsService {
     await Promise.all(notifications);
   }
 
+  private async assertEntryFeeAllowed(entryFee: number | null | undefined) {
+    if (!entryFee || entryFee <= 0) {
+      return;
+    }
+
+    const feesConfig = await this.tournamentsRepository.getFeesConfig();
+    if (feesConfig.allowEntryFees === false) {
+      throw new BadRequestException(
+        'Hệ thống hiện không cho phép ban tổ chức đặt lệ phí đăng ký. Vui lòng để lệ phí là 0đ.',
+      );
+    }
+  }
+
   private async cleanupTournamentImages(tournament: { galleryImages?: string[] | null; bannerUrl?: string | null; logoUrl?: string | null }) {
     const urls: string[] = [];
 
@@ -281,6 +294,7 @@ export class TournamentsService {
     }
 
     this.validateRegistrationMode(createTournamentDto.tournamentConfig);
+    await this.assertEntryFeeAllowed(createTournamentDto.entryFee);
 
     // 1. Validate category existence and sportRules default fallback
     const category = await this.tournamentsRepository.findCategory(createTournamentDto.categoryId);
@@ -730,6 +744,8 @@ export class TournamentsService {
     if (!canUpdate) {
       throw new ForbiddenException('You do not have permission to update this tournament');
     }
+
+    await this.assertEntryFeeAllowed(updateTournamentDto.entryFee);
 
     // Validations during update based on tournament lifecycle status
     if (existing.status !== 'DRAFT') {
@@ -2709,6 +2725,10 @@ export class TournamentsService {
         throw new ForbiddenException('Bạn không có quyền tạo bảng thi đấu cho giải này');
       }
 
+      const divisionEntryFee = createDivisionDto.entryFee
+        ?? (tournament.entryFee ? Number(tournament.entryFee) : 0);
+      await this.assertEntryFeeAllowed(divisionEntryFee);
+
       // Không cho phép thêm hình thức mới khi đang mở đăng ký
       if (
         tournament.status === 'REGISTRATION_OPEN' ||
@@ -2754,7 +2774,7 @@ export class TournamentsService {
           matchType: createDivisionDto.matchType,
           genderRestriction: createDivisionDto.genderRestriction,
           maxParticipants: createDivisionDto.maxParticipants ?? tournament.maxParticipants ?? undefined,
-          entryFee: createDivisionDto.entryFee ?? (tournament.entryFee ? Number(tournament.entryFee) : 0),
+          entryFee: divisionEntryFee,
           isConfigOverride: createDivisionDto.isConfigOverride,
           venueId: createDivisionDto.venueId,
           bracketType: createDivisionDto.bracketType,
@@ -2816,6 +2836,8 @@ export class TournamentsService {
       throw new NotFoundException('Tournament not found');
     }
 
+    await this.assertEntryFeeAllowed(updateDivisionDto.entryFee);
+
     const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
     if (!category) {
       throw new NotFoundException('Category not found');
@@ -2865,6 +2887,8 @@ export class TournamentsService {
     if (!isOwner && !isSystemAuthorized) {
       throw new ForbiddenException('Bạn không có quyền cập nhật cấu hình hình thức này');
     }
+
+    await this.assertEntryFeeAllowed(updateDivisionDto.entryFee);
 
     // Không cho đổi hình thức thi đấu khi đang mở đăng ký
     if (
