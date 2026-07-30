@@ -539,7 +539,12 @@ export class AuthService {
       if (!decoded || !decoded.sub) {
         throw new UnauthorizedException('Apple Identity Token không hợp lệ.');
       }
-      if (nonce && decoded.nonce !== nonce) {
+      // sign_in_with_apple sends the SHA-256 hash of the raw nonce in the ID token.
+      // The app sends the original raw nonce so the backend must hash it before comparing.
+      const expectedNonce = nonce
+        ? crypto.createHash('sha256').update(nonce).digest('hex')
+        : undefined;
+      if (expectedNonce && decoded.nonce !== expectedNonce) {
         throw new UnauthorizedException('Apple nonce không hợp lệ.');
       }
 
