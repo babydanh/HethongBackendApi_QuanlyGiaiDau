@@ -88,23 +88,31 @@ export const userRanks = pgTable(
   }),
 );
 
-export const eloHistoryLogs = pgTable('elo_history_logs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .references(() => users.id, { onDelete: 'cascade' })
-    .notNull(),
-  categoryId: uuid('category_id')
-    .references(() => categories.id, { onDelete: 'cascade' })
-    .notNull(),
-  matchId: uuid('match_id'), // fk will be added via ALTER TABLE later or manually due to circular deps
-  reason: varchar('reason', { length: 100 }),
-  previousElo: integer('previous_elo').notNull(),
-  newElo: integer('new_elo').notNull(),
-  changedPoints: integer('changed_points').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const eloHistoryLogs = pgTable(
+  'elo_history_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    categoryId: uuid('category_id')
+      .references(() => categories.id, { onDelete: 'cascade' })
+      .notNull(),
+    matchId: uuid('match_id'), // fk will be added via ALTER TABLE later or manually due to circular deps
+    reason: varchar('reason', { length: 100 }),
+    previousElo: integer('previous_elo').notNull(),
+    newElo: integer('new_elo').notNull(),
+    changedPoints: integer('changed_points').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    uniqueIdxMatchUser: uniqueIndex('unique_idx_match_user')
+      .on(table.matchId, table.userId)
+      .where(sql`${table.matchId} IS NOT NULL`),
+  }),
+);
 
 export const pairRanks = pgTable(
   'pair_ranks',
