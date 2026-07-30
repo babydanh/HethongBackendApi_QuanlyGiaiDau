@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as dotenv from 'dotenv';
 import { userRanks, eloTiers } from '../schema/categories.schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { createPostgresClientFromEnv } from '../postgres-client';
 
 dotenv.config();
@@ -40,25 +40,6 @@ async function run() {
       
       const categoryTiers = tiersByCategory.get(categoryId) || [];
       if (categoryTiers.length === 0) continue;
-
-      // Find top 1 player in this category/matchType for Tier S
-      const [topRank] = await db
-        .select({
-          id: userRanks.id,
-          userId: userRanks.userId,
-          eloPoints: userRanks.eloPoints,
-        })
-        .from(userRanks)
-        .where(
-          and(
-            eq(userRanks.categoryId, categoryId),
-            eq(userRanks.matchType, matchType)
-          )
-        )
-        .orderBy(desc(userRanks.eloPoints))
-        .limit(1);
-
-      const isTop1Player = topRank && topRank.userId === rank.userId;
 
       let targetTier: typeof allTiers[0] | undefined;
 
