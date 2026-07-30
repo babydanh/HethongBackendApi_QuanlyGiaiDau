@@ -15,6 +15,11 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { UserRole } from '../../common/constants/enums';
 import { ChatRepository } from './chat.repository';
 
+interface SupportTypingPayload {
+  roomId: string;
+  isTyping: boolean;
+}
+
 @WebSocketGateway({
   cors: corsOptions,
   namespace: '/chat',
@@ -123,6 +128,52 @@ export class ChatGateway {
 
   broadcastMessage(roomId: string, message: ChatMessagePayload) {
     this.server.to(`chat:${roomId}`).emit('chat:message', message);
+  }
+
+  @SubscribeMessage('supportTyping')
+  async handleSupportTyping(
+    @MessageBody() payload: SupportTypingPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (
+      !payload?.roomId ||
+      typeof payload.isTyping !== 'boolean'
+    ) {
+      return { event: 'support:error', data: 'Invalid typing payload' };
+    }
+
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub) {
+      return { event: 'support:error', data: 'Unauthorized' };
+    }
+
+    const roles = user.roles ?? (user.role ? [user.role] : []);
+    const isSupportStaff = roles.some(
+      (role) => role === UserRole.ADMIN || role === UserRole.MODERATOR,
+    );
+    const isMember = await this.chatRepository.isMemberOfRoom(
+      payload.roomId,
+      user.sub,
+    );
+    const room = !isMember && isSupportStaff
+      ? await this.chatRepository.findRoomById(payload.roomId)
+      : null;
+
+    if (!isMember && (!room || room.type !== 'SUPPORT')) {
+      return { event: 'support:error', data: 'Forbidden' };
+    }
+
+    client.to(`chat:${payload.roomId}`).emit('support:typing', {
+      roomId: payload.roomId,
+      userId: user.sub,
+      isTyping: payload.isTyping,
+      isSupportStaff,
+    });
+
+    return {
+      event: 'support:typing:ack',
+      data: { roomId: payload.roomId, isTyping: payload.isTyping },
+    };
   }
 
   broadcastSupportMessage(roomId: string, message: ChatMessagePayload) {
