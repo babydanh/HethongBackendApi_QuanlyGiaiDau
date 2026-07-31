@@ -47,20 +47,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
-                  ),
+                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
-                  ),
+                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
                 ),
               ),
         );
@@ -249,20 +243,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
-                  ),
+                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
-                  ),
+                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
                 ),
               ),
         );
@@ -682,20 +670,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
-                  ),
+                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
-                  ),
+                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
                 ),
               ),
         );

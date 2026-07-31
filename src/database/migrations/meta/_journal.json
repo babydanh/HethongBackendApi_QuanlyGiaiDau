@@ -225,6 +225,20 @@
       "when": 1784359912076,
       "tag": "0031_deep_fabian_cortez",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785480000000,
+      "tag": "0032_monthly_elo_decay",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785483600000,
+      "tag": "0033_pair_rank_independent_elo",
+      "breakpoints": true
     }
   ]
 }

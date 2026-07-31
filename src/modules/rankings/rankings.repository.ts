@@ -441,7 +441,7 @@ export class RankingsRepository {
   async updateUserRank(
     tx: AppTx,
     id: string,
-    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean; peakElo?: number; lastActiveAt?: Date },
+    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean; peakElo?: number; lastActiveAt?: Date; lastDecayAt?: Date },
     scope: 'PUBLIC' | 'COMMUNITY',
   ) {
     const setData: Record<string, unknown> = {
@@ -453,6 +453,7 @@ export class RankingsRepository {
     };
     if (data.peakElo !== undefined) setData.peakElo = data.peakElo;
     if (data.lastActiveAt !== undefined) setData.lastActiveAt = data.lastActiveAt;
+    if (data.lastDecayAt !== undefined) setData.lastDecayAt = data.lastDecayAt;
 
     if (scope === 'COMMUNITY') {
       return tx
