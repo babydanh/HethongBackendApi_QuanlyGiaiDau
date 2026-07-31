@@ -89,7 +89,19 @@ export class RankingsService {
       console.error('Failed to get leaderboard cache:', err);
     }
 
-    const data = await this.rankingsRepository.getLeaderboard(query);
+    let data;
+    try {
+      data = await this.rankingsRepository.getLeaderboard(query);
+    } catch (error) {
+      if (query.scope === 'COMMUNITY' && query.communityId) {
+        // Keep the club page usable while a stale/missing ranking projection is
+        // being repaired. The clients will hydrate joined members at base ELO.
+        console.error('Community leaderboard unavailable:', error);
+        data = { data: [], meta: { page: query.page || 1, limit: query.limit || 20 } };
+      } else {
+        throw error;
+      }
+    }
 
     try {
       await this.redisService.set(cacheKey, JSON.stringify(data), 300); // 5 mins TTL
