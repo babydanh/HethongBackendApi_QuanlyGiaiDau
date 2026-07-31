@@ -69,6 +69,9 @@ export const userRanks = pgTable(
     lastActiveAt: timestamp('last_active_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    lastDecayAt: timestamp('last_decay_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -128,6 +131,7 @@ export const pairRanks = pgTable(
     eloPoints: integer('elo_points').default(1000).notNull(),
     peakElo: integer('peak_elo').default(1000).notNull(),
     lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow().notNull(),
+    lastDecayAt: timestamp('last_decay_at', { withTimezone: true }).defaultNow().notNull(),
     matchesPlayed: integer('matches_played').default(0).notNull(),
     matchesWon: integer('matches_won').default(0).notNull(),
     winStreak: integer('win_streak').default(0).notNull(),

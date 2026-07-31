@@ -97,7 +97,9 @@ export class MatchesService {
 
     if (existing.tournament) {
       const tournament = existing.tournament;
-      const scope = tournament.tournamentType === 'CLUB' ? 'COMMUNITY' : 'PUBLIC';
+      const scope = tournament.tournamentType === 'CLUB' && tournament.communityId
+        ? 'COMMUNITY'
+        : 'PUBLIC';
       const loserId = winnerId === existing.participant1Id ? existing.participant2Id : existing.participant1Id;
 
       if (tournament.isRanked && winnerId && loserId) {
@@ -386,6 +388,9 @@ export class MatchesService {
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
+    if (existing.status === 'COMPLETED') {
+      throw new BadRequestException('Trận đấu đã kết thúc, không thể nhập điểm nữa.');
+    }
 
     const isCreator = existing.tournament?.createdBy === user.sub;
     // A tournament referee may claim any scheduled match by starting it.
@@ -528,6 +533,9 @@ export class MatchesService {
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
+    if (existing.status === 'COMPLETED') {
+      throw new BadRequestException('Trận đấu đã kết thúc, không thể đổi trạng thái nữa.');
+    }
 
     const isCreator = existing.tournament?.createdBy === user.sub;
     const isReferee = existing.refereeId === user.sub;
@@ -607,6 +615,9 @@ export class MatchesService {
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
+    if (existing.status === 'COMPLETED') {
+      throw new BadRequestException('Trận đấu đã kết thúc, không thể áp dụng quyết định lần nữa.');
+    }
 
     const isCreator = existing.tournament?.createdBy === user.sub;
     const isAdmin = this.isAdmin(user);

@@ -1139,6 +1139,7 @@ export class TournamentsService {
     systemRoles: string[] = [],
     divisionId?: string,
     seedingType?: 'SEEDED' | 'RANDOM',
+    allowReset = false,
   ) {
     const existing = await this.tournamentsRepository.findById(id);
     if (!existing) throw new NotFoundException('Tournament not found');
@@ -1148,7 +1149,7 @@ export class TournamentsService {
     }
 
     // After REGISTRATION_CLOSED, only allow reset bracket once
-    if (existing.status === 'REGISTRATION_CLOSED' || existing.status === 'UPCOMING') {
+    if (!allowReset && (existing.status === 'REGISTRATION_CLOSED' || existing.status === 'UPCOMING')) {
       try {
         const bracket = await this.tournamentsRepository.findBracket(id, divisionId);
         if (bracket && bracket.stages && bracket.stages.length > 0) {
@@ -1270,7 +1271,7 @@ export class TournamentsService {
 
     // generateBracket performs the same BTC/community authorization and persists
     // stages, groups and matches in one generator transaction.
-    return this.generateBracket(id, userId, systemRoles, undefined, 'RANDOM');
+    return this.generateBracket(id, userId, systemRoles, undefined, 'RANDOM', reset);
   }
 
   async autoSeedFromElo(

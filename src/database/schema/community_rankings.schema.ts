@@ -28,6 +28,7 @@ export const communityRankings = pgTable('community_rankings', {
     onDelete: 'set null',
   }),
   lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow().notNull(),
+  lastDecayAt: timestamp('last_decay_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   communityRankNullGenderIdx: uniqueIndex('community_rank_null_gender_idx')

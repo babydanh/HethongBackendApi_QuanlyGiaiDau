@@ -1,9 +1,10 @@
 import { Injectable, BadRequestException, Inject } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { RankingsRepository } from './rankings.repository';
 import { EloEngineService } from './elo-engine.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
-import { eq, and, isNull, desc, sql, or, asc, gte, lt } from 'drizzle-orm';
+import { eq, and, isNull, desc, sql, or, asc, gte, lt, inArray } from 'drizzle-orm';
 import type { AppTx, AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { RedisService } from '../../providers/redis/redis.service';
@@ -13,6 +14,15 @@ type Transaction = AppTx;
 
 // ELO Shield: ngưỡng kích hoạt bảo vệ khi user vượt qua mốc ELO nhất định
 const ELO_SHIELD_BOUNDARIES = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800] as const;
+const ELO_DECAY_INACTIVE_MONTHS = 1;
+const ELO_DECAY_THRESHOLD = 1400;
+const ELO_DECAY_RATES = [
+  { minElo: 1700, rate: 0.05 },
+  { minElo: 1600, rate: 0.04 },
+  { minElo: 1500, rate: 0.03 },
+  { minElo: 1400, rate: 0.02 },
+] as const;
+const ELO_DECAY_FLOOR = 1000;
 
 @Injectable()
 export class RankingsService {
@@ -110,7 +120,59 @@ export class RankingsService {
   // Recalculate ELO for a single match manually (via Admin Endpoint)
   async updateMatchElo(dto: UpdateEloDto) {
     const db = this.rankingsRepository.getDbInstance();
-    const scope = dto.communityId ? 'COMMUNITY' : 'PUBLIC';
+    const [matchContext] = await db
+      .select({
+        status: schema.matches.status,
+        isRanked: schema.tournaments.isRanked,
+        tournamentType: schema.tournaments.tournamentType,
+        communityId: schema.tournaments.communityId,
+        categoryId: schema.tournaments.categoryId,
+        matchType: schema.tournaments.matchType,
+        genderRestriction: schema.tournaments.genderRestriction,
+        divisionMatchType: schema.tournamentDivisions.matchType,
+        divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
+      })
+      .from(schema.matches)
+      .innerJoin(schema.tournaments, eq(schema.matches.tournamentId, schema.tournaments.id))
+      .innerJoin(schema.tournamentStages, eq(schema.matches.stageId, schema.tournamentStages.id))
+      .leftJoin(
+        schema.tournamentDivisions,
+        eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
+      )
+      .where(eq(schema.matches.id, dto.matchId))
+      .limit(1);
+
+    if (!matchContext) {
+      throw new BadRequestException('Trận đấu không tồn tại.');
+    }
+    if (matchContext.status !== 'COMPLETED') {
+      throw new BadRequestException('Chỉ trận đã hoàn tất mới được tính ELO.');
+    }
+    if (!matchContext.isRanked) {
+      throw new BadRequestException('Trận đấu thuộc giải không xếp hạng ELO.');
+    }
+
+    const effectiveMatchType = matchContext.divisionMatchType ?? matchContext.matchType;
+    const effectiveGenderRestriction = matchContext.divisionGenderRestriction ?? matchContext.genderRestriction;
+    if (effectiveMatchType === 'DOUBLES' || effectiveMatchType === 'MIXED_DOUBLES') {
+      throw new BadRequestException('Trận đôi phải được tính ELO qua luồng hoàn tất trận, không dùng endpoint ELO thủ công cho user đơn.');
+    }
+    const effectiveCommunityId = matchContext.tournamentType === 'CLUB'
+      ? matchContext.communityId
+      : null;
+    if (matchContext.tournamentType === 'CLUB' && !effectiveCommunityId) {
+      throw new BadRequestException('Giải CLB phải có câu lạc bộ để ghi ELO nội bộ.');
+    }
+    if (
+      dto.categoryId !== matchContext.categoryId ||
+      dto.matchType !== effectiveMatchType ||
+      (dto.communityId ?? null) !== effectiveCommunityId ||
+      (dto.genderRestriction ?? null) !== (effectiveGenderRestriction ?? null)
+    ) {
+      throw new BadRequestException('Thông tin tính ELO không khớp cấu hình của trận đấu.');
+    }
+
+    const scope = effectiveCommunityId ? 'COMMUNITY' : 'PUBLIC';
 
     // Fetch scoreDetails để tính Score Factor Modifier
     let scoreRatio: number | undefined;
@@ -136,6 +198,24 @@ export class RankingsService {
     }
 
     const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${dto.matchId}))`);
+      const previousLogs = await tx
+        .select({ userId: schema.eloHistoryLogs.userId })
+        .from(schema.eloHistoryLogs)
+        .where(
+          and(
+            eq(schema.eloHistoryLogs.matchId, dto.matchId),
+            inArray(schema.eloHistoryLogs.userId, [dto.winnerId, dto.loserId]),
+          ),
+        );
+
+      if (previousLogs.length > 0) {
+        if (previousLogs.length === 2) {
+          return { alreadyProcessed: true, matchId: dto.matchId };
+        }
+        throw new BadRequestException('Lịch sử ELO của trận đấu không đầy đủ; không thể tính lại tự động.');
+      }
+
       // 1. Lock records
       const winnerRank = await this.rankingsRepository.getOrCreateUserRank(
         tx,
@@ -215,6 +295,8 @@ export class RankingsService {
           winStreak: winnerResult.newWinStreak,
           shieldActive: isWinnerShieldActive,
           peakElo: winnerResult.newPeakElo,
+          lastActiveAt: new Date(),
+          lastDecayAt: new Date(),
         },
         scope,
       );
@@ -229,6 +311,8 @@ export class RankingsService {
           winStreak: 0,
           shieldActive: isLoserShieldActive,
           peakElo: loserResult.newPeakElo,
+          lastActiveAt: new Date(),
+          lastDecayAt: new Date(),
         },
         scope,
       );
@@ -334,6 +418,13 @@ export class RankingsService {
 
     const winnerUserIds = winnerRosters.map((r) => r.userId);
     const loserUserIds = loserRosters.map((r) => r.userId);
+    const isDoublesMatch = ['DOUBLES', 'MIXED_DOUBLES'].includes(matchType);
+    const expectedRosterSize = isDoublesMatch ? 2 : 1;
+    if (winnerUserIds.length !== expectedRosterSize || loserUserIds.length !== expectedRosterSize) {
+      throw new BadRequestException(
+        `${isDoublesMatch ? 'Trận đôi' : 'Trận đơn'} phải có đúng ${expectedRosterSize} vận động viên mỗi bên để tính ELO.`,
+      );
+    }
 
     // 2a. Fetch match scoreDetails để tính Score Factor Modifier
     let scoreRatio: number | undefined;
@@ -359,7 +450,25 @@ export class RankingsService {
     }
 
     const result = await db.transaction(async (tx) => {
-      if (['DOUBLES', 'MIXED_DOUBLES'].includes(matchType) && winnerUserIds.length === 2 && loserUserIds.length === 2) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${matchId}))`);
+      const previousLogs = await tx
+        .select({ userId: schema.eloHistoryLogs.userId })
+        .from(schema.eloHistoryLogs)
+        .where(
+          and(
+            eq(schema.eloHistoryLogs.matchId, matchId),
+            inArray(schema.eloHistoryLogs.userId, [...winnerUserIds, ...loserUserIds]),
+          ),
+        );
+      if (previousLogs.length > 0) {
+        const expectedLogCount = winnerUserIds.length + loserUserIds.length;
+        if (previousLogs.length === expectedLogCount) {
+          return { alreadyProcessed: true, matchId };
+        }
+        throw new BadRequestException('Lịch sử ELO của trận đấu không đầy đủ; không thể tính lại tự động.');
+      }
+
+      if (isDoublesMatch) {
         // 1. Sort IDs to make unique pair key
         const wId1 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[0] : winnerUserIds[1];
         const wId2 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[1] : winnerUserIds[0];
@@ -401,7 +510,6 @@ export class RankingsService {
           .limit(1);
 
         if (!winnerPair) {
-          const avgElo = (winnerRanksList[0].eloPoints + winnerRanksList[1].eloPoints) / 2;
           [winnerPair] = await tx
             .insert(schema.pairRanks)
             .values({
@@ -412,7 +520,8 @@ export class RankingsService {
               genderRestriction: genderRestriction || null,
               scope,
               communityId: communityId || null,
-              eloPoints: Math.round(avgElo),
+              // Pair ELO is an independent rating for this exact pair.
+              eloPoints: ELO_DECAY_FLOOR,
               matchesPlayed: 0,
               matchesWon: 0,
               winStreak: 0,
@@ -441,7 +550,6 @@ export class RankingsService {
           .limit(1);
 
         if (!loserPair) {
-          const avgElo = (loserRanksList[0].eloPoints + loserRanksList[1].eloPoints) / 2;
           [loserPair] = await tx
             .insert(schema.pairRanks)
             .values({
@@ -452,7 +560,8 @@ export class RankingsService {
               genderRestriction: genderRestriction || null,
               scope,
               communityId: communityId || null,
-              eloPoints: Math.round(avgElo),
+              // Pair ELO is an independent rating for this exact pair.
+              eloPoints: ELO_DECAY_FLOOR,
               matchesPlayed: 0,
               matchesWon: 0,
               winStreak: 0,
@@ -480,24 +589,29 @@ export class RankingsService {
         );
 
         // 5. Update pair ranks
+        const pairActivityAt = new Date();
         await tx
           .update(schema.pairRanks)
           .set({
-            eloPoints: winnerPairResult.newElo,
+            eloPoints: Math.max(ELO_DECAY_FLOOR, winnerPairResult.newElo),
             matchesPlayed: winnerPair.matchesPlayed + 1,
             matchesWon: winnerPair.matchesWon + 1,
             winStreak: winnerPairResult.newWinStreak,
-            updatedAt: new Date(),
+            lastActiveAt: pairActivityAt,
+            lastDecayAt: pairActivityAt,
+            updatedAt: pairActivityAt,
           })
           .where(eq(schema.pairRanks.id, winnerPair.id));
 
         await tx
           .update(schema.pairRanks)
           .set({
-            eloPoints: loserPairResult.newElo,
+            eloPoints: Math.max(ELO_DECAY_FLOOR, loserPairResult.newElo),
             matchesPlayed: loserPair.matchesPlayed + 1,
             winStreak: 0,
-            updatedAt: new Date(),
+            lastActiveAt: pairActivityAt,
+            lastDecayAt: pairActivityAt,
+            updatedAt: pairActivityAt,
           })
           .where(eq(schema.pairRanks.id, loserPair.id));
 
@@ -538,7 +652,7 @@ export class RankingsService {
         ];
 
         for (const { rank, delta } of winnersToUpdate) {
-          const newElo = Math.max(100, rank.eloPoints + delta);
+          const newElo = Math.max(ELO_DECAY_FLOOR, rank.eloPoints + delta);
           let isWinnerShieldActive = false;
           if (scope === 'PUBLIC') {
             isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
@@ -581,7 +695,7 @@ export class RankingsService {
         ];
 
         for (const { rank, delta } of losersToUpdate) {
-          const newElo = Math.max(100, rank.eloPoints + delta);
+          const newElo = Math.max(ELO_DECAY_FLOOR, rank.eloPoints + delta);
           const boundaries = ELO_SHIELD_BOUNDARIES;
           let finalLoserElo = newElo;
           let isLoserShieldActive = false;
@@ -649,11 +763,16 @@ export class RankingsService {
               for (const uid of [...winnerUserIds, ...loserUserIds]) {
                 await tx
                   .update(schema.userRanks)
-                  .set({ lastActiveAt: dNow } as any)
+                  .set({ lastActiveAt: dNow, lastDecayAt: dNow } as any)
                   .where(
                     and(
                       eq(schema.userRanks.userId, uid),
                       eq(schema.userRanks.categoryId, categoryId),
+                      eq(schema.userRanks.matchType, matchType),
+                      genderRestriction
+                        ? eq(schema.userRanks.genderRestriction, genderRestriction)
+                        : isNull(schema.userRanks.genderRestriction),
+                      isNull(schema.userRanks.communityId),
                     ),
                   );
               }
@@ -661,11 +780,15 @@ export class RankingsService {
               for (const uid of [...winnerUserIds, ...loserUserIds]) {
                 await tx
                   .update(schema.communityRankings)
-                  .set({ lastActiveAt: dNow } as any)
+                  .set({ lastActiveAt: dNow, lastDecayAt: dNow } as any)
                   .where(
                     and(
                       eq(schema.communityRankings.userId, uid),
                       eq(schema.communityRankings.categoryId, categoryId),
+                      eq(schema.communityRankings.matchType, matchType),
+                      genderRestriction
+                        ? eq(schema.communityRankings.genderRestriction, genderRestriction)
+                        : isNull(schema.communityRankings.genderRestriction),
                       communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
                     ),
                   );
@@ -739,11 +862,12 @@ export class RankingsService {
           }
         }
 
+        const winnerElo = Math.max(ELO_DECAY_FLOOR, result.newElo);
         await this.rankingsRepository.updateUserRank(
           tx,
           rank.id,
           {
-            eloPoints: result.newElo,
+            eloPoints: winnerElo,
             matchesPlayed: rank.matchesPlayed + 1,
             matchesWon: rank.matchesWon + 1,
             winStreak: result.newWinStreak,
@@ -759,8 +883,8 @@ export class RankingsService {
           matchId,
           reason: 'MATCH_WIN',
           previousElo: rank.eloPoints,
-          newElo: result.newElo,
-          changedPoints: result.changedPoints,
+          newElo: winnerElo,
+          changedPoints: winnerElo - rank.eloPoints,
         });
       }
 
@@ -775,13 +899,14 @@ export class RankingsService {
           scoreRatio,
         );
 
-        let finalLoserElo = result.newElo;
+        const resultElo = Math.max(ELO_DECAY_FLOOR, result.newElo);
+        let finalLoserElo = resultElo;
         let isLoserShieldActive = false;
         if (scope === 'PUBLIC') {
           const publicRank = rank as typeof schema.userRanks.$inferSelect;
           isLoserShieldActive = !!publicRank.shieldActive;
           for (const boundary of ELO_SHIELD_BOUNDARIES) {
-            if (rank.eloPoints >= boundary && result.newElo < boundary) {
+            if (rank.eloPoints >= boundary && resultElo < boundary) {
               if (publicRank.shieldActive) {
                 finalLoserElo = boundary;
                 isLoserShieldActive = false; // shield broken
@@ -841,22 +966,31 @@ export class RankingsService {
         if (scope === 'COMMUNITY') {
           await tx
             .update(schema.communityRankings)
-            .set({ lastActiveAt: now } as any)
+            .set({ lastActiveAt: now, lastDecayAt: now } as any)
             .where(
               and(
                 eq(schema.communityRankings.userId, userId),
                 eq(schema.communityRankings.categoryId, categoryId),
+                eq(schema.communityRankings.matchType, matchType),
+                genderRestriction
+                  ? eq(schema.communityRankings.genderRestriction, genderRestriction)
+                  : isNull(schema.communityRankings.genderRestriction),
                 communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
               ),
             );
         } else {
           await tx
             .update(schema.userRanks)
-            .set({ lastActiveAt: now } as any)
+            .set({ lastActiveAt: now, lastDecayAt: now } as any)
             .where(
               and(
                 eq(schema.userRanks.userId, userId),
                 eq(schema.userRanks.categoryId, categoryId),
+                eq(schema.userRanks.matchType, matchType),
+                genderRestriction
+                  ? eq(schema.userRanks.genderRestriction, genderRestriction)
+                  : isNull(schema.userRanks.genderRestriction),
+                isNull(schema.userRanks.communityId),
               ),
             );
         }
@@ -995,6 +1129,120 @@ export class RankingsService {
           .where(eq(schema.userRanks.id, rank.id));
       }
     }
+  }
+
+  /**
+   * Apply the monthly inactivity penalty once per rank and per calendar month.
+   * The advisory lock makes this safe when several API instances run the cron.
+   */
+  @Cron('0 3 * * *')
+  async applyMonthlyInactivityDecay() {
+    const now = new Date();
+    const inactiveBefore = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth() - ELO_DECAY_INACTIVE_MONTHS,
+      now.getUTCDate(),
+      now.getUTCHours(),
+      now.getUTCMinutes(),
+      now.getUTCSeconds(),
+    ));
+    const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const affectedCategoryIds = new Set<string>();
+
+    await this.db.transaction(async (tx) => {
+      const lockResult = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext('elo-monthly-inactivity-decay')) as locked`);
+      const locked = Boolean((lockResult as unknown as { rows?: Array<{ locked?: boolean }> }).rows?.[0]?.locked);
+      if (!locked) return;
+
+      const publicRanks = await tx
+        .select()
+        .from(schema.userRanks)
+        .where(and(
+          lt(schema.userRanks.lastActiveAt, inactiveBefore),
+          lt(schema.userRanks.lastDecayAt, currentMonthStart),
+          isNull(schema.userRanks.communityId),
+        ));
+      const communityRanks = await tx
+        .select()
+        .from(schema.communityRankings)
+        .where(and(
+          lt(schema.communityRankings.lastActiveAt, inactiveBefore),
+          lt(schema.communityRankings.lastDecayAt, currentMonthStart),
+        ));
+      const pairRanks = await tx
+        .select()
+        .from(schema.pairRanks)
+        .where(and(
+          lt(schema.pairRanks.lastActiveAt, inactiveBefore),
+          lt(schema.pairRanks.lastDecayAt, currentMonthStart),
+        ));
+
+      const monthsSince = (lastDecayAt: Date) => Math.max(
+        1,
+        (now.getUTCFullYear() - lastDecayAt.getUTCFullYear()) * 12 +
+          now.getUTCMonth() - lastDecayAt.getUTCMonth(),
+      );
+      const decayedElo = (elo: number, months: number) => {
+        if (elo < ELO_DECAY_THRESHOLD) return elo;
+
+        const rate = ELO_DECAY_RATES.find((bracket) => elo >= bracket.minElo)?.rate;
+        if (!rate) return elo;
+
+        return Math.max(
+          ELO_DECAY_FLOOR,
+          Math.round(elo * Math.pow(1 - rate, months)),
+        );
+      };
+
+      for (const rank of publicRanks) {
+        let newElo = decayedElo(rank.eloPoints, monthsSince(rank.lastDecayAt));
+        let shieldActive = rank.shieldActive;
+        if (shieldActive) {
+          const protectedBoundary = [...ELO_SHIELD_BOUNDARIES]
+            .reverse()
+            .find((boundary) => rank.eloPoints >= boundary && newElo < boundary);
+          if (protectedBoundary !== undefined) {
+            newElo = protectedBoundary;
+            shieldActive = false;
+          }
+        }
+        await tx.update(schema.userRanks)
+          .set({ eloPoints: newElo, shieldActive, lastDecayAt: now, updatedAt: now })
+          .where(eq(schema.userRanks.id, rank.id));
+        await this.recalculateUserRankTier(tx, rank.userId, rank.categoryId, rank.matchType, rank.genderRestriction || undefined);
+        affectedCategoryIds.add(rank.categoryId);
+        if (newElo !== rank.eloPoints) {
+          await this.rankingsRepository.insertEloHistory(tx, [{
+            userId: rank.userId,
+            categoryId: rank.categoryId,
+            matchId: null,
+            reason: 'INACTIVITY_DECAY',
+            previousElo: rank.eloPoints,
+            newElo,
+            changedPoints: newElo - rank.eloPoints,
+          }]);
+        }
+      }
+
+      for (const rank of communityRanks) {
+        const newElo = decayedElo(rank.eloPoints, monthsSince(rank.lastDecayAt));
+        await tx.update(schema.communityRankings)
+          .set({ eloPoints: newElo, lastDecayAt: now, updatedAt: now })
+          .where(eq(schema.communityRankings.id, rank.id));
+        await this.recalculateCommunityRankTier(tx, rank.userId, rank.categoryId, rank.matchType, rank.communityId, rank.genderRestriction || undefined);
+        affectedCategoryIds.add(rank.categoryId);
+      }
+
+      for (const rank of pairRanks) {
+        const newElo = decayedElo(rank.eloPoints, monthsSince(rank.lastDecayAt));
+        await tx.update(schema.pairRanks)
+          .set({ eloPoints: newElo, lastDecayAt: now, updatedAt: now })
+          .where(eq(schema.pairRanks.id, rank.id));
+        affectedCategoryIds.add(rank.categoryId);
+      }
+    });
+
+    await Promise.all([...affectedCategoryIds].map((categoryId) => this.invalidateLeaderboardCache(categoryId)));
   }
 
   async recalculateCommunityRankTier(
