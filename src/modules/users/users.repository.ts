@@ -12,6 +12,7 @@ import type { QueryMyReportsDto } from './dto/query-my-reports.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import { AuditService } from '../audit/audit.service';
 import { UserRole } from '../../common/constants/enums';
+import { ChatGateway } from '../chat/chat.gateway';
 
 @Injectable()
 export class UsersRepository {
@@ -300,6 +301,7 @@ export class UsersRepository {
       email: row.email,
       isEmailVerified: row.isEmailVerified,
       createdAt: row.createdAt,
+      isOnline: ChatGateway.isUserOnline(row.id),
       roles: rolesByUserId.get(row.id) ?? [],
       profile: {
         fullName: row.fullName || '',

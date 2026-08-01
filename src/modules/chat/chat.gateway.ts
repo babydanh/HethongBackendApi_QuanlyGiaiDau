@@ -34,6 +34,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly supportStaffRoom = 'support:staff';
   private static readonly onlineUsers = new Map<string, Set<string>>();
 
+  public static isUserOnline(userId: string): boolean {
+    return ChatGateway.onlineUsers.has(userId) && (ChatGateway.onlineUsers.get(userId)?.size ?? 0) > 0;
+  }
+
+  public static getOnlineUserIds(): string[] {
+    return Array.from(ChatGateway.onlineUsers.keys());
+  }
+
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly jwtService: JwtService,

@@ -383,7 +383,7 @@ export class TournamentsController {
           try {
             const payload = await this.jwtService.verifyAsync(parts[1]);
             userId = payload.sub;
-          } catch (_e) {}
+          } catch {}
         }
       }
     }
