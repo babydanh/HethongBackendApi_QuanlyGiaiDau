@@ -674,9 +674,14 @@ export class TournamentsService {
         );
       }
 
-      // Club creation is community-scoped: ADMIN bypasses; otherwise the
-      // caller must be a joined community OWNER or MODERATOR. The global
-      // ORGANIZER role is intentionally for out-of-club creation only.
+      // Advanced club tournaments are not the Lite exception: they require
+      // the global ORGANIZER/ADMIN capability and the caller must still be
+      // authorized within the target club tenant.
+      if (!isSystemAuthorized) {
+        throw new ForbiddenException(
+          'Giải nâng cao trong câu lạc bộ yêu cầu quyền Ban tổ chức hoặc Admin.',
+        );
+      }
       if (!systemRoles.includes('ADMIN')) {
         const member = await this.tournamentsRepository.findCommunityMember(
           createTournamentDto.communityId,
@@ -688,7 +693,7 @@ export class TournamentsService {
           member.status !== 'JOINED'
         ) {
           throw new ForbiddenException(
-            'Bạn phải là Quản trị viên hoặc Điều hành viên của câu lạc bộ mới có thể tạo giải đấu nội bộ.',
+            'Bạn cần vừa có quyền Ban tổ chức vừa là Chủ/Điều hành viên của đúng câu lạc bộ để tạo giải nâng cao.',
           );
         }
       }
@@ -861,6 +866,11 @@ export class TournamentsService {
     if (dto.communityId && dto.tournamentType === 'PUBLIC') {
       throw new BadRequestException(
         'Giải nhanh có communityId phải có loại CLUB.',
+      );
+    }
+    if (dto.communityId && dto.visibility === 'PUBLIC') {
+      throw new BadRequestException(
+        'Giải Super Quick trong câu lạc bộ chỉ được là giải nội bộ, không thể mở thành giải công khai.',
       );
     }
     if (!dto.communityId && dto.tournamentType === 'CLUB') {
