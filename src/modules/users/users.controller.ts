@@ -213,29 +213,31 @@ export class UsersController {
   }
 
   @Get('admin/change-requests')
-  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Lấy danh sách yêu cầu đổi giới tính/email (Admin)' })
   async findChangeRequests(@Query('status') status?: string) {
     return this.usersService.findChangeRequests(status);
   }
 
   @Patch('admin/change-requests/:id/approve')
-  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Duyệt yêu cầu đổi giới tính/email (Admin)' })
   async approveChangeRequest(
     @Param('id') id: string,
     @Body() body: { adminNote?: string },
+    @CurrentUser() user: { id: string },
   ) {
-    return this.usersService.approveChangeRequest(id, body.adminNote);
+    return this.usersService.approveChangeRequest(id, user.id, body.adminNote);
   }
 
   @Patch('admin/change-requests/:id/reject')
-  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Từ chối yêu cầu đổi giới tính/email (Admin)' })
   async rejectChangeRequest(
     @Param('id') id: string,
     @Body() body: { adminNote?: string },
+    @CurrentUser() user: { id: string },
   ) {
-    return this.usersService.rejectChangeRequest(id, body.adminNote);
+    return this.usersService.rejectChangeRequest(id, user.id, body.adminNote);
   }
 }

@@ -5685,7 +5685,7 @@ export class TournamentsService {
     }
 
     const formatChanged =
-      nextMatchType !== (currentDivision.matchType as MatchType) ||
+      String(nextMatchType) !== String(currentDivision.matchType) ||
       nextGenderRestriction !== currentDivision.genderRestriction;
     if (formatChanged) {
       const participantCount =

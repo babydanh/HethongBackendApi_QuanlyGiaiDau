@@ -965,17 +965,46 @@ export class UsersRepository {
       .limit(10);
   }
 
-  async createChangeRequest(userId: string, requestType: 'GENDER' | 'EMAIL', oldValue: string, newValue: string) {
-    return await this.db
-      .insert(schema.userChangeRequests)
-      .values({
-        userId,
-        requestType,
-        oldValue,
-        newValue,
-        status: 'PENDING',
-      })
-      .returning();
+  async createChangeRequest(
+    userId: string,
+    requestType: 'GENDER' | 'EMAIL',
+    oldValue: string,
+    newValue: string,
+  ) {
+    return await this.db.transaction(async (tx) => {
+      // Serialize requests for the same account/type so two rapid submissions
+      // cannot both become PENDING before either one is observed.
+      await tx.execute(sql`
+        select pg_advisory_xact_lock(
+          hashtext(${`user-change-request:${userId}:${requestType}`})
+        )
+      `);
+
+      const [pending] = await tx
+        .select({ id: schema.userChangeRequests.id })
+        .from(schema.userChangeRequests)
+        .where(and(
+          eq(schema.userChangeRequests.userId, userId),
+          eq(schema.userChangeRequests.requestType, requestType),
+          eq(schema.userChangeRequests.status, 'PENDING'),
+        ))
+        .limit(1);
+      if (pending) {
+        throw new Error('PENDING_CHANGE_REQUEST_EXISTS');
+      }
+
+      const [request] = await tx
+        .insert(schema.userChangeRequests)
+        .values({
+          userId,
+          requestType,
+          oldValue,
+          newValue,
+          status: 'PENDING',
+        })
+        .returning();
+      return [request];
+    });
   }
 
   async findChangeRequests(status?: string) {
@@ -1007,6 +1036,217 @@ export class UsersRepository {
       .where(eq(schema.userChangeRequests.id, id))
       .limit(1);
     return result[0] ?? null;
+  }
+
+  async approveChangeRequestAtomically(
+    id: string,
+    reviewerId: string,
+    adminNote?: string,
+  ) {
+    return await this.db.transaction(async (tx) => {
+      await tx.execute(sql`
+        select pg_advisory_xact_lock(
+          hashtext(${`user-change-approval:${id}`})
+        )
+      `);
+
+      const [request] = await tx
+        .select()
+        .from(schema.userChangeRequests)
+        .where(eq(schema.userChangeRequests.id, id))
+        .for('update')
+        .limit(1);
+      if (!request) return null;
+      if (request.status !== 'PENDING') {
+        throw new Error('CHANGE_REQUEST_ALREADY_PROCESSED');
+      }
+
+      const [targetUser] = await tx
+        .select({
+          id: schema.users.id,
+          email: schema.users.email,
+          isEmailVerified: schema.users.isEmailVerified,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, request.userId))
+        .for('update')
+        .limit(1);
+      if (!targetUser) {
+        throw new Error('CHANGE_REQUEST_USER_NOT_FOUND');
+      }
+
+      if (request.requestType === 'GENDER') {
+        const [profile] = await tx
+          .select({
+            gender: schema.profiles.gender,
+          })
+          .from(schema.profiles)
+          .where(eq(schema.profiles.userId, request.userId))
+          .for('update')
+          .limit(1);
+        if (!profile) {
+          throw new Error('CHANGE_REQUEST_PROFILE_NOT_FOUND');
+        }
+        if (
+          String(profile.gender ?? '').trim().toLowerCase() !==
+          request.oldValue.trim().toLowerCase()
+        ) {
+          throw new Error('CHANGE_REQUEST_STALE');
+        }
+        await tx
+          .update(schema.profiles)
+          .set({ gender: request.newValue, updatedAt: new Date() })
+          .where(eq(schema.profiles.userId, request.userId));
+        await this.auditService.logUpdate(
+          tx,
+          reviewerId,
+          'profiles',
+          request.userId,
+          { gender: profile.gender },
+          { gender: request.newValue },
+        );
+      } else if (request.requestType === 'EMAIL') {
+        if (targetUser.isEmailVerified === true) {
+          throw new Error('EMAIL_CHANGE_LOCKED');
+        }
+        if (targetUser.email.trim().toLowerCase() !== request.oldValue.trim().toLowerCase()) {
+          throw new Error('CHANGE_REQUEST_STALE');
+        }
+        const normalizedEmail = request.newValue.trim().toLowerCase();
+        const [updatedUser] = await tx
+          .update(schema.users)
+          .set({
+            email: normalizedEmail,
+            isEmailVerified: false,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.users.id, request.userId))
+          .returning({
+            id: schema.users.id,
+            email: schema.users.email,
+            isEmailVerified: schema.users.isEmailVerified,
+          });
+        if (!updatedUser) {
+          throw new Error('CHANGE_REQUEST_USER_NOT_FOUND');
+        }
+        await tx
+          .update(schema.otpCodes)
+          .set({ isUsed: true })
+          .where(and(
+            eq(schema.otpCodes.userId, request.userId),
+            eq(schema.otpCodes.type, 'EMAIL_VERIFY'),
+            eq(schema.otpCodes.isUsed, false),
+          ));
+        await this.auditService.logUpdate(
+          tx,
+          reviewerId,
+          'users',
+          request.userId,
+          {
+            email: targetUser.email,
+            isEmailVerified: targetUser.isEmailVerified,
+          },
+          {
+            email: updatedUser.email,
+            isEmailVerified: updatedUser.isEmailVerified,
+          },
+        );
+      } else {
+        throw new Error('CHANGE_REQUEST_TYPE_INVALID');
+      }
+
+      const [updatedRequest] = await tx
+        .update(schema.userChangeRequests)
+        .set({
+          status: 'APPROVED',
+          adminNote,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(schema.userChangeRequests.id, id),
+          eq(schema.userChangeRequests.status, 'PENDING'),
+        ))
+        .returning();
+      if (!updatedRequest) {
+        throw new Error('CHANGE_REQUEST_ALREADY_PROCESSED');
+      }
+      await this.auditService.logUpdate(
+        tx,
+        reviewerId,
+        'user_change_requests',
+        id,
+        {
+          status: 'PENDING',
+          requestType: request.requestType,
+          userId: request.userId,
+        },
+        {
+          status: 'APPROVED',
+          adminNote: adminNote ?? null,
+          requestType: request.requestType,
+          userId: request.userId,
+        },
+      );
+      return updatedRequest;
+    });
+  }
+
+  async rejectChangeRequestAtomically(
+    id: string,
+    reviewerId: string,
+    adminNote?: string,
+  ) {
+    return await this.db.transaction(async (tx) => {
+      await tx.execute(sql`
+        select pg_advisory_xact_lock(
+          hashtext(${`user-change-approval:${id}`})
+        )
+      `);
+      const [request] = await tx
+        .select()
+        .from(schema.userChangeRequests)
+        .where(eq(schema.userChangeRequests.id, id))
+        .for('update')
+        .limit(1);
+      if (!request) return null;
+      if (request.status !== 'PENDING') {
+        throw new Error('CHANGE_REQUEST_ALREADY_PROCESSED');
+      }
+
+      const [updatedRequest] = await tx
+        .update(schema.userChangeRequests)
+        .set({
+          status: 'REJECTED',
+          adminNote,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(schema.userChangeRequests.id, id),
+          eq(schema.userChangeRequests.status, 'PENDING'),
+        ))
+        .returning();
+      if (!updatedRequest) {
+        throw new Error('CHANGE_REQUEST_ALREADY_PROCESSED');
+      }
+      await this.auditService.logUpdate(
+        tx,
+        reviewerId,
+        'user_change_requests',
+        id,
+        {
+          status: 'PENDING',
+          requestType: request.requestType,
+          userId: request.userId,
+        },
+        {
+          status: 'REJECTED',
+          adminNote: adminNote ?? null,
+          requestType: request.requestType,
+          userId: request.userId,
+        },
+      );
+      return updatedRequest;
+    });
   }
 
   async updateChangeRequestStatus(id: string, status: 'APPROVED' | 'REJECTED', adminNote?: string) {

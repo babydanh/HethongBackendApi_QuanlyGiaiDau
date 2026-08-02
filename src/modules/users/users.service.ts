@@ -324,54 +324,116 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('Không tìm thấy người dùng');
     }
+
+    const trimmedValue = newValue.trim();
+    if (!trimmedValue) {
+      throw new BadRequestException('Giá trị thay đổi không được để trống.');
+    }
+    if (requestType === 'EMAIL' && user.isEmailVerified === true) {
+      throw new ForbiddenException(
+        'Email đã được xác minh nên không thể gửi yêu cầu đổi email.',
+      );
+    }
+
     const oldValue = requestType === 'GENDER' ? (user.profile?.gender || '') : user.email;
-    const [request] = await this.usersRepository.createChangeRequest(userId, requestType, oldValue, newValue);
-    return request;
+    const normalizedGender = requestType === 'GENDER'
+      ? this.normalizeGenderValue(trimmedValue)
+      : null;
+    if (requestType === 'GENDER' && !normalizedGender) {
+      throw new BadRequestException('Giới tính mới không hợp lệ.');
+    }
+    if (
+      requestType === 'EMAIL' &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValue)
+    ) {
+      throw new BadRequestException('Email mới không hợp lệ.');
+    }
+
+    const isSameValue = requestType === 'EMAIL'
+      ? oldValue.trim().toLowerCase() === trimmedValue.toLowerCase()
+      : this.normalizeGenderValue(oldValue) === normalizedGender;
+    if (isSameValue) {
+      throw new BadRequestException('Thông tin mới giống thông tin hiện tại.');
+    }
+
+    try {
+      const [request] = await this.usersRepository.createChangeRequest(
+        userId,
+        requestType,
+        oldValue,
+        trimmedValue,
+      );
+      return request;
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'PENDING_CHANGE_REQUEST_EXISTS') {
+        throw new ConflictException('Bạn đã có một yêu cầu cùng loại đang chờ xử lý.');
+      }
+      throw error;
+    }
   }
 
   async findChangeRequests(status?: string) {
     return await this.usersRepository.findChangeRequests(status);
   }
 
-  async approveChangeRequest(id: string, adminNote?: string) {
-    const request = await this.usersRepository.findChangeRequestById(id);
-    if (!request) {
-      throw new NotFoundException('Yêu cầu không tồn tại');
-    }
-    if (request.status !== 'PENDING') {
-      throw new BadRequestException('Yêu cầu này đã được xử lý trước đó');
-    }
-
-    // Apply the change
-    if (request.requestType === 'GENDER') {
-      await this.usersRepository.updateProfile(request.userId, { gender: request.newValue });
-    } else if (request.requestType === 'EMAIL') {
-      const normalizedEmail = request.newValue.trim().toLowerCase();
-      try {
-        await this.usersRepository.updateEmail(request.userId, normalizedEmail);
-        await this.usersRepository.invalidateEmailVerificationTokens(request.userId);
-      } catch (error: unknown) {
-        if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
-          throw new ConflictException('Email này đã được sử dụng bởi tài khoản khác.');
-        }
-        throw error;
+  async approveChangeRequest(id: string, reviewerId: string, adminNote?: string) {
+    try {
+      const updated = await this.usersRepository.approveChangeRequestAtomically(
+        id,
+        reviewerId,
+        adminNote,
+      );
+      if (!updated) {
+        throw new NotFoundException('Yêu cầu không tồn tại');
       }
+      return updated;
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_ALREADY_PROCESSED') {
+        throw new BadRequestException('Yêu cầu này đã được xử lý trước đó');
+      }
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_USER_NOT_FOUND') {
+        throw new NotFoundException('Người dùng của yêu cầu không tồn tại');
+      }
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_PROFILE_NOT_FOUND') {
+        throw new BadRequestException('Hồ sơ người dùng không tồn tại để cập nhật.');
+      }
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_TYPE_INVALID') {
+        throw new BadRequestException('Loại yêu cầu không hợp lệ.');
+      }
+      if (error instanceof Error && error.message === 'EMAIL_CHANGE_LOCKED') {
+        throw new ForbiddenException(
+          'Email đã được xác minh nên không thể thay đổi.',
+        );
+      }
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_STALE') {
+        throw new ConflictException(
+          'Thông tin hiện tại đã thay đổi; yêu cầu này không còn hợp lệ.',
+        );
+      }
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
+        throw new ConflictException('Email này đã được sử dụng bởi tài khoản khác.');
+      }
+      throw error;
     }
-
-    const [updated] = await this.usersRepository.updateChangeRequestStatus(id, 'APPROVED', adminNote);
-    return updated;
   }
 
-  async rejectChangeRequest(id: string, adminNote?: string) {
-    const request = await this.usersRepository.findChangeRequestById(id);
-    if (!request) {
-      throw new NotFoundException('Yêu cầu không tồn tại');
+  async rejectChangeRequest(id: string, reviewerId: string, adminNote?: string) {
+    try {
+      const updated = await this.usersRepository.rejectChangeRequestAtomically(
+        id,
+        reviewerId,
+        adminNote,
+      );
+      if (!updated) {
+        throw new NotFoundException('Yêu cầu không tồn tại');
+      }
+      return updated;
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_ALREADY_PROCESSED') {
+        throw new BadRequestException('Yêu cầu này đã được xử lý trước đó');
+      }
+      throw error;
     }
-    if (request.status !== 'PENDING') {
-      throw new BadRequestException('Yêu cầu này đã được xử lý trước đó');
-    }
-    const [updated] = await this.usersRepository.updateChangeRequestStatus(id, 'REJECTED', adminNote);
-    return updated;
   }
 
   async deleteAccount(userId: string, changePasswordDto: { password: string }) {
