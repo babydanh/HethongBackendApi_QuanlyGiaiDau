@@ -44,6 +44,7 @@ import { AppVersionModule } from './modules/app-version/app-version.module';
 import { FootballTeamsModule } from './modules/football-teams/football-teams.module';
 import { FirebaseModule } from './modules/firebase/firebase.module';
 import { SponsorsModule } from './modules/sponsors/sponsors.module';
+import { AdvertisementsModule } from './modules/advertisements/advertisements.module';
 
 @Module({
   imports: [
@@ -99,6 +100,7 @@ import { SponsorsModule } from './modules/sponsors/sponsors.module';
     FootballTeamsModule,
     FirebaseModule,
     SponsorsModule,
+    AdvertisementsModule,
   ],
   controllers: [AppController],
   providers: [
