@@ -805,27 +805,16 @@ export class TournamentsRepository {
         .where(eq(schema.tournaments.id, id))
         .returning();
 
-      // Cascade soft-delete to matches
-      const stages = await tx
-        .select({ id: schema.tournamentStages.id })
-        .from(schema.tournamentStages)
-        .where(eq(schema.tournamentStages.tournamentId, id));
-      const stageIds = stages.map(s => s.id);
-
-      if (stageIds.length > 0) {
-        const groups = await tx
-          .select({ id: schema.tournamentGroups.id })
-          .from(schema.tournamentGroups)
-          .where(inArray(schema.tournamentGroups.stageId, stageIds));
-        const groupIds = groups.map(g => g.id);
-
-        if (groupIds.length > 0) {
-          await tx
-            .update(schema.matches)
-            .set({ deletedAt: new Date(), updatedAt: new Date() })
-            .where(inArray(schema.matches.groupId, groupIds));
-        }
-      }
+      // Cascade by tournamentId so knockout matches without a groupId are included.
+      await tx
+        .update(schema.matches)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.matches.tournamentId, id),
+            isNull(schema.matches.deletedAt),
+          ),
+        );
 
       // Delete any notifications referencing this tournament
       await tx
@@ -834,6 +823,28 @@ export class TournamentsRepository {
 
       await this.auditService.logDelete(tx, userId, 'tournaments', id, oldRecord);
       return deleted;
+    });
+  }
+
+  async archive(id: string, userId: string) {
+    return this.db.transaction(async (tx) => {
+      const [oldRecord] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(and(eq(schema.tournaments.id, id), isNull(schema.tournaments.deletedAt)))
+        .limit(1);
+
+      if (!oldRecord) return null;
+
+      const now = new Date();
+      const [archived] = await tx
+        .update(schema.tournaments)
+        .set({ archivedAt: now, updatedAt: now })
+        .where(eq(schema.tournaments.id, id))
+        .returning();
+
+      await this.auditService.logUpdate(tx, userId, 'tournaments', id, oldRecord, archived);
+      return archived;
     });
   }
 
@@ -2857,6 +2868,19 @@ export class TournamentsRepository {
         .update(schema.tournaments)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(schema.tournaments.parentId, id));
+
+      // Cascade directly by tournamentId; knockout matches may not have groupId.
+      if (divisionIds.length > 0) {
+        await tx
+          .update(schema.matches)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              inArray(schema.matches.tournamentId, divisionIds),
+              isNull(schema.matches.deletedAt),
+            ),
+          );
+      }
 
       // Delete notifications for the parent tournament
       await tx

@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, desc, and, isNull, or, SQL, sql, gt, aliasedTable } from 'drizzle-orm';
+import { eq, desc, and, isNull, or, SQL, sql, gt, aliasedTable, inArray } from 'drizzle-orm';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 
 @Injectable()
@@ -510,7 +510,24 @@ export class RankingsRepository {
     tx: AppTx,
     logs: (typeof schema.eloHistoryLogs.$inferInsert)[],
   ) {
-    return tx.insert(schema.eloHistoryLogs).values(logs).onConflictDoNothing();
+    const matchIds = [...new Set(logs.map((log) => log.matchId).filter((id): id is string => Boolean(id)))];
+    const tournamentByMatch = new Map<string, string | null>();
+
+    if (matchIds.length > 0) {
+      const matches = await tx
+        .select({ id: schema.matches.id, tournamentId: schema.matches.tournamentId })
+        .from(schema.matches)
+        .where(inArray(schema.matches.id, matchIds));
+      for (const match of matches) tournamentByMatch.set(match.id, match.tournamentId);
+    }
+
+    const enrichedLogs = logs.map((log) => ({
+      ...log,
+      tournamentId:
+        log.tournamentId ?? (log.matchId ? tournamentByMatch.get(log.matchId) ?? null : null),
+    }));
+
+    return tx.insert(schema.eloHistoryLogs).values(enrichedLogs).onConflictDoNothing();
   }
 
   async getEloTiersByCategory(categoryId: string) {

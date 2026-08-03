@@ -102,6 +102,8 @@ export const eloHistoryLogs = pgTable(
       .references(() => categories.id, { onDelete: 'cascade' })
       .notNull(),
     matchId: uuid('match_id'), // fk will be added via ALTER TABLE later or manually due to circular deps
+    // FK is added in SQL migration to avoid a circular schema import.
+    tournamentId: uuid('tournament_id'),
     reason: varchar('reason', { length: 100 }),
     previousElo: integer('previous_elo').notNull(),
     newElo: integer('new_elo').notNull(),

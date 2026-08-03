@@ -239,6 +239,13 @@
       "when": 1785483600000,
       "tag": "0033_pair_rank_independent_elo",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785750000000,
+      "tag": "0034_archive_completed_tournaments",
+      "breakpoints": true
     }
   ]
 }

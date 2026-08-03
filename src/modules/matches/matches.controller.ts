@@ -70,7 +70,7 @@ export class MatchesController {
   @Patch(':id/score')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.PLAYER, UserRole.REFEREE, UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.REFEREE, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
   async updateScore(
     @Param('id', ParseUUIDPipe) id: string,
@@ -83,7 +83,7 @@ export class MatchesController {
   @Patch(':id/status')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.PLAYER, UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.REFEREE, UserRole.ADMIN)
   @ApiOperation({
     summary: 'Cập nhật trạng thái trận đấu (ONGOING, COMPLETED)',
   })
