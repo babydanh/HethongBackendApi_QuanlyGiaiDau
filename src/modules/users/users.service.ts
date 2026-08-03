@@ -29,7 +29,7 @@ export class UsersService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  private normalizeGenderValue(value?: string | null): 'MALE' | 'FEMALE' | null {
+  private normalizeGenderValue(value?: string | null): 'MALE' | 'FEMALE' | 'OTHER' | null {
     const normalized = String(value ?? '')
       .trim()
       .toUpperCase()
@@ -37,6 +37,7 @@ export class UsersService {
 
     if (['MALE', 'MEN', 'NAM'].includes(normalized)) return 'MALE';
     if (['FEMALE', 'WOMEN', 'NU', 'NỮ'].includes(normalized)) return 'FEMALE';
+    if (['OTHER', 'KHAC', 'KHÁC'].includes(normalized)) return 'OTHER';
     return null;
   }
 
@@ -329,9 +330,14 @@ export class UsersService {
     if (!trimmedValue) {
       throw new BadRequestException('Giá trị thay đổi không được để trống.');
     }
-    if (requestType === 'EMAIL' && user.isEmailVerified === true) {
-      throw new ForbiddenException(
-        'Email đã được xác minh nên không thể gửi yêu cầu đổi email.',
+    if (requestType === 'EMAIL') {
+      throw new BadRequestException(
+        'Email chỉ được thay đổi trực tiếp khi chưa xác minh; không hỗ trợ yêu cầu duyệt đổi email.',
+      );
+    }
+    if (requestType === 'GENDER' && !user.profile?.isGenderLocked) {
+      throw new BadRequestException(
+        'Giới tính chưa bị khóa; bạn có thể cập nhật trực tiếp trong hồ sơ.',
       );
     }
 
@@ -342,16 +348,7 @@ export class UsersService {
     if (requestType === 'GENDER' && !normalizedGender) {
       throw new BadRequestException('Giới tính mới không hợp lệ.');
     }
-    if (
-      requestType === 'EMAIL' &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValue)
-    ) {
-      throw new BadRequestException('Email mới không hợp lệ.');
-    }
-
-    const isSameValue = requestType === 'EMAIL'
-      ? oldValue.trim().toLowerCase() === trimmedValue.toLowerCase()
-      : this.normalizeGenderValue(oldValue) === normalizedGender;
+    const isSameValue = this.normalizeGenderValue(oldValue) === normalizedGender;
     if (isSameValue) {
       throw new BadRequestException('Thông tin mới giống thông tin hiện tại.');
     }
@@ -399,6 +396,11 @@ export class UsersService {
       }
       if (error instanceof Error && error.message === 'CHANGE_REQUEST_TYPE_INVALID') {
         throw new BadRequestException('Loại yêu cầu không hợp lệ.');
+      }
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_EMAIL_DEPRECATED') {
+        throw new BadRequestException(
+          'Yêu cầu đổi email cũ không thể duyệt; người dùng phải sửa trực tiếp khi email chưa xác minh.',
+        );
       }
       if (error instanceof Error && error.message === 'EMAIL_CHANGE_LOCKED') {
         throw new ForbiddenException(

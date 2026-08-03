@@ -204,7 +204,7 @@ export class UsersController {
 
   @Post('change-requests')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Gửi yêu cầu thay đổi giới tính / email nhạy cảm' })
+  @ApiOperation({ summary: 'Gửi yêu cầu thay đổi giới tính (Admin duyệt)' })
   async createChangeRequest(
     @CurrentUser() user: { id: string },
     @Body() body: CreateChangeRequestDto,
@@ -214,14 +214,14 @@ export class UsersController {
 
   @Get('admin/change-requests')
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Lấy danh sách yêu cầu đổi giới tính/email (Admin)' })
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu đổi giới tính (Admin)' })
   async findChangeRequests(@Query('status') status?: string) {
     return this.usersService.findChangeRequests(status);
   }
 
   @Patch('admin/change-requests/:id/approve')
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Duyệt yêu cầu đổi giới tính/email (Admin)' })
+  @ApiOperation({ summary: 'Duyệt yêu cầu đổi giới tính (Admin)' })
   async approveChangeRequest(
     @Param('id') id: string,
     @Body() body: { adminNote?: string },
@@ -232,7 +232,7 @@ export class UsersController {
 
   @Patch('admin/change-requests/:id/reject')
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Từ chối yêu cầu đổi giới tính/email (Admin)' })
+  @ApiOperation({ summary: 'Từ chối yêu cầu đổi giới tính (Admin)' })
   async rejectChangeRequest(
     @Param('id') id: string,
     @Body() body: { adminNote?: string },
