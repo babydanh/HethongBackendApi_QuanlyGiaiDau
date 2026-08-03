@@ -1060,6 +1060,9 @@ export class UsersRepository {
       if (request.status !== 'PENDING') {
         throw new Error('CHANGE_REQUEST_ALREADY_PROCESSED');
       }
+      if (request.requestType === 'EMAIL') {
+        throw new Error('CHANGE_REQUEST_EMAIL_DEPRECATED');
+      }
 
       const [targetUser] = await tx
         .select({
