@@ -576,6 +576,7 @@ ${divisionsStr}
       throw new BadRequestException(`Nội dung điều lệ không được vượt quá ${this.maxTournamentSourceChars} ký tự.`);
     }
     let sourceContent = rawText;
+    let sourceImageCandidates: string[] = [];
 
     // If a URL is provided, fetch only a bounded public source.
     const sourceUrl = dto.sourceUrl?.trim();
@@ -595,6 +596,21 @@ ${divisionsStr}
         }
         const html = (await response.text()).slice(0, this.maxTournamentFetchBytes);
         const parsedUrl = new URL(sourceUrl);
+        const imageCandidates = Array.from(html.matchAll(/<meta[^>]+(?:property|name)=["'](?:og:image|og:image:url|twitter:image|twitter:image:src)["'][^>]+content=["']([^"']+)["'][^>]*>/gi))
+            .map((match) => match[1])
+            .concat(Array.from(html.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|og:image:url|twitter:image|twitter:image:src)["'][^>]*>/gi)).map((match) => match[1]))
+            .map((value) => {
+              try {
+                const url = new URL(value, sourceUrl);
+                return ['http:', 'https:'].includes(url.protocol) ? url.toString() : null;
+              } catch {
+                return null;
+              }
+            })
+            .filter((value): value is string => Boolean(value))
+            .filter((value, index, values) => values.indexOf(value) === index)
+            .slice(0, 8);
+        sourceImageCandidates = imageCandidates;
         const isGoogleFormUrl = parsedUrl.hostname.toLowerCase() === 'docs.google.com' || parsedUrl.hostname.toLowerCase().endsWith('.docs.google.com');
         const redirectedToGoogleAuth = response.url.toLowerCase().includes('accounts.google.com') || response.url.toLowerCase().includes('/servicelogin');
         const googleFormRequiresAuth = isGoogleFormUrl && (
@@ -621,7 +637,10 @@ ${divisionsStr}
             .replace(/\s+/g, ' ')
             .trim();
           if (textOnly.length > 50) {
-            sourceContent = `[NỘI DUNG TẢI TỪ URL: ${sourceUrl}]\n${textOnly.slice(0, 24000)}\n${embeddedData ? `\n[DỮ LIỆU NHÚNG CỦA GOOGLE FORM]\n${embeddedData}` : ''}\n\n${sourceContent}`;
+            const mediaContext = sourceImageCandidates.length
+              ? `\n[URL ẢNH/PHƯƠNG TIỆN TÌM THẤY TRÊN NGUỒN]\n${sourceImageCandidates.join('\n')}`
+              : '';
+            sourceContent = `[NỘI DUNG TẢI TỪ URL: ${sourceUrl}]\n${textOnly.slice(0, 24000)}${mediaContext}\n${embeddedData ? `\n[DỮ LIỆU NHÚNG CỦA GOOGLE FORM]\n${embeddedData}` : ''}\n\n${sourceContent}`;
           }
         }
       } catch (err: any) {
@@ -648,7 +667,7 @@ Quy tắc phân loại:
 8. "ward": Phường / xã / thị trấn nếu nguồn có nêu rõ, nếu không thì null.
 9. "description": Tóm tắt quy định, điều lệ hoặc thông tin giải đấu.
 10. "bannerUrl": Link ảnh banner/poster nếu tìm thấy trong văn bản (hoặc null).
-11. "logoUrl": Link logo nếu nguồn có nêu rõ (hoặc null).
+11. "logoUrl": Link logo nếu nguồn có nêu rõ (hoặc null). Nếu có URL ảnh nguồn được cung cấp trong ngữ cảnh, ưu tiên chọn ảnh banner/poster phù hợp nhất cho bannerUrl; không tự bịa URL.
 12. "prizeDescription": Mô tả giải thưởng (hoặc null).
 13. "contactInfo": {"phone": số liên hệ hoặc null, "email": email liên hệ hoặc null}.
 14. "registrationMode": OPEN nếu tự do, APPROVAL nếu phải xét duyệt, INVITE_ONLY nếu chỉ mã mời; null nếu không rõ.
@@ -806,7 +825,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
         district: normalizeText(parsed.district, 120),
         ward: normalizeText(parsed.ward, 120),
         description: normalizeText(parsed.description, 5000),
-        bannerUrl: normalizeHttpUrl(parsed.bannerUrl),
+        bannerUrl: normalizeHttpUrl(parsed.bannerUrl) ?? sourceImageCandidates[0] ?? null,
         logoUrl: normalizeHttpUrl(parsed.logoUrl),
         prizeDescription: normalizeText(parsed.prizeDescription, 3000),
         contactInfo: parsed.contactInfo && typeof parsed.contactInfo === 'object'

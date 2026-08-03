@@ -8752,6 +8752,11 @@ export class TournamentsRepository {
         name: string;
         teamName: string;
       }> = [];
+      const linkedAccountNotifications: Array<{
+        userId: string;
+        status: 'COMPLETE' | 'PENDING_APPROVAL';
+        divisionId: string | null;
+      }> = [];
 
       for (const [itemIndex, item] of items.entries()) {
         const player1Name = item.player1Name?.trim();
@@ -8792,7 +8797,9 @@ export class TournamentsRepository {
           );
         }
 
-        // 1. Resolve User 1
+        // Resolve only existing SportO accounts. Unmatched contacts remain
+        // participant metadata and never become synthetic users or notification
+        // recipients.
         let user1Id: string | null = null;
         if (p1Email || p1Phone) {
           let foundUser: typeof schema.users.$inferSelect | undefined;
@@ -8820,132 +8827,39 @@ export class TournamentsRepository {
                 .then((r) => r[0]);
             }
           }
-
-          if (foundUser) {
-            user1Id = foundUser.id;
-          } else {
-            const guestEmail =
-              p1Email ||
-              `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
-            const [newUser] = await tx
-              .insert(schema.users)
-              .values({
-                email: guestEmail,
-                isEmailVerified: false,
-                isMock: false,
-              })
-              .returning();
-
-            await tx.insert(schema.profiles).values({
-              userId: newUser.id,
-              fullName: player1Name,
-              phoneNumber: p1Phone || null,
-            });
-
-            user1Id = newUser.id;
-            if (p1Email) {
-              unregisteredEmails.push({
-                email: p1Email,
-                name: item.player1Name,
-                teamName: item.teamName,
-              });
-            }
-          }
-        } else {
-          const guestEmail = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
-          const [newUser] = await tx
-            .insert(schema.users)
-            .values({
-              email: guestEmail,
-              isEmailVerified: false,
-              isMock: false,
-            })
-            .returning();
-
-          await tx.insert(schema.profiles).values({
-            userId: newUser.id,
-            fullName: player1Name,
-          });
-          user1Id = newUser.id;
+          user1Id = foundUser?.id ?? null;
         }
 
-        // 2. Resolve User 2 (if doubles)
+        // Resolve User 2 only when the doubles participant already has a
+        // matching SportO account. Names/emails are retained in customResponses.
         let user2Id: string | null = null;
-        if (isDoubles && hasPlayer2Data) {
-          if (p2Email || p2Phone) {
-            let foundUser2: typeof schema.users.$inferSelect | undefined;
-            if (p2Email) {
+        if (isDoubles && hasPlayer2Data && (p2Email || p2Phone)) {
+          let foundUser2: typeof schema.users.$inferSelect | undefined;
+          if (p2Email) {
+            foundUser2 = await tx
+              .select()
+              .from(schema.users)
+              .where(eq(schema.users.email, p2Email))
+              .limit(1)
+              .then((r) => r[0]);
+          }
+          if (!foundUser2 && p2Phone) {
+            const foundProfile2 = await tx
+              .select()
+              .from(schema.profiles)
+              .where(eq(schema.profiles.phoneNumber, p2Phone))
+              .limit(1)
+              .then((r) => r[0]);
+            if (foundProfile2) {
               foundUser2 = await tx
                 .select()
                 .from(schema.users)
-                .where(eq(schema.users.email, p2Email))
+                .where(eq(schema.users.id, foundProfile2.userId))
                 .limit(1)
                 .then((r) => r[0]);
             }
-            if (!foundUser2 && p2Phone) {
-              const foundProfile2 = await tx
-                .select()
-                .from(schema.profiles)
-                .where(eq(schema.profiles.phoneNumber, p2Phone))
-                .limit(1)
-                .then((r) => r[0]);
-              if (foundProfile2) {
-                foundUser2 = await tx
-                  .select()
-                  .from(schema.users)
-                  .where(eq(schema.users.id, foundProfile2.userId))
-                  .limit(1)
-                  .then((r) => r[0]);
-              }
-            }
-
-            if (foundUser2) {
-              user2Id = foundUser2.id;
-            } else {
-              const guestEmail2 =
-                p2Email ||
-                `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
-              const [newUser2] = await tx
-                .insert(schema.users)
-                .values({
-                  email: guestEmail2,
-                  isEmailVerified: false,
-                  isMock: false,
-                })
-                .returning();
-
-              await tx.insert(schema.profiles).values({
-                userId: newUser2.id,
-                fullName: player2Name || 'Đồng đội',
-                phoneNumber: p2Phone || null,
-              });
-
-              user2Id = newUser2.id;
-              if (p2Email) {
-                unregisteredEmails.push({
-                  email: p2Email,
-                  name: player2Name || 'VĐV',
-                  teamName: item.teamName,
-                });
-              }
-            }
-          } else if (player2Name) {
-            const guestEmail2 = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
-            const [newUser2] = await tx
-              .insert(schema.users)
-              .values({
-                email: guestEmail2,
-                isEmailVerified: false,
-                isMock: false,
-              })
-              .returning();
-
-            await tx.insert(schema.profiles).values({
-              userId: newUser2.id,
-              fullName: player2Name,
-            });
-            user2Id = newUser2.id;
           }
+          user2Id = foundUser2?.id ?? null;
         }
 
         const teamStatus =
@@ -8991,12 +8905,21 @@ export class TournamentsRepository {
           });
         }
 
+        for (const linkedUserId of new Set([user1Id, user2Id].filter((value): value is string => Boolean(value)))) {
+          linkedAccountNotifications.push({
+            userId: linkedUserId,
+            status: teamStatus,
+            divisionId: divisionId ?? null,
+          });
+        }
+
         results.push(participant);
       }
 
       return {
         importedCount: results.length,
         unregisteredEmails,
+        linkedAccountNotifications,
         participants: results,
       };
     });
