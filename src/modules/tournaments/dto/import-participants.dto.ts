@@ -79,4 +79,9 @@ export class ImportParticipantsDto {
   @IsOptional()
   @IsBoolean()
   sendInvitationEmail?: boolean;
+
+  @ApiPropertyOptional({ description: 'Gửi thông báo trong SportO cho các VĐV đã có tài khoản' })
+  @IsOptional()
+  @IsBoolean()
+  notifyLinkedAccounts?: boolean;
 }

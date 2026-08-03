@@ -76,6 +76,15 @@ describe('admin Elo safety guardrails', () => {
     expect(serviceSource).not.toContain('lastDecayAt: now');
   });
 
+  it('returns the admin bootstrap flag in user profile ranking projections', () => {
+    expect(repositorySource).toContain(
+      'adminLeaderboardEligible: schema.userRanks.adminLeaderboardEligible',
+    );
+    expect(repositorySource).toContain(
+      'adminLeaderboardEligible: schema.communityRankings.adminLeaderboardEligible',
+    );
+  });
+
   it('uses real matches or an explicit admin bootstrap flag for eligible singles reads', () => {
     expect(repositorySource).toContain(
       'eq(schema.communityRankings.adminLeaderboardEligible, true)',

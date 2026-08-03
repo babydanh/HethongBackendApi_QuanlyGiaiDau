@@ -1004,12 +1004,14 @@ export class TournamentsService {
     // Keep the organizer's selected policy. Public Quick defaults to
     // APPROVAL; silently collapsing it to OPEN made the UI promise review
     // while the API immediately accepted every applicant.
+    const requestedPublic = dto.visibility === 'PUBLIC';
     const registrationMode = dto.registrationMode === 'INVITE_ONLY'
       ? 'INVITE_ONLY'
       : dto.registrationMode === 'APPROVAL'
         ? 'APPROVAL'
-        : 'OPEN';
-    const requestedPublic = dto.visibility === 'PUBLIC';
+        : requestedPublic
+          ? 'APPROVAL'
+          : 'OPEN';
     // Community quick-create is always an internal club tournament. For a
     // standalone quick-create, preserve the organizer's explicit scope and
     // default to the expanded/public tournament type.
@@ -6543,7 +6545,31 @@ export class TournamentsService {
       dto.divisionId,
     );
 
-    // Send invitation emails if requested
+    if (dto.notifyLinkedAccounts && result.linkedAccountNotifications?.length) {
+      for (const recipient of result.linkedAccountNotifications) {
+        try {
+          const notification = recipient.status === 'COMPLETE'
+            ? buildParticipantRegistrationSuccessNotification({
+                tournamentId,
+                tournamentName: tournament.name,
+                receiverId: recipient.userId,
+                divisionId: recipient.divisionId,
+              })
+            : buildParticipantRegistrationPendingNotification({
+                tournamentId,
+                tournamentName: tournament.name,
+                receiverId: recipient.userId,
+                divisionId: recipient.divisionId,
+              });
+          await this.notificationsService.sendNotification(notification);
+        } catch {
+          // A notification failure must not roll back a successful import.
+        }
+      }
+    }
+
+    // Unmatched contacts are intentionally not invited or notified by clone/import.
+    // Keep this legacy opt-in email branch only for explicit non-clone callers.
     if (dto.sendInvitationEmail && this.mailService && result.unregisteredEmails?.length) {
       for (const recipient of result.unregisteredEmails) {
         try {
