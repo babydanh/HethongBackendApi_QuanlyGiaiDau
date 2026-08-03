@@ -592,7 +592,7 @@ export class UsersRepository {
         count += 1;
       }
       return {
-        currentStreakType: firstResult as 'WIN' | 'LOSS',
+        currentStreakType: firstResult,
         currentStreakCount: count,
       };
     };

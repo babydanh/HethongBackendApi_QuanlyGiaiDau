@@ -31,7 +31,7 @@ import { CreateReportDto } from './dto/create-report.dto';
 import { CreateChangeRequestDto } from './dto/create-change-request.dto';
 import { QueryMyReportsDto } from './dto/query-my-reports.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Verified } from '../../common/decorators/verified.decorator';
+
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { UserRole } from '../../common/constants/enums';
