@@ -2,7 +2,8 @@ import { Injectable, Inject, NotFoundException, BadRequestException, ConflictExc
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNull, aliasedTable, like } from 'drizzle-orm';
+import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNull, aliasedTable, like, lt } from 'drizzle-orm';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import { EloEngineService } from '../rankings/elo-engine.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -1755,20 +1756,24 @@ export class AdminService {
 
     const baseWhereClause = and(...conditions);
     let whereClause = baseWhereClause;
-    let tournamentCursor: { createdAt: string; id: string } | null = null;
-    if (cursor) {
-      try {
-        tournamentCursor = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
-      } catch {
-        tournamentCursor = null;
+    const decodedCursor = cursor
+      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor)
+      : null;
+
+    if (decodedCursor && decodedCursor.createdAt && decodedCursor.id) {
+      const cursorDate = new Date(decodedCursor.createdAt);
+      if (!isNaN(cursorDate.getTime())) {
+        whereClause = and(
+          baseWhereClause,
+          or(
+            lt(schema.tournaments.createdAt, cursorDate),
+            and(
+              eq(schema.tournaments.createdAt, cursorDate),
+              lt(schema.tournaments.id, decodedCursor.id),
+            ),
+          ),
+        );
       }
-    }
-    if (tournamentCursor) {
-      const cursorDate = new Date(tournamentCursor.createdAt);
-      whereClause = and(
-        baseWhereClause,
-        sql`(${schema.tournaments.createdAt} < ${cursorDate} OR (${schema.tournaments.createdAt} = ${cursorDate} AND ${schema.tournaments.id} < ${tournamentCursor.id}))`,
-      );
     }
 
     const [totalRecord] = await this.db
@@ -1802,8 +1807,8 @@ export class AdminService {
     const tournamentRows = await tournamentsQuery;
     const hasMore = tournamentRows.length > limit;
     const data = hasMore ? tournamentRows.slice(0, limit) : tournamentRows;
-    const lastTournament = tournamentRows.length > 0
-      ? tournamentRows[tournamentRows.length - 1] as { createdAt: Date; id: string }
+    const lastTournament = data.length > 0
+      ? (data[data.length - 1] as { createdAt: Date | string; id: string })
       : undefined;
 
     return {
@@ -1813,7 +1818,16 @@ export class AdminService {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
-        nextCursor: hasMore && lastTournament ? Buffer.from(JSON.stringify({ createdAt: lastTournament.createdAt.toISOString(), id: lastTournament.id })).toString('base64url') : null,
+        nextCursor:
+          hasMore && lastTournament
+            ? CursorPaginationHelper.encodeCursor({
+                id: lastTournament.id,
+                createdAt:
+                  lastTournament.createdAt instanceof Date
+                    ? lastTournament.createdAt.toISOString()
+                    : String(lastTournament.createdAt),
+              })
+            : null,
         hasMore,
       },
     };
