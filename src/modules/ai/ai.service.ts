@@ -522,6 +522,29 @@ ${divisionsStr}
     ward?: string | null;
     description?: string | null;
     bannerUrl?: string | null;
+    logoUrl?: string | null;
+    prizeDescription?: string | null;
+    contactInfo?: { phone?: string | null; email?: string | null } | null;
+    registrationMode?: 'OPEN' | 'APPROVAL' | 'INVITE_ONLY' | null;
+    isRanked?: boolean | null;
+    startTime?: string | null;
+    registrationStartDate?: string | null;
+    registrationEndDate?: string | null;
+    teamSize?: 5 | 7 | 11 | null;
+    maxReserve?: number | null;
+    setsToWin?: number | null;
+    pointsPerSet?: number | null;
+    winByTwo?: boolean | null;
+    maxPoints?: number | null;
+    footballHalvesCount?: number | null;
+    footballHalfDuration?: number | null;
+    footballAllowDraw?: boolean | null;
+    isRecurring?: boolean | null;
+    recurringFrequency?: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | null;
+    recurringDayOfWeek?: number | null;
+    recurringDaysOfWeek?: number[] | null;
+    recurringTimeOfDay?: string | null;
+    recurringAdvanceDays?: number | null;
     formats: Array<{
       name: string;
       formatKey: string;
@@ -529,6 +552,9 @@ ${divisionsStr}
       maxParticipants?: number | null;
       minElo?: number | null;
       maxElo?: number | null;
+      prizeDescription?: string | null;
+      startDate?: string | null;
+      registrationEndDate?: string | null;
     }>;
     registrationFormFields: Array<{
       id: string;
@@ -609,16 +635,29 @@ Quy tắc phân loại:
 8. "ward": Phường / xã / thị trấn nếu nguồn có nêu rõ, nếu không thì null.
 9. "description": Tóm tắt quy định, điều lệ hoặc thông tin giải đấu.
 10. "bannerUrl": Link ảnh banner/poster nếu tìm thấy trong văn bản (hoặc null).
-11. "formats": Danh sách các nội dung thi đấu (Divisions). Mỗi mục gồm:
+11. "logoUrl": Link logo nếu nguồn có nêu rõ (hoặc null).
+12. "prizeDescription": Mô tả giải thưởng (hoặc null).
+13. "contactInfo": {"phone": số liên hệ hoặc null, "email": email liên hệ hoặc null}.
+14. "registrationMode": OPEN nếu tự do, APPROVAL nếu phải xét duyệt, INVITE_ONLY nếu chỉ mã mời; null nếu không rõ.
+15. "isRanked": true nếu nguồn nói tính ELO/xếp hạng, false nếu nói phong trào/không xếp hạng, null nếu không rõ.
+16. "startTime", "registrationStartDate", "registrationEndDate": thời gian ISO hoặc HH:mm nếu nguồn có nêu rõ.
+17. "teamSize", "maxReserve": chỉ dành cho bóng đá; teamSize chỉ nhận 5, 7 hoặc 11.
+18. "setsToWin", "pointsPerSet", "winByTwo", "maxPoints": luật preset nếu nguồn nói rõ.
+19. "footballHalvesCount", "footballHalfDuration", "footballAllowDraw": luật bóng đá nếu nguồn nói rõ.
+20. "isRecurring", "recurringFrequency", "recurringDayOfWeek", "recurringDaysOfWeek", "recurringTimeOfDay", "recurringAdvanceDays": lịch lặp nếu nguồn nói rõ, nếu không thì false/null.
+21. "formats": Danh sách các nội dung thi đấu (Divisions). Mỗi mục gồm:
    - "name": Tên hiển thị (VD: "Đôi Nam 6.5", "Đôi Nam Nữ Open", "Đơn Nam 3.0", "Đôi Nữ")
    - "formatKey": Chuẩn hóa theo một trong các giá trị:
      + "SINGLES_MALE", "SINGLES_FEMALE", "DOUBLES_MALE", "DOUBLES_FEMALE", "MIXED_DOUBLES"
-     + Hoặc môn bóng đá: "FOOTBALL_MALE", "FOOTBALL_FEMALE", "FOOTBALL_OPEN"
+     + Hoặc môn bóng đá: "FOOTBALL_MALE", "FOOTBALL_FEMALE", "FOOTBALL_MIXED", "FOOTBALL_OPEN"
    - "bracketType": "SINGLE_ELIMINATION" | "DOUBLE_ELIMINATION" | "ROUND_ROBIN" | "GROUP_STAGE_KNOCKOUT" (mặc định "SINGLE_ELIMINATION" nếu không rõ)
    - "maxParticipants": Số lượng VĐV hoặc Cặp tối đa (mặc định 16 hoặc 32)
    - "minElo": Số ELO tối thiểu (hoặc null)
-   - "maxElo": Số ELO tối đa (hoặc null)
-10. "registrationFormFields": Toàn bộ câu hỏi/ô nhập liệu được tìm thấy trong form đăng ký hoặc điều lệ. Đọc theo ngữ nghĩa, không chỉ theo từ khóa:
+          - "maxElo": Số ELO tối đa (hoặc null)
+       - "prizeDescription": giải thưởng riêng của nội dung (hoặc null)
+       - "startDate": thời gian bắt đầu riêng của nội dung (hoặc null)
+       - "registrationEndDate": thời gian đóng đăng ký riêng của nội dung (hoặc null)
+22. "registrationFormFields": Toàn bộ câu hỏi/ô nhập liệu được tìm thấy trong form đăng ký hoặc điều lệ. Đọc theo ngữ nghĩa, không chỉ theo từ khóa:
    - "id": slug tiếng Anh không dấu, duy nhất, ổn định.
    - "label": giữ nguyên nội dung câu hỏi bằng tiếng Việt/ngôn ngữ nguồn.
    - "type": chọn đúng một trong TEXT, TEXTAREA, EMAIL, PHONE, NUMBER, SELECT, MULTI_SELECT, CHECKBOX, FILE.
@@ -664,6 +703,9 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
           },
         ],
         registrationFormFields: [],
+        registrationMode: null,
+        isRanked: null,
+        isRecurring: false,
       };
     }
 
@@ -752,6 +794,34 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
         ward: normalizeText(parsed.ward, 120),
         description: normalizeText(parsed.description, 5000),
         bannerUrl: normalizeHttpUrl(parsed.bannerUrl),
+        logoUrl: normalizeHttpUrl(parsed.logoUrl),
+        prizeDescription: normalizeText(parsed.prizeDescription, 3000),
+        contactInfo: parsed.contactInfo && typeof parsed.contactInfo === 'object'
+          ? {
+              phone: normalizeText((parsed.contactInfo as Record<string, unknown>).phone, 80),
+              email: normalizeText((parsed.contactInfo as Record<string, unknown>).email, 320),
+            }
+          : null,
+        registrationMode: ['OPEN', 'APPROVAL', 'INVITE_ONLY'].includes(parsed.registrationMode) ? parsed.registrationMode : null,
+        isRanked: typeof parsed.isRanked === 'boolean' ? parsed.isRanked : null,
+        startTime: normalizeText(parsed.startTime, 16),
+        registrationStartDate: normalizeDate(parsed.registrationStartDate),
+        registrationEndDate: normalizeDate(parsed.registrationEndDate, true),
+        teamSize: [5, 7, 11].includes(parsed.teamSize) ? parsed.teamSize : null,
+        maxReserve: typeof parsed.maxReserve === 'number' && Number.isFinite(parsed.maxReserve) ? Math.min(20, Math.max(0, Math.round(parsed.maxReserve))) : null,
+        setsToWin: typeof parsed.setsToWin === 'number' && Number.isFinite(parsed.setsToWin) ? Math.min(5, Math.max(1, Math.round(parsed.setsToWin))) : null,
+        pointsPerSet: typeof parsed.pointsPerSet === 'number' && Number.isFinite(parsed.pointsPerSet) ? Math.min(99, Math.max(1, Math.round(parsed.pointsPerSet))) : null,
+        winByTwo: typeof parsed.winByTwo === 'boolean' ? parsed.winByTwo : null,
+        maxPoints: typeof parsed.maxPoints === 'number' && Number.isFinite(parsed.maxPoints) ? Math.min(199, Math.max(1, Math.round(parsed.maxPoints))) : null,
+        footballHalvesCount: typeof parsed.footballHalvesCount === 'number' && Number.isFinite(parsed.footballHalvesCount) ? Math.min(4, Math.max(1, Math.round(parsed.footballHalvesCount))) : null,
+        footballHalfDuration: typeof parsed.footballHalfDuration === 'number' && Number.isFinite(parsed.footballHalfDuration) ? Math.min(120, Math.max(1, Math.round(parsed.footballHalfDuration))) : null,
+        footballAllowDraw: typeof parsed.footballAllowDraw === 'boolean' ? parsed.footballAllowDraw : null,
+        isRecurring: parsed.isRecurring === true,
+        recurringFrequency: ['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'].includes(parsed.recurringFrequency) ? parsed.recurringFrequency : null,
+        recurringDayOfWeek: typeof parsed.recurringDayOfWeek === 'number' && Number.isInteger(parsed.recurringDayOfWeek) && parsed.recurringDayOfWeek >= 0 && parsed.recurringDayOfWeek <= 6 ? parsed.recurringDayOfWeek : null,
+        recurringDaysOfWeek: Array.isArray(parsed.recurringDaysOfWeek) ? parsed.recurringDaysOfWeek.filter((day: unknown) => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6).slice(0, 7) : null,
+        recurringTimeOfDay: normalizeText(parsed.recurringTimeOfDay, 16),
+        recurringAdvanceDays: typeof parsed.recurringAdvanceDays === 'number' && Number.isFinite(parsed.recurringAdvanceDays) ? Math.min(30, Math.max(0, Math.round(parsed.recurringAdvanceDays))) : null,
         formats: Array.isArray(parsed.formats) && parsed.formats.length > 0
           ? parsed.formats.map((f: any) => {
               const maxParticipants = typeof f?.maxParticipants === 'number' && Number.isFinite(f.maxParticipants)
@@ -766,6 +836,9 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
                 maxParticipants,
                 minElo: minElo !== null && maxElo !== null && minElo > maxElo ? maxElo : minElo,
                 maxElo,
+                prizeDescription: normalizeText(f?.prizeDescription, 1000),
+                startDate: normalizeDate(f?.startDate),
+                registrationEndDate: normalizeDate(f?.registrationEndDate, true),
               };
             })
           : [

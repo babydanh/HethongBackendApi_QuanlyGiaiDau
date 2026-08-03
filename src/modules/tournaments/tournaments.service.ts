@@ -1309,6 +1309,7 @@ export class TournamentsService {
             registrationEndDate: divInfo.registrationEndDate ? new Date(divInfo.registrationEndDate).toISOString() : undefined,
             minElo: divInfo.minElo ?? null,
             maxElo: divInfo.maxElo ?? null,
+            prizeDescription: divInfo.prizeDescription ?? null,
           },
           userId,
         );
