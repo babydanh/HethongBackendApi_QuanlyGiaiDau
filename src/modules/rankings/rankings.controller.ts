@@ -1,6 +1,19 @@
-import { Controller, Get, Query, Post, Body, Param, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  Post,
+  Body,
+  Param,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { RankingsService } from './rankings.service';
+import { AdminRankingService } from './admin-ranking.service';
+import {
+  AdminEloOperationDto,
+  AdminEloQueryDto,
+} from './dto/admin-elo-operation.dto';
 import { FootballTeamEloService } from './football-team-elo.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
@@ -8,6 +21,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/enums';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('rankings')
 @Controller('rankings')
@@ -15,6 +29,7 @@ export class RankingsController {
   constructor(
     private readonly rankingsService: RankingsService,
     private readonly footballTeamEloService: FootballTeamEloService,
+    private readonly adminRankingService: AdminRankingService,
   ) {}
 
   @Public()
@@ -36,6 +51,38 @@ export class RankingsController {
   @ApiOperation({ summary: 'Lấy bảng xếp hạng theo môn thể thao' })
   async getLeaderboard(@Query() query: QueryRankingDto) {
     return this.rankingsService.getLeaderboard(query);
+  }
+
+  @Get('admin/contexts')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Danh sách context ELO để quản trị (Admin)' })
+  async listAdminRankingContexts(@Query() query: AdminEloQueryDto) {
+    return this.adminRankingService.listContexts(query);
+  }
+
+  @Get('admin/contexts/:contextId/history')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Lịch sử điều chỉnh ELO của context (Admin)' })
+  async getAdminRankingHistory(
+    @Param('contextId', ParseUUIDPipe) contextId: string,
+    @Query('limit') limit?: number,
+  ) {
+    return this.adminRankingService.getHistory(
+      contextId,
+      limit ? Number(limit) : 50,
+    );
+  }
+
+  @Post('admin/operations')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Điều chỉnh ELO hoặc trạng thái bảng xếp hạng (Admin)',
+  })
+  async applyAdminRankingOperation(
+    @CurrentUser() admin: { id: string },
+    @Body() dto: AdminEloOperationDto,
+  ) {
+    return this.adminRankingService.applyOperation(admin.id, dto);
   }
 
   @Public()

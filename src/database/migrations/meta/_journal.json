@@ -253,6 +253,13 @@
       "when": 1785753600000,
       "tag": "0036_ranking_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787500000000,
+      "tag": "0037_admin_elo_management",
+      "breakpoints": true
     }
   ]
 }

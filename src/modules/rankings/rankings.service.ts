@@ -1,10 +1,26 @@
-import { Injectable, BadRequestException, Inject, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Inject,
+  Optional,
+} from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { RankingsRepository } from './rankings.repository';
 import { EloEngineService } from './elo-engine.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
-import { eq, and, isNull, desc, sql, or, asc, gte, lt, inArray } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  isNull,
+  desc,
+  sql,
+  or,
+  asc,
+  gte,
+  lt,
+  inArray,
+} from 'drizzle-orm';
 import type { AppTx, AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { RedisService } from '../../providers/redis/redis.service';
@@ -14,7 +30,9 @@ import { FootballTeamEloService } from './football-team-elo.service';
 type Transaction = AppTx;
 
 // ELO Shield: ngưỡng kích hoạt bảo vệ khi user vượt qua mốc ELO nhất định
-const ELO_SHIELD_BOUNDARIES = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800] as const;
+const ELO_SHIELD_BOUNDARIES = [
+  1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800,
+] as const;
 const ELO_DECAY_INACTIVE_MONTHS = 1;
 const ELO_DECAY_THRESHOLD = 1400;
 const ELO_DECAY_RATES = [
@@ -32,7 +50,8 @@ export class RankingsService {
     private readonly rankingsRepository: RankingsRepository,
     private readonly eloEngineService: EloEngineService,
     private readonly redisService: RedisService,
-    @Optional() private readonly footballTeamEloService?: FootballTeamEloService,
+    @Optional()
+    private readonly footballTeamEloService?: FootballTeamEloService,
   ) {}
 
   private async invalidateLeaderboardCache(categoryId: string) {
@@ -47,6 +66,10 @@ export class RankingsService {
     }
   }
 
+  async invalidateLeaderboardCacheForCategory(categoryId: string) {
+    await this.invalidateLeaderboardCache(categoryId);
+  }
+
   /**
    * Trích xuất scoreRatio (winnerPoints / totalPoints) từ scoreDetails của match.
    * @returns scoreRatio từ 0.5 đến 0.85, hoặc undefined nếu không có dữ liệu set.
@@ -56,7 +79,11 @@ export class RankingsService {
     winnerParticipantId: string,
     participant1Id: string | null,
   ): number | undefined {
-    if (!scoreDetails?.sets || !Array.isArray(scoreDetails.sets) || scoreDetails.sets.length === 0) {
+    if (
+      !scoreDetails?.sets ||
+      !Array.isArray(scoreDetails.sets) ||
+      scoreDetails.sets.length === 0
+    ) {
       return undefined;
     }
 
@@ -77,7 +104,17 @@ export class RankingsService {
     const loserPoints = isWinnerTeam1 ? team2Total : team1Total;
 
     // Clamp: 0.5 (sát nút) → 0.85 (hủy diệt tối đa)
-    return Math.min(0.85, Math.max(0.5, winnerPoints / (winnerPoints + loserPoints)));
+    return Math.min(
+      0.85,
+      Math.max(0.5, winnerPoints / (winnerPoints + loserPoints)),
+    );
+  }
+
+  async insertAdminEloHistory(
+    tx: Transaction,
+    log: typeof schema.eloHistoryLogs.$inferInsert,
+  ) {
+    return this.rankingsRepository.insertEloHistory(tx, [log]);
   }
 
   async getLeaderboard(query: QueryRankingDto) {
@@ -99,7 +136,10 @@ export class RankingsService {
         // Keep the club page usable while a stale/missing ranking projection is
         // being repaired. The clients will hydrate joined members at base ELO.
         console.error('Community leaderboard unavailable:', error);
-        data = { data: [], meta: { page: query.page || 1, limit: query.limit || 20 } };
+        data = {
+          data: [],
+          meta: { page: query.page || 1, limit: query.limit || 20 },
+        };
       } else {
         throw error;
       }
@@ -151,11 +191,20 @@ export class RankingsService {
         divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
       })
       .from(schema.matches)
-      .innerJoin(schema.tournaments, eq(schema.matches.tournamentId, schema.tournaments.id))
-      .innerJoin(schema.tournamentStages, eq(schema.matches.stageId, schema.tournamentStages.id))
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.matches.tournamentId, schema.tournaments.id),
+      )
+      .innerJoin(
+        schema.tournamentStages,
+        eq(schema.matches.stageId, schema.tournamentStages.id),
+      )
       .leftJoin(
         schema.tournamentDivisions,
-        eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
+        eq(
+          schema.tournamentStages.tournamentDivisionId,
+          schema.tournamentDivisions.id,
+        ),
       )
       .where(eq(schema.matches.id, dto.matchId))
       .limit(1);
@@ -170,16 +219,24 @@ export class RankingsService {
       throw new BadRequestException('Trận đấu thuộc giải không xếp hạng ELO.');
     }
 
-    const effectiveMatchType = matchContext.divisionMatchType ?? matchContext.matchType;
-    const effectiveGenderRestriction = matchContext.divisionGenderRestriction ?? matchContext.genderRestriction;
-    if (effectiveMatchType === 'DOUBLES' || effectiveMatchType === 'MIXED_DOUBLES') {
-      throw new BadRequestException('Trận đôi phải được tính ELO qua luồng hoàn tất trận, không dùng endpoint ELO thủ công cho user đơn.');
+    const effectiveMatchType =
+      matchContext.divisionMatchType ?? matchContext.matchType;
+    const effectiveGenderRestriction =
+      matchContext.divisionGenderRestriction ?? matchContext.genderRestriction;
+    if (
+      effectiveMatchType === 'DOUBLES' ||
+      effectiveMatchType === 'MIXED_DOUBLES'
+    ) {
+      throw new BadRequestException(
+        'Trận đôi phải được tính ELO qua luồng hoàn tất trận, không dùng endpoint ELO thủ công cho user đơn.',
+      );
     }
-    const effectiveCommunityId = matchContext.tournamentType === 'CLUB'
-      ? matchContext.communityId
-      : null;
+    const effectiveCommunityId =
+      matchContext.tournamentType === 'CLUB' ? matchContext.communityId : null;
     if (matchContext.tournamentType === 'CLUB' && !effectiveCommunityId) {
-      throw new BadRequestException('Giải CLB phải có câu lạc bộ để ghi ELO nội bộ.');
+      throw new BadRequestException(
+        'Giải CLB phải có câu lạc bộ để ghi ELO nội bộ.',
+      );
     }
     if (
       dto.categoryId !== matchContext.categoryId ||
@@ -187,7 +244,9 @@ export class RankingsService {
       (dto.communityId ?? null) !== effectiveCommunityId ||
       (dto.genderRestriction ?? null) !== (effectiveGenderRestriction ?? null)
     ) {
-      throw new BadRequestException('Thông tin tính ELO không khớp cấu hình của trận đấu.');
+      throw new BadRequestException(
+        'Thông tin tính ELO không khớp cấu hình của trận đấu.',
+      );
     }
 
     const scope = effectiveCommunityId ? 'COMMUNITY' : 'PUBLIC';
@@ -212,11 +271,16 @@ export class RankingsService {
         );
       }
     } catch (err) {
-      console.warn('Failed to fetch scoreDetails for admin ELO update, scoreFactor disabled:', err.message);
+      console.warn(
+        'Failed to fetch scoreDetails for admin ELO update, scoreFactor disabled:',
+        err.message,
+      );
     }
 
     const result = await db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${dto.matchId}))`);
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${dto.matchId}))`,
+      );
       const previousLogs = await tx
         .select({ userId: schema.eloHistoryLogs.userId })
         .from(schema.eloHistoryLogs)
@@ -231,7 +295,9 @@ export class RankingsService {
         if (previousLogs.length === 2) {
           return { alreadyProcessed: true, matchId: dto.matchId };
         }
-        throw new BadRequestException('Lịch sử ELO của trận đấu không đầy đủ; không thể tính lại tự động.');
+        throw new BadRequestException(
+          'Lịch sử ELO của trận đấu không đầy đủ; không thể tính lại tự động.',
+        );
       }
 
       // 1. Lock records
@@ -278,10 +344,14 @@ export class RankingsService {
       // 3. Update ranks with shield logic
       let isWinnerShieldActive = false;
       if (scope === 'PUBLIC') {
-        const publicWinnerRank = winnerRank as typeof schema.userRanks.$inferSelect;
+        const publicWinnerRank =
+          winnerRank as typeof schema.userRanks.$inferSelect;
         isWinnerShieldActive = !!publicWinnerRank.shieldActive;
         for (const boundary of ELO_SHIELD_BOUNDARIES) {
-          if (winnerRank.eloPoints < boundary && winnerResult.newElo >= boundary) {
+          if (
+            winnerRank.eloPoints < boundary &&
+            winnerResult.newElo >= boundary
+          ) {
             isWinnerShieldActive = true;
           }
         }
@@ -290,10 +360,14 @@ export class RankingsService {
       let finalLoserElo = loserResult.newElo;
       let isLoserShieldActive = false;
       if (scope === 'PUBLIC') {
-        const publicLoserRank = loserRank as typeof schema.userRanks.$inferSelect;
+        const publicLoserRank =
+          loserRank as typeof schema.userRanks.$inferSelect;
         isLoserShieldActive = !!publicLoserRank.shieldActive;
         for (const boundary of ELO_SHIELD_BOUNDARIES) {
-          if (loserRank.eloPoints >= boundary && loserResult.newElo < boundary) {
+          if (
+            loserRank.eloPoints >= boundary &&
+            loserResult.newElo < boundary
+          ) {
             if (publicLoserRank.shieldActive) {
               finalLoserElo = boundary;
               isLoserShieldActive = false; // shield broken
@@ -336,8 +410,20 @@ export class RankingsService {
       );
 
       if (scope === 'PUBLIC') {
-        await this.recalculateUserRankTier(tx, dto.winnerId, dto.categoryId, dto.matchType, dto.genderRestriction);
-        await this.recalculateUserRankTier(tx, dto.loserId, dto.categoryId, dto.matchType, dto.genderRestriction);
+        await this.recalculateUserRankTier(
+          tx,
+          dto.winnerId,
+          dto.categoryId,
+          dto.matchType,
+          dto.genderRestriction,
+        );
+        await this.recalculateUserRankTier(
+          tx,
+          dto.loserId,
+          dto.categoryId,
+          dto.matchType,
+          dto.genderRestriction,
+        );
       }
 
       // 4. Record history
@@ -398,10 +484,16 @@ export class RankingsService {
         participantIsMock: schema.tournamentParticipants.isMock,
       })
       .from(schema.tournamentRosters)
-      .innerJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.tournamentRosters.userId, schema.users.id),
+      )
       .innerJoin(
         schema.tournamentParticipants,
-        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
       )
       .where(eq(schema.tournamentRosters.participantId, winnerParticipantId));
 
@@ -412,15 +504,23 @@ export class RankingsService {
         participantIsMock: schema.tournamentParticipants.isMock,
       })
       .from(schema.tournamentRosters)
-      .innerJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.tournamentRosters.userId, schema.users.id),
+      )
       .innerJoin(
         schema.tournamentParticipants,
-        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
       )
       .where(eq(schema.tournamentRosters.participantId, loserParticipantId));
 
     if (winnerRosters.length === 0 || loserRosters.length === 0) {
-      throw new BadRequestException('Winner or Loser team has no players registered.');
+      throw new BadRequestException(
+        'Winner or Loser team has no players registered.',
+      );
     }
 
     const hasMockPlayer = [...winnerRosters, ...loserRosters].some(
@@ -438,7 +538,10 @@ export class RankingsService {
     const loserUserIds = loserRosters.map((r) => r.userId);
     const isDoublesMatch = ['DOUBLES', 'MIXED_DOUBLES'].includes(matchType);
     const expectedRosterSize = isDoublesMatch ? 2 : 1;
-    if (winnerUserIds.length !== expectedRosterSize || loserUserIds.length !== expectedRosterSize) {
+    if (
+      winnerUserIds.length !== expectedRosterSize ||
+      loserUserIds.length !== expectedRosterSize
+    ) {
       throw new BadRequestException(
         `${isDoublesMatch ? 'Trận đôi' : 'Trận đơn'} phải có đúng ${expectedRosterSize} vận động viên mỗi bên để tính ELO.`,
       );
@@ -464,7 +567,10 @@ export class RankingsService {
         );
       }
     } catch (err) {
-      console.warn('Failed to fetch scoreDetails for match, scoreFactor disabled:', err.message);
+      console.warn(
+        'Failed to fetch scoreDetails for match, scoreFactor disabled:',
+        err.message,
+      );
     }
 
     const result = await db.transaction(async (tx) => {
@@ -475,7 +581,10 @@ export class RankingsService {
         .where(
           and(
             eq(schema.eloHistoryLogs.matchId, matchId),
-            inArray(schema.eloHistoryLogs.userId, [...winnerUserIds, ...loserUserIds]),
+            inArray(schema.eloHistoryLogs.userId, [
+              ...winnerUserIds,
+              ...loserUserIds,
+            ]),
           ),
         );
       if (previousLogs.length > 0) {
@@ -483,26 +592,56 @@ export class RankingsService {
         if (previousLogs.length === expectedLogCount) {
           return { alreadyProcessed: true, matchId };
         }
-        throw new BadRequestException('Lịch sử ELO của trận đấu không đầy đủ; không thể tính lại tự động.');
+        throw new BadRequestException(
+          'Lịch sử ELO của trận đấu không đầy đủ; không thể tính lại tự động.',
+        );
       }
 
       if (isDoublesMatch) {
         // 1. Sort IDs to make unique pair key
-        const wId1 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[0] : winnerUserIds[1];
-        const wId2 = winnerUserIds[0] < winnerUserIds[1] ? winnerUserIds[1] : winnerUserIds[0];
-        const lId1 = loserUserIds[0] < loserUserIds[1] ? loserUserIds[0] : loserUserIds[1];
-        const lId2 = loserUserIds[0] < loserUserIds[1] ? loserUserIds[1] : loserUserIds[0];
+        const wId1 =
+          winnerUserIds[0] < winnerUserIds[1]
+            ? winnerUserIds[0]
+            : winnerUserIds[1];
+        const wId2 =
+          winnerUserIds[0] < winnerUserIds[1]
+            ? winnerUserIds[1]
+            : winnerUserIds[0];
+        const lId1 =
+          loserUserIds[0] < loserUserIds[1] ? loserUserIds[0] : loserUserIds[1];
+        const lId2 =
+          loserUserIds[0] < loserUserIds[1] ? loserUserIds[1] : loserUserIds[0];
 
         // 2. Lock individual ranks to prevent concurrent updates
-        type UserRank = typeof schema.userRanks.$inferSelect | typeof schema.communityRankings.$inferSelect;
+        type UserRank =
+          | typeof schema.userRanks.$inferSelect
+          | typeof schema.communityRankings.$inferSelect;
         const winnerRanksList: UserRank[] = [];
         for (const uid of winnerUserIds) {
-          const r = await this.rankingsRepository.getOrCreateUserRank(tx, uid, categoryId, matchType, scope, communityId, true, genderRestriction);
+          const r = await this.rankingsRepository.getOrCreateUserRank(
+            tx,
+            uid,
+            categoryId,
+            matchType,
+            scope,
+            communityId,
+            true,
+            genderRestriction,
+          );
           winnerRanksList.push(r);
         }
         const loserRanksList: UserRank[] = [];
         for (const uid of loserUserIds) {
-          const r = await this.rankingsRepository.getOrCreateUserRank(tx, uid, categoryId, matchType, scope, communityId, true, genderRestriction);
+          const r = await this.rankingsRepository.getOrCreateUserRank(
+            tx,
+            uid,
+            categoryId,
+            matchType,
+            scope,
+            communityId,
+            true,
+            genderRestriction,
+          );
           loserRanksList.push(r);
         }
 
@@ -523,7 +662,7 @@ export class RankingsService {
               communityId
                 ? eq(schema.pairRanks.communityId, communityId)
                 : isNull(schema.pairRanks.communityId),
-            )
+            ),
           )
           .limit(1);
 
@@ -563,7 +702,7 @@ export class RankingsService {
               communityId
                 ? eq(schema.pairRanks.communityId, communityId)
                 : isNull(schema.pairRanks.communityId),
-            )
+            ),
           )
           .limit(1);
 
@@ -646,8 +785,12 @@ export class RankingsService {
         const wScale1 = Math.max(0.2, Math.min(1.8, 1 - wDiff / 800));
         const wScale2 = Math.max(0.2, Math.min(1.8, 1 + wDiff / 800));
 
-        const w1Delta = Math.round(winnerDelta * (wElo1 >= wElo2 ? wScale1 : wScale2));
-        const w2Delta = Math.round(winnerDelta * (wElo2 >= wElo1 ? wScale1 : wScale2));
+        const w1Delta = Math.round(
+          winnerDelta * (wElo1 >= wElo2 ? wScale1 : wScale2),
+        );
+        const w2Delta = Math.round(
+          winnerDelta * (wElo2 >= wElo1 ? wScale1 : wScale2),
+        );
 
         // 7. Calculate scaled deltas for individual losers
         // Thua với tư cách strong → mất nhiều điểm hơn (scale > 1)
@@ -658,8 +801,12 @@ export class RankingsService {
         const lScale1 = Math.max(0.2, Math.min(1.8, 1 - lDiff / 800));
         const lScale2 = Math.max(0.2, Math.min(1.8, 1 + lDiff / 800));
 
-        const l1Delta = Math.round(loserDelta * (lElo1 >= lElo2 ? lScale2 : lScale1));
-        const l2Delta = Math.round(loserDelta * (lElo2 >= lElo1 ? lScale2 : lScale1));
+        const l1Delta = Math.round(
+          loserDelta * (lElo1 >= lElo2 ? lScale2 : lScale1),
+        );
+        const l2Delta = Math.round(
+          loserDelta * (lElo2 >= lElo1 ? lScale2 : lScale1),
+        );
 
         const logs: (typeof schema.eloHistoryLogs.$inferInsert)[] = [];
 
@@ -673,7 +820,9 @@ export class RankingsService {
           const newElo = Math.max(ELO_DECAY_FLOOR, rank.eloPoints + delta);
           let isWinnerShieldActive = false;
           if (scope === 'PUBLIC') {
-            isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
+            isWinnerShieldActive = !!(
+              rank as typeof schema.userRanks.$inferSelect
+            ).shieldActive;
             for (const boundary of ELO_SHIELD_BOUNDARIES) {
               if (rank.eloPoints < boundary && newElo >= boundary) {
                 isWinnerShieldActive = true;
@@ -761,68 +910,101 @@ export class RankingsService {
 
         if (scope === 'PUBLIC') {
           for (const uid of winnerUserIds) {
-            await this.recalculateUserRankTier(tx, uid, categoryId, matchType, genderRestriction);
+            await this.recalculateUserRankTier(
+              tx,
+              uid,
+              categoryId,
+              matchType,
+              genderRestriction,
+            );
           }
           for (const uid of loserUserIds) {
-            await this.recalculateUserRankTier(tx, uid, categoryId, matchType, genderRestriction);
+            await this.recalculateUserRankTier(
+              tx,
+              uid,
+              categoryId,
+              matchType,
+              genderRestriction,
+            );
           }
         } else if (scope === 'COMMUNITY') {
           for (const uid of winnerUserIds) {
-            await this.recalculateCommunityRankTier(tx, uid, categoryId, matchType, communityId, genderRestriction);
+            await this.recalculateCommunityRankTier(
+              tx,
+              uid,
+              categoryId,
+              matchType,
+              communityId,
+              genderRestriction,
+            );
           }
           for (const uid of loserUserIds) {
-            await this.recalculateCommunityRankTier(tx, uid, categoryId, matchType, communityId, genderRestriction);
-            }
-            }
+            await this.recalculateCommunityRankTier(
+              tx,
+              uid,
+              categoryId,
+              matchType,
+              communityId,
+              genderRestriction,
+            );
+          }
+        }
 
-            // Update lastActiveAt for all doubles players
-            const dNow = new Date();
-            if (scope === 'PUBLIC') {
-              for (const uid of [...winnerUserIds, ...loserUserIds]) {
-                await tx
-                  .update(schema.userRanks)
-                  .set({ lastActiveAt: dNow, lastDecayAt: dNow } as any)
-                  .where(
-                    and(
-                      eq(schema.userRanks.userId, uid),
-                      eq(schema.userRanks.categoryId, categoryId),
-                      eq(schema.userRanks.matchType, matchType),
-                      genderRestriction
-                        ? eq(schema.userRanks.genderRestriction, genderRestriction)
-                        : isNull(schema.userRanks.genderRestriction),
-                      isNull(schema.userRanks.communityId),
-                    ),
-                  );
-              }
-            } else if (scope === 'COMMUNITY') {
-              for (const uid of [...winnerUserIds, ...loserUserIds]) {
-                await tx
-                  .update(schema.communityRankings)
-                  .set({ lastActiveAt: dNow, lastDecayAt: dNow } as any)
-                  .where(
-                    and(
-                      eq(schema.communityRankings.userId, uid),
-                      eq(schema.communityRankings.categoryId, categoryId),
-                      eq(schema.communityRankings.matchType, matchType),
-                      genderRestriction
-                        ? eq(schema.communityRankings.genderRestriction, genderRestriction)
-                        : isNull(schema.communityRankings.genderRestriction),
-                      communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
-                    ),
-                  );
-              }
-            }
+        // Update lastActiveAt for all doubles players
+        const dNow = new Date();
+        if (scope === 'PUBLIC') {
+          for (const uid of [...winnerUserIds, ...loserUserIds]) {
+            await tx
+              .update(schema.userRanks)
+              .set({ lastActiveAt: dNow, lastDecayAt: dNow } as any)
+              .where(
+                and(
+                  eq(schema.userRanks.userId, uid),
+                  eq(schema.userRanks.categoryId, categoryId),
+                  eq(schema.userRanks.matchType, matchType),
+                  genderRestriction
+                    ? eq(schema.userRanks.genderRestriction, genderRestriction)
+                    : isNull(schema.userRanks.genderRestriction),
+                  isNull(schema.userRanks.communityId),
+                ),
+              );
+          }
+        } else if (scope === 'COMMUNITY') {
+          for (const uid of [...winnerUserIds, ...loserUserIds]) {
+            await tx
+              .update(schema.communityRankings)
+              .set({ lastActiveAt: dNow, lastDecayAt: dNow } as any)
+              .where(
+                and(
+                  eq(schema.communityRankings.userId, uid),
+                  eq(schema.communityRankings.categoryId, categoryId),
+                  eq(schema.communityRankings.matchType, matchType),
+                  genderRestriction
+                    ? eq(
+                        schema.communityRankings.genderRestriction,
+                        genderRestriction,
+                      )
+                    : isNull(schema.communityRankings.genderRestriction),
+                  communityId
+                    ? eq(schema.communityRankings.communityId, communityId)
+                    : undefined,
+                ),
+              );
+          }
+        }
 
-            return {
-              success: true,
-            winnerPlayerCount: winnerRanksList.length,
+        return {
+          success: true,
+          winnerPlayerCount: winnerRanksList.length,
           loserPlayerCount: loserRanksList.length,
           doublesMode: true,
         };
       }
 
       // 2. Fetch and Lock existing rank records for all players
-      type UserRank = typeof schema.userRanks.$inferSelect | typeof schema.communityRankings.$inferSelect;
+      type UserRank =
+        | typeof schema.userRanks.$inferSelect
+        | typeof schema.communityRankings.$inferSelect;
       const winnerRanks: UserRank[] = [];
       for (const userId of winnerUserIds) {
         const rank = await this.rankingsRepository.getOrCreateUserRank(
@@ -854,8 +1036,11 @@ export class RankingsService {
       }
 
       // 3. Calculate team ELO averages
-      const avgWinnerElo = winnerRanks.reduce((sum, r) => sum + r.eloPoints, 0) / winnerRanks.length;
-      const avgLoserElo = loserRanks.reduce((sum, r) => sum + r.eloPoints, 0) / loserRanks.length;
+      const avgWinnerElo =
+        winnerRanks.reduce((sum, r) => sum + r.eloPoints, 0) /
+        winnerRanks.length;
+      const avgLoserElo =
+        loserRanks.reduce((sum, r) => sum + r.eloPoints, 0) / loserRanks.length;
 
       const logs: (typeof schema.eloHistoryLogs.$inferInsert)[] = [];
 
@@ -872,7 +1057,9 @@ export class RankingsService {
 
         let isWinnerShieldActive = false;
         if (scope === 'PUBLIC') {
-          isWinnerShieldActive = !!(rank as typeof schema.userRanks.$inferSelect).shieldActive;
+          isWinnerShieldActive = !!(
+            rank as typeof schema.userRanks.$inferSelect
+          ).shieldActive;
           for (const boundary of ELO_SHIELD_BOUNDARIES) {
             if (rank.eloPoints < boundary && result.newElo >= boundary) {
               isWinnerShieldActive = true;
@@ -964,17 +1151,43 @@ export class RankingsService {
 
       if (scope === 'PUBLIC') {
         for (const userId of winnerUserIds) {
-          await this.recalculateUserRankTier(tx, userId, categoryId, matchType, genderRestriction);
+          await this.recalculateUserRankTier(
+            tx,
+            userId,
+            categoryId,
+            matchType,
+            genderRestriction,
+          );
         }
         for (const userId of loserUserIds) {
-          await this.recalculateUserRankTier(tx, userId, categoryId, matchType, genderRestriction);
+          await this.recalculateUserRankTier(
+            tx,
+            userId,
+            categoryId,
+            matchType,
+            genderRestriction,
+          );
         }
       } else if (scope === 'COMMUNITY') {
         for (const userId of winnerUserIds) {
-          await this.recalculateCommunityRankTier(tx, userId, categoryId, matchType, communityId, genderRestriction);
+          await this.recalculateCommunityRankTier(
+            tx,
+            userId,
+            categoryId,
+            matchType,
+            communityId,
+            genderRestriction,
+          );
         }
         for (const userId of loserUserIds) {
-          await this.recalculateCommunityRankTier(tx, userId, categoryId, matchType, communityId, genderRestriction);
+          await this.recalculateCommunityRankTier(
+            tx,
+            userId,
+            categoryId,
+            matchType,
+            communityId,
+            genderRestriction,
+          );
         }
       }
 
@@ -991,9 +1204,14 @@ export class RankingsService {
                 eq(schema.communityRankings.categoryId, categoryId),
                 eq(schema.communityRankings.matchType, matchType),
                 genderRestriction
-                  ? eq(schema.communityRankings.genderRestriction, genderRestriction)
+                  ? eq(
+                      schema.communityRankings.genderRestriction,
+                      genderRestriction,
+                    )
                   : isNull(schema.communityRankings.genderRestriction),
-                communityId ? eq(schema.communityRankings.communityId, communityId) : undefined,
+                communityId
+                  ? eq(schema.communityRankings.communityId, communityId)
+                  : undefined,
               ),
             );
         } else {
@@ -1070,7 +1288,8 @@ export class RankingsService {
       .limit(1);
 
     // 2. Identify Tier S user (min 1800 ELO under the new system)
-    const tierSUserId = (topRank && topRank.eloPoints >= 1800) ? topRank.userId : null;
+    const tierSUserId =
+      topRank && topRank.eloPoints >= 1800 ? topRank.userId : null;
 
     // 3. Update all Tier S assignments
     if (tierS) {
@@ -1092,8 +1311,8 @@ export class RankingsService {
               genderCondition,
               isNull(schema.userRanks.communityId),
               eq(schema.userRanks.tierId, tierS.id),
-              sql`${schema.userRanks.userId} != ${tierSUserId}`
-            )
+              sql`${schema.userRanks.userId} != ${tierSUserId}`,
+            ),
           );
       } else {
         // Nobody is Tier S, downgrade anyone holding it to Tier A (High)
@@ -1106,8 +1325,8 @@ export class RankingsService {
               eq(schema.userRanks.matchType, matchType),
               genderCondition,
               isNull(schema.userRanks.communityId),
-              eq(schema.userRanks.tierId, tierS.id)
-            )
+              eq(schema.userRanks.tierId, tierS.id),
+            ),
           );
       }
     }
@@ -1156,54 +1375,73 @@ export class RankingsService {
   @Cron('0 3 * * *')
   async applyMonthlyInactivityDecay() {
     const now = new Date();
-    const inactiveBefore = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth() - ELO_DECAY_INACTIVE_MONTHS,
-      now.getUTCDate(),
-      now.getUTCHours(),
-      now.getUTCMinutes(),
-      now.getUTCSeconds(),
-    ));
-    const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const inactiveBefore = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth() - ELO_DECAY_INACTIVE_MONTHS,
+        now.getUTCDate(),
+        now.getUTCHours(),
+        now.getUTCMinutes(),
+        now.getUTCSeconds(),
+      ),
+    );
+    const currentMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
     const affectedCategoryIds = new Set<string>();
 
     await this.db.transaction(async (tx) => {
-      const lockResult = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext('elo-monthly-inactivity-decay')) as locked`);
-      const locked = Boolean((lockResult as unknown as { rows?: Array<{ locked?: boolean }> }).rows?.[0]?.locked);
+      const lockResult = await tx.execute(
+        sql`select pg_try_advisory_xact_lock(hashtext('elo-monthly-inactivity-decay')) as locked`,
+      );
+      const locked = Boolean(
+        (lockResult as unknown as { rows?: Array<{ locked?: boolean }> })
+          .rows?.[0]?.locked,
+      );
       if (!locked) return;
 
       const publicRanks = await tx
         .select()
         .from(schema.userRanks)
-        .where(and(
-          lt(schema.userRanks.lastActiveAt, inactiveBefore),
-          lt(schema.userRanks.lastDecayAt, currentMonthStart),
-          isNull(schema.userRanks.communityId),
-        ));
+        .where(
+          and(
+            lt(schema.userRanks.lastActiveAt, inactiveBefore),
+            lt(schema.userRanks.lastDecayAt, currentMonthStart),
+            isNull(schema.userRanks.communityId),
+          ),
+        );
       const communityRanks = await tx
         .select()
         .from(schema.communityRankings)
-        .where(and(
-          lt(schema.communityRankings.lastActiveAt, inactiveBefore),
-          lt(schema.communityRankings.lastDecayAt, currentMonthStart),
-        ));
+        .where(
+          and(
+            lt(schema.communityRankings.lastActiveAt, inactiveBefore),
+            lt(schema.communityRankings.lastDecayAt, currentMonthStart),
+          ),
+        );
       const pairRanks = await tx
         .select()
         .from(schema.pairRanks)
-        .where(and(
-          lt(schema.pairRanks.lastActiveAt, inactiveBefore),
-          lt(schema.pairRanks.lastDecayAt, currentMonthStart),
-        ));
+        .where(
+          and(
+            lt(schema.pairRanks.lastActiveAt, inactiveBefore),
+            lt(schema.pairRanks.lastDecayAt, currentMonthStart),
+          ),
+        );
 
-      const monthsSince = (lastDecayAt: Date) => Math.max(
-        1,
-        (now.getUTCFullYear() - lastDecayAt.getUTCFullYear()) * 12 +
-          now.getUTCMonth() - lastDecayAt.getUTCMonth(),
-      );
+      const monthsSince = (lastDecayAt: Date) =>
+        Math.max(
+          1,
+          (now.getUTCFullYear() - lastDecayAt.getUTCFullYear()) * 12 +
+            now.getUTCMonth() -
+            lastDecayAt.getUTCMonth(),
+        );
       const decayedElo = (elo: number, months: number) => {
         if (elo < ELO_DECAY_THRESHOLD) return elo;
 
-        const rate = ELO_DECAY_RATES.find((bracket) => elo >= bracket.minElo)?.rate;
+        const rate = ELO_DECAY_RATES.find(
+          (bracket) => elo >= bracket.minElo,
+        )?.rate;
         if (!rate) return elo;
 
         return Math.max(
@@ -1218,49 +1456,84 @@ export class RankingsService {
         if (shieldActive) {
           const protectedBoundary = [...ELO_SHIELD_BOUNDARIES]
             .reverse()
-            .find((boundary) => rank.eloPoints >= boundary && newElo < boundary);
+            .find(
+              (boundary) => rank.eloPoints >= boundary && newElo < boundary,
+            );
           if (protectedBoundary !== undefined) {
             newElo = protectedBoundary;
             shieldActive = false;
           }
         }
-        await tx.update(schema.userRanks)
-          .set({ eloPoints: newElo, shieldActive, lastDecayAt: now, updatedAt: now })
+        await tx
+          .update(schema.userRanks)
+          .set({
+            eloPoints: newElo,
+            shieldActive,
+            lastDecayAt: now,
+            updatedAt: now,
+          })
           .where(eq(schema.userRanks.id, rank.id));
-        await this.recalculateUserRankTier(tx, rank.userId, rank.categoryId, rank.matchType, rank.genderRestriction || undefined);
+        await this.recalculateUserRankTier(
+          tx,
+          rank.userId,
+          rank.categoryId,
+          rank.matchType,
+          rank.genderRestriction || undefined,
+        );
         affectedCategoryIds.add(rank.categoryId);
         if (newElo !== rank.eloPoints) {
-          await this.rankingsRepository.insertEloHistory(tx, [{
-            userId: rank.userId,
-            categoryId: rank.categoryId,
-            matchId: null,
-            reason: 'INACTIVITY_DECAY',
-            previousElo: rank.eloPoints,
-            newElo,
-            changedPoints: newElo - rank.eloPoints,
-          }]);
+          await this.rankingsRepository.insertEloHistory(tx, [
+            {
+              userId: rank.userId,
+              categoryId: rank.categoryId,
+              matchId: null,
+              reason: 'INACTIVITY_DECAY',
+              previousElo: rank.eloPoints,
+              newElo,
+              changedPoints: newElo - rank.eloPoints,
+            },
+          ]);
         }
       }
 
       for (const rank of communityRanks) {
-        const newElo = decayedElo(rank.eloPoints, monthsSince(rank.lastDecayAt));
-        await tx.update(schema.communityRankings)
+        const newElo = decayedElo(
+          rank.eloPoints,
+          monthsSince(rank.lastDecayAt),
+        );
+        await tx
+          .update(schema.communityRankings)
           .set({ eloPoints: newElo, lastDecayAt: now, updatedAt: now })
           .where(eq(schema.communityRankings.id, rank.id));
-        await this.recalculateCommunityRankTier(tx, rank.userId, rank.categoryId, rank.matchType, rank.communityId, rank.genderRestriction || undefined);
+        await this.recalculateCommunityRankTier(
+          tx,
+          rank.userId,
+          rank.categoryId,
+          rank.matchType,
+          rank.communityId,
+          rank.genderRestriction || undefined,
+        );
         affectedCategoryIds.add(rank.categoryId);
       }
 
       for (const rank of pairRanks) {
-        const newElo = decayedElo(rank.eloPoints, monthsSince(rank.lastDecayAt));
-        await tx.update(schema.pairRanks)
+        const newElo = decayedElo(
+          rank.eloPoints,
+          monthsSince(rank.lastDecayAt),
+        );
+        await tx
+          .update(schema.pairRanks)
           .set({ eloPoints: newElo, lastDecayAt: now, updatedAt: now })
           .where(eq(schema.pairRanks.id, rank.id));
         affectedCategoryIds.add(rank.categoryId);
       }
     });
 
-    await Promise.all([...affectedCategoryIds].map((categoryId) => this.invalidateLeaderboardCache(categoryId)));
+    await Promise.all(
+      [...affectedCategoryIds].map((categoryId) =>
+        this.invalidateLeaderboardCache(categoryId),
+      ),
+    );
   }
 
   async recalculateCommunityRankTier(
@@ -1348,20 +1621,38 @@ export class RankingsService {
         tournament: schema.tournaments,
       })
       .from(schema.matches)
-      .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-      .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-      .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-      .innerJoin(schema.tournamentRosters, or(
-         eq(schema.matches.participant1Id, schema.tournamentRosters.participantId),
-         eq(schema.matches.participant2Id, schema.tournamentRosters.participantId)
-      ))
+      .innerJoin(
+        schema.tournamentGroups,
+        eq(schema.matches.groupId, schema.tournamentGroups.id),
+      )
+      .innerJoin(
+        schema.tournamentStages,
+        eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+      )
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+      )
+      .innerJoin(
+        schema.tournamentRosters,
+        or(
+          eq(
+            schema.matches.participant1Id,
+            schema.tournamentRosters.participantId,
+          ),
+          eq(
+            schema.matches.participant2Id,
+            schema.tournamentRosters.participantId,
+          ),
+        ),
+      )
       .where(
         and(
           eq(schema.tournaments.categoryId, categoryId),
           eq(schema.tournaments.matchType, matchType),
           eq(schema.matches.status, 'COMPLETED'),
-          gte(schema.matches.completedAt, fromTime)
-        )
+          gte(schema.matches.completedAt, fromTime),
+        ),
       )
       .orderBy(asc(schema.matches.completedAt));
 
@@ -1375,14 +1666,17 @@ export class RankingsService {
     }
 
     const affectedPlayers = new Set<string>(playerIds);
-    const playerStates = new Map<string, {
-      elo: number;
-      matchesPlayed: number;
-      matchesWon: number;
-      winStreak: number;
-      shieldActive: boolean;
-      peakElo: number;
-    }>();
+    const playerStates = new Map<
+      string,
+      {
+        elo: number;
+        matchesPlayed: number;
+        matchesWon: number;
+        winStreak: number;
+        shieldActive: boolean;
+        peakElo: number;
+      }
+    >();
 
     const getPlayerState = async (userId: string, completedAt: Date) => {
       if (playerStates.has(userId)) {
@@ -1396,8 +1690,8 @@ export class RankingsService {
           and(
             eq(schema.eloHistoryLogs.userId, userId),
             eq(schema.eloHistoryLogs.categoryId, categoryId),
-            lt(schema.eloHistoryLogs.createdAt, completedAt)
-          )
+            lt(schema.eloHistoryLogs.createdAt, completedAt),
+          ),
         )
         .orderBy(desc(schema.eloHistoryLogs.createdAt))
         .limit(1);
@@ -1407,39 +1701,69 @@ export class RankingsService {
       const playedRes = await tx
         .select({ count: sql<number>`count(*)` })
         .from(schema.matches)
-        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-        .innerJoin(schema.tournamentRosters, or(
-          eq(schema.matches.participant1Id, schema.tournamentRosters.participantId),
-          eq(schema.matches.participant2Id, schema.tournamentRosters.participantId)
-        ))
+        .innerJoin(
+          schema.tournamentGroups,
+          eq(schema.matches.groupId, schema.tournamentGroups.id),
+        )
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+        )
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+        )
+        .innerJoin(
+          schema.tournamentRosters,
+          or(
+            eq(
+              schema.matches.participant1Id,
+              schema.tournamentRosters.participantId,
+            ),
+            eq(
+              schema.matches.participant2Id,
+              schema.tournamentRosters.participantId,
+            ),
+          ),
+        )
         .where(
           and(
             eq(schema.tournamentRosters.userId, userId),
             eq(schema.tournaments.categoryId, categoryId),
             eq(schema.tournaments.matchType, matchType),
             eq(schema.matches.status, 'COMPLETED'),
-            lt(schema.matches.completedAt, completedAt)
-          )
+            lt(schema.matches.completedAt, completedAt),
+          ),
         );
       const matchesPlayed = Number(playedRes[0]?.count || 0);
 
       const wonRes = await tx
         .select({ count: sql<number>`count(*)` })
         .from(schema.matches)
-        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-        .innerJoin(schema.tournamentRosters, eq(schema.matches.winnerId, schema.tournamentRosters.participantId))
+        .innerJoin(
+          schema.tournamentGroups,
+          eq(schema.matches.groupId, schema.tournamentGroups.id),
+        )
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+        )
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+        )
+        .innerJoin(
+          schema.tournamentRosters,
+          eq(schema.matches.winnerId, schema.tournamentRosters.participantId),
+        )
         .where(
           and(
             eq(schema.tournamentRosters.userId, userId),
             eq(schema.tournaments.categoryId, categoryId),
             eq(schema.tournaments.matchType, matchType),
             eq(schema.matches.status, 'COMPLETED'),
-            lt(schema.matches.completedAt, completedAt)
-          )
+            lt(schema.matches.completedAt, completedAt),
+          ),
         );
       const matchesWon = Number(wonRes[0]?.count || 0);
 
@@ -1448,24 +1772,42 @@ export class RankingsService {
           winnerId: schema.matches.winnerId,
           p1Id: schema.matches.participant1Id,
           p2Id: schema.matches.participant2Id,
-          participantId: schema.tournamentRosters.participantId
+          participantId: schema.tournamentRosters.participantId,
         })
         .from(schema.matches)
-        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-        .innerJoin(schema.tournamentRosters, or(
-          eq(schema.matches.participant1Id, schema.tournamentRosters.participantId),
-          eq(schema.matches.participant2Id, schema.tournamentRosters.participantId)
-        ))
+        .innerJoin(
+          schema.tournamentGroups,
+          eq(schema.matches.groupId, schema.tournamentGroups.id),
+        )
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+        )
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+        )
+        .innerJoin(
+          schema.tournamentRosters,
+          or(
+            eq(
+              schema.matches.participant1Id,
+              schema.tournamentRosters.participantId,
+            ),
+            eq(
+              schema.matches.participant2Id,
+              schema.tournamentRosters.participantId,
+            ),
+          ),
+        )
         .where(
           and(
             eq(schema.tournamentRosters.userId, userId),
             eq(schema.tournaments.categoryId, categoryId),
             eq(schema.tournaments.matchType, matchType),
             eq(schema.matches.status, 'COMPLETED'),
-            lt(schema.matches.completedAt, completedAt)
-          )
+            lt(schema.matches.completedAt, completedAt),
+          ),
         )
         .orderBy(desc(schema.matches.completedAt));
 
@@ -1490,7 +1832,14 @@ export class RankingsService {
         }
       }
 
-      const state = { elo: startingElo, matchesPlayed, matchesWon, winStreak, shieldActive, peakElo: startingElo };
+      const state = {
+        elo: startingElo,
+        matchesPlayed,
+        matchesWon,
+        winStreak,
+        shieldActive,
+        peakElo: startingElo,
+      };
       playerStates.set(userId, state);
       return state;
     };
@@ -1516,21 +1865,25 @@ export class RankingsService {
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, loserParticipantId));
 
-      const winnerUserIds: string[] = winnerRosters.map(r => r.userId);
-      const loserUserIds: string[] = loserRosters.map(r => r.userId);
+      const winnerUserIds: string[] = winnerRosters.map((r) => r.userId);
+      const loserUserIds: string[] = loserRosters.map((r) => r.userId);
 
-      const isMatchAffected = [...winnerUserIds, ...loserUserIds].some(uid => affectedPlayers.has(uid));
+      const isMatchAffected = [...winnerUserIds, ...loserUserIds].some((uid) =>
+        affectedPlayers.has(uid),
+      );
       if (!isMatchAffected) continue;
 
       for (const uid of [...winnerUserIds, ...loserUserIds]) {
         await getPlayerState(uid, completedAt);
       }
 
-      const winnerStates = winnerUserIds.map(uid => playerStates.get(uid)!);
-      const loserStates = loserUserIds.map(uid => playerStates.get(uid)!);
+      const winnerStates = winnerUserIds.map((uid) => playerStates.get(uid)!);
+      const loserStates = loserUserIds.map((uid) => playerStates.get(uid)!);
 
-      const avgWinnerElo = winnerStates.reduce((sum, s) => sum + s.elo, 0) / winnerStates.length;
-      const avgLoserElo = loserStates.reduce((sum, s) => sum + s.elo, 0) / loserStates.length;
+      const avgWinnerElo =
+        winnerStates.reduce((sum, s) => sum + s.elo, 0) / winnerStates.length;
+      const avgLoserElo =
+        loserStates.reduce((sum, s) => sum + s.elo, 0) / loserStates.length;
 
       // Tính scoreRatio từ scoreDetails của match (nếu có)
       const matchScoreRatio = match.scoreDetails
@@ -1567,8 +1920,8 @@ export class RankingsService {
           .where(
             and(
               eq(schema.eloHistoryLogs.matchId, match.id),
-              eq(schema.eloHistoryLogs.userId, uid)
-            )
+              eq(schema.eloHistoryLogs.userId, uid),
+            ),
           );
 
         await tx.insert(schema.eloHistoryLogs).values({
@@ -1623,8 +1976,8 @@ export class RankingsService {
           .where(
             and(
               eq(schema.eloHistoryLogs.matchId, match.id),
-              eq(schema.eloHistoryLogs.userId, uid)
-            )
+              eq(schema.eloHistoryLogs.userId, uid),
+            ),
           );
 
         await tx.insert(schema.eloHistoryLogs).values({
@@ -1665,8 +2018,8 @@ export class RankingsService {
             eq(schema.userRanks.userId, uid),
             eq(schema.userRanks.categoryId, categoryId),
             eq(schema.userRanks.matchType, matchType),
-            isNull(schema.userRanks.communityId)
-          )
+            isNull(schema.userRanks.communityId),
+          ),
         );
 
       await this.recalculateUserRankTier(tx, uid, categoryId, matchType);
@@ -1686,7 +2039,13 @@ export class RankingsService {
     matchType: string,
   ) {
     await this.db.transaction(async (tx) => {
-      await this.recalculateEloChain(tx, playerIds, fromTime, categoryId, matchType);
+      await this.recalculateEloChain(
+        tx,
+        playerIds,
+        fromTime,
+        categoryId,
+        matchType,
+      );
     });
   }
 
@@ -1698,7 +2057,8 @@ export class RankingsService {
    * Idempotent by design (advisory lock + unique elo_history_logs index).
    */
   async processMatchResultFromOutbox(matchId: string) {
-    const footballResult = await this.footballTeamEloService?.processCompletedMatch(matchId);
+    const footballResult =
+      await this.footballTeamEloService?.processCompletedMatch(matchId);
     if (footballResult?.handled) return footballResult;
 
     const [match] = await this.db
@@ -1721,7 +2081,9 @@ export class RankingsService {
     }
 
     const loserId =
-      match.winnerId === match.participant1Id ? match.participant2Id : match.participant1Id;
+      match.winnerId === match.participant1Id
+        ? match.participant2Id
+        : match.participant1Id;
     if (!loserId) {
       throw new Error(`Match ${matchId} has no loser — cannot compute ELO`);
     }
@@ -1737,19 +2099,35 @@ export class RankingsService {
         divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
       })
       .from(schema.tournaments)
-      .leftJoin(schema.tournamentStages, eq(schema.tournamentStages.id, match.stageId))
-      .leftJoin(schema.tournamentDivisions, eq(schema.tournamentDivisions.id, schema.tournamentStages.tournamentDivisionId))
+      .leftJoin(
+        schema.tournamentStages,
+        eq(schema.tournamentStages.id, match.stageId),
+      )
+      .leftJoin(
+        schema.tournamentDivisions,
+        eq(
+          schema.tournamentDivisions.id,
+          schema.tournamentStages.tournamentDivisionId,
+        ),
+      )
       .where(eq(schema.tournaments.id, match.tournamentId))
       .limit(1);
 
     if (!tournament) {
-      throw new Error(`Tournament ${match.tournamentId} not found for ELO outbox processing`);
+      throw new Error(
+        `Tournament ${match.tournamentId} not found for ELO outbox processing`,
+      );
     }
 
-    const effectiveMatchType = tournament.divisionMatchType ?? tournament.tournamentMatchType;
-    const effectiveGenderRestriction = tournament.divisionGenderRestriction ?? tournament.tournamentGenderRestriction;
+    const effectiveMatchType =
+      tournament.divisionMatchType ?? tournament.tournamentMatchType;
+    const effectiveGenderRestriction =
+      tournament.divisionGenderRestriction ??
+      tournament.tournamentGenderRestriction;
     const scope =
-      tournament.tournamentType === 'CLUB' && tournament.communityId ? 'COMMUNITY' : 'PUBLIC';
+      tournament.tournamentType === 'CLUB' && tournament.communityId
+        ? 'COMMUNITY'
+        : 'PUBLIC';
 
     return this.processMatchResult(
       matchId,
