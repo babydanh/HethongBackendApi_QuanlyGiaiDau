@@ -66,6 +66,11 @@ class CreateLiteDivisionConfigDto {
   @IsDateString()
   @IsOptional()
   registrationEndDate?: string | null;
+
+  @ApiPropertyOptional({ example: 'Giải nhất 3.000.000đ' })
+  @IsString()
+  @IsOptional()
+  prizeDescription?: string | null;
 }
 
 export class CreateLiteTournamentDto {
