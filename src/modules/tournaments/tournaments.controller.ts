@@ -228,6 +228,7 @@ export class TournamentsController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id')
   @ApiOperation({ summary: 'Láº¥y chi tiáº¿t giáº£i Ä‘áº¥u' })
   async findOne(
@@ -735,6 +736,7 @@ export class TournamentsController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/bracket')
   @ApiOperation({ summary: 'Láº¥y full bracket data' })
   async findBracket(

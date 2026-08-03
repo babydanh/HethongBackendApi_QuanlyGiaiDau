@@ -20,6 +20,7 @@ export class RateLimitGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
+    const response = context.switchToHttp().getResponse();
     const authenticatedUserId = request.user?.sub || request.user?.id;
     const clientAddress = (request.ip || request.ips?.[0]) || 'unknown';
     const key = authenticatedUserId
@@ -30,10 +31,16 @@ export class RateLimitGuard implements CanActivate {
     const entry = this.store.get(key);
     if (!entry || now > entry.resetAt) {
       this.store.set(key, { count: 1, resetAt: now + this.windowMs });
+      response.setHeader('X-RateLimit-Limit', this.maxRequests.toString());
+      response.setHeader('X-RateLimit-Remaining', Math.max(0, this.maxRequests - 1).toString());
       return true;
     }
 
     if (entry.count >= this.maxRequests) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+      response.setHeader('Retry-After', retryAfterSeconds.toString());
+      response.setHeader('X-RateLimit-Limit', this.maxRequests.toString());
+      response.setHeader('X-RateLimit-Remaining', '0');
       throw new HttpException(
         'Bạn thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại.',
         HttpStatus.TOO_MANY_REQUESTS,
@@ -41,6 +48,8 @@ export class RateLimitGuard implements CanActivate {
     }
 
     entry.count++;
+    response.setHeader('X-RateLimit-Limit', this.maxRequests.toString());
+    response.setHeader('X-RateLimit-Remaining', Math.max(0, this.maxRequests - entry.count).toString());
     return true;
   }
 }

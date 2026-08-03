@@ -31,6 +31,7 @@ import { Verified } from '../../common/decorators/verified.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('communities')
 @Controller('communities')
@@ -82,6 +83,7 @@ export class CommunitiesController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết 1 cộng đồng' })
   async findOne(
@@ -142,6 +144,7 @@ export class CommunitiesController {
   // --- MEMBERS ---
 
   @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/members')
   @ApiOperation({ summary: 'Lấy danh sách thành viên cộng đồng' })
   async getMembers(@Param('id', ParseUUIDPipe) id: string) {
@@ -317,6 +320,7 @@ export class CommunitiesController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/gallery')
   @ApiOperation({ summary: 'Lấy gallery ảnh' })
   async getGallery(@Param('id', ParseUUIDPipe) id: string) {
@@ -346,6 +350,7 @@ export class CommunitiesController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/tournaments')
   @ApiOperation({ summary: 'Lấy giải đấu trong cộng đồng' })
   async getTournaments(
@@ -356,6 +361,7 @@ export class CommunitiesController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/rankings')
   @ApiOperation({ summary: 'Lấy bảng xếp hạng trong cộng đồng' })
   async getRankings(
