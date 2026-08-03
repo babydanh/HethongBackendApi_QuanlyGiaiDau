@@ -1,4 +1,5 @@
 import { Controller, Get, Query, Post, Body, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { RankingsService } from './rankings.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
@@ -13,6 +14,7 @@ export class RankingsController {
   constructor(private readonly rankingsService: RankingsService) {}
 
   @ApiBearerAuth()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get()
   @ApiOperation({ summary: 'Lấy bảng xếp hạng theo môn thể thao' })
   async getLeaderboard(@Query() query: QueryRankingDto) {
