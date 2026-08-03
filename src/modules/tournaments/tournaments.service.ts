@@ -2495,6 +2495,7 @@ export class TournamentsService {
     id: string,
     userId: string,
     systemRoles: string[] = [],
+    divisionId?: string,
     reset = false,
   ) {
     const tournament = await this.tournamentsRepository.findById(id);
@@ -2514,7 +2515,7 @@ export class TournamentsService {
     }
 
     const bracket = reset
-      ? await this.tournamentsRepository.findBracket(id)
+      ? await this.tournamentsRepository.findBracket(id, divisionId)
       : null;
     const started =
       bracket?.stages.some((stage) =>
@@ -2534,7 +2535,7 @@ export class TournamentsService {
       id,
       userId,
       systemRoles,
-      undefined,
+      divisionId,
       'RANDOM',
       reset,
     );

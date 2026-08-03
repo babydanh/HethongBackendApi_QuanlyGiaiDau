@@ -447,12 +447,14 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Tạo hoặc lưu bracket cho giải Lite' })
   async generateLiteBracket(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.generateLiteBracket(
       id,
       user.sub,
       this.getSystemRoles(user),
+      divisionId,
     );
   }
 
@@ -461,12 +463,14 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Reset bracket Lite trước khi có trận bắt đầu' })
   async resetLiteBracket(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.generateLiteBracket(
       id,
       user.sub,
       this.getSystemRoles(user),
+      divisionId,
       true,
     );
   }
