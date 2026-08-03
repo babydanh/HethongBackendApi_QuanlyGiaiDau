@@ -28,6 +28,7 @@ export class LiveScoreGateway
   private readonly logger = new Logger(LiveScoreGateway.name);
 
   private readonly clientMatchRooms = new Map<string, Set<string>>();
+  private readonly clientTournamentRooms = new Map<string, Set<string>>();
   
   // Bộ đệm gộp tin (Batching) cho viewer counts
   private readonly pendingViewerUpdates = new Set<string>();
@@ -70,7 +71,9 @@ export class LiveScoreGateway
     setTimeout(() => {
       if (client.connected) {
         const joinedRooms = this.clientMatchRooms.get(client.id);
-        if (!joinedRooms || joinedRooms.size === 0) {
+        const joinedTournamentRooms = this.clientTournamentRooms.get(client.id);
+        if ((!joinedRooms || joinedRooms.size === 0) &&
+            (!joinedTournamentRooms || joinedTournamentRooms.size === 0)) {
           this.logger.warn(`Disconnecting zombie client ${client.id} due to inactivity (not joined any match).`);
           client.disconnect(true);
         }
@@ -87,6 +90,7 @@ export class LiveScoreGateway
       });
       this.clientMatchRooms.delete(client.id);
     }
+    this.clientTournamentRooms.delete(client.id);
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
@@ -132,17 +136,53 @@ export class LiveScoreGateway
     return { event: 'left', data: room };
   }
 
+  @SubscribeMessage('joinTournament')
+  handleJoinTournament(
+    @MessageBody() tournamentId: string,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = `tournament:${tournamentId}`;
+    client.join(room);
+    const joinedTournamentIds = this.clientTournamentRooms.get(client.id) ?? new Set<string>();
+    joinedTournamentIds.add(tournamentId);
+    this.clientTournamentRooms.set(client.id, joinedTournamentIds);
+    return { event: 'joined', data: room };
+  }
+
+  @SubscribeMessage('leaveTournament')
+  handleLeaveTournament(
+    @MessageBody() tournamentId: string,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = `tournament:${tournamentId}`;
+    client.leave(room);
+    const joinedTournamentIds = this.clientTournamentRooms.get(client.id);
+    if (joinedTournamentIds) {
+      joinedTournamentIds.delete(tournamentId);
+      if (joinedTournamentIds.size === 0) {
+        this.clientTournamentRooms.delete(client.id);
+      }
+    }
+    return { event: 'left', data: room };
+  }
+
   // Tối ưu hoá: Mã hóa 1 lần (Single JSON stringify) + Chống áp lực ngược (Volatile drop)
-  broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData) {
+  broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(matchData);
     this.server.to(`match:${matchId}`).emit('score:update', rawPayload);
+    if (tournamentId) {
+      this.server.to(`tournament:${tournamentId}`).emit('match:update', rawPayload);
+    }
   }
 
-  broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData) {
+  broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(matchData);
     this.server.to(`match:${matchId}`).emit('match:status', rawPayload);
+    if (tournamentId) {
+      this.server.to(`tournament:${tournamentId}`).emit('match:update', rawPayload);
+    }
   }
 
   // Định kỳ phát viewer count từ hàng chờ gộp tin
