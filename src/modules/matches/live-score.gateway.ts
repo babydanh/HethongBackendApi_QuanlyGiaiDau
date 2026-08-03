@@ -136,13 +136,13 @@ export class LiveScoreGateway
   broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(matchData);
-    this.server.volatile.to(`match:${matchId}`).emit('score:update', rawPayload);
+    this.server.to(`match:${matchId}`).emit('score:update', rawPayload);
   }
 
   broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(matchData);
-    this.server.volatile.to(`match:${matchId}`).emit('match:status', rawPayload);
+    this.server.to(`match:${matchId}`).emit('match:status', rawPayload);
   }
 
   // Định kỳ phát viewer count từ hàng chờ gộp tin

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { MatchesRepository } from './matches.repository';
 import { MATCH_OPERATION_ACTIONS, MatchOperationAction, OperateMatchDto } from './dto/operate-match.dto';
 import { QueryMatchDto } from './dto/query-match.dto';
@@ -81,6 +81,10 @@ export class MatchesService {
         (existing.scoreDetails as Record<string, unknown> | null | undefined),
       auditUserId,
     });
+
+    // A repeated completion is idempotent: the repository returns null after
+    // the first transaction has already completed the match.
+    if (!updatedMatch) return existing;
 
     try {
       await this.redisService.del(`match:live:${matchId}`);
@@ -392,13 +396,14 @@ export class MatchesService {
       throw new BadRequestException('Trận đấu đã kết thúc, không thể nhập điểm nữa.');
     }
 
-    const isCreator = existing.tournament?.createdBy === user.sub;
-    // A tournament referee may claim any scheduled match by starting it.
-    // The repository assignment below records the first referee atomically.
-    const isReferee = existing.refereeId === user.sub || user.role === 'REFEREE';
+    if (existing.status !== 'ONGOING') {
+      throw new BadRequestException('Chỉ có thể nhập điểm khi trận đấu đang diễn ra. Hãy bắt đầu trận trước.');
+    }
+
+    const isReferee = existing.refereeId === user.sub;
     const isAdmin = this.isAdmin(user);
 
-    if (!isAdmin && !isCreator && !isReferee) {
+    if (!isAdmin && !isReferee) {
       throw new ForbiddenException('Bạn không có quyền nhập điểm cho trận đấu này');
     }
 
@@ -475,11 +480,12 @@ export class MatchesService {
           }
         : scoreDetails;
 
-    if (existing.status === 'COMPLETED') {
+    /*
       throw new BadRequestException('Trận đấu đã kết thúc');
     }
 
     // Nếu trận đấu đã xác định được đội thắng, tiến hành chốt kết quả và tự động đi tiếp (advancement logic)
+    */
     if (winnerId) {
       return await this.finalizeCompletedMatch(existing, id, winnerId, user.sub, {
         p1SetsWon,
@@ -537,11 +543,22 @@ export class MatchesService {
       throw new BadRequestException('Trận đấu đã kết thúc, không thể đổi trạng thái nữa.');
     }
 
-    const isCreator = existing.tournament?.createdBy === user.sub;
+    const nextStatus = updateMatchStatusDto.status;
+    if (nextStatus === 'ONGOING' && existing.status !== 'SCHEDULED') {
+      throw new BadRequestException('A match must be scheduled before it can start.');
+    }
+    if (nextStatus === 'COMPLETED' && existing.status !== 'ONGOING') {
+      throw new BadRequestException('A match must be ongoing before it can be completed.');
+    }
+    if (nextStatus === 'SCHEDULED' && existing.status !== 'SCHEDULED') {
+      throw new BadRequestException('An ongoing match cannot return to scheduled.');
+    }
+
     const isReferee = existing.refereeId === user.sub;
     const isAdmin = this.isAdmin(user);
 
-    if (!isAdmin && !isCreator && !isReferee) {
+    const canClaimAsReferee = updateMatchStatusDto.status === 'ONGOING' && user.role === 'REFEREE';
+    if (!isAdmin && !isReferee && !canClaimAsReferee) {
       throw new ForbiddenException('Bạn không có quyền thay đổi trạng thái trận đấu này');
     }
 
@@ -550,13 +567,22 @@ export class MatchesService {
         throw new BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
       }
 
-      // Auto-assign referee when starting a match if not already assigned
-      // IMPORTANT: assign referee BEFORE updateStatus to avoid partial state
-      if (!existing.refereeId && (this.isAdmin(user) || isCreator || user.role === 'REFEREE')) {
-        const updated = await this.matchesRepository.updateRefereeId(id, user.sub, user.sub);
-        if (updated) {
-          existing.refereeId = updated.refereeId;
+      if (user.role === 'REFEREE' && existing.refereeId && existing.refereeId !== user.sub) {
+        throw new ForbiddenException('This match is assigned to another referee.');
+      }
+
+      // A referee may claim an unassigned match only after the tournament accepts them.
+      if (!existing.refereeId && user.role === 'REFEREE') {
+        const accepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, user.sub);
+        if (!accepted) {
+          throw new ForbiddenException('Only an accepted tournament referee can claim this match.');
         }
+
+        const updated = await this.matchesRepository.updateRefereeId(id, user.sub, user.sub);
+        if (!updated) {
+          throw new ConflictException('Another referee claimed this match.');
+        }
+        existing.refereeId = updated.refereeId;
       }
     }
 
@@ -649,8 +675,13 @@ export class MatchesService {
 
     const winnerId = this.resolveOperationalWinner(existing, data.winnerId);
     const isParticipant1Winner = winnerId === existing.participant1Id;
-    const nextP1SetsWon = isParticipant1Winner ? Math.max(existing.p1SetsWon, 2) : 0;
-    const nextP2SetsWon = isParticipant1Winner ? 0 : Math.max(existing.p2SetsWon, 2);
+    const resolvedConfig = this.resolveMatchConfig(existing);
+    const nextP1SetsWon = isParticipant1Winner
+      ? Math.max(existing.p1SetsWon, resolvedConfig.setsToWin)
+      : 0;
+    const nextP2SetsWon = isParticipant1Winner
+      ? 0
+      : Math.max(existing.p2SetsWon, resolvedConfig.setsToWin);
 
     return this.finalizeCompletedMatch(existing, id, winnerId, user.sub, {
       p1SetsWon: nextP1SetsWon,

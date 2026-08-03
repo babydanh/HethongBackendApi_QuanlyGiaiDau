@@ -347,7 +347,7 @@ export class MatchesRepository {
     const result = await this.db
       .select()
       .from(schema.matches)
-      .where(eq(schema.matches.id, id))
+      .where(and(eq(schema.matches.id, id), isNull(schema.matches.deletedAt)))
       .limit(1);
 
     if (result.length === 0) return null;
@@ -396,8 +396,18 @@ export class MatchesRepository {
       )
       .leftJoin(schema.categories, eq(schema.categories.id, schema.tournaments.categoryId))
       .leftJoin(schema.tournamentGroups, eq(schema.tournamentGroups.id, match.groupId!))
-      .where(eq(schema.tournamentStages.id, match.stageId))
+      .where(
+        and(
+          eq(schema.tournamentStages.id, match.stageId),
+          eq(schema.tournaments.id, match.tournamentId),
+          isNull(schema.tournaments.deletedAt),
+        ),
+      )
       .limit(1);
+
+    // A legacy row may have survived an older incomplete cascade. Do not expose
+    // it when its stage/tournament is deleted or no longer matches the match.
+    if (!group) return null;
 
     // Get details for participant 1 & 2 in a single query to reduce live-score latency.
     let participant1: { id: string; teamName: string; tournamentDivisionId: string | null } | null = null;
@@ -718,6 +728,7 @@ export class MatchesRepository {
       .limit(1);
 
     if (!existing) return null;
+    if (existing.status === 'COMPLETED') return null;
 
     // 1. Update the match status to COMPLETED and winnerId
     const [updated] = await tx

@@ -1015,6 +1015,22 @@ export class TournamentsService {
       );
     }
 
+    // Completed tournaments remain available for club history and ELO audit.
+    // Archive is intentionally non-destructive: matches and ELO history stay intact.
+    if (existing.status === 'COMPLETED') {
+      const archived = await this.tournamentsRepository.archive(id, userId);
+      try {
+        await this.redisService.delByPattern('tournaments:list:*');
+      } catch (e) {
+        // Redis down - ignore
+      }
+      return {
+        ...archived,
+        archived: true,
+        message: 'Giải đã hoàn thành được lưu trữ để giữ lịch sử giải đấu và ELO.',
+      };
+    }
+
     // If System ADMIN, delete immediately
     if (systemRoles.includes('ADMIN')) {
       await this.cleanupTournamentImages(existing);
@@ -1088,6 +1104,25 @@ export class TournamentsService {
           `Vui lòng hoàn thành hoàn tiền trước khi xóa.`,
         );
       }
+    }
+
+    // Never destroy a completed child division when deleting its parent.
+    // Keep the parent and historical matches available for club/ELO history.
+    const completedDivisions = divisions.filter((div) => div.status === 'COMPLETED');
+    if (completedDivisions.length > 0) {
+      for (const division of completedDivisions) {
+        await this.tournamentsRepository.archive(division.id, userId);
+      }
+      try {
+        await this.redisService.delByPattern('tournaments:list:*');
+      } catch (e) {
+        // Redis down - ignore
+      }
+      return {
+        archived: true,
+        archivedTournamentIds: completedDivisions.map((division) => division.id),
+        message: 'Các giải đã hoàn thành được lưu trữ để giữ lịch sử giải đấu và ELO.',
+      };
     }
 
     // If System ADMIN, delete immediately
