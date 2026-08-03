@@ -71,6 +71,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       findCommunityMember: jest.fn(),
       isCoOrganizer: jest.fn(),
       hasNonDeletedStagesOrMatches: jest.fn(),
+      findBracket: jest.fn(),
       findLitePendingPartnerParticipants: jest.fn(),
       findLiteParticipantsWithRosters: jest.fn(),
       findUserBasicById: jest.fn(),
@@ -90,7 +91,12 @@ describe('TournamentsService — Lite pairing guards', () => {
       updateFootballRoster: jest.fn(),
     };
 
-    mockBracketGenerator = {};
+    mockBracketGenerator = {
+      generateSingleElimination: jest.fn(),
+      generateDoubleElimination: jest.fn(),
+      generateRoundRobin: jest.fn(),
+      generateGroupStageKnockout: jest.fn(),
+    };
     mockNotifications = {};
     mockStorage = {};
     mockRedis = {
@@ -367,6 +373,73 @@ describe('TournamentsService — Lite pairing guards', () => {
       });
       expect(mockRepo.lockTournamentAndPair).toHaveBeenCalled();
       expect(result).toEqual({ id: 'p1', teamStatus: 'COMPLETE' });
+    });
+  });
+
+  describe('generateLiteBracket', () => {
+    it('passes divisionId to the generator for a newly created bracket', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        matchType: 'SINGLES',
+      });
+      mockBracketGenerator.generateSingleElimination.mockResolvedValue({
+        stageId: 'stage-1',
+        totalMatches: 8,
+      });
+
+      await service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN'], 'division-1');
+
+      expect(mockBracketGenerator.generateSingleElimination).toHaveBeenCalledWith(
+        'tournament-1',
+        'user-1',
+        'division-1',
+        'RANDOM',
+      );
+    });
+
+    it('uses the division-scoped bracket when checking a reset', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        matchType: 'SINGLES',
+      });
+      mockRepo.findBracket!.mockResolvedValue({ stages: [] });
+      mockBracketGenerator.generateSingleElimination.mockResolvedValue({
+        stageId: 'stage-2',
+        totalMatches: 8,
+      });
+
+      await service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN'], 'division-1', true);
+
+      expect(mockRepo.findBracket).toHaveBeenCalledWith('tournament-1', 'division-1');
+      expect(mockBracketGenerator.generateSingleElimination).toHaveBeenCalledWith(
+        'tournament-1',
+        'user-1',
+        'division-1',
+        'RANDOM',
+      );
+    });
+
+    it('blocks reset after a bracket match has started', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        matchType: 'SINGLES',
+      });
+      mockRepo.findBracket!.mockResolvedValue({
+        stages: [
+          {
+            groups: [
+              {
+                matches: [{ status: 'IN_PROGRESS' }],
+              },
+            ],
+          },
+        ],
+      });
+
+      await expect(
+        service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN'], 'division-1', true),
+      ).rejects.toThrow('Không thể reset bracket sau khi đã bắt đầu');
+      expect(mockBracketGenerator.generateSingleElimination).not.toHaveBeenCalled();
     });
   });
 
