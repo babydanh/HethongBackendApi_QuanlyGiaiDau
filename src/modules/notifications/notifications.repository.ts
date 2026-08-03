@@ -1,11 +1,37 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, lt, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, like, lt, not, or, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
+
+const MANAGEMENT_NOTIFICATION_TYPES = [
+  'TOURNAMENT_PARTICIPANT_NEW',
+  'TOURNAMENT_TEAM_COMPLETED',
+  'TOURNAMENT_WITHDRAWN',
+  'TOURNAMENT_PUBLISH_APPROVED',
+  'TOURNAMENT_PUBLISH_REJECTED',
+  'TOURNAMENT_SUSPENDED',
+  'TOURNAMENT_UNSUSPENDED',
+  'TOURNAMENT_DELETE_APPROVED',
+  'TOURNAMENT_DELETE_REJECTED',
+  'STAFF_ADDED',
+  'REFEREE_INVITE_ACCEPTED',
+  'REFEREE_INVITE_DECLINED',
+  'PAYOUT_APPROVED',
+  'PAYOUT_REJECTED',
+] as const;
+
+const managementScopeCondition = (): SQL =>
+  or(
+    inArray(schema.notifications.type, MANAGEMENT_NOTIFICATION_TYPES as unknown as string[]),
+    and(
+      eq(schema.notifications.type, 'TOURNAMENT_PAYMENT_COMPLETED'),
+      like(schema.notifications.redirectUrl, '/organizer/%'),
+    ),
+  ) as SQL;
 
 @Injectable()
 export class NotificationsRepository {
@@ -28,8 +54,9 @@ export class NotificationsRepository {
   }
 
   async getNotificationsByUser(userId: string, query: QueryNotificationsDto) {
-    const { page = 1, limit = 10, cursor, isRead } = query;
+    const { page = 1, limit = 10, cursor, isRead, scope = 'player' } = query;
     const conditions: SQL[] = [eq(schema.notifications.receiverId, userId)];
+    conditions.push(scope === 'management' ? managementScopeCondition() : not(managementScopeCondition()));
 
     if (isRead !== undefined) {
       conditions.push(eq(schema.notifications.isRead, isRead));
@@ -83,7 +110,7 @@ export class NotificationsRepository {
     };
   }
 
-  async getUnreadCountByUser(userId: string) {
+  async getUnreadCountByUser(userId: string, scope: 'player' | 'management' = 'player') {
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.notifications)
@@ -91,6 +118,7 @@ export class NotificationsRepository {
         and(
           eq(schema.notifications.receiverId, userId),
           eq(schema.notifications.isRead, false),
+          scope === 'management' ? managementScopeCondition() : not(managementScopeCondition()),
         ),
       );
 
@@ -112,7 +140,7 @@ export class NotificationsRepository {
     return updated;
   }
 
-  async markAllAsRead(userId: string) {
+  async markAllAsRead(userId: string, scope: 'player' | 'management' = 'player') {
     return this.db
       .update(schema.notifications)
       .set({ isRead: true })
@@ -120,6 +148,7 @@ export class NotificationsRepository {
         and(
           eq(schema.notifications.receiverId, userId),
           eq(schema.notifications.isRead, false),
+          scope === 'management' ? managementScopeCondition() : not(managementScopeCondition()),
         ),
       )
       .returning();
