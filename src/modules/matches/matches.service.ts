@@ -135,8 +135,8 @@ export class MatchesService {
       }
     }
 
-    this.liveScoreGateway.broadcastMatchStatus(matchId, updatedMatch);
-    this.liveScoreGateway.broadcastScoreUpdate(matchId, updatedMatch);
+    this.liveScoreGateway.broadcastMatchStatus(matchId, updatedMatch, existing.tournamentId);
+    this.liveScoreGateway.broadcastScoreUpdate(matchId, updatedMatch, existing.tournamentId);
 
     try {
       const participantIds: string[] = [];
@@ -520,7 +520,7 @@ export class MatchesService {
     }
 
     // Broadcast score real-time
-    this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
+    this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch, existing.tournamentId);
 
     // Invalidate matches list cache
     try {
@@ -621,7 +621,7 @@ export class MatchesService {
       }
 
       // Broadcast status real-time
-      this.liveScoreGateway.broadcastMatchStatus(id, updatedMatch);
+      this.liveScoreGateway.broadcastMatchStatus(id, updatedMatch, existing.tournamentId);
 
       // Invalidate matches list cache
       try {
@@ -754,7 +754,7 @@ export class MatchesService {
 
     const updatedMatch = await this.matchesRepository.updateSchedule(id, user.sub, data);
     if (updatedMatch) {
-      this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch);
+      this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch, existing.tournamentId);
     }
 
     if (data.refereeId && data.refereeId !== existing.refereeId) {
