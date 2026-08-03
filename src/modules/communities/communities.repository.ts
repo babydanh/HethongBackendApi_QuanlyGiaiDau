@@ -143,8 +143,18 @@ export class CommunitiesRepository {
 
   async findMyCommunities(userId: string) {
     const created = await this.db
-      .select()
+      .select({
+        community: schema.communities,
+        myRole: schema.communityMembers.role,
+      })
       .from(schema.communities)
+      .leftJoin(
+        schema.communityMembers,
+        and(
+          eq(schema.communities.id, schema.communityMembers.communityId),
+          eq(schema.communityMembers.userId, userId),
+        ),
+      )
       .where(
         and(
           eq(schema.communities.creatorId, userId),
@@ -155,6 +165,7 @@ export class CommunitiesRepository {
     const joined = await this.db
       .select({
         community: schema.communities,
+        myRole: schema.communityMembers.role,
       })
       .from(schema.communities)
       .innerJoin(
@@ -171,8 +182,14 @@ export class CommunitiesRepository {
       );
 
     return {
-      created,
-      joined: joined.map((result) => result.community),
+      created: created.map((result) => ({
+        ...result.community,
+        myRole: result.myRole || 'OWNER',
+      })),
+      joined: joined.map((result) => ({
+        ...result.community,
+        myRole: result.myRole || 'MEMBER',
+      })),
     };
   }
 
