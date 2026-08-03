@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, like, lt, not, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, like, lt, not, or, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
@@ -29,6 +29,7 @@ const managementScopeCondition = (): SQL =>
     inArray(schema.notifications.type, MANAGEMENT_NOTIFICATION_TYPES as unknown as string[]),
     and(
       eq(schema.notifications.type, 'TOURNAMENT_PAYMENT_COMPLETED'),
+      isNotNull(schema.notifications.redirectUrl),
       like(schema.notifications.redirectUrl, '/organizer/%'),
     ),
   ) as SQL;

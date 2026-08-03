@@ -2,14 +2,25 @@ import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, desc, and, isNull, or, SQL, sql, gt, aliasedTable, inArray, AnyColumn } from 'drizzle-orm';
+import {
+  eq,
+  desc,
+  and,
+  isNull,
+  or,
+  SQL,
+  sql,
+  gt,
+  aliasedTable,
+  inArray,
+  notExists,
+  AnyColumn,
+} from 'drizzle-orm';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 
 @Injectable()
 export class RankingsRepository {
-  constructor(
-    @Inject(PG_CONNECTION) private readonly db: AppDb,
-  ) {}
+  constructor(@Inject(PG_CONNECTION) private readonly db: AppDb) {}
 
   // Get public db instance (useful for starting transaction in service)
   getDbInstance() {
@@ -17,18 +28,31 @@ export class RankingsRepository {
   }
 
   async getLeaderboard(query: QueryRankingDto) {
-    const { page = 1, limit = 50, cursor, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode, genderRestriction } = query;
+    const {
+      page = 1,
+      limit = 50,
+      cursor,
+      categoryId,
+      matchType,
+      communityId,
+      scope = 'PUBLIC',
+      provinceCode,
+      genderRestriction,
+    } = query;
     let cursorValue: { eloPoints: number; id: string } | null = null;
     if (cursor) {
       try {
-        cursorValue = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { eloPoints: number; id: string };
+        cursorValue = JSON.parse(
+          Buffer.from(cursor, 'base64url').toString('utf8'),
+        ) as { eloPoints: number; id: string };
       } catch {
         cursorValue = null;
       }
     }
-    const applyCursor = (eloColumn: AnyColumn, idColumn: AnyColumn) => cursorValue
-      ? sql`(${eloColumn} < ${cursorValue.eloPoints} OR (${eloColumn} = ${cursorValue.eloPoints} AND ${idColumn} < ${cursorValue.id}))`
-      : undefined;
+    const applyCursor = (eloColumn: AnyColumn, idColumn: AnyColumn) =>
+      cursorValue
+        ? sql`(${eloColumn} < ${cursorValue.eloPoints} OR (${eloColumn} = ${cursorValue.eloPoints} AND ${idColumn} < ${cursorValue.id}))`
+        : undefined;
 
     const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
 
@@ -51,7 +75,9 @@ export class RankingsRepository {
         conditions.push(eq(schema.pairRanks.matchType, matchType));
       }
       if (genderRestriction) {
-        conditions.push(eq(schema.pairRanks.genderRestriction, genderRestriction));
+        conditions.push(
+          eq(schema.pairRanks.genderRestriction, genderRestriction),
+        );
       }
       if (communityId && scope === 'COMMUNITY') {
         conditions.push(eq(schema.pairRanks.communityId, communityId));
@@ -62,9 +88,55 @@ export class RankingsRepository {
       // Filter by province code of either of the players if requested
       if (provinceCode) {
         conditions.push(
-          sql`(${profile1.provinceCode} = ${provinceCode} OR ${profile2.provinceCode} = ${provinceCode})`
+          sql`(${profile1.provinceCode} = ${provinceCode} OR ${profile2.provinceCode} = ${provinceCode})`,
         );
       }
+
+      conditions.push(
+        notExists(
+          this.db
+            .select({ id: schema.rankingContextStatuses.id })
+            .from(schema.rankingContextStatuses)
+            .where(
+              and(
+                or(
+                  eq(
+                    schema.rankingContextStatuses.userId,
+                    schema.pairRanks.user1Id,
+                  ),
+                  eq(
+                    schema.rankingContextStatuses.userId,
+                    schema.pairRanks.user2Id,
+                  ),
+                ),
+                eq(
+                  schema.rankingContextStatuses.categoryId,
+                  schema.pairRanks.categoryId,
+                ),
+                eq(schema.rankingContextStatuses.scope, scope),
+                scope === 'COMMUNITY'
+                  ? eq(
+                      schema.rankingContextStatuses.communityId,
+                      schema.pairRanks.communityId,
+                    )
+                  : isNull(schema.rankingContextStatuses.communityId),
+                eq(
+                  schema.rankingContextStatuses.matchType,
+                  schema.pairRanks.matchType,
+                ),
+                sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.pairRanks.genderRestriction}, '')`,
+                inArray(schema.rankingContextStatuses.status, [
+                  'HIDDEN',
+                  'BANNED',
+                ]),
+                or(
+                  isNull(schema.rankingContextStatuses.expiresAt),
+                  gt(schema.rankingContextStatuses.expiresAt, new Date()),
+                ),
+              ),
+            ),
+        ),
+      );
 
       const whereClause = and(...conditions);
 
@@ -96,7 +168,12 @@ export class RankingsRepository {
         .innerJoin(user2, eq(schema.pairRanks.user2Id, user2.id))
         .leftJoin(profile1, eq(user1.id, profile1.userId))
         .leftJoin(profile2, eq(user2.id, profile2.userId))
-        .where(and(whereClause, applyCursor(schema.pairRanks.eloPoints, schema.pairRanks.id)))
+        .where(
+          and(
+            whereClause,
+            applyCursor(schema.pairRanks.eloPoints, schema.pairRanks.id),
+          ),
+        )
         .orderBy(desc(schema.pairRanks.eloPoints), desc(schema.pairRanks.id))
         .limit(limit + 1)
         .$dynamic();
@@ -110,7 +187,15 @@ export class RankingsRepository {
         meta: {
           page,
           limit,
-          nextCursor: pairHasMore && pairLast ? Buffer.from(JSON.stringify({ eloPoints: pairLast.eloPoints, id: pairLast.id })).toString('base64url') : null,
+          nextCursor:
+            pairHasMore && pairLast
+              ? Buffer.from(
+                  JSON.stringify({
+                    eloPoints: pairLast.eloPoints,
+                    id: pairLast.id,
+                  }),
+                ).toString('base64url')
+              : null,
           hasMore: pairHasMore,
         },
       };
@@ -118,7 +203,9 @@ export class RankingsRepository {
 
     if (scope === 'COMMUNITY') {
       if (!communityId) {
-        throw new BadRequestException('communityId is required when scope is COMMUNITY');
+        throw new BadRequestException(
+          'communityId is required when scope is COMMUNITY',
+        );
       }
       const conditions: SQL[] = [
         eq(schema.communityRankings.categoryId, categoryId),
@@ -130,21 +217,62 @@ export class RankingsRepository {
         conditions.push(eq(schema.communityRankings.matchType, matchType));
       }
       if (genderRestriction) {
-        conditions.push(or(
-          eq(schema.communityRankings.genderRestriction, genderRestriction),
-          isNull(schema.communityRankings.genderRestriction),
-        ) as SQL);
+        conditions.push(
+          or(
+            eq(schema.communityRankings.genderRestriction, genderRestriction),
+            isNull(schema.communityRankings.genderRestriction),
+          ) as SQL,
+        );
       }
 
       if (provinceCode) {
         conditions.push(eq(schema.profiles.provinceCode, provinceCode));
       }
 
+      conditions.push(
+        notExists(
+          this.db
+            .select({ id: schema.rankingContextStatuses.id })
+            .from(schema.rankingContextStatuses)
+            .where(
+              and(
+                eq(
+                  schema.rankingContextStatuses.userId,
+                  schema.communityRankings.userId,
+                ),
+                eq(
+                  schema.rankingContextStatuses.categoryId,
+                  schema.communityRankings.categoryId,
+                ),
+                eq(schema.rankingContextStatuses.scope, 'COMMUNITY'),
+                eq(
+                  schema.rankingContextStatuses.communityId,
+                  schema.communityRankings.communityId,
+                ),
+                eq(
+                  schema.rankingContextStatuses.matchType,
+                  schema.communityRankings.matchType,
+                ),
+                sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.communityRankings.genderRestriction}, '')`,
+                inArray(schema.rankingContextStatuses.status, [
+                  'HIDDEN',
+                  'BANNED',
+                ]),
+                or(
+                  isNull(schema.rankingContextStatuses.expiresAt),
+                  gt(schema.rankingContextStatuses.expiresAt, new Date()),
+                ),
+              ),
+            ),
+        ),
+      );
+
       const whereClause = and(...conditions);
 
       const data = this.db
         .select({
           id: schema.communityRankings.id,
+
           userId: schema.communityRankings.userId,
           categoryId: schema.communityRankings.categoryId,
           communityId: schema.communityRankings.communityId,
@@ -162,19 +290,41 @@ export class RankingsRepository {
           },
         })
         .from(schema.communityRankings)
-        .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
+        .innerJoin(
+          schema.users,
+          eq(schema.communityRankings.userId, schema.users.id),
+        )
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-        .innerJoin(schema.communityMembers, and(
-          eq(schema.communityRankings.userId, schema.communityMembers.userId),
-          eq(schema.communityRankings.communityId, schema.communityMembers.communityId),
-        ))
-        .where(and(whereClause, applyCursor(schema.communityRankings.eloPoints, schema.communityRankings.id)))
-        .orderBy(desc(schema.communityRankings.eloPoints), desc(schema.communityRankings.id))
+        .innerJoin(
+          schema.communityMembers,
+          and(
+            eq(schema.communityRankings.userId, schema.communityMembers.userId),
+            eq(
+              schema.communityRankings.communityId,
+              schema.communityMembers.communityId,
+            ),
+          ),
+        )
+        .where(
+          and(
+            whereClause,
+            applyCursor(
+              schema.communityRankings.eloPoints,
+              schema.communityRankings.id,
+            ),
+          ),
+        )
+        .orderBy(
+          desc(schema.communityRankings.eloPoints),
+          desc(schema.communityRankings.id),
+        )
         .limit(limit + 1)
         .$dynamic();
       const communityData = await data;
       const communityHasMore = communityData.length > limit;
-      const communityItems = communityHasMore ? communityData.slice(0, limit) : communityData;
+      const communityItems = communityHasMore
+        ? communityData.slice(0, limit)
+        : communityData;
       const communityLast = communityItems.at(-1);
 
       return {
@@ -182,7 +332,15 @@ export class RankingsRepository {
         meta: {
           page,
           limit,
-          nextCursor: communityHasMore && communityLast ? Buffer.from(JSON.stringify({ eloPoints: communityLast.eloPoints, id: communityLast.id })).toString('base64url') : null,
+          nextCursor:
+            communityHasMore && communityLast
+              ? Buffer.from(
+                  JSON.stringify({
+                    eloPoints: communityLast.eloPoints,
+                    id: communityLast.id,
+                  }),
+                ).toString('base64url')
+              : null,
           hasMore: communityHasMore,
         },
       };
@@ -198,17 +356,55 @@ export class RankingsRepository {
         conditions.push(eq(schema.userRanks.matchType, matchType));
       }
       if (genderRestriction) {
-        conditions.push(eq(schema.userRanks.genderRestriction, genderRestriction));
+        conditions.push(
+          eq(schema.userRanks.genderRestriction, genderRestriction),
+        );
       }
       if (provinceCode) {
         conditions.push(eq(schema.profiles.provinceCode, provinceCode));
       }
+
+      conditions.push(
+        notExists(
+          this.db
+            .select({ id: schema.rankingContextStatuses.id })
+            .from(schema.rankingContextStatuses)
+            .where(
+              and(
+                eq(
+                  schema.rankingContextStatuses.userId,
+                  schema.userRanks.userId,
+                ),
+                eq(
+                  schema.rankingContextStatuses.categoryId,
+                  schema.userRanks.categoryId,
+                ),
+                eq(schema.rankingContextStatuses.scope, 'PUBLIC'),
+                isNull(schema.rankingContextStatuses.communityId),
+                eq(
+                  schema.rankingContextStatuses.matchType,
+                  schema.userRanks.matchType,
+                ),
+                sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                inArray(schema.rankingContextStatuses.status, [
+                  'HIDDEN',
+                  'BANNED',
+                ]),
+                or(
+                  isNull(schema.rankingContextStatuses.expiresAt),
+                  gt(schema.rankingContextStatuses.expiresAt, new Date()),
+                ),
+              ),
+            ),
+        ),
+      );
 
       const whereClause = and(...conditions);
 
       const data = this.db
         .select({
           id: schema.userRanks.id,
+
           userId: schema.userRanks.userId,
           categoryId: schema.userRanks.categoryId,
           matchType: schema.userRanks.matchType,
@@ -231,14 +427,24 @@ export class RankingsRepository {
         .from(schema.userRanks)
         .innerJoin(schema.users, eq(schema.userRanks.userId, schema.users.id))
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-        .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
-        .where(and(whereClause, applyCursor(schema.userRanks.eloPoints, schema.userRanks.id)))
+        .leftJoin(
+          schema.eloTiers,
+          eq(schema.userRanks.tierId, schema.eloTiers.id),
+        )
+        .where(
+          and(
+            whereClause,
+            applyCursor(schema.userRanks.eloPoints, schema.userRanks.id),
+          ),
+        )
         .orderBy(desc(schema.userRanks.eloPoints), desc(schema.userRanks.id))
         .limit(limit + 1)
         .$dynamic();
       const publicData = await data;
       const publicHasMore = publicData.length > limit;
-      const publicItems = publicHasMore ? publicData.slice(0, limit) : publicData;
+      const publicItems = publicHasMore
+        ? publicData.slice(0, limit)
+        : publicData;
       const publicLast = publicItems.at(-1);
 
       return {
@@ -246,7 +452,15 @@ export class RankingsRepository {
         meta: {
           page,
           limit,
-          nextCursor: publicHasMore && publicLast ? Buffer.from(JSON.stringify({ eloPoints: publicLast.eloPoints, id: publicLast.id })).toString('base64url') : null,
+          nextCursor:
+            publicHasMore && publicLast
+              ? Buffer.from(
+                  JSON.stringify({
+                    eloPoints: publicLast.eloPoints,
+                    id: publicLast.id,
+                  }),
+                ).toString('base64url')
+              : null,
           hasMore: publicHasMore,
         },
       };
@@ -282,13 +496,53 @@ export class RankingsRepository {
         tierName: schema.eloTiers.name,
       })
       .from(schema.userRanks)
-      .innerJoin(schema.categories, eq(schema.userRanks.categoryId, schema.categories.id))
-      .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
-      .where(and(
-        eq(schema.userRanks.userId, userId),
-        isNull(schema.userRanks.communityId),
-        gt(schema.userRanks.matchesPlayed, 0),
-      ));
+      .innerJoin(
+        schema.categories,
+        eq(schema.userRanks.categoryId, schema.categories.id),
+      )
+      .leftJoin(
+        schema.eloTiers,
+        eq(schema.userRanks.tierId, schema.eloTiers.id),
+      )
+      .where(
+        and(
+          eq(schema.userRanks.userId, userId),
+          isNull(schema.userRanks.communityId),
+          gt(schema.userRanks.matchesPlayed, 0),
+          notExists(
+            this.db
+              .select({ id: schema.rankingContextStatuses.id })
+              .from(schema.rankingContextStatuses)
+              .where(
+                and(
+                  eq(
+                    schema.rankingContextStatuses.userId,
+                    schema.userRanks.userId,
+                  ),
+                  eq(
+                    schema.rankingContextStatuses.categoryId,
+                    schema.userRanks.categoryId,
+                  ),
+                  eq(schema.rankingContextStatuses.scope, 'PUBLIC'),
+                  isNull(schema.rankingContextStatuses.communityId),
+                  eq(
+                    schema.rankingContextStatuses.matchType,
+                    schema.userRanks.matchType,
+                  ),
+                  sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                  inArray(schema.rankingContextStatuses.status, [
+                    'HIDDEN',
+                    'BANNED',
+                  ]),
+                  or(
+                    isNull(schema.rankingContextStatuses.expiresAt),
+                    gt(schema.rankingContextStatuses.expiresAt, new Date()),
+                  ),
+                ),
+              ),
+          ),
+        ),
+      );
 
     const communityRanks = await this.db
       .select({
@@ -308,12 +562,55 @@ export class RankingsRepository {
         updatedAt: schema.communityRankings.updatedAt,
       })
       .from(schema.communityRankings)
-      .innerJoin(schema.communities, eq(schema.communityRankings.communityId, schema.communities.id))
-      .innerJoin(schema.categories, eq(schema.communityRankings.categoryId, schema.categories.id))
-      .where(and(
-        eq(schema.communityRankings.userId, userId),
-        gt(schema.communityRankings.matchesPlayed, 0),
-      ));
+      .innerJoin(
+        schema.communities,
+        eq(schema.communityRankings.communityId, schema.communities.id),
+      )
+      .innerJoin(
+        schema.categories,
+        eq(schema.communityRankings.categoryId, schema.categories.id),
+      )
+      .where(
+        and(
+          eq(schema.communityRankings.userId, userId),
+          gt(schema.communityRankings.matchesPlayed, 0),
+          notExists(
+            this.db
+              .select({ id: schema.rankingContextStatuses.id })
+              .from(schema.rankingContextStatuses)
+              .where(
+                and(
+                  eq(
+                    schema.rankingContextStatuses.userId,
+                    schema.communityRankings.userId,
+                  ),
+                  eq(
+                    schema.rankingContextStatuses.categoryId,
+                    schema.communityRankings.categoryId,
+                  ),
+                  eq(schema.rankingContextStatuses.scope, 'COMMUNITY'),
+                  eq(
+                    schema.rankingContextStatuses.communityId,
+                    schema.communityRankings.communityId,
+                  ),
+                  eq(
+                    schema.rankingContextStatuses.matchType,
+                    schema.communityRankings.matchType,
+                  ),
+                  sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.communityRankings.genderRestriction}, '')`,
+                  inArray(schema.rankingContextStatuses.status, [
+                    'HIDDEN',
+                    'BANNED',
+                  ]),
+                  or(
+                    isNull(schema.rankingContextStatuses.expiresAt),
+                    gt(schema.rankingContextStatuses.expiresAt, new Date()),
+                  ),
+                ),
+              ),
+          ),
+        ),
+      );
 
     return {
       publicRanks,
@@ -378,13 +675,15 @@ export class RankingsRepository {
 
     if (scope === 'COMMUNITY') {
       if (!communityId) {
-        throw new BadRequestException('communityId is required when scope is COMMUNITY');
+        throw new BadRequestException(
+          'communityId is required when scope is COMMUNITY',
+        );
       }
       conditions.push(eq(schema.tournaments.communityId, communityId));
       conditions.push(eq(schema.tournaments.tournamentType, 'CLUB'));
     } else {
       conditions.push(
-        sql`(${schema.eloHistoryLogs.matchId} IS NULL OR ${schema.tournaments.tournamentType} = 'PUBLIC')`
+        sql`(${schema.eloHistoryLogs.matchId} IS NULL OR ${schema.tournaments.tournamentType} = 'PUBLIC')`,
       );
     }
 
@@ -394,7 +693,9 @@ export class RankingsRepository {
     let historyCursor: { createdAt: string; id: string } | null = null;
     if (cursor) {
       try {
-        historyCursor = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+        historyCursor = JSON.parse(
+          Buffer.from(cursor, 'base64url').toString('utf8'),
+        ) as { createdAt: string; id: string };
       } catch {
         historyCursor = null;
       }
@@ -424,68 +725,108 @@ export class RankingsRepository {
           tournamentName: schema.tournaments.name,
           tournamentType: schema.tournaments.tournamentType,
           communityId: schema.tournaments.communityId,
-        }
+        },
       })
       .from(schema.eloHistoryLogs)
-      .leftJoin(schema.matches, eq(schema.eloHistoryLogs.matchId, schema.matches.id))
-      .leftJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-      .leftJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-      .leftJoin(schema.tournamentDivisions, eq(schema.tournamentDivisions.id, schema.tournamentStages.tournamentDivisionId))
-      .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+      .leftJoin(
+        schema.matches,
+        eq(schema.eloHistoryLogs.matchId, schema.matches.id),
+      )
+      .leftJoin(
+        schema.tournamentGroups,
+        eq(schema.matches.groupId, schema.tournamentGroups.id),
+      )
+      .leftJoin(
+        schema.tournamentStages,
+        eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+      )
+      .leftJoin(
+        schema.tournamentDivisions,
+        eq(
+          schema.tournamentDivisions.id,
+          schema.tournamentStages.tournamentDivisionId,
+        ),
+      )
+      .leftJoin(
+        schema.tournaments,
+        eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+      )
       .where(historyWhere)
-      .orderBy(desc(schema.eloHistoryLogs.createdAt), desc(schema.eloHistoryLogs.id))
+      .orderBy(
+        desc(schema.eloHistoryLogs.createdAt),
+        desc(schema.eloHistoryLogs.id),
+      )
       .limit(limit + 1)
       .$dynamic();
     const historyData = await data;
     const historyHasMore = historyData.length > limit;
-    const historyItems = historyHasMore ? historyData.slice(0, limit) : historyData;
+    const historyItems = historyHasMore
+      ? historyData.slice(0, limit)
+      : historyData;
     const historyLast = historyItems.at(-1);
 
-    const currentPlayer = aliasedTable(schema.matchPlayers, 'elo_history_current_player');
-    const participant1 = aliasedTable(schema.tournamentParticipants, 'elo_history_participant_1');
-    const participant2 = aliasedTable(schema.tournamentParticipants, 'elo_history_participant_2');
+    const currentPlayer = aliasedTable(
+      schema.matchPlayers,
+      'elo_history_current_player',
+    );
+    const participant1 = aliasedTable(
+      schema.tournamentParticipants,
+      'elo_history_participant_1',
+    );
+    const participant2 = aliasedTable(
+      schema.tournamentParticipants,
+      'elo_history_participant_2',
+    );
     const historyMatchIds = historyItems
       .map((item) => item.matchId)
       .filter((matchId): matchId is string => Boolean(matchId));
-    const historyMatchRows = historyMatchIds.length > 0
-      ? await this.db
-          .select({
-            matchId: schema.matches.id,
-            currentParticipantId: currentPlayer.participantId,
-            status: schema.matches.status,
-            completedAt: schema.matches.completedAt,
-            winnerId: schema.matches.winnerId,
-            p1SetsWon: schema.matches.p1SetsWon,
-            p2SetsWon: schema.matches.p2SetsWon,
-            scoreDetails: schema.matches.scoreDetails,
-            participant1: {
-              id: participant1.id,
-              teamName: participant1.teamName,
-            },
-            participant2: {
-              id: participant2.id,
-              teamName: participant2.teamName,
-            },
-          })
-          .from(schema.matches)
-          .leftJoin(
-            currentPlayer,
-            and(
-              eq(currentPlayer.matchId, schema.matches.id),
-              eq(currentPlayer.userId, userId),
-            ),
-          )
-          .leftJoin(participant1, eq(participant1.id, schema.matches.participant1Id))
-          .leftJoin(participant2, eq(participant2.id, schema.matches.participant2Id))
-          .where(inArray(schema.matches.id, historyMatchIds))
-      : [];
+    const historyMatchRows =
+      historyMatchIds.length > 0
+        ? await this.db
+            .select({
+              matchId: schema.matches.id,
+              currentParticipantId: currentPlayer.participantId,
+              status: schema.matches.status,
+              completedAt: schema.matches.completedAt,
+              winnerId: schema.matches.winnerId,
+              p1SetsWon: schema.matches.p1SetsWon,
+              p2SetsWon: schema.matches.p2SetsWon,
+              scoreDetails: schema.matches.scoreDetails,
+              participant1: {
+                id: participant1.id,
+                teamName: participant1.teamName,
+              },
+              participant2: {
+                id: participant2.id,
+                teamName: participant2.teamName,
+              },
+            })
+            .from(schema.matches)
+            .leftJoin(
+              currentPlayer,
+              and(
+                eq(currentPlayer.matchId, schema.matches.id),
+                eq(currentPlayer.userId, userId),
+              ),
+            )
+            .leftJoin(
+              participant1,
+              eq(participant1.id, schema.matches.participant1Id),
+            )
+            .leftJoin(
+              participant2,
+              eq(participant2.id, schema.matches.participant2Id),
+            )
+            .where(inArray(schema.matches.id, historyMatchIds))
+        : [];
 
     const historyMatchById = new Map(
       historyMatchRows.map((row) => {
         const currentParticipant = row.currentParticipantId;
-        const opponent = currentParticipant === row.participant1?.id
-          ? row.participant2
-          : row.participant1;
+        const opponent =
+          currentParticipant === row.participant1?.id
+            ? row.participant2
+            : row.participant1;
         const result = !row.winnerId
           ? 'DRAW'
           : !currentParticipant
@@ -493,27 +834,30 @@ export class RankingsRepository {
             : row.winnerId === currentParticipant
               ? 'WIN'
               : 'LOSS';
-        return [row.matchId, {
-          status: row.status,
-          completedAt: row.completedAt,
-          winnerId: row.winnerId,
-          p1SetsWon: row.p1SetsWon,
-          p2SetsWon: row.p2SetsWon,
-          scoreDetails: row.scoreDetails,
-          result,
-          opponent: opponent
-            ? { id: opponent.id, name: opponent.teamName }
-            : null,
-        }];
+        return [
+          row.matchId,
+          {
+            status: row.status,
+            completedAt: row.completedAt,
+            winnerId: row.winnerId,
+            p1SetsWon: row.p1SetsWon,
+            p2SetsWon: row.p2SetsWon,
+            scoreDetails: row.scoreDetails,
+            result,
+            opponent: opponent
+              ? { id: opponent.id, name: opponent.teamName }
+              : null,
+          },
+        ];
       }),
     );
     const enrichedHistoryItems = historyItems.map((item) => {
-      const details = item.matchId ? historyMatchById.get(item.matchId) : undefined;
+      const details = item.matchId
+        ? historyMatchById.get(item.matchId)
+        : undefined;
       return {
         ...item,
-        match: item.match
-          ? { ...item.match, ...details }
-          : details ?? null,
+        match: item.match ? { ...item.match, ...details } : (details ?? null),
       };
     });
 
@@ -522,9 +866,17 @@ export class RankingsRepository {
       meta: {
         page,
         limit,
-        nextCursor: historyHasMore && historyLast ? Buffer.from(JSON.stringify({ createdAt: historyLast.createdAt.toISOString(), id: historyLast.id })).toString('base64url') : null,
+        nextCursor:
+          historyHasMore && historyLast
+            ? Buffer.from(
+                JSON.stringify({
+                  createdAt: historyLast.createdAt.toISOString(),
+                  id: historyLast.id,
+                }),
+              ).toString('base64url')
+            : null,
         hasMore: historyHasMore,
-      }
+      },
     };
   }
 
@@ -539,7 +891,10 @@ export class RankingsRepository {
     genderRestriction?: string,
   ) {
     if (scope === 'COMMUNITY') {
-      if (!communityId) throw new BadRequestException('communityId is required for COMMUNITY scope');
+      if (!communityId)
+        throw new BadRequestException(
+          'communityId is required for COMMUNITY scope',
+        );
       const conditions = [
         eq(schema.communityRankings.userId, userId),
         eq(schema.communityRankings.categoryId, categoryId),
@@ -549,10 +904,19 @@ export class RankingsRepository {
           ? eq(schema.communityRankings.genderRestriction, genderRestriction)
           : isNull(schema.communityRankings.genderRestriction),
       ];
-      
+
       const existing = forUpdate
-        ? await tx.select().from(schema.communityRankings).where(and(...conditions)).for('update').limit(1)
-        : await tx.select().from(schema.communityRankings).where(and(...conditions)).limit(1);
+        ? await tx
+            .select()
+            .from(schema.communityRankings)
+            .where(and(...conditions))
+            .for('update')
+            .limit(1)
+        : await tx
+            .select()
+            .from(schema.communityRankings)
+            .where(and(...conditions))
+            .limit(1);
 
       if (existing.length > 0) return existing[0];
 
@@ -584,8 +948,17 @@ export class RankingsRepository {
       ];
 
       const existing = forUpdate
-        ? await tx.select().from(schema.userRanks).where(and(...conditions)).for('update').limit(1)
-        : await tx.select().from(schema.userRanks).where(and(...conditions)).limit(1);
+        ? await tx
+            .select()
+            .from(schema.userRanks)
+            .where(and(...conditions))
+            .for('update')
+            .limit(1)
+        : await tx
+            .select()
+            .from(schema.userRanks)
+            .where(and(...conditions))
+            .limit(1);
 
       if (existing.length > 0) return existing[0];
 
@@ -610,7 +983,16 @@ export class RankingsRepository {
   async updateUserRank(
     tx: AppTx,
     id: string,
-    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean; peakElo?: number; lastActiveAt?: Date; lastDecayAt?: Date },
+    data: {
+      eloPoints: number;
+      matchesPlayed: number;
+      matchesWon: number;
+      winStreak: number;
+      shieldActive?: boolean;
+      peakElo?: number;
+      lastActiveAt?: Date;
+      lastDecayAt?: Date;
+    },
     scope: 'PUBLIC' | 'COMMUNITY',
   ) {
     const setData: Record<string, unknown> = {
@@ -621,7 +1003,8 @@ export class RankingsRepository {
       updatedAt: new Date(),
     };
     if (data.peakElo !== undefined) setData.peakElo = data.peakElo;
-    if (data.lastActiveAt !== undefined) setData.lastActiveAt = data.lastActiveAt;
+    if (data.lastActiveAt !== undefined)
+      setData.lastActiveAt = data.lastActiveAt;
     if (data.lastDecayAt !== undefined) setData.lastDecayAt = data.lastDecayAt;
 
     if (scope === 'COMMUNITY') {
@@ -642,7 +1025,13 @@ export class RankingsRepository {
   private async _updateUserRank(
     tx: AppTx,
     id: string,
-    data: { eloPoints: number; matchesPlayed: number; matchesWon: number; winStreak: number; shieldActive?: boolean },
+    data: {
+      eloPoints: number;
+      matchesPlayed: number;
+      matchesWon: number;
+      winStreak: number;
+      shieldActive?: boolean;
+    },
     scope: 'PUBLIC' | 'COMMUNITY',
   ) {
     if (scope === 'COMMUNITY') {
@@ -665,7 +1054,9 @@ export class RankingsRepository {
           matchesPlayed: data.matchesPlayed,
           matchesWon: data.matchesWon,
           winStreak: data.winStreak,
-          ...(data.shieldActive !== undefined && { shieldActive: data.shieldActive }),
+          ...(data.shieldActive !== undefined && {
+            shieldActive: data.shieldActive,
+          }),
           updatedAt: new Date(),
         })
         .where(eq(schema.userRanks.id, id))
@@ -677,24 +1068,38 @@ export class RankingsRepository {
     tx: AppTx,
     logs: (typeof schema.eloHistoryLogs.$inferInsert)[],
   ) {
-    const matchIds = [...new Set(logs.map((log) => log.matchId).filter((id): id is string => Boolean(id)))];
+    const matchIds = [
+      ...new Set(
+        logs
+          .map((log) => log.matchId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
     const tournamentByMatch = new Map<string, string | null>();
 
     if (matchIds.length > 0) {
       const matches = await tx
-        .select({ id: schema.matches.id, tournamentId: schema.matches.tournamentId })
+        .select({
+          id: schema.matches.id,
+          tournamentId: schema.matches.tournamentId,
+        })
         .from(schema.matches)
         .where(inArray(schema.matches.id, matchIds));
-      for (const match of matches) tournamentByMatch.set(match.id, match.tournamentId);
+      for (const match of matches)
+        tournamentByMatch.set(match.id, match.tournamentId);
     }
 
     const enrichedLogs = logs.map((log) => ({
       ...log,
       tournamentId:
-        log.tournamentId ?? (log.matchId ? tournamentByMatch.get(log.matchId) ?? null : null),
+        log.tournamentId ??
+        (log.matchId ? (tournamentByMatch.get(log.matchId) ?? null) : null),
     }));
 
-    return tx.insert(schema.eloHistoryLogs).values(enrichedLogs).onConflictDoNothing();
+    return tx
+      .insert(schema.eloHistoryLogs)
+      .values(enrichedLogs)
+      .onConflictDoNothing();
   }
 
   async getEloTiersByCategory(categoryId: string) {
@@ -714,15 +1119,10 @@ export class RankingsRepository {
     return profile?.provinceCode || null;
   }
 
-  async updateUserRankTier(
-    tx: AppTx,
-    rankId: string,
-    tierId: string | null,
-  ) {
+  async updateUserRankTier(tx: AppTx, rankId: string, tierId: string | null) {
     return tx
       .update(schema.userRanks)
       .set({ tierId })
       .where(eq(schema.userRanks.id, rankId));
   }
 }
-
