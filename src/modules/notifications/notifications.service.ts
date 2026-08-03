@@ -57,8 +57,8 @@ export class NotificationsService {
     return this.notificationsRepository.getNotificationsByUser(userId, query);
   }
 
-  async getUnreadCount(userId: string) {
-    const count = await this.notificationsRepository.getUnreadCountByUser(userId);
+  async getUnreadCount(userId: string, scope: 'player' | 'management' = 'player') {
+    const count = await this.notificationsRepository.getUnreadCountByUser(userId, scope);
     return { count };
   }
 
@@ -72,8 +72,8 @@ export class NotificationsService {
     return notification;
   }
 
-  async markAllAsRead(userId: string) {
-    return this.notificationsRepository.markAllAsRead(userId);
+  async markAllAsRead(userId: string, scope: 'player' | 'management' = 'player') {
+    return this.notificationsRepository.markAllAsRead(userId, scope);
   }
 
   async deleteByReceiverTypeAndRedirect(

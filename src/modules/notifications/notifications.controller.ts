@@ -13,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
+import { MarkAllNotificationsDto } from './dto/mark-all-notifications.dto';
 import { RegisterDeviceTokenDto, RemoveDeviceTokenDto } from './dto/register-device-token.dto';
 import { NotificationsService } from './notifications.service';
 
@@ -33,8 +34,11 @@ export class NotificationsController {
 
   @Get('unread-count')
   @ApiOperation({ summary: 'Lấy số lượng thông báo chưa đọc của user' })
-  async getUnreadCount(@CurrentUser() user: JwtPayload) {
-    return this.notificationsService.getUnreadCount(user.sub);
+  async getUnreadCount(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryNotificationsDto,
+  ) {
+    return this.notificationsService.getUnreadCount(user.sub, query.scope);
   }
 
   @Patch(':id/read')
@@ -48,8 +52,11 @@ export class NotificationsController {
 
   @Patch('read-all')
   @ApiOperation({ summary: 'Đánh dấu tất cả thông báo là đã đọc' })
-  async markAllAsRead(@CurrentUser() user: JwtPayload) {
-    return this.notificationsService.markAllAsRead(user.sub);
+  async markAllAsRead(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: MarkAllNotificationsDto,
+  ) {
+    return this.notificationsService.markAllAsRead(user.sub, body.scope);
   }
 
   @Post('device-token')
