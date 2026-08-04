@@ -21,7 +21,8 @@ export class MatchesRepository {
   ) {}
 
   async findAll(query: QueryMatchDto) {
-    const { page = 1, limit = 10, groupId, status, userId, publicOnly, bracketType, genderRestriction, city, isRanked, matchType } = query;
+    const { page = 1, limit = 10, groupId, status, userId, bracketType, genderRestriction, city, isRanked, matchType } = query;
+    const publicOnly = query.publicOnly ?? query.isPublicOnly;
     const offset = (page - 1) * limit;
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
@@ -242,19 +243,7 @@ export class MatchesRepository {
         })
         .from(schema.tournamentRosters)
         .leftJoin(schema.profiles, eq(schema.tournamentRosters.userId, schema.profiles.userId))
-        .leftJoin(
-          schema.userRanks,
-          and(
-            eq(schema.tournamentRosters.userId, schema.userRanks.userId),
-                        sql`exists (
-              select 1 from ${schema.tournamentParticipants} tp 
-              join ${schema.tournamentDivisions} td on tp.tournament_division_id = td.id
-              join ${schema.tournaments} t on td.tournament_id = t.id
-              where tp.id = ${schema.tournamentRosters.participantId} 
-              and t.category_id = ${schema.userRanks.categoryId}
-            )`
-          )
-        )
+        .leftJoin(schema.userRanks, eq(schema.tournamentRosters.userId, schema.userRanks.userId))
         .where(inArray(schema.tournamentRosters.participantId, Array.from(participantIds)));
 
       const rostersMap = new Map<string, { userId: string; fullName: string | null; avatarUrl: string | null; elo?: { eloPoints: number } }[]>();
