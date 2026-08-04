@@ -630,7 +630,7 @@ export class MatchesRepository {
   }
 
   async updateScore(id: string, userId: string, data: UpdateMatchScoreDto) {
-    const [updated] = await this.db.transaction(async (tx) => {
+    const updated = await this.db.transaction(async (tx) => {
       const [existing] = await tx
         .select({
           p1SetsWon: schema.matches.p1SetsWon,
@@ -657,9 +657,31 @@ export class MatchesRepository {
           scoreConfirmedBy: userId,
           scoreConfirmedAt: new Date(),
           updatedAt: new Date(),
+          revision: sql`${schema.matches.revision} + 1`,
         })
-        .where(eq(schema.matches.id, id))
+        .where(
+          and(
+            eq(schema.matches.id, id),
+            // Optimistic lock (D3): when the client supplies expectedRevision,
+            // a stale write must not win — 0 rows → conflict surfaced as 409.
+            ...(data.expectedRevision !== undefined
+              ? [eq(schema.matches.revision, data.expectedRevision)]
+              : []),
+          ),
+        )
         .returning();
+
+      if (!up) {
+        const [current] = await tx
+          .select({
+            status: schema.matches.status,
+            revision: schema.matches.revision,
+          })
+          .from(schema.matches)
+          .where(eq(schema.matches.id, id))
+          .limit(1);
+        return { conflict: true, currentMatch: current };
+      }
 
       const oldValues = {
         p1SetsWon: existing.p1SetsWon,
@@ -680,13 +702,20 @@ export class MatchesRepository {
       return [up];
     });
 
-    return await this.findById(updated.id);
+    // Optimistic-lock conflict: stale client revision — surface for a 409.
+    if (updated && typeof updated === 'object' && 'conflict' in updated) {
+      return updated as never;
+    }
+
+    const rows = updated as unknown as Array<{ id: string }>;
+    return await this.findById(rows[0].id);
   }
 
   async updateStatus(id: string, data: UpdateMatchStatusDto) {
     const setClause: Record<string, unknown> = {
       status: data.status,
       updatedAt: new Date(),
+      revision: sql`${schema.matches.revision} + 1`,
     };
 
     if (data.status === 'ONGOING') {
@@ -719,6 +748,7 @@ export class MatchesRepository {
       p2SetsWon: number;
       scoreDetails: Record<string, unknown> | null | undefined;
       auditUserId?: string | null;
+      expectedRevision?: number;
     }
   ) {
     return await this.db.transaction(async (tx) => {
@@ -727,7 +757,14 @@ export class MatchesRepository {
         p2SetsWon: matchDetails.p2SetsWon,
         scoreDetails: matchDetails.scoreDetails,
         auditUserId: matchDetails.auditUserId,
+        expectedRevision: matchDetails.expectedRevision,
       });
+
+      // A stale-revision completion surfaces as a conflict — standings must NOT
+      // run for it (the transaction did not win the completion).
+      if (updated && typeof updated === 'object' && 'conflict' in updated) {
+        return updated;
+      }
 
       // 5. Update standings if Round Robin
       if (matchDetails.isRoundRobin && updated) {
@@ -774,48 +811,36 @@ export class MatchesRepository {
           const setPointsFor = pId === p1Id ? matchDetails.p1SetsWon : matchDetails.p2SetsWon;
           const setPointsAgainst = pId === p1Id ? matchDetails.p2SetsWon : matchDetails.p1SetsWon;
 
-          const existingStanding = await tx
-            .select()
-            .from(schema.groupStandings)
-            .where(
-              and(
-                eq(schema.groupStandings.groupId, updated.groupId),
-                eq(schema.groupStandings.participantId, pId)
-              )
-            )
-            .limit(1);
-
-          if (existingStanding.length > 0) {
-            const row = existingStanding[0];
-            await tx
-              .update(schema.groupStandings)
-              .set({
-                played: row.played + 1,
-                won: row.won + (isWinner ? 1 : 0),
-                lost: row.lost + ((!isWinner && !isDraw) ? 1 : 0),
-                draws: row.draws + (isDraw ? 1 : 0),
-                pointsFor: row.pointsFor + setPointsFor,
-                pointsAgainst: row.pointsAgainst + setPointsAgainst,
-                totalPoints: row.totalPoints + pointsEarned,
+          // Atomic upsert (NOTE-2): INSERT ... ON CONFLICT DO UPDATE with
+          // SQL-side increments. Replaces read-modify-write, so concurrent
+          // completions for the same group/participant never lose an update.
+          await tx
+            .insert(schema.groupStandings)
+            .values({
+              groupId: updated.groupId,
+              participantId: pId,
+              played: 1,
+              won: isWinner ? 1 : 0,
+              lost: (!isWinner && !isDraw) ? 1 : 0,
+              draws: isDraw ? 1 : 0,
+              pointsFor: setPointsFor,
+              pointsAgainst: setPointsAgainst,
+              totalPoints: pointsEarned,
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: [schema.groupStandings.groupId, schema.groupStandings.participantId],
+              set: {
+                played: sql`${schema.groupStandings.played} + 1`,
+                won: sql`${schema.groupStandings.won} + ${isWinner ? 1 : 0}`,
+                lost: sql`${schema.groupStandings.lost} + ${(!isWinner && !isDraw) ? 1 : 0}`,
+                draws: sql`${schema.groupStandings.draws} + ${isDraw ? 1 : 0}`,
+                pointsFor: sql`${schema.groupStandings.pointsFor} + ${setPointsFor}`,
+                pointsAgainst: sql`${schema.groupStandings.pointsAgainst} + ${setPointsAgainst}`,
+                totalPoints: sql`${schema.groupStandings.totalPoints} + ${pointsEarned}`,
                 updatedAt: new Date(),
-              })
-              .where(eq(schema.groupStandings.id, row.id));
-          } else {
-            await tx
-              .insert(schema.groupStandings)
-              .values({
-                groupId: updated.groupId,
-                participantId: pId,
-                played: 1,
-                won: isWinner ? 1 : 0,
-                lost: (!isWinner && !isDraw) ? 1 : 0,
-                draws: isDraw ? 1 : 0,
-                pointsFor: setPointsFor,
-                pointsAgainst: setPointsAgainst,
-                totalPoints: pointsEarned,
-                updatedAt: new Date(),
-              });
-          }
+              },
+            });
         }
       }
 
@@ -833,6 +858,7 @@ export class MatchesRepository {
       scoreDetails: Record<string, unknown> | null | undefined;
       auditUserId?: string | null;
       isBye?: boolean;
+      expectedRevision?: number;
     }
   ) {
     const [existing] = await tx
@@ -842,9 +868,11 @@ export class MatchesRepository {
       .limit(1);
 
     if (!existing) return null;
-    if (existing.status === 'COMPLETED') return null;
 
-    // 1. Update the match status to COMPLETED and winnerId
+    // 1. Conditional update: only the FIRST transaction that flips
+    // status away from COMPLETED may run side effects (NOTE-1).
+    // Optional optimistic lock: when the caller supplies expectedRevision
+    // (from a client-visible match), the update only wins if revision matches.
     const [updated] = await tx
       .update(schema.matches)
       .set({
@@ -856,9 +884,34 @@ export class MatchesRepository {
         isBye: details.isBye ?? existing.isBye,
         completedAt: new Date(),
         updatedAt: new Date(),
+        revision: sql`${schema.matches.revision} + 1`,
       })
-      .where(eq(schema.matches.id, id))
+      .where(
+        and(
+          eq(schema.matches.id, id),
+          ne(schema.matches.status, 'COMPLETED'),
+          ...(details.expectedRevision !== undefined
+            ? [eq(schema.matches.revision, details.expectedRevision)]
+            : []),
+        ),
+      )
       .returning();
+
+    // Affected-row gate: no row updated means either already COMPLETED
+    // (idempotent — return null, zero side effects) or a stale revision
+    // conflict (client saw an older match) — surface as 409 in the service.
+    if (!updated) {
+      const [current] = await tx
+        .select({
+          status: schema.matches.status,
+          revision: schema.matches.revision,
+        })
+        .from(schema.matches)
+        .where(eq(schema.matches.id, id))
+        .limit(1);
+      if (!current || current.status === 'COMPLETED') return null;
+      return { conflict: true, currentMatch: current } as never;
+    }
 
     const oldValues = {
       p1SetsWon: existing.p1SetsWon,
@@ -875,6 +928,28 @@ export class MatchesRepository {
       status: updated.status,
     };
     await this.auditService.logUpdate(tx, details.auditUserId ?? null, 'matches', id, oldValues, newValues);
+
+    // 1b. ELO transactional outbox (NOTE-3, T12): enqueue ONLY from the winning
+    // transaction, and ONLY for ranked tournaments. Ranked determination is done
+    // INSIDE the tx (no TOCTOU against a service-level read). UNIQUE(match_id) +
+    // ON CONFLICT DO NOTHING guarantees one row per match ever.
+    const [eloTournament] = await tx
+      .select({ isRanked: schema.tournaments.isRanked })
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, existing.tournamentId))
+      .limit(1);
+
+    if (eloTournament?.isRanked && winnerId) {
+      await tx
+        .insert(schema.matchEloOutbox)
+        .values({
+          matchId: id,
+          status: 'PENDING',
+          attempts: 0,
+          nextAttemptAt: new Date(),
+        })
+        .onConflictDoNothing({ target: schema.matchEloOutbox.matchId });
+    }
 
     // 2. Auto-advance Winner
     if (existing.nextMatchId) {
@@ -1115,6 +1190,7 @@ export class MatchesRepository {
           scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
           ...(data.matchConfig !== undefined && { matchConfig: data.matchConfig || {} }),
           updatedAt: new Date(),
+          revision: sql`${schema.matches.revision} + 1`,
         })
         .where(eq(schema.matches.id, id))
         .returning();
