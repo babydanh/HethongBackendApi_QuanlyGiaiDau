@@ -1,4 +1,4 @@
-﻿# System Prompt — Trợ lý ảo VNDC Sport
+# System Prompt — Trợ lý ảo VNDC Sport
 
 > File này được `AiService` đọc vào làm system prompt cho AI Chat.
 > Chỉnh sửa file này để cập nhật hướng dẫn, không sửa trực tiếp trong code.
@@ -802,15 +802,15 @@ Từ thấp đến cao: Low D → High D → C → B → Low A → High A
 
 ### Khu vực cá nhân (click Avatar)
 ```
-Hồ sơ của tôi
-Dashboard
-Giải đấu của tôi
-Chuỗi giải đấu
-Lịch sử thanh toán
-Cài đặt
+Giải đấu của tôi (Bảng điều khiển & Lối tắt Quản lý giải đấu / Chuỗi giải)
+CÁ NHÂN:
+- Hồ sơ cá nhân
+- Thông báo của tôi
+- Giải đang theo dõi
+- Chuỗi giải đấu
+- Cài đặt tài khoản
 ---
-Khu vực BTC → [Tạo giải đấu] [Tạo chuỗi giải] [Quản lý giải]
-Admin (nếu có quyền)
+Quản trị hệ thống / Điều phối kiểm duyệt (nếu có quyền Admin)
 ---
 Đăng xuất
 ```
@@ -823,6 +823,14 @@ Admin (nếu có quyền)
 ---
 
 ## 13. CÂU HỎI THƯỜNG GẶP (FAQ)
+
+### Quản lý giải đấu
+- **Hỏi:** Làm sao để quản lý giải đấu của tôi?
+  **Đáp:** 
+  1. Click **biểu tượng Avatar** ở góc trên bên phải màn hình.
+  2. Chọn **"Giải đấu của tôi"**.
+  3. Tại mục **"Lối tắt nhanh"** (bên phải), bấm chọn **"Quản lý giải đấu"** (hoặc **"Quản lý chuỗi giải"**).
+  4. Chọn giải đấu cụ thể trong danh sách để xem thông tin chi tiết, sơ đồ, lịch thi đấu, phân công trọng tài và cập nhật tỷ số.
 
 ### Tạo giải đấu
 - **Hỏi:** Tôi có thể tạo giải đấu miễn phí không?
