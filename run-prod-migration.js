@@ -132,6 +132,25 @@ async function run() {
         file: path.join(migrationsDir, `${e.tag}.sql`),
         hash: e.tag,
       }));
+
+      // Keep hand-authored operational migrations (for example files named
+      // with a date) in the same production pipeline. Drizzle's journal does
+      // not include those files, which previously left the running schema
+      // behind the application schema without failing the deploy.
+      const journalTags = new Set(migrationFiles.map((migration) => migration.tag));
+      const standaloneMigrations = fs
+        .readdirSync(migrationsDir)
+        .filter((file) => file.endsWith('.sql') && !file.startsWith('meta'))
+        .map((file) => file.replace(/\.sql$/, ''))
+        .filter((tag) => !journalTags.has(tag))
+        .sort()
+        .map((tag) => ({
+          tag,
+          file: path.join(migrationsDir, `${tag}.sql`),
+          hash: tag,
+        }));
+
+      migrationFiles.push(...standaloneMigrations);
     } else {
       // Fallback: read all .sql files alphabetically
       migrationFiles = fs
