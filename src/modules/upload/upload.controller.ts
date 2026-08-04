@@ -11,7 +11,7 @@ export class UploadController {
 
   @Public()
   @Post('image')
-  @ApiOperation({ summary: 'Upload an image' })
+  @ApiOperation({ summary: 'Upload an image or evidence file' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -29,8 +29,8 @@ export class UploadController {
     @UploadedFile(
       new ParseFilePipe({
         validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
-          new FileTypeValidator({ fileType: '.(png|jpeg|jpg|webp)' }),
+          new MaxFileSizeValidator({ maxSize: 15 * 1024 * 1024 }), // 15MB
+          new FileTypeValidator({ fileType: '.(png|jpeg|jpg|webp|pdf|mp4|mov|webm)' }),
         ],
       }),
     )
