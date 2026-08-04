@@ -1683,4 +1683,67 @@ export class RankingsService {
       await this.recalculateEloChain(tx, playerIds, fromTime, categoryId, matchType);
     });
   }
+
+  /**
+   * Entry point used by the ELO outbox worker (elo-outbox.processor.ts).
+   * Loads the match + tournament context and calls processMatchResult with the
+   * same arguments the old inline completion path used, so ELO semantics stay
+   * identical while the caller moves out of the completion transaction.
+   * Idempotent by design (advisory lock + unique elo_history_logs index).
+   */
+  async processMatchResultFromOutbox(matchId: string) {
+    const [match] = await this.db
+      .select({
+        winnerId: schema.matches.winnerId,
+        participant1Id: schema.matches.participant1Id,
+        participant2Id: schema.matches.participant2Id,
+        tournamentId: schema.matches.tournamentId,
+      })
+      .from(schema.matches)
+      .where(eq(schema.matches.id, matchId))
+      .limit(1);
+
+    if (!match) {
+      throw new Error(`Match ${matchId} not found for ELO outbox processing`);
+    }
+    if (!match.winnerId) {
+      throw new Error(`Match ${matchId} has no winner — cannot compute ELO`);
+    }
+
+    const loserId =
+      match.winnerId === match.participant1Id ? match.participant2Id : match.participant1Id;
+    if (!loserId) {
+      throw new Error(`Match ${matchId} has no loser — cannot compute ELO`);
+    }
+
+    const [tournament] = await this.db
+      .select({
+        categoryId: schema.tournaments.categoryId,
+        matchType: schema.tournaments.matchType,
+        tournamentType: schema.tournaments.tournamentType,
+        communityId: schema.tournaments.communityId,
+        genderRestriction: schema.tournaments.genderRestriction,
+      })
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, match.tournamentId))
+      .limit(1);
+
+    if (!tournament) {
+      throw new Error(`Tournament ${match.tournamentId} not found for ELO outbox processing`);
+    }
+
+    const scope =
+      tournament.tournamentType === 'CLUB' && tournament.communityId ? 'COMMUNITY' : 'PUBLIC';
+
+    return this.processMatchResult(
+      matchId,
+      match.winnerId,
+      loserId,
+      tournament.categoryId,
+      tournament.matchType,
+      scope,
+      tournament.communityId || undefined,
+      tournament.genderRestriction || undefined,
+    );
+  }
 }

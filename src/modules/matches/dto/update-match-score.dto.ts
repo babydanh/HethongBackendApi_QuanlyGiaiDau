@@ -36,4 +36,14 @@ export class UpdateMatchScoreDto {
   @IsString()
   @MaxLength(500)
   overrideReason?: string;
+
+  @ApiPropertyOptional({
+    example: 5,
+    description:
+      'Revision hiện tại client đang hiển thị. Backend chỉ ghi điểm nếu khớp (optimistic lock); lệch sẽ trả 409 kèm currentRevision.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedRevision?: number;
 }

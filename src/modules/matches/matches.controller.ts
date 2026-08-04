@@ -153,16 +153,20 @@ export class MatchesController {
   async unmuteUser(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return await this.matchesService.unmuteUser(id, userId);
+    return await this.matchesService.unmuteUser(id, userId, user);
   }
 
   @Get(':id/muted-users')
   @ApiBearerAuth()
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Danh sách người dùng bị mute/ban' })
-  async getMutedUsers(@Param('id', ParseUUIDPipe) id: string) {
-    return await this.matchesService.getMutedUsers(id);
+  async getMutedUsers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.getMutedUsers(id, user);
   }
 
   @Public()

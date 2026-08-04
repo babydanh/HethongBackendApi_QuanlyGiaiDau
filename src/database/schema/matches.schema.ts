@@ -9,6 +9,7 @@ import {
   timestamp,
   check,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
@@ -35,6 +36,9 @@ export const groupStandings = pgTable('group_standings', {
     .notNull(),
 }, (table) => ({
   idxStandingsGroupId: index('idx_standings_group_id').on(table.groupId),
+  idxStandingsGroupParticipantUnique: uniqueIndex(
+    'idx_standings_group_participant_unique',
+  ).on(table.groupId, table.participantId),
 }));
 
 export const matches = pgTable(
@@ -61,6 +65,7 @@ export const matches = pgTable(
     p1SetsWon: integer('p1_sets_won').default(0).notNull(),
     p2SetsWon: integer('p2_sets_won').default(0).notNull(),
     totalSetsPlayed: integer('total_sets_played').default(0).notNull(),
+    revision: integer('revision').default(1).notNull(),
     roundNumber: integer('round_number').notNull(),
     matchOrder: integer('match_order').notNull(),
     bracketBranch: varchar('bracket_branch', { length: 50 })
@@ -158,3 +163,36 @@ export const matchDisputes = pgTable('match_disputes', {
     .notNull(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
 });
+
+// ELO transactional outbox (NOTE-3): completion tx enqueues one row per ranked
+// match; worker claims via status + lease. State machine:
+//   PENDING(retryable) → PROCESSING(lease) → PROCESSED(ok) | FAILED(terminal)
+//   retryable failure returns to PENDING with backoff.
+export const matchEloOutbox = pgTable(
+  'match_elo_outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    matchId: uuid('match_id')
+      .references(() => matches.id, { onDelete: 'restrict' })
+      .notNull(),
+    status: varchar('status', { length: 20 }).default('PENDING').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    lockedBy: text('locked_by'),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+  },
+  (table) => ({
+    matchIdUnique: uniqueIndex('match_elo_outbox_match_id_unique').on(table.matchId),
+    idxEloOutboxClaim: index('idx_elo_outbox_claim').on(table.status, table.nextAttemptAt),
+    idxEloOutboxLease: index('idx_elo_outbox_lease')
+      .on(table.lockedAt)
+      .where(sql`status = 'PROCESSING'`),
+  }),
+);

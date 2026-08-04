@@ -18,6 +18,12 @@ import { RedisService } from '../../providers/redis/redis.service';
 import { resolveEffectiveSportRules } from '../tournaments/utils/sport-rules/resolve-effective-sport-rules';
 import { validateSportRuleConfig } from '../tournaments/utils/sport-rules/validate-sport-rules-config';
 import { validateScoreDetails } from './utils/score-validation/validate-score-details';
+import {
+  hasRole,
+  isAdminUser,
+  isMatchOwnerOrAdmin,
+} from '../../common/helpers/role.helper';
+import { UserRole } from '../../common/constants/enums';
 
 @Injectable()
 export class MatchesService {
@@ -30,7 +36,7 @@ export class MatchesService {
   ) {}
 
   private isAdmin(user: JwtPayload) {
-    return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
+    return isAdminUser(user);
   }
 
   private resolveOperationalWinner(
@@ -58,6 +64,7 @@ export class MatchesService {
       p1SetsWon: number;
       p2SetsWon: number;
       scoreDetails?: Record<string, unknown> | null;
+      expectedRevision?: number;
     },
   ) {
     if (!existing) {
@@ -80,7 +87,21 @@ export class MatchesService {
         overrideOutcome?.scoreDetails ??
         (existing.scoreDetails as Record<string, unknown> | null | undefined),
       auditUserId,
+      expectedRevision: overrideOutcome?.expectedRevision,
     });
+
+    // Stale-revision completion conflict (D3): another device already changed
+    // the match — surface as 409 so the client refetches before retrying.
+    if (updatedMatch && typeof updatedMatch === 'object' && 'conflict' in updatedMatch) {
+      const conflict = updatedMatch as unknown as {
+        conflict: true;
+        currentMatch: { revision: number };
+      };
+      throw new ConflictException({
+        message: 'Điểm đã thay đổi từ thiết bị khác. Vui lòng làm mới trước khi chốt kết quả.',
+        currentRevision: conflict.currentMatch.revision,
+      });
+    }
 
     // A repeated completion is idempotent: the repository returns null after
     // the first transaction has already completed the match.
@@ -99,30 +120,10 @@ export class MatchesService {
       console.error('Failed to invalidate matches list cache:', err);
     }
 
-    if (existing.tournament) {
-      const tournament = existing.tournament;
-      const scope = tournament.tournamentType === 'CLUB' && tournament.communityId
-        ? 'COMMUNITY'
-        : 'PUBLIC';
-      const loserId = winnerId === existing.participant1Id ? existing.participant2Id : existing.participant1Id;
-
-      if (tournament.isRanked && winnerId && loserId) {
-        try {
-          await this.rankingsService.processMatchResult(
-            matchId,
-            winnerId,
-            loserId,
-            tournament.categoryId,
-            tournament.matchType,
-            scope,
-            tournament.communityId || undefined,
-            tournament.genderRestriction || undefined,
-          );
-        } catch (err) {
-          console.error('Failed to update ELO after match completion:', err.message);
-        }
-      }
-    }
+    // NOTE-3 (T12): ELO is now enqueued inside the completion transaction via
+    // match_elo_outbox (see matches.repository completeMatchInTx). The worker
+    // (EloOutboxProcessor) owns processMatchResult with retry + idempotency.
+    // No inline call here — a failure can no longer be swallowed silently.
 
     if (existing.tournamentId) {
       try {
@@ -207,6 +208,10 @@ export class MatchesService {
     if (!Array.isArray(rawSets)) {
       throw new BadRequestException('Override score yêu cầu scoreDetails.sets là một mảng hợp lệ.');
     }
+    // Lite is free-form, but keep a bounded payload and sane integer scores.
+    if (rawSets.length === 0 || rawSets.length > 99) {
+      throw new BadRequestException('Số set của giải Lite phải nằm trong khoảng từ 1 đến 99.');
+    }
 
     let p1SetsWon = 0;
     let p2SetsWon = 0;
@@ -224,6 +229,8 @@ export class MatchesService {
       if (
         !Number.isFinite(team1Score) ||
         !Number.isFinite(team2Score) ||
+        !Number.isInteger(team1Score) ||
+        !Number.isInteger(team2Score) ||
         team1Score < 0 ||
         team2Score < 0
       ) {
@@ -491,6 +498,7 @@ export class MatchesService {
         p1SetsWon,
         p2SetsWon,
         scoreDetails: nextScoreDetails,
+        expectedRevision: updateMatchScoreDto.expectedRevision,
       });
     }
 
@@ -498,7 +506,21 @@ export class MatchesService {
       p1SetsWon,
       p2SetsWon,
       scoreDetails: nextScoreDetails,
+      expectedRevision: updateMatchScoreDto.expectedRevision,
     });
+
+    // Optimistic-lock conflict (D3): another device wrote first → 409 + currentRevision.
+    if (updatedMatch && typeof updatedMatch === 'object' && 'conflict' in updatedMatch) {
+      const conflict = updatedMatch as unknown as {
+        conflict: true;
+        currentMatch: { revision: number };
+      };
+      throw new ConflictException({
+        message: 'Điểm đã thay đổi từ thiết bị khác. Vui lòng làm mới trước khi nhập tiếp.',
+        currentRevision: conflict.currentMatch.revision,
+      });
+    }
+
     if (!updatedMatch) {
       throw new NotFoundException('Match not found after score update');
     }
@@ -557,7 +579,8 @@ export class MatchesService {
     const isReferee = existing.refereeId === user.sub;
     const isAdmin = this.isAdmin(user);
 
-    const canClaimAsReferee = updateMatchStatusDto.status === 'ONGOING' && user.role === 'REFEREE';
+    const canClaimAsReferee =
+      updateMatchStatusDto.status === 'ONGOING' && hasRole(user, UserRole.REFEREE);
     if (!isAdmin && !isReferee && !canClaimAsReferee) {
       throw new ForbiddenException('Bạn không có quyền thay đổi trạng thái trận đấu này');
     }
@@ -567,12 +590,12 @@ export class MatchesService {
         throw new BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
       }
 
-      if (user.role === 'REFEREE' && existing.refereeId && existing.refereeId !== user.sub) {
+      if (hasRole(user, UserRole.REFEREE) && existing.refereeId && existing.refereeId !== user.sub) {
         throw new ForbiddenException('This match is assigned to another referee.');
       }
 
       // A referee may claim an unassigned match only after the tournament accepts them.
-      if (!existing.refereeId && user.role === 'REFEREE') {
+      if (!existing.refereeId && hasRole(user, UserRole.REFEREE)) {
         const accepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, user.sub);
         if (!accepted) {
           throw new ForbiddenException('Only an accepted tournament referee can claim this match.');
@@ -730,6 +753,13 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
+    // Object-level authorization: admin or tournament creator only (NOTE-5)
+    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isAdmin = this.isAdmin(user);
+    if (!isAdmin && !isCreator) {
+      throw new ForbiddenException('Bạn không có quyền chỉnh lịch thi đấu của giải này');
+    }
+
     if (data.refereeId) {
       const isAccepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, data.refereeId);
       if (!isAccepted) {
@@ -837,7 +867,7 @@ export class MatchesService {
     if (!existing) throw new NotFoundException('Match not found');
 
     const isCreator = existing.tournament?.createdBy === user.sub;
-    const isAdmin = user.role === 'ADMIN';
+    const isAdmin = this.isAdmin(user);
 
     if (!isAdmin && !isCreator) {
       throw new ForbiddenException('Bạn không có quyền phân công trọng tài cho trận đấu này');
@@ -879,7 +909,17 @@ export class MatchesService {
     return { message: type === 'BAN' ? 'Đã cấm người dùng này' : 'Đã mute người dùng này' };
   }
 
-  async unmuteUser(id: string, targetUserId: string) {
+  async unmuteUser(id: string, targetUserId: string, user: JwtPayload) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    // Object-level authorization: admin or tournament creator only (NOTE-4)
+    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isAdmin = this.isAdmin(user);
+    if (!isAdmin && !isCreator) {
+      throw new ForbiddenException('Bạn không có quyền quản lý bình luận trận đấu này');
+    }
+
     await this.matchesRepository.unmuteUser(id, targetUserId);
     this.liveScoreGateway.broadcastComment(id, {
       type: 'MUTE_UPDATE',
@@ -889,9 +929,14 @@ export class MatchesService {
     return { message: 'Đã bỏ cấm/mute người dùng' };
   }
 
-  async getMutedUsers(id: string) {
+  async getMutedUsers(id: string, user: JwtPayload) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
+
+    if (!isMatchOwnerOrAdmin(user, existing.tournament?.createdBy)) {
+      throw new ForbiddenException('Bạn không có quyền xem danh sách người dùng bị hạn chế');
+    }
+
     return this.matchesRepository.getMutedUsers(id);
   }
 
