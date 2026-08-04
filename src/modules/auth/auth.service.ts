@@ -557,7 +557,17 @@ export class AuthService {
         accessToken: undefined,
         refreshToken: undefined,
       };
-    } catch {
+    } catch (error) {
+      // Keep the client-facing message generic, but retain the reason in the
+      // server log so Apple review failures can be diagnosed safely.
+      this.logger.warn(
+        `Apple token verification failed: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Xác thực Apple Token thất bại.');
     }
   }
