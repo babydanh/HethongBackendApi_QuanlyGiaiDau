@@ -32,25 +32,42 @@ export class MatchesRepository {
     conditions.push(isNull(schema.matches.deletedAt));
     if (publicOnly) {
       conditions.push(
-        sql`exists (
-          select 1 from ${schema.tournamentGroups} g
-          join ${schema.tournamentStages} s on g.stage_id = s.id
-          join ${schema.tournaments} t on s.tournament_id = t.id
-          where g.id = ${schema.matches.groupId}
-          and t.deleted_at is null
-          and t.visibility = 'PUBLIC'
-          and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
+        sql`(
+          exists (
+            select 1 from ${schema.tournaments} t
+            where t.id = ${schema.matches.tournamentId}
+            and t.deleted_at is null
+            and t.visibility = 'PUBLIC'
+            and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
+          )
+          or exists (
+            select 1 from ${schema.tournamentGroups} g
+            join ${schema.tournamentStages} s on g.stage_id = s.id
+            join ${schema.tournaments} t on s.tournament_id = t.id
+            where g.id = ${schema.matches.groupId}
+            and t.deleted_at is null
+            and t.visibility = 'PUBLIC'
+            and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
+          )
         )`
       );
     } else {
       conditions.push(
-        sql`exists (
-          select 1 from ${schema.tournamentGroups} g
-          join ${schema.tournamentStages} s on g.stage_id = s.id
-          join ${schema.tournaments} t on s.tournament_id = t.id
-          where g.id = ${schema.matches.groupId}
-          and t.deleted_at is null
-          and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
+        sql`(
+          exists (
+            select 1 from ${schema.tournaments} t
+            where t.id = ${schema.matches.tournamentId}
+            and t.deleted_at is null
+            and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
+          )
+          or exists (
+            select 1 from ${schema.tournamentGroups} g
+            join ${schema.tournamentStages} s on g.stage_id = s.id
+            join ${schema.tournaments} t on s.tournament_id = t.id
+            where g.id = ${schema.matches.groupId}
+            and t.deleted_at is null
+            and t.status not in ('DRAFT', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
+          )
         )`
       );
     }
@@ -146,6 +163,7 @@ export class MatchesRepository {
 
     const stages = await stagesQuery;
     const stageIds = stages.map(s => s.id);
+    const tournamentIds = Array.from(new Set(stages.map(s => s.tournamentId).filter(Boolean)));
     
     if (stageIds.length === 0) {
       return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
@@ -157,11 +175,17 @@ export class MatchesRepository {
       .where(inArray(schema.tournamentGroups.stageId, stageIds));
     const groupIds = groups.map(g => g.id);
 
-    if (groupIds.length === 0) {
+    if (groupIds.length === 0 && tournamentIds.length === 0) {
       return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
     }
 
-    conditions.push(inArray(schema.matches.groupId, groupIds));
+    // Knockout/advancement rows can legitimately have no groupId. They still
+    // belong to the selected tournament through matches.tournamentId.
+    const matchScope = [
+      ...(groupIds.length > 0 ? [inArray(schema.matches.groupId, groupIds)] : []),
+      ...(tournamentIds.length > 0 ? [inArray(schema.matches.tournamentId, tournamentIds)] : []),
+    ];
+    conditions.push(or(...matchScope) as SQL);
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -410,8 +434,15 @@ export class MatchesRepository {
     if (!group) return null;
 
     // Get details for participant 1 & 2 in a single query to reduce live-score latency.
-    let participant1: { id: string; teamName: string; tournamentDivisionId: string | null } | null = null;
-    let participant2: { id: string; teamName: string; tournamentDivisionId: string | null } | null = null;
+    type ParticipantDetails = {
+      id: string;
+      teamName: string;
+      tournamentDivisionId: string | null;
+      eloPoints: number | null;
+      members: { userId: string; fullName: string | null; avatarUrl: string | null; elo?: { eloPoints: number } }[];
+    };
+    let participant1: ParticipantDetails | null = null;
+    let participant2: ParticipantDetails | null = null;
 
     const participantIds = [match.participant1Id, match.participant2Id].filter(
       (participantId): participantId is string => typeof participantId === 'string' && participantId.length > 0,
@@ -427,8 +458,91 @@ export class MatchesRepository {
         .from(schema.tournamentParticipants)
         .where(inArray(schema.tournamentParticipants.id, participantIds));
 
-      participant1 = participants.find((participant) => participant.id === match.participant1Id) ?? null;
-      participant2 = participants.find((participant) => participant.id === match.participant2Id) ?? null;
+      const rosters = await this.db
+        .select({
+          participantId: schema.tournamentRosters.participantId,
+          userId: schema.tournamentRosters.userId,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+          eloPoints: schema.userRanks.eloPoints,
+        })
+        .from(schema.tournamentRosters)
+        .leftJoin(schema.profiles, eq(schema.tournamentRosters.userId, schema.profiles.userId))
+        .leftJoin(
+          schema.userRanks,
+          and(
+            eq(schema.tournamentRosters.userId, schema.userRanks.userId),
+            eq(schema.userRanks.categoryId, group.categoryId),
+          ),
+        )
+        .where(inArray(schema.tournamentRosters.participantId, participantIds));
+
+      const rostersByParticipant = new Map<string, ParticipantDetails['members']>();
+      for (const roster of rosters) {
+        const list = rostersByParticipant.get(roster.participantId) ?? [];
+        list.push({
+          userId: roster.userId,
+          fullName: roster.fullName,
+          avatarUrl: roster.avatarUrl,
+          elo: roster.eloPoints == null ? undefined : { eloPoints: roster.eloPoints },
+        });
+        rostersByParticipant.set(roster.participantId, list);
+      }
+
+      const matchType = group.divisionMatchType ?? group.matchType;
+      const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+      const userIds = rosters.map((roster) => roster.userId);
+      const pairEloByKey = new Map<string, number>();
+      if (isDoubles && group.categoryId && userIds.length >= 2) {
+        const pairRanks = await this.db
+          .select({
+            user1Id: schema.pairRanks.user1Id,
+            user2Id: schema.pairRanks.user2Id,
+            eloPoints: schema.pairRanks.eloPoints,
+            scope: schema.pairRanks.scope,
+            communityId: schema.pairRanks.communityId,
+          })
+          .from(schema.pairRanks)
+          .where(and(
+            eq(schema.pairRanks.categoryId, group.categoryId),
+            inArray(schema.pairRanks.matchType, ['DOUBLES', 'MIXED_DOUBLES']),
+            or(
+              and(inArray(schema.pairRanks.user1Id, userIds), inArray(schema.pairRanks.user2Id, userIds)),
+            ),
+          ));
+
+        // Prefer the tournament's community pair rank, then the public pair rank.
+        const ordered = pairRanks.sort((a, b) => {
+          const score = (row: typeof a) =>
+            group.communityId && row.scope === 'COMMUNITY' && row.communityId === group.communityId ? 2 :
+            row.scope === 'PUBLIC' && row.communityId == null ? 1 : 0;
+          return score(b) - score(a);
+        });
+        for (const row of ordered) {
+          const key = [row.user1Id, row.user2Id].sort().join(':');
+          if (!pairEloByKey.has(key)) pairEloByKey.set(key, row.eloPoints);
+        }
+      }
+
+      const toParticipant = (participant: typeof participants[number]): ParticipantDetails => {
+        const members = rostersByParticipant.get(participant.id) ?? [];
+        const pairKey = members.length >= 2
+          ? members.slice(0, 2).map((member) => member.userId).sort().join(':')
+          : null;
+        return {
+          ...participant,
+          members,
+          // For doubles this is the pair rank, never a member's singles rank.
+          eloPoints: isDoubles && pairKey ? pairEloByKey.get(pairKey) ?? null : members[0]?.elo?.eloPoints ?? null,
+        };
+      };
+
+      participant1 = participants.find((participant) => participant.id === match.participant1Id)
+        ? toParticipant(participants.find((participant) => participant.id === match.participant1Id)!)
+        : null;
+      participant2 = participants.find((participant) => participant.id === match.participant2Id)
+        ? toParticipant(participants.find((participant) => participant.id === match.participant2Id)!)
+        : null;
     }
 
     return {
