@@ -60,8 +60,8 @@ import { LivestreamModule } from './modules/livestream/livestream.module';
     RedisModule,
     MailModule,
     ThrottlerModule.forRoot([
-      // Dev: 2000 req/60s; Production: 600 req/60s (tránh bẫy rate limit khi cuộn trang)
-      { name: 'default', ttl: 60000, limit: process.env.NODE_ENV === 'production' ? 600 : 2000 },
+      // Dev: 10000 req/60s; Production: 5000 req/60s (tránh bẫy 429 rate limit khi cuộn trang)
+      { name: 'default', ttl: 60000, limit: process.env.NODE_ENV === 'production' ? 5000 : 10000 },
       // Endpoint nhạy cảm (auth, payment)
       { name: 'sensitive', ttl: 30000, limit: process.env.NODE_ENV === 'production' ? 60 : 300 },
       // Endpoint cực nhạy (login, register) — chống brute force
