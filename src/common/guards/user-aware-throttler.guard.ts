@@ -5,6 +5,14 @@ import * as jwt from 'jsonwebtoken';
 /** Keeps authenticated users isolated from each other behind a shared proxy IP. */
 @Injectable()
 export class UserAwareThrottlerGuard extends ThrottlerGuard {
+  protected async shouldSkip(context: ExecutionContext): Promise<boolean> {
+    const type = context.getType();
+    if (type === 'ws') return true;
+    const req = context.switchToHttp().getRequest();
+    if (req?.url?.includes('/socket.io/')) return true;
+    return super.shouldSkip(context);
+  }
+
   protected async getTracker(req: Record<string, any>): Promise<string> {
     const authenticatedUserId = req.user?.sub || req.user?.id;
     if (authenticatedUserId) return `user:${authenticatedUserId}`;
