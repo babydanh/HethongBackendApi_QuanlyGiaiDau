@@ -13,6 +13,7 @@ import { UserRole } from '../../common/constants/enums';
 export class RankingsController {
   constructor(private readonly rankingsService: RankingsService) {}
 
+  @Public()
   @ApiBearerAuth()
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get()
