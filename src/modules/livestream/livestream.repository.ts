@@ -81,6 +81,17 @@ export class LivestreamRepository {
   }
 
   async deleteCamera(cameraId: string) {
+    await this.db
+      .update(schema.matchLivestreams)
+      .set({
+        cameraId: null,
+        streamStatus: 'IDLE',
+        playbackUrl: null,
+        endedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.matchLivestreams.cameraId, cameraId));
+
     const [camera] = await this.db
       .update(schema.livestreamCameras)
       .set({
@@ -193,7 +204,7 @@ export class LivestreamRepository {
 
   async updateStreamStatus(
     matchId: string,
-    status: 'IDLE' | 'LIVE' | 'ENDED',
+    status: 'IDLE' | 'LIVE',
     _userId: string | null,
     playbackUrl: string | null,
   ) {
@@ -208,6 +219,7 @@ export class LivestreamRepository {
           }
         : {
             streamStatus: status,
+            playbackUrl: null,
             endedAt: new Date(),
             updatedAt: new Date(),
           };

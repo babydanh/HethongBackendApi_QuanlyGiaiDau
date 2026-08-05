@@ -183,7 +183,8 @@ export class LivestreamService {
       throw new BadRequestException('Trận này chưa được gán camera.');
     }
 
-    return this.livestreamRepository.updateStreamStatus(matchId, 'ENDED', user.sub, null);
+    // Stopping a broadcast is reversible. Recording/replay is a separate feature.
+    return this.livestreamRepository.updateStreamStatus(matchId, 'IDLE', user.sub, null);
   }
 
   async getMatchPlayback(matchId: string) {
