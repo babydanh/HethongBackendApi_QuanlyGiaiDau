@@ -38,6 +38,18 @@ export class LivestreamService {
     return `${this.getRtmpBaseUrl().replace(/\/$/, '')}/${streamKey}`;
   }
 
+  // ENDED was used by the old stop flow. Replay is not supported yet, so it
+  // must not permanently block a match or a newly assigned camera.
+  private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T): T {
+    if (stream.streamStatus !== 'ENDED') return stream;
+    return {
+      ...stream,
+      streamStatus: 'IDLE',
+      endedAt: null,
+      playbackUrl: null,
+    };
+  }
+
   private buildSrtUrl(streamName: string) {
     const baseUrl = this.configService.get<string>('LIVESTREAM_SRT_BASE_URL') || 'srt://localhost:8890';
     return `${baseUrl.replace(/\/$/, '')}?streamid=publish:${streamName}`;
@@ -100,7 +112,8 @@ export class LivestreamService {
 
   async listMatchLivestreams(tournamentId: string, user: JwtPayload) {
     await this.assertTournamentOperator(tournamentId, user);
-    return this.livestreamRepository.listMatchLivestreams(tournamentId);
+    const streams = await this.livestreamRepository.listMatchLivestreams(tournamentId);
+    return streams.map((stream) => this.normalizeStream(stream));
   }
 
   async createCamera(tournamentId: string, user: JwtPayload, data: CreateCameraDto) {
@@ -153,7 +166,7 @@ export class LivestreamService {
 
   async startMatchStream(matchId: string, user: JwtPayload) {
     const match = await this.assertCanControlMatchStream(matchId, user);
-    const stream = await this.livestreamRepository.findMatchLivestream(matchId);
+    const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
 
     if (!stream?.cameraId || !stream.streamKey) {
       throw new BadRequestException('Trận này chưa được BTC gán camera nên chưa thể bắt đầu livestream.');
@@ -177,7 +190,7 @@ export class LivestreamService {
 
   async stopMatchStream(matchId: string, user: JwtPayload) {
     await this.assertCanControlMatchStream(matchId, user);
-    const stream = await this.livestreamRepository.findMatchLivestream(matchId);
+    const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
 
     if (!stream?.cameraId) {
       throw new BadRequestException('Trận này chưa được gán camera.');
@@ -193,7 +206,7 @@ export class LivestreamService {
       throw new NotFoundException('Match not found');
     }
 
-    const stream = await this.livestreamRepository.findMatchLivestream(matchId);
+    const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
     if (!stream?.cameraId) {
       return {
         matchId,

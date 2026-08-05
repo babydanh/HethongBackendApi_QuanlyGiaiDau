@@ -188,6 +188,7 @@ export class LivestreamRepository {
           cameraId,
           playbackUrl,
           streamStatus: 'IDLE',
+          startedAt: null,
           endedAt: null,
           updatedAt: new Date(),
         },
@@ -220,7 +221,8 @@ export class LivestreamRepository {
         : {
             streamStatus: status,
             playbackUrl: null,
-            endedAt: new Date(),
+            startedAt: null,
+            endedAt: null,
             updatedAt: new Date(),
           };
 
