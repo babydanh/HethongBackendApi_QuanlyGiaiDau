@@ -26,6 +26,7 @@ import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 @ApiTags('matches')
+@SkipThrottle()
 @Controller('matches')
 export class MatchesController {
   constructor(private readonly matchesService: MatchesService) {}

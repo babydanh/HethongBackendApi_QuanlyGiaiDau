@@ -8,7 +8,10 @@ import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { LivestreamService } from './livestream.service';
 
+import { SkipThrottle } from '@nestjs/throttler';
+
 @ApiTags('livestream')
+@SkipThrottle()
 @Controller('livestream')
 export class LivestreamController {
   constructor(private readonly livestreamService: LivestreamService) {}
