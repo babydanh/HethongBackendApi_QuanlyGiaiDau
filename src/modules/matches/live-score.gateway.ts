@@ -94,6 +94,16 @@ export class LiveScoreGateway
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
+  private getViewerCount(matchId: string): number {
+    let count = 0;
+    this.clientMatchRooms.forEach((matches) => {
+      if (matches.has(matchId)) {
+        count++;
+      }
+    });
+    return count;
+  }
+
   @SubscribeMessage('joinMatch')
   handleJoinMatch(
     @MessageBody() matchId: string,
@@ -105,10 +115,12 @@ export class LiveScoreGateway
     joinedMatchIds.add(matchId);
     this.clientMatchRooms.set(client.id, joinedMatchIds);
     
-    // Đăng ký cập nhật lượt xem vào hàng chờ gộp tin
-    this.pendingViewerUpdates.add(matchId);
+    // Đăng ký và phát cập nhật lượt xem lập tức
+    const viewerCount = this.getViewerCount(matchId);
+    const payload = JSON.stringify({ matchId, viewerCount });
+    this.server.volatile.to(room).emit('viewer:count', payload);
     
-    this.logger.log(`Client ${client.id} joined room ${room}`);
+    this.logger.log(`Client ${client.id} joined room ${room} (viewers: ${viewerCount})`);
     return { event: 'joined', data: room };
   }
 
@@ -184,17 +196,13 @@ export class LiveScoreGateway
       this.server.to(`tournament:${tournamentId}`).emit('match:update', rawPayload);
     }
   }
-
   // Định kỳ phát viewer count từ hàng chờ gộp tin
   private flushViewerCounts() {
     if (this.pendingViewerUpdates.size === 0 || !this.server) return;
 
     this.pendingViewerUpdates.forEach((matchId) => {
       const room = `match:${matchId}`;
-      const serverInstance = this.server as unknown as Record<string, { rooms: Map<string, { size: number }> }>;
-      const rooms = serverInstance.adapter?.rooms;
-      const viewerCount = rooms?.get(room)?.size ?? 0;
-      
+      const viewerCount = this.getViewerCount(matchId);
       const payload = JSON.stringify({ matchId, viewerCount });
       this.server.volatile.to(room).emit('viewer:count', payload);
     });
