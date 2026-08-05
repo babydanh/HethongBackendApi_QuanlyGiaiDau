@@ -13,15 +13,15 @@ export class UserAwareThrottlerGuard extends ThrottlerGuard {
     return super.shouldSkip(context);
   }
 
-  protected async getTracker(req: Record<string, any>): Promise<string> {
+  protected getTracker(req: Record<string, any>): Promise<string> {
     const authenticatedUserId = req.user?.sub || req.user?.id;
-    if (authenticatedUserId) return `user:${authenticatedUserId}`;
+    if (authenticatedUserId) return Promise.resolve(`user:${authenticatedUserId}`);
 
     const authorization = req.headers?.authorization;
     if (typeof authorization === 'string' && authorization.startsWith('Bearer ')) {
       const payload = jwt.decode(authorization.slice(7)) as { sub?: string; id?: string } | null;
       const tokenUserId = payload?.sub || payload?.id;
-      if (tokenUserId) return `user:${tokenUserId}`;
+      if (tokenUserId) return Promise.resolve(`user:${tokenUserId}`);
     }
 
     const forwardedFor = req.headers?.['x-forwarded-for'];
@@ -30,6 +30,6 @@ export class UserAwareThrottlerGuard extends ThrottlerGuard {
       : typeof forwardedFor === 'string'
         ? forwardedFor.split(',')[0].trim()
         : req.ip || req.socket?.remoteAddress || 'unknown';
-    return `ip:${clientIp}`;
+    return Promise.resolve(`ip:${clientIp}`);
   }
 }

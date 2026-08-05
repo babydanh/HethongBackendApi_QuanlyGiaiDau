@@ -145,7 +145,13 @@ export class LivestreamRepository {
         streamKey: schema.livestreamCameras.streamKey,
       })
       .from(schema.matchLivestreams)
-      .leftJoin(schema.livestreamCameras, eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id))
+      .leftJoin(
+        schema.livestreamCameras,
+        and(
+          eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
       .where(eq(schema.matchLivestreams.matchId, matchId))
       .limit(1);
 
@@ -168,7 +174,13 @@ export class LivestreamRepository {
       })
       .from(schema.matchLivestreams)
       .innerJoin(schema.matches, eq(schema.matchLivestreams.matchId, schema.matches.id))
-      .leftJoin(schema.livestreamCameras, eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id))
+      .leftJoin(
+        schema.livestreamCameras,
+        and(
+          eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
       .where(and(eq(schema.matches.tournamentId, tournamentId), isNull(schema.matches.deletedAt)));
   }
 
