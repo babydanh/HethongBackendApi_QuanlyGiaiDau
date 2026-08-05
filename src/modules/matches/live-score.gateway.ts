@@ -106,6 +106,11 @@ export class LiveScoreGateway
   }
 
   private getViewerCount(matchId: string): number {
+    const roomName = `match:${matchId}`;
+    const adapterRoom = this.server?.sockets?.adapter?.rooms?.get(roomName);
+    if (adapterRoom && adapterRoom.size > 0) {
+      return adapterRoom.size;
+    }
     let count = 0;
     this.clientMatchRooms.forEach((matches) => {
       if (matches.has(matchId)) {
