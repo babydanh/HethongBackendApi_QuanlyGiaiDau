@@ -23,11 +23,11 @@ export class LivestreamService {
   }
 
   private getRtmpBaseUrl() {
-    return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://localhost:1935/live';
+    return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://giaidau.vnvar.com:1935/live';
   }
 
   private getHlsBaseUrl() {
-    return this.configService.get<string>('LIVESTREAM_HLS_PUBLIC_BASE_URL') || 'http://localhost:8888/live';
+    return this.configService.get<string>('LIVESTREAM_HLS_PUBLIC_BASE_URL') || 'https://giaidau.vnvar.com/hls';
   }
 
   private buildPlaybackUrl(streamKey: string) {
