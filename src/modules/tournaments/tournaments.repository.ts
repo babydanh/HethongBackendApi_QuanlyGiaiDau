@@ -3455,8 +3455,8 @@ export class TournamentsRepository {
     };
 
     return {
-      feePublicRanked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED', '100000')),
-      feePublicUnranked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED', '50000')),
+      feePublicRanked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED', '0')),
+      feePublicUnranked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED', '0')),
       feeClub: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_CLUB', '0')),
       pctPublicRanked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5')),
       pctPublicUnranked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5')),

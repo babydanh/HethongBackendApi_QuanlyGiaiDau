@@ -8,6 +8,8 @@ import {
   timestamp,
   check,
   uniqueIndex,
+  boolean,
+  index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
@@ -111,6 +113,51 @@ export const paymentStatusLogs = pgTable('payment_status_logs', {
     .defaultNow()
     .notNull(),
 });
+
+// Immutable gateway evidence and order snapshot. These tables intentionally do
+// not store card or bank-account details returned by a payment provider.
+export const paymentWebhookEvents = pgTable(
+  'payment_webhook_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventKey: varchar('event_key', { length: 255 }).notNull().unique(),
+    paymentId: uuid('payment_id').references(() => payments.id, { onDelete: 'set null' }),
+    providerOrderCode: varchar('provider_order_code', { length: 50 }).notNull(),
+    providerTransactionId: varchar('provider_transaction_id', { length: 255 }),
+    statusCode: varchar('status_code', { length: 20 }).notNull(),
+    amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+    signatureVerified: boolean('signature_verified').default(false).notNull(),
+    payload: jsonb('payload').notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    providerOrderCodeIdx: index('payment_webhook_events_order_code_idx').on(table.providerOrderCode),
+  }),
+);
+
+export const paymentReceipts = pgTable(
+  'payment_receipts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    paymentId: uuid('payment_id')
+      .references(() => payments.id, { onDelete: 'restrict' })
+      .notNull()
+      .unique(),
+    receiptNumber: varchar('receipt_number', { length: 50 }).notNull().unique(),
+    serviceName: varchar('service_name', { length: 255 }).notNull(),
+    purpose: varchar('purpose', { length: 50 }).notNull(),
+    tournamentId: uuid('tournament_id').references(() => tournaments.id, { onDelete: 'set null' }),
+    buyerUserId: uuid('buyer_user_id').references(() => users.id, { onDelete: 'set null' }),
+    subtotal: numeric('subtotal', { precision: 12, scale: 2 }).notNull(),
+    platformFeeAmount: numeric('platform_fee_amount', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    taxAmount: numeric('tax_amount', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    totalAmount: numeric('total_amount', { precision: 12, scale: 2 }).notNull(),
+    currency: varchar('currency', { length: 3 }).default('VND').notNull(),
+    issuedAt: timestamp('issued_at', { withTimezone: true }).defaultNow().notNull(),
+    snapshot: jsonb('snapshot').notNull(),
+  },
+);
 
 export const organizerPayouts = pgTable(
   'organizer_payouts',

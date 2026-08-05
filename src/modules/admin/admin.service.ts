@@ -705,8 +705,8 @@ export class AdminService {
 
   async getFeesConfig() {
     return {
-      feePublicRanked: parseFloat(await this.getOrInitConfig('TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED', '100000')),
-      feePublicUnranked: parseFloat(await this.getOrInitConfig('TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED', '50000')),
+      feePublicRanked: parseFloat(await this.getOrInitConfig('TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED', '0')),
+      feePublicUnranked: parseFloat(await this.getOrInitConfig('TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED', '0')),
       feeClub: parseFloat(await this.getOrInitConfig('TOURNAMENT_PUBLISH_FEE_CLUB', '0')),
       pctPublicRanked: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5')),
       pctPublicUnranked: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5')),
@@ -1193,10 +1193,17 @@ export class AdminService {
       throw new BadRequestException('Tournament is not pending approval');
     }
 
+    const registrationStartsAt = tournament.registrationStartDate
+      ? new Date(tournament.registrationStartDate)
+      : null;
+    const nextStatus = registrationStartsAt && registrationStartsAt > new Date()
+      ? 'UPCOMING'
+      : 'REGISTRATION_OPEN';
+
     const [updatedTournament] = await this.db
       .update(schema.tournaments)
       .set({
-        status: 'REGISTRATION_OPEN',
+        status: nextStatus,
         updatedAt: new Date(),
       })
       .where(eq(schema.tournaments.id, tournamentId))

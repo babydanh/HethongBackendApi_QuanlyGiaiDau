@@ -147,6 +147,7 @@ export class PaymentsService {
         platformFeeAmount: calculated.platformFeeAmount,
         idempotencyKey,
         expiresAt,
+        serviceName: tournament.name,
       });
     } catch (error: unknown) {
       // Hoàn trả slot nếu tạo hóa đơn lỗi
@@ -230,6 +231,17 @@ export class PaymentsService {
     if (Number(payment.amount) !== verified.amount) {
       throw new BadRequestException('Số tiền webhook không khớp payment intent.');
     }
+    const webhookData = this.sanitizeWebhookData(verified);
+    const eventKey = `PAYOS:${verified.orderCode}:${verified.reference ?? 'no-reference'}:${verified.code}`;
+    await this.paymentsRepository.recordWebhookEvent({
+      eventKey,
+      paymentId: payment.id,
+      providerOrderCode: verified.orderCode.toString(),
+      providerTransactionId: verified.reference,
+      statusCode: verified.code,
+      amount: verified.amount,
+      payload: webhookData,
+    });
     if (verified.code !== '00') {
       return { accepted: true, completed: false };
     }
@@ -244,7 +256,7 @@ export class PaymentsService {
         'PENDING',
         'CANCELLED',
         invalidReason,
-        this.sanitizeWebhookData(verified),
+        webhookData,
         verified.reference,
       );
       if (payment.purpose === 'REGISTRATION_FEE') {
@@ -258,7 +270,7 @@ export class PaymentsService {
       'PENDING',
       'COMPLETED',
       'PAYOS_VERIFIED_WEBHOOK',
-      this.sanitizeWebhookData(verified),
+      webhookData,
       verified.reference,
     );
     if (!result.payment) throw new NotFoundException('Không tìm thấy giao dịch thanh toán.');
@@ -274,6 +286,7 @@ export class PaymentsService {
     if (payment.purpose === 'REGISTRATION_FEE') {
       await this.registrationLockService.confirmSlot(payment.tournamentId, payment.divisionId ?? undefined);
     }
+    await this.paymentsRepository.finalizeReceipt(result.payment.id, result.payment, webhookData);
     await this.afterPaymentCompleted(result.payment);
     return { accepted: true, completed: true, idempotent: false };
   }
@@ -353,6 +366,25 @@ export class PaymentsService {
       throw new ForbiddenException('Bạn không có quyền xem giao dịch này.');
     }
     return payment;
+  }
+
+  async findPaymentReceipt(userId: string, id: string) {
+    const payment = await this.findPaymentById(userId, id);
+    const receipt = await this.paymentsRepository.findPaymentReceipt(payment.id);
+    if (!receipt || payment.status !== 'COMPLETED') {
+      throw new NotFoundException('Chung tu chua duoc phat hanh.');
+    }
+    return receipt;
+  }
+
+  async findAdminPaymentReceipt(id: string) {
+    const payment = await this.paymentsRepository.findPaymentById(id);
+    if (!payment) throw new NotFoundException('Không tìm thấy giao dịch thanh toán.');
+    const receipt = await this.paymentsRepository.findPaymentReceipt(payment.id);
+    if (!receipt || payment.status !== 'COMPLETED') {
+      throw new NotFoundException('Chứng từ chưa được phát hành cho giao dịch này.');
+    }
+    return receipt;
   }
 
   async reviewPayout(
@@ -516,9 +548,7 @@ export class PaymentsService {
         ? 'TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED'
         : 'TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED'
       : 'TOURNAMENT_PUBLISH_FEE_CLUB';
-    const fallback = tournament.tournamentType === 'PUBLIC'
-      ? tournament.isRanked ? '100000' : '50000'
-      : '0';
+    const fallback = '0';
     const amount = Number(await this.paymentsRepository.getConfigValue(key, fallback));
     if (!Number.isSafeInteger(amount) || amount < 0) {
       throw new BadRequestException(`Cấu hình ${key} không hợp lệ.`);

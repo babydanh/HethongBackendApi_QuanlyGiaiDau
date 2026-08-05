@@ -16,6 +16,7 @@ export interface CreatePaymentIntentInput {
   platformFeeAmount: number;
   idempotencyKey: string;
   expiresAt: Date;
+  serviceName: string;
 }
 
 const activePayoutStatuses = [
@@ -154,7 +155,58 @@ export class PaymentsRepository {
         expiresAt: input.expiresAt,
       })
       .returning();
+    await this.db.insert(schema.paymentReceipts).values({
+      paymentId: record.id,
+      receiptNumber: `PENDING-${record.id}`,
+      serviceName: input.serviceName,
+      purpose: input.purpose,
+      tournamentId: input.tournamentId,
+      buyerUserId: userId,
+      subtotal: input.amount.toString(),
+      platformFeeAmount: input.platformFeeAmount.toString(),
+      totalAmount: input.amount.toString(),
+      snapshot: { status: 'PENDING', amount: input.amount, purpose: input.purpose },
+    });
     return record;
+  }
+
+  async recordWebhookEvent(input: {
+    eventKey: string;
+    paymentId?: string;
+    providerOrderCode: string;
+    providerTransactionId?: string;
+    statusCode: string;
+    amount: number;
+    payload: Record<string, unknown>;
+  }) {
+    const [event] = await this.db
+      .insert(schema.paymentWebhookEvents)
+      .values({
+        eventKey: input.eventKey,
+        paymentId: input.paymentId,
+        providerOrderCode: input.providerOrderCode,
+        providerTransactionId: input.providerTransactionId,
+        statusCode: input.statusCode,
+        amount: input.amount.toString(),
+        signatureVerified: true,
+        payload: input.payload,
+      })
+      .onConflictDoNothing({ target: schema.paymentWebhookEvents.eventKey })
+      .returning();
+    return event ?? null;
+  }
+
+  async finalizeReceipt(paymentId: string, payment: typeof schema.payments.$inferSelect, webhook: Record<string, unknown>) {
+    const receiptNumber = `VNS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${payment.id.slice(0, 8).toUpperCase()}`;
+    const [receipt] = await this.db
+      .update(schema.paymentReceipts)
+      .set({
+        receiptNumber,
+        snapshot: { ...webhook, paymentId: payment.id, orderCode: payment.providerOrderCode },
+      })
+      .where(eq(schema.paymentReceipts.paymentId, paymentId))
+      .returning();
+    return receipt ?? null;
   }
 
   async attachPayOSLink(paymentId: string, orderCode: string) {
@@ -266,6 +318,15 @@ export class PaymentsRepository {
       .innerJoin(schema.tournaments, eq(schema.payments.tournamentId, schema.tournaments.id))
       .where(eq(schema.payments.userId, userId))
       .orderBy(desc(schema.payments.createdAt));
+  }
+
+  async findPaymentReceipt(paymentId: string) {
+    const [receipt] = await this.db
+      .select()
+      .from(schema.paymentReceipts)
+      .where(eq(schema.paymentReceipts.paymentId, paymentId))
+      .limit(1);
+    return receipt ?? null;
   }
 
   async findPayoutById(id: string) {
