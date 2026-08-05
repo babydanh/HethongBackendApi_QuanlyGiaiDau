@@ -61,6 +61,14 @@ export class PaymentsController {
     return this.paymentsService.findAllTransactions();
   }
 
+  @Get('admin/payments/:id/receipt')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xem chứng từ thanh toán đã phát hành (Chỉ ADMIN)' })
+  async findAdminPaymentReceipt(@Param('id', ParseUUIDPipe) id: string) {
+    return this.paymentsService.findAdminPaymentReceipt(id);
+  }
+
   @Post('admin/payments/:id/confirm-refund')
   @ApiBearerAuth()
   @Roles(UserRole.ADMIN)
@@ -135,5 +143,16 @@ export class PaymentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.paymentsService.findPaymentById(user.sub, id);
+  }
+
+  @Get(':id/receipt')
+  @ApiBearerAuth()
+  @Roles(UserRole.PLAYER, UserRole.ORGANIZER)
+  @ApiOperation({ summary: 'Xem chứng từ giao dịch đã hoàn tất' })
+  async findPaymentReceipt(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.paymentsService.findPaymentReceipt(user.sub, id);
   }
 }
