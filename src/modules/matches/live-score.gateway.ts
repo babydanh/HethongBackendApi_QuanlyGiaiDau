@@ -115,10 +115,11 @@ export class LiveScoreGateway
     joinedMatchIds.add(matchId);
     this.clientMatchRooms.set(client.id, joinedMatchIds);
     
-    // Đăng ký và phát cập nhật lượt xem lập tức
+    // Đăng ký và phát cập nhật lượt xem lập tức cho client vừa join và cả phòng
     const viewerCount = this.getViewerCount(matchId);
     const payload = JSON.stringify({ matchId, viewerCount });
-    this.server.volatile.to(room).emit('viewer:count', payload);
+    client.emit('viewer:count', payload);
+    this.server.to(room).emit('viewer:count', payload);
     
     this.logger.log(`Client ${client.id} joined room ${room} (viewers: ${viewerCount})`);
     return { event: 'joined', data: room };
