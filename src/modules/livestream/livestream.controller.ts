@@ -23,6 +23,16 @@ export class LivestreamController {
     return this.livestreamService.listCameras(tournamentId, user);
   }
 
+  @Get('tournaments/:tournamentId/matches')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Danh sách trạng thái livestream theo trận của giải' })
+  listMatchLivestreams(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.listMatchLivestreams(tournamentId, user);
+  }
+
   @Post('tournaments/:tournamentId/cameras')
   @Verified()
   @ApiBearerAuth()
