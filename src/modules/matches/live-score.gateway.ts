@@ -33,6 +33,7 @@ export class LiveScoreGateway
   // Bộ đệm gộp tin (Batching) cho viewer counts
   private readonly pendingViewerUpdates = new Set<string>();
   private batchInterval: NodeJS.Timeout | null = null;
+  private viewerSyncInterval: NodeJS.Timeout | null = null;
   private metricsInterval: NodeJS.Timeout | null = null;
 
   // Khởi tạo monitor đo độ trễ Event Loop của Node.js
@@ -46,6 +47,13 @@ export class LiveScoreGateway
       this.flushViewerCounts();
     }, 1000);
 
+    // Broadcast định kỳ lượt xem cho MỌI trận đang có người xem (5 giây/lần).
+    // Tin viewer:count khi join dùng volatile — dễ bị rớt khi client nghẽn
+    // => số "đang xem" bị kẹt không tăng. Vòng này tự hội tụ lại đúng.
+    this.viewerSyncInterval = setInterval(() => {
+      this.broadcastAllViewerCounts();
+    }, 5000);
+
     // Phát thông số hệ thống (Event Loop Delay, Active Connections, Buffer) mỗi 2 giây
     this.metricsInterval = setInterval(() => {
       this.broadcastSystemMetrics();
@@ -56,6 +64,9 @@ export class LiveScoreGateway
   onApplicationShutdown() {
     if (this.batchInterval) {
       clearInterval(this.batchInterval);
+    }
+    if (this.viewerSyncInterval) {
+      clearInterval(this.viewerSyncInterval);
     }
     if (this.metricsInterval) {
       clearInterval(this.metricsInterval);
@@ -209,6 +220,23 @@ export class LiveScoreGateway
     });
 
     this.pendingViewerUpdates.clear();
+  }
+
+  // Broadcast lượt xem cho MỌI trận đang có ít nhất 1 người xem (định kỳ).
+  // Dùng emit thường (không volatile) để đảm bảo client luôn nhận được số
+  // chính xác — tự phục hồi nếu tin join/leave bị rớt.
+  private broadcastAllViewerCounts() {
+    if (!this.server) return;
+    const counts = new Map<string, number>();
+    this.clientMatchRooms.forEach((matches) => {
+      matches.forEach((matchId) => {
+        counts.set(matchId, (counts.get(matchId) ?? 0) + 1);
+      });
+    });
+    counts.forEach((viewerCount, matchId) => {
+      const payload = JSON.stringify({ matchId, viewerCount });
+      this.server.to(`match:${matchId}`).emit('viewer:count', payload);
+    });
   }
 
   broadcastComment(matchId: string, comment: unknown) {
