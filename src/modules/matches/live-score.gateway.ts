@@ -14,10 +14,7 @@ import { corsOptions } from '../../config/cors.config';
 import { monitorEventLoopDelay } from 'perf_hooks';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-    credentials: true,
-  },
+  cors: corsOptions,
   namespace: '/live',
   pingInterval: 25000,
   pingTimeout: 10000,
