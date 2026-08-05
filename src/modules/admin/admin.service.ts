@@ -238,15 +238,15 @@ export class AdminService {
       },
       totalUsers: {
         value: usersTotal.count,
-        change: calcGrowth(usersCurrent.count, usersPrev.count),
+        change: usersCurrent.count,
       },
       totalCommunities: {
         value: communitiesTotal.count,
-        change: calcGrowth(communitiesCurrent.count, communitiesPrev.count),
+        change: communitiesCurrent.count,
       },
       totalTournaments: {
         value: tournamentsTotal.count,
-        change: calcGrowth(tournamentsCurrent.count, tournamentsPrev.count),
+        change: tournamentsCurrent.count,
       },
     };
   }
