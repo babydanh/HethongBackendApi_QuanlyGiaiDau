@@ -113,7 +113,14 @@ export class LivestreamService {
   async listMatchLivestreams(tournamentId: string, user: JwtPayload) {
     await this.assertTournamentOperator(tournamentId, user);
     const streams = await this.livestreamRepository.listMatchLivestreams(tournamentId);
-    return streams.map((stream) => this.normalizeStream(stream));
+    return streams.map((stream) => {
+      const normalized = this.normalizeStream(stream);
+      // A soft-deleted camera is intentionally treated as unassigned, even
+      // when an old match row still contains its cameraId.
+      return normalized.cameraName
+        ? normalized
+        : { ...normalized, cameraId: null, streamStatus: 'IDLE', playbackUrl: null, endedAt: null };
+    });
   }
 
   async createCamera(tournamentId: string, user: JwtPayload, data: CreateCameraDto) {
@@ -207,7 +214,7 @@ export class LivestreamService {
     }
 
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
-    if (!stream?.cameraId) {
+    if (!stream?.cameraId || !stream.cameraName) {
       return {
         matchId,
         streamStatus: 'OFFLINE',
