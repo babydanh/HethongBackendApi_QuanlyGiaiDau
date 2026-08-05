@@ -98,6 +98,11 @@ export class LivestreamService {
     return this.livestreamRepository.listCameras(tournamentId);
   }
 
+  async listMatchLivestreams(tournamentId: string, user: JwtPayload) {
+    await this.assertTournamentOperator(tournamentId, user);
+    return this.livestreamRepository.listMatchLivestreams(tournamentId);
+  }
+
   async createCamera(tournamentId: string, user: JwtPayload, data: CreateCameraDto) {
     await this.assertTournamentOperator(tournamentId, user);
     const streamName = `camera_${randomUUID().replace(/-/g, '')}`;
