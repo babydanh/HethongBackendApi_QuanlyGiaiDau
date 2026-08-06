@@ -1308,13 +1308,19 @@ export class TournamentsRepository {
       }
 
       const teamInviteToken = isDoubles ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase() : null;
+      const partnerInviteExpiresAt = (isDoubles && partnerId)
+        ? new Date(Date.now() + 15 * 60 * 1000)
+        : null;
+
       const teamStatus = isWaitlisted
         ? 'WAITLISTED'
-        : isDoubles && !partnerId
+        : isDoubles && partnerId
           ? 'PENDING_PARTNER'
-          : regMode === 'APPROVAL'
-            ? 'PENDING_APPROVAL'
-            : 'COMPLETE';
+          : isDoubles && !partnerId
+            ? 'PENDING_PARTNER'
+            : regMode === 'APPROVAL'
+              ? 'PENDING_APPROVAL'
+              : 'COMPLETE';
       const isPaid = payableEntryFeeAmount === 0;
 
       let finalTeamName = (data.teamName || '').trim();
@@ -1337,6 +1343,7 @@ export class TournamentsRepository {
           isPaid,
           teamInviteToken: partnerId ? null : teamInviteToken,
           teamStatus,
+          partnerInviteExpiresAt,
         })
         .returning();
 
@@ -1346,15 +1353,6 @@ export class TournamentsRepository {
         userId: userId,
         role: 'MAIN',
       });
-
-      // 10.5 Thêm rosters cho Partner nếu có
-      if (partnerId) {
-        await tx.insert(schema.tournamentRosters).values({
-          participantId: participant.id,
-          userId: partnerId,
-          role: 'MAIN',
-        });
-      }
 
       // Payment intent is created later by the checkout flow.
       const paymentUrl: string | null = null;
@@ -1371,6 +1369,77 @@ export class TournamentsRepository {
           : null,
         isWaitlisted,
       };
+    });
+  }
+
+  async acceptPartnerInvite(participantId: string, partnerUserId: string) {
+    return await this.db.transaction(async (tx) => {
+      const [participant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .limit(1);
+
+      if (!participant) {
+        throw new NotFoundException('Lời mời ghép đôi không tồn tại hoặc đã bị hủy.');
+      }
+
+      if (participant.teamStatus !== 'PENDING_PARTNER') {
+        throw new BadRequestException('Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.');
+      }
+
+      if (participant.partnerInviteExpiresAt && new Date() > participant.partnerInviteExpiresAt) {
+        await tx
+          .update(schema.tournamentParticipants)
+          .set({ teamStatus: 'EXPIRED' })
+          .where(eq(schema.tournamentParticipants.id, participantId));
+        throw new BadRequestException('Lời mời ghép đôi này đã hết hạn 15 phút. Suất giữ chỗ đã bị giải phóng.');
+      }
+
+      // Check duplicate roster
+      const existingRosters = await tx
+        .select()
+        .from(schema.tournamentRosters)
+        .where(
+          and(
+            eq(schema.tournamentRosters.participantId, participantId),
+            eq(schema.tournamentRosters.userId, partnerUserId),
+          ),
+        );
+
+      if (existingRosters.length === 0) {
+        await tx.insert(schema.tournamentRosters).values({
+          participantId,
+          userId: partnerUserId,
+          role: 'MAIN',
+        });
+      }
+
+      const [updated] = await tx
+        .update(schema.tournamentParticipants)
+        .set({
+          teamStatus: 'COMPLETE',
+          partnerInviteExpiresAt: null,
+        })
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+
+      return updated;
+    });
+  }
+
+  async rejectPartnerInvite(participantId: string) {
+    return await this.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(schema.tournamentParticipants)
+        .set({
+          teamStatus: 'EXPIRED',
+          partnerInviteExpiresAt: null,
+        })
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+
+      return updated;
     });
   }
 

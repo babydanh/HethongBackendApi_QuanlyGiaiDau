@@ -181,6 +181,7 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   isPaid: boolean('is_paid').default(false).notNull(),
   teamInviteToken: varchar('team_invite_token', { length: 50 }).unique(),
   teamStatus: varchar('team_status', { length: 50 }).default('PENDING').notNull(),
+  partnerInviteExpiresAt: timestamp('partner_invite_expires_at', { withTimezone: true }),
   isMock: boolean('is_mock').default(false).notNull(),
   isWildcard: boolean('is_wildcard').default(false).notNull(),
   registeredAt: timestamp('registered_at', { withTimezone: true })
