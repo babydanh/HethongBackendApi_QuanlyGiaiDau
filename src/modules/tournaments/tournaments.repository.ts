@@ -929,6 +929,12 @@ export class TournamentsRepository {
         throw new BadRequestException('Tournament not found');
       }
 
+      if (tournament.isRanked && data.rankingConsent !== true) {
+        throw new BadRequestException(
+          'Giai dau co xep hang yeu cau ban dong y gui ket qua va diem ELO len bang xep hang.',
+        );
+      }
+
       // 1.5 Kiểm tra Exclusion Rule (khóa đăng ký đối với chặng đấu thuộc chuỗi giải đấu)
       const [seriesEvent] = await tx
         .select({
@@ -1336,6 +1342,7 @@ export class TournamentsRepository {
           tournamentDivisionId: selectedDivision?.id ?? null,
           registeredBy: userId,
           teamName: finalTeamName,
+          rankingConsent: data.rankingConsent === true,
           isPaid,
           teamInviteToken: partnerId ? null : teamInviteToken,
           teamStatus,
