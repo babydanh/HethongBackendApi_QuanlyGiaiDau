@@ -4950,7 +4950,16 @@ export class TournamentsRepository {
       .select()
       .from(schema.groupStandings)
       .where(inArray(schema.groupStandings.groupId, groupIds))
-      .orderBy(schema.groupStandings.groupId, sql`total_points DESC, (points_for - points_against) DESC`);
+      // Competition standings are independent from ELO. Keep the same
+      // deterministic order used by bracket advancement and the clients.
+      .orderBy(
+        schema.groupStandings.groupId,
+        sql`total_points DESC,
+          (points_for - points_against) DESC,
+          points_for DESC,
+          won DESC,
+          participant_id ASC`,
+      );
 
     // Lấy participant info kèm seed
     const participantIds = [...new Set(standings.map(s => s.participantId))];

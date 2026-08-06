@@ -20,10 +20,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { Cron } from '@nestjs/schedule';
 import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
 import { CreateDivisionDto } from './dto/create-division.dto';
-import { DivisionBracketType } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { resolveEffectiveSportRules } from './utils/sport-rules/resolve-effective-sport-rules';
-import { deriveGroupStageConfig } from './utils/group-stage-config';
 import {
   inferAllowedSportRuleKinds,
   inferExpectedSportRuleKind,
@@ -1234,44 +1232,13 @@ export class TournamentsService {
     } else if (bracketType === 'ROUND_ROBIN') {
       return this.bracketGeneratorService.generateRoundRobin(id, userId, divisionId, seedingType);
     } else if (bracketType === 'GROUP_STAGE_KNOCKOUT') {
-      // Derive group stage config from actual eligible COMPLETE+paid participant count
+      // Keep the organizer's saved group configuration. The generator validates
+      // the capacity and advancement rules against the eligible participants.
       const participants = await this.tournamentsRepository.findParticipantsForSeeding(id, divisionId);
       const actualTeams = participants.length;
 
       if (actualTeams < 4) {
         throw new BadRequestException('Cần ít nhất 4 đội để tạo vòng bảng + loại trực tiếp.');
-      }
-
-      const { numGroups, teamsAdvancing, teamsPerGroup } = deriveGroupStageConfig(actualTeams);
-
-      // Inject derived config for the generator
-      const derivedConfig = {
-        ...config,
-        groupsConfig: { numGroups, teamsPerGroup },
-        advancementConfig: { teamsAdvancing, allowWildcardThird: false, wildcardTeamsAdvancing: 0 },
-        playoffConfig: { type: 'SINGLE_ELIMINATION' },
-      };
-
-      // Store on tournamentConfig in DB so generator can read it
-      if (division) {
-        await this.tournamentsRepository.updateDivisionConfig(
-          division.id,
-          {
-            roundConfig: {
-              groupsConfig: derivedConfig.groupsConfig,
-              advancementConfig: derivedConfig.advancementConfig,
-              playoffConfig: derivedConfig.playoffConfig,
-              scoring: { winPoints: 3, drawPoints: 1, lossPoints: 0 },
-            },
-            isConfigOverride: true,
-            bracketType: DivisionBracketType.GROUP_STAGE_KNOCKOUT,
-          },
-          userId,
-        );
-      } else {
-        await this.tournamentsRepository.update(id, userId, {
-          tournamentConfig: derivedConfig,
-        } as any);
       }
 
       return this.bracketGeneratorService.generateGroupStageKnockout(id, userId, divisionId, seedingType);
