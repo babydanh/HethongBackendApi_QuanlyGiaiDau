@@ -1220,6 +1220,7 @@ export class TournamentsService {
       }
     }
 
+    if (!isAuthorized) throw new ForbiddenException();
     let division: typeof schema.tournamentDivisions.$inferSelect | undefined;
     if (divisionId) {
       const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
@@ -1262,7 +1263,8 @@ export class TournamentsService {
     if (!tournament) throw new NotFoundException('Tournament not found');
 
     const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (String(config.mode || '').toUpperCase() !== 'LITE') {
+    const mode = typeof config.mode === 'string' ? config.mode : '';
+    if (mode.toUpperCase() !== 'LITE') {
       throw new BadRequestException('Chỉ giải Lite mới dùng được luồng quản lý này.');
     }
 
@@ -1479,8 +1481,9 @@ export class TournamentsService {
     }
 
     const userIds = [userId];
+    let partnerUser: { id: string } | null = null;
     if (registerTournamentDto.partnerEmailOrPhone) {
-      const partnerUser = await this.tournamentsRepository.findUserByEmailOrPhone(registerTournamentDto.partnerEmailOrPhone);
+      partnerUser = await this.tournamentsRepository.findUserByEmailOrPhone(registerTournamentDto.partnerEmailOrPhone);
       if (!partnerUser) {
         throw new BadRequestException(
           `Không tìm thấy tài khoản VNSport với email/SĐT "${registerTournamentDto.partnerEmailOrPhone}". Đồng đội cần đăng ký tài khoản trước khi tham gia.`
@@ -1531,6 +1534,7 @@ export class TournamentsService {
       }
 
       if (result.teamInviteLink) {
+        // VĐV 1 chưa có partner — thông báo cho VĐV 1 chờ đồng đội join
         notifications.push(
           this.notificationsService.sendNotification(
             buildParticipantPendingTeammateNotification({
@@ -1540,6 +1544,17 @@ export class TournamentsService {
               divisionId: result.participant.tournamentDivisionId,
             }),
           ),
+        );
+      } else if (result.participant.teamStatus === 'PENDING_PARTNER' && partnerUser) {
+        // VĐV 1 đã nhập email/SĐT VĐV 2 — gửi thông báo mời cho VĐV 2
+        notifications.push(
+          this.notificationsService.sendNotification({
+            receiverId: partnerUser.id,
+            type: 'PARTNER_INVITE_RECEIVED',
+            title: 'Bạn có lời mời ghép đôi!',
+            content: `${tournament.name}: ${result.participant.teamName} mời bạn làm đồng đội. Xác nhận trong vòng 15 phút.`,
+            redirectUrl: `/tournaments/${id}/participants/${result.participant.id}/accept-partner`,
+          }),
         );
       } else if (result.participant.teamStatus === 'PENDING_APPROVAL') {
         notifications.push(
@@ -3439,7 +3454,7 @@ export class TournamentsService {
     return updated;
   }
 
-  async rejectPartnerInvite(participantId: string, partnerUserId: string) {
+  async rejectPartnerInvite(participantId: string) {
     const updated = await this.tournamentsRepository.rejectPartnerInvite(participantId);
     if (updated && updated.registeredBy) {
       await this.notificationsService.sendNotification({
