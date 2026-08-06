@@ -929,7 +929,20 @@ export class MatchesRepository {
       .where(eq(schema.tournaments.id, existing.tournamentId))
       .limit(1);
 
-    if (eloTournament?.isRanked && winnerId) {
+    const participantIds = [existing.participant1Id, existing.participant2Id].filter(
+      (participantId): participantId is string => Boolean(participantId),
+    );
+    const consentRows = participantIds.length
+      ? await tx
+          .select({ rankingConsent: schema.tournamentParticipants.rankingConsent })
+          .from(schema.tournamentParticipants)
+          .where(inArray(schema.tournamentParticipants.id, participantIds))
+      : [];
+    const allParticipantsConsented =
+      participantIds.length === consentRows.length &&
+      consentRows.every((row) => row.rankingConsent);
+
+    if (eloTournament?.isRanked && winnerId && allParticipantsConsented) {
       await tx
         .insert(schema.matchEloOutbox)
         .values({

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional, IsIn, Matches } from 'class-validator';
+import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional, IsIn, Matches, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterTournamentDto {
@@ -36,4 +36,12 @@ export class RegisterTournamentDto {
   @IsString()
   @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
   matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+
+  @ApiPropertyOptional({
+    description: 'Nguoi dang ky dong y gui ket qua va diem ELO len bang xep hang',
+    default: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  rankingConsent?: boolean;
 }

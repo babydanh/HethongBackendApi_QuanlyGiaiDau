@@ -246,6 +246,13 @@
       "when": 1785750000000,
       "tag": "0034_archive_completed_tournaments",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785753600000,
+      "tag": "0036_ranking_consent",
+      "breakpoints": true
     }
   ]
 }

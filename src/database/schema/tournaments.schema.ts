@@ -178,6 +178,7 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   teamName: varchar('team_name', { length: 255 }).notNull(),
   seed: integer('seed'),
   points: integer('points').default(0).notNull(),
+  rankingConsent: boolean('ranking_consent').default(false).notNull(),
   isPaid: boolean('is_paid').default(false).notNull(),
   teamInviteToken: varchar('team_invite_token', { length: 50 }).unique(),
   teamStatus: varchar('team_status', { length: 50 }).default('PENDING').notNull(),

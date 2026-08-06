@@ -23,6 +23,7 @@ import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
 import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
+import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
@@ -785,11 +786,16 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Sinh danh sÃ¡ch VÄV giáº£ láº­p Ä‘á»ƒ test' })
   async seedMockParticipants(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body('names') names: string[],
+    @Body() dto: SeedMockParticipantsDto,
     @CurrentUser() user: JwtPayload,
-    @Body('divisionId') divisionId?: string
   ) {
-    return this.tournamentsService.seedMockParticipants(id, user.sub, names, this.getSystemRoles(user), divisionId);
+    return this.tournamentsService.seedMockParticipants(
+      id,
+      user.sub,
+      dto.names,
+      this.getSystemRoles(user),
+      dto.divisionId,
+    );
   }
 
   @Delete(':id/mock-participants')
