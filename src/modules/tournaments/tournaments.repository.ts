@@ -1308,19 +1308,15 @@ export class TournamentsRepository {
       }
 
       const teamInviteToken = isDoubles ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase() : null;
-      const partnerInviteExpiresAt = (isDoubles && partnerId)
-        ? new Date(Date.now() + 15 * 60 * 1000)
-        : null;
+      const partnerInviteExpiresAt = isDoubles ? new Date(Date.now() + 15 * 60 * 1000) : null;
 
       const teamStatus = isWaitlisted
         ? 'WAITLISTED'
-        : isDoubles && partnerId
+        : isDoubles
           ? 'PENDING_PARTNER'
-          : isDoubles && !partnerId
-            ? 'PENDING_PARTNER'
-            : regMode === 'APPROVAL'
-              ? 'PENDING_APPROVAL'
-              : 'COMPLETE';
+          : regMode === 'APPROVAL'
+            ? 'PENDING_APPROVAL'
+            : 'COMPLETE';
       const isPaid = payableEntryFeeAmount === 0;
 
       let finalTeamName = (data.teamName || '').trim();
@@ -1429,18 +1425,12 @@ export class TournamentsRepository {
   }
 
   async rejectPartnerInvite(participantId: string) {
-    return await this.db.transaction(async (tx) => {
-      const [updated] = await tx
-        .update(schema.tournamentParticipants)
-        .set({
-          teamStatus: 'EXPIRED',
-          partnerInviteExpiresAt: null,
-        })
-        .where(eq(schema.tournamentParticipants.id, participantId))
-        .returning();
-
-      return updated;
-    });
+    const [updated] = await this.db
+      .update(schema.tournamentParticipants)
+      .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .returning();
+    return updated;
   }
 
   async joinTeam(tournamentId: string, userId: string, participantId: string, teamInviteToken: string) {
@@ -3020,6 +3010,7 @@ export class TournamentsRepository {
             registeredBy: user1.id,
             teamName,
             isPaid: true,
+            teamInviteToken: null,
             teamStatus: 'COMPLETE',
             isMock: true,
           }).returning();
@@ -3042,6 +3033,7 @@ export class TournamentsRepository {
             registeredBy: user.id,
             teamName: name,
             isPaid: true,
+            teamInviteToken: null,
             teamStatus: 'COMPLETE',
             isMock: true,
           }).returning();

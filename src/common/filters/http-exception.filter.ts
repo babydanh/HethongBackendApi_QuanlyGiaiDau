@@ -78,6 +78,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else {
       console.error('[Unhandled Exception]:', exception);
+      // Che giấu chi tiết câu lệnh SQL/Internal error khỏi phía client để thân thiện và an toàn hơn
+      message = 'Đã có lỗi hệ thống xảy ra. Vui lòng thử lại sau hoặc liên hệ ban quản trị.';
+      code = 'INTERNAL_SERVER_ERROR';
     }
 
     response.status(status).json({

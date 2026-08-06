@@ -359,7 +359,7 @@ export class TournamentsController {
         try {
           const payload = await this.jwtService.verifyAsync(req.cookies.accessToken);
           userId = payload.sub;
-        } catch {}
+        } catch (_e) {}
       }
       // App: Bearer token in Authorization header
       if (!userId && req?.headers?.authorization) {
@@ -368,7 +368,7 @@ export class TournamentsController {
           try {
             const payload = await this.jwtService.verifyAsync(parts[1]);
             userId = payload.sub;
-          } catch {}
+          } catch (_e) {}
         }
       }
     }
@@ -609,9 +609,8 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Từ chối lời mời ghép đôi (Giữ chỗ 15 phút)' })
   async rejectPartnerInvite(
     @Param('participantId', ParseUUIDPipe) participantId: string,
-    @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.rejectPartnerInvite(participantId, user.sub);
+    return this.tournamentsService.rejectPartnerInvite(participantId);
   }
 
   @Post(':id/withdraw')
