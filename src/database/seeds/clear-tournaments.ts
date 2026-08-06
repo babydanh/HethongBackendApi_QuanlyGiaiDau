@@ -10,6 +10,7 @@ import {
   tournamentGroups, 
   tournamentDivisions,
   livestreamCameras,
+  payments,
 } from '../schema';
 
 dotenv.config();
@@ -20,7 +21,8 @@ async function clearTournaments() {
   const db = drizzle(sql);
 
   try {
-    // Xoá các bảng con trước
+    // Xoá các bảng con dính khóa ngoại (Foreign key) trước
+    await db.delete(payments);
     await db.delete(matches);
     await db.delete(tournamentParticipants);
     await db.delete(tournamentGroups);
