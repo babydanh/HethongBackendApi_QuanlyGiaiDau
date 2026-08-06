@@ -38,6 +38,7 @@ import { RedisModule } from './providers/redis/redis.module';
 import { MailModule } from './providers/mail/mail.module';
 import { AiModule } from './modules/ai/ai.module';
 import { LivestreamModule } from './modules/livestream/livestream.module';
+import { AppVersionModule } from './modules/app-version/app-version.module';
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { LivestreamModule } from './modules/livestream/livestream.module';
     SeriesModule,
     AiModule,
     LivestreamModule,
+    AppVersionModule,
   ],
   controllers: [AppController],
   providers: [
