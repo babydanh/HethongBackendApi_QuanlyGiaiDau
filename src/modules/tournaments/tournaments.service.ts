@@ -449,7 +449,7 @@ export class TournamentsService {
       case 'tennis':
         return { sportPreset: 'TENNIS_SUPER_TIEBREAK', sportRules: { kind: 'TENNIS', setsToWin: 1, pointsPerSet: 10, winByTwo: true } };
       default:
-        return { sportPreset: 'BADMINTON_STANDARD', sportRules: { kind: 'BADMINTON', setsToWin: 2, pointsPerSet: 21, winByTwo: true } };
+        throw new BadRequestException('Môn thể thao không hợp lệ. Vui lòng chọn một môn được hỗ trợ.');
     }
   }
 
@@ -463,10 +463,15 @@ export class TournamentsService {
       }
     }
 
+    const sport = dto.sport?.trim().toLowerCase();
+    if (!sport) {
+      throw new BadRequestException('Vui lòng chọn môn thể thao trước khi tạo giải.');
+    }
+
     // 1. Map sport slug → category
-    const category = await this.tournamentsRepository.findCategoryBySlug(dto.sport);
+    const category = await this.tournamentsRepository.findCategoryBySlug(sport);
     if (!category) {
-      throw new BadRequestException(`Môn thể thao "${dto.sport}" không được hỗ trợ`);
+      throw new BadRequestException(`Môn thể thao "${sport}" không được hỗ trợ`);
     }
 
     // 2. Resolve matchType
@@ -496,7 +501,7 @@ export class TournamentsService {
     }
 
     // 5. Build Lite sport preset + rules
-    const litePreset = this.buildLiteSportPreset(dto.sport);
+    const litePreset = this.buildLiteSportPreset(sport);
     const sportRules = { ...litePreset.sportRules };
 
     // 6. Build Lite tournamentConfig shared by App/Web

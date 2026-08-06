@@ -10,6 +10,9 @@ export function calcPlatformFee(
   entryFee: number,
   platformFeePercentage: number,
 ): number {
+  if (platformFeePercentage === 0) {
+    return 0;
+  }
   if (entryFee >= 100000) {
     return Math.round(entryFee * (platformFeePercentage / 100));
   }
