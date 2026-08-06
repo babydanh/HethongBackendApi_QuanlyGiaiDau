@@ -3440,6 +3440,58 @@ export class TournamentsService {
     return await this.tournamentsRepository.lockTournamentAndUnpair(id, participantId, userId);
   }
 
+  async seedMockParticipants(
+    id: string,
+    userId: string,
+    names: string[],
+    systemRoles: string[] = [],
+    divisionId?: string,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền sinh VĐV giả lập cho giải đấu này');
+    }
+
+    return this.tournamentsRepository.seedMockParticipants(id, names, divisionId);
+  }
+
+  async clearMockParticipants(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+    divisionId?: string,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền xóa VĐV giả lập cho giải đấu này');
+    }
+
+    return this.tournamentsRepository.clearMockParticipants(id, divisionId);
+  }
+
+  async deleteMockParticipant(
+    id: string,
+    participantId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isAuthorized = systemRoles.includes('ADMIN') || tournament.createdBy === userId;
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền xóa VĐV giả lập cho giải đấu này');
+    }
+
+    return this.tournamentsRepository.deleteMockParticipant(participantId);
+  }
+
   async acceptPartnerInvite(participantId: string, partnerUserId: string) {
     const updated = await this.tournamentsRepository.acceptPartnerInvite(participantId, partnerUserId);
     if (updated && updated.registeredBy) {
