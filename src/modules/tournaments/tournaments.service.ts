@@ -3424,4 +3424,32 @@ export class TournamentsService {
 
     return await this.tournamentsRepository.lockTournamentAndUnpair(id, participantId, userId);
   }
+
+  async acceptPartnerInvite(participantId: string, partnerUserId: string) {
+    const updated = await this.tournamentsRepository.acceptPartnerInvite(participantId, partnerUserId);
+    if (updated && updated.registeredBy) {
+      await this.notificationsService.sendNotification({
+        receiverId: updated.registeredBy,
+        type: 'PARTNER_INVITE_ACCEPTED',
+        title: 'Đồng đội đã chấp nhận lời mời ghép đôi!',
+        content: `Đồng đội của bạn đã đồng ý tham gia giải đấu. Đội của bạn hiện đã hợp lệ!`,
+        redirectUrl: `/tournaments/${updated.tournamentId}`,
+      });
+    }
+    return updated;
+  }
+
+  async rejectPartnerInvite(participantId: string, partnerUserId: string) {
+    const updated = await this.tournamentsRepository.rejectPartnerInvite(participantId);
+    if (updated && updated.registeredBy) {
+      await this.notificationsService.sendNotification({
+        receiverId: updated.registeredBy,
+        type: 'PARTNER_INVITE_REJECTED',
+        title: 'Lời mời ghép đôi đã bị từ chối/hết hạn',
+        content: `Đồng đội đã từ chối lời mời hoặc thời gian giữ chỗ 15 phút đã kết thúc. Suất giữ chỗ đã được giải phóng.`,
+        redirectUrl: `/tournaments/${updated.tournamentId}`,
+      });
+    }
+    return updated;
+  }
 }

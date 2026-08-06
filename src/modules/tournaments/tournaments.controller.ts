@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -582,7 +582,7 @@ export class TournamentsController {
   @Verified()
   @ApiBearerAuth()
   @Throttle({ sensitive: { limit: 5, ttl: 60000 } })
-  @ApiOperation({ summary: 'Äá»“ng Ä‘á»™i tham gia nhÃ³m thi Ä‘áº¥u Ä‘Ã¡nh Ä‘Ã´i' })
+  @ApiOperation({ summary: 'Đồng đội tham gia nhóm thi đấu đánh đôi' })
   async joinTeam(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('participantId') participantId: string,
@@ -592,10 +592,32 @@ export class TournamentsController {
     return this.tournamentsService.joinTeam(id, user.sub, participantId, teamInviteToken);
   }
 
+  @Post('participants/:participantId/accept-partner')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Chấp nhận lời mời ghép đôi (Giữ chỗ 15 phút)' })
+  async acceptPartnerInvite(
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.acceptPartnerInvite(participantId, user.sub);
+  }
+
+  @Post('participants/:participantId/reject-partner')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Từ chối lời mời ghép đôi (Giữ chỗ 15 phút)' })
+  async rejectPartnerInvite(
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.rejectPartnerInvite(participantId, user.sub);
+  }
+
   @Post(':id/withdraw')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'RÃºt lui khá»i giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'RÃºt lui khá» i giáº£i Ä‘áº¥u' })
   async withdraw(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
