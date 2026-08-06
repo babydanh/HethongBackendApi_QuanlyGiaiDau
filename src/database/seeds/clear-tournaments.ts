@@ -12,7 +12,7 @@ async function clearTournaments() {
 
   try {
     await db.execute(
-      sql`TRUNCATE TABLE tournaments, parent_tournaments, matches, tournament_participants, tournament_stages, tournament_groups, tournament_divisions, livestream_cameras, payments, payment_status_logs CASCADE;`
+      sql`TRUNCATE TABLE tournaments, parent_tournaments, matches, tournament_participants, tournament_stages, tournament_groups, tournament_divisions, livestream_cameras, payments, payment_status_logs, tournament_series, series_legs, series_events, series_standings, psr_point_logs, series_invitations, series_managers, advertisements CASCADE;`
     );
     console.log('✅ Đã xoá thành công toàn bộ giải đấu và dữ liệu liên quan trên Database!');
   } catch (error) {
