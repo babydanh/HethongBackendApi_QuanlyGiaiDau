@@ -45,6 +45,14 @@ export class LivestreamService {
     try {
       const parsed = new URL(url);
       if (parsed.hostname === 'giaidau.vnvar.com' && parsed.port === '8888') {
+        // Old rows stored MediaMTX's plain HTTP port. Rebuild from the key so
+        // playback goes through the public HTTPS reverse proxy, regardless of
+        // whether the old path was /live or /hls.
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        const indexPosition = parts.lastIndexOf('index.m3u8');
+        const streamKey = indexPosition > 0 ? parts[indexPosition - 1] : null;
+        if (streamKey) return this.buildPlaybackUrl(streamKey);
+
         parsed.protocol = 'https:';
         parsed.port = '';
       }

@@ -130,7 +130,9 @@ export class LivestreamRepository {
       .select({
         id: schema.matchLivestreams.id,
         matchId: schema.matchLivestreams.matchId,
-        cameraId: schema.matchLivestreams.cameraId,
+        // Read the id from the active joined camera. A soft-deleted camera
+        // must behave as an unassigned stream, not as a stale assignment.
+        cameraId: schema.livestreamCameras.id,
         streamStatus: schema.matchLivestreams.streamStatus,
         playbackUrl: schema.matchLivestreams.playbackUrl,
         recordingUrl: schema.matchLivestreams.recordingUrl,
@@ -163,7 +165,8 @@ export class LivestreamRepository {
       .select({
         id: schema.matchLivestreams.id,
         matchId: schema.matchLivestreams.matchId,
-        cameraId: schema.matchLivestreams.cameraId,
+        // Do not expose a deleted camera id from the match row.
+        cameraId: schema.livestreamCameras.id,
         streamStatus: schema.matchLivestreams.streamStatus,
         playbackUrl: schema.matchLivestreams.playbackUrl,
         recordingUrl: schema.matchLivestreams.recordingUrl,
@@ -185,6 +188,12 @@ export class LivestreamRepository {
   }
 
   async assignCameraToMatch(matchId: string, cameraId: string, playbackUrl: string) {
+    const [existing] = await this.db
+      .select({ cameraId: schema.matchLivestreams.cameraId })
+      .from(schema.matchLivestreams)
+      .where(eq(schema.matchLivestreams.matchId, matchId))
+      .limit(1);
+
     const [stream] = await this.db
       .insert(schema.matchLivestreams)
       .values({
@@ -207,10 +216,10 @@ export class LivestreamRepository {
       })
       .returning();
 
-    await this.db
-      .update(schema.livestreamCameras)
-      .set({ status: 'ASSIGNED', updatedAt: new Date() })
-      .where(eq(schema.livestreamCameras.id, cameraId));
+    await this.syncCameraStatus(cameraId);
+    if (existing?.cameraId && existing.cameraId !== cameraId) {
+      await this.syncCameraStatus(existing.cameraId);
+    }
 
     return stream;
   }
@@ -245,15 +254,40 @@ export class LivestreamRepository {
       .returning();
 
     if (stream?.cameraId) {
-      await this.db
-        .update(schema.livestreamCameras)
-        .set({
-          status: status === 'LIVE' ? 'LIVE' : 'ASSIGNED',
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.livestreamCameras.id, stream.cameraId));
+      // Camera status is derived from all active match assignments. Updating
+      // one match must not make another match appear LIVE or stopped.
+      await this.syncCameraStatus(stream.cameraId);
     }
 
     return stream ?? null;
+  }
+
+  private async syncCameraStatus(cameraId: string) {
+    const assignments = await this.db
+      .select({ streamStatus: schema.matchLivestreams.streamStatus })
+      .from(schema.matchLivestreams)
+      .innerJoin(schema.matches, eq(schema.matchLivestreams.matchId, schema.matches.id))
+      .where(
+        and(
+          eq(schema.matchLivestreams.cameraId, cameraId),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
+
+    const status = assignments.some((item) => item.streamStatus === 'LIVE')
+      ? 'LIVE'
+      : assignments.length > 0
+        ? 'ASSIGNED'
+        : 'IDLE';
+
+    await this.db
+      .update(schema.livestreamCameras)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.livestreamCameras.id, cameraId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      );
   }
 }
