@@ -1,4 +1,6 @@
-import { db } from '../index';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import * as dotenv from 'dotenv';
+import { createPostgresClientFromEnv } from '../postgres-client';
 import { 
   tournaments, 
   parentTournaments, 
@@ -7,11 +9,15 @@ import {
   tournamentStages, 
   tournamentGroups, 
   tournamentDivisions,
-  livestreams 
+  livestreamCameras,
 } from '../schema';
+
+dotenv.config();
 
 async function clearTournaments() {
   console.log('⚠️ Bắt đầu xoá tất cả giải đấu...');
+  const sql = createPostgresClientFromEnv();
+  const db = drizzle(sql);
 
   try {
     // Xoá các bảng con trước
@@ -20,7 +26,7 @@ async function clearTournaments() {
     await db.delete(tournamentGroups);
     await db.delete(tournamentStages);
     await db.delete(tournamentDivisions);
-    await db.delete(livestreams);
+    await db.delete(livestreamCameras);
     
     // Xoá tất cả tournaments
     await db.delete(tournaments);
@@ -30,8 +36,8 @@ async function clearTournaments() {
   } catch (error) {
     console.error('❌ Lỗi khi xoá giải đấu:', error);
   } finally {
-    process.exit(0);
+    await sql.end();
   }
 }
 
-clearTournaments();
+clearTournaments().catch(console.error);
