@@ -930,6 +930,16 @@ export class TournamentsController {
   }
 
   @Public()
+  @Get(':id/results')
+  @ApiOperation({ summary: 'Kết quả chính thức và vinh danh giải đấu' })
+  async getTournamentResults(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('divisionId') divisionId?: string,
+  ) {
+    return this.tournamentsService.getTournamentResultsV2(id, divisionId);
+  }
+
+  @Public()
   @Get(':id/staff')
   @ApiOperation({ summary: 'Lay danh sach nhan su (BTC, trong tai, khach xem)' })
   async findStaff(@Param('id', ParseUUIDPipe) id: string) {

@@ -34,6 +34,26 @@ export class LivestreamService {
     return `${this.getHlsBaseUrl().replace(/\/$/, '')}/${streamKey}/index.m3u8`;
   }
 
+  /**
+   * MediaMTX serves HLS over plain HTTP on 8888. Public pages are HTTPS, so
+   * production must use the reverse-proxied HTTPS path instead of exposing
+   * the media port directly. Normalize legacy rows created with :8888 too.
+   */
+  private normalizePublicPlaybackUrl(url: string | null | undefined) {
+    if (!url) return url ?? null;
+
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'giaidau.vnvar.com' && parsed.port === '8888') {
+        parsed.protocol = 'https:';
+        parsed.port = '';
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }
+
   private buildIngestUrl(streamKey: string) {
     return `${this.getRtmpBaseUrl().replace(/\/$/, '')}/${streamKey}`;
   }
@@ -107,7 +127,11 @@ export class LivestreamService {
 
   async listCameras(tournamentId: string, user: JwtPayload) {
     await this.assertTournamentOperator(tournamentId, user);
-    return this.livestreamRepository.listCameras(tournamentId);
+    const cameras = await this.livestreamRepository.listCameras(tournamentId);
+    return cameras.map((camera) => ({
+      ...camera,
+      playbackUrl: this.normalizePublicPlaybackUrl(camera.playbackUrl),
+    }));
   }
 
   async listMatchLivestreams(tournamentId: string, user: JwtPayload) {
@@ -118,7 +142,7 @@ export class LivestreamService {
       // A soft-deleted camera is intentionally treated as unassigned, even
       // when an old match row still contains its cameraId.
       return normalized.cameraName
-        ? normalized
+        ? { ...normalized, playbackUrl: this.normalizePublicPlaybackUrl(normalized.playbackUrl) }
         : { ...normalized, cameraId: null, streamStatus: 'IDLE', playbackUrl: null, endedAt: null };
     });
   }
@@ -135,7 +159,7 @@ export class LivestreamService {
       protocol: data.protocol ?? 'RTMP',
       streamName,
       streamKey,
-      playbackUrl,
+      playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
       createdBy: user.sub,
     });
 
@@ -168,7 +192,11 @@ export class LivestreamService {
       throw new BadRequestException('Camera không thuộc giải đấu của trận này.');
     }
 
-    return this.livestreamRepository.assignCameraToMatch(matchId, data.cameraId, camera.playbackUrl ?? '');
+    return this.livestreamRepository.assignCameraToMatch(
+      matchId,
+      data.cameraId,
+      this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '',
+    );
   }
 
   async startMatchStream(matchId: string, user: JwtPayload) {
@@ -183,7 +211,9 @@ export class LivestreamService {
       throw new BadRequestException('Trận chưa đủ hai đội nên chưa thể bắt đầu livestream.');
     }
 
-    const playbackUrl = stream.cameraPlaybackUrl || this.buildPlaybackUrl(stream.streamKey);
+    const playbackUrl = this.normalizePublicPlaybackUrl(
+      stream.cameraPlaybackUrl || this.buildPlaybackUrl(stream.streamKey),
+    )!;
     const livestream = await this.livestreamRepository.updateStreamStatus(matchId, 'LIVE', user.sub, playbackUrl);
 
     const protocol = stream.cameraProtocol === 'SRT' ? 'SRT' : 'RTMP';
@@ -225,7 +255,8 @@ export class LivestreamService {
     return {
       matchId,
       streamStatus: stream.streamStatus,
-      playbackUrl: stream.streamStatus === 'LIVE' ? stream.playbackUrl : null,
+      playbackUrl:
+        stream.streamStatus === 'LIVE' ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null,
       cameraName: stream.cameraName,
       startedAt: stream.startedAt,
       endedAt: stream.endedAt,
