@@ -782,9 +782,10 @@ export class MatchesRepository {
 
           if (tournament && tournament.sportRules) {
             const rules = tournament.sportRules as Record<string, unknown>;
-            if (typeof rules.winPoints === 'number') winPoints = rules.winPoints;
-            if (typeof rules.drawPoints === 'number') drawPoints = rules.drawPoints;
-            if (typeof rules.lossPoints === 'number') lossPoints = rules.lossPoints;
+            const scoring = (rules.scoring as Record<string, unknown> | undefined) ?? rules;
+            if (typeof scoring.winPoints === 'number') winPoints = scoring.winPoints;
+            if (typeof scoring.drawPoints === 'number') drawPoints = scoring.drawPoints;
+            if (typeof scoring.lossPoints === 'number') lossPoints = scoring.lossPoints;
           }
         }
 

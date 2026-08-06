@@ -728,9 +728,9 @@ export class BracketGeneratorService {
             }
             const sc = rc.scoring as Record<string, unknown> | null;
             if (sc) {
-              if (sc.winPoints) winPoints = Number(sc.winPoints);
-              if (sc.drawPoints) drawPoints = Number(sc.drawPoints);
-              if (sc.lossPoints) lossPoints = Number(sc.lossPoints);
+              if (typeof sc.winPoints === 'number') winPoints = Number(sc.winPoints);
+              if (typeof sc.drawPoints === 'number') drawPoints = Number(sc.drawPoints);
+              if (typeof sc.lossPoints === 'number') lossPoints = Number(sc.lossPoints);
             }
             if (rc.tiebreakerRules) tiebreakerRules = rc.tiebreakerRules as Record<string, unknown>;
             const rtp = rc.roundsToPlay;
@@ -1165,9 +1165,9 @@ export class BracketGeneratorService {
         );
 
       // 4. Stage 1: Round Robin
-      const winPts = (scoring.winPoints as number) || 3;
-      const drawPts = (scoring.drawPoints as number) || 1;
-      const lossPts = (scoring.lossPoints as number) || 0;
+      const winPts = typeof scoring.winPoints === 'number' ? scoring.winPoints : 3;
+      const drawPts = typeof scoring.drawPoints === 'number' ? scoring.drawPoints : 1;
+      const lossPts = typeof scoring.lossPoints === 'number' ? scoring.lossPoints : 0;
 
       const [stage1] = await tx
         .insert(schema.tournamentStages)
@@ -1598,10 +1598,12 @@ export class BracketGeneratorService {
         // Sort by totalPoints DESC, then tiebreaker
         groupStandings.sort((a, b) => {
           if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-          // Primary: H2H (simplified - check direct match result)
           const diffA = a.pointsFor - a.pointsAgainst;
           const diffB = b.pointsFor - b.pointsAgainst;
-          return diffB - diffA;
+          if (diffB !== diffA) return diffB - diffA;
+          if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
+          if (b.won !== a.won) return b.won - a.won;
+          return a.participantId.localeCompare(b.participantId);
         });
 
         // Check for ties and create playoff matches
@@ -1650,7 +1652,10 @@ export class BracketGeneratorService {
             if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
             const diffA = a.pointsFor - a.pointsAgainst;
             const diffB = b.pointsFor - b.pointsAgainst;
-            return diffB - diffA;
+            if (diffB !== diffA) return diffB - diffA;
+            if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
+            if (b.won !== a.won) return b.won - a.won;
+            return a.participantId.localeCompare(b.participantId);
           });
           if (groupStandings.length >= 3) {
             thirdPlaced.push({
@@ -1663,7 +1668,9 @@ export class BracketGeneratorService {
         thirdPlaced.sort((a, b) => {
           const diffA = a.pointsFor - a.pointsAgainst;
           const diffB = b.pointsFor - b.pointsAgainst;
-          return diffB - diffA;
+          if (diffB !== diffA) return diffB - diffA;
+          if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
+          return a.participantId.localeCompare(b.participantId);
         });
         for (let i = 0; i < Math.min(wildcardTeams, thirdPlaced.length); i++) {
           advancingParticipants.push({
