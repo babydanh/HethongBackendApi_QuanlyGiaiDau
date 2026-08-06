@@ -3053,6 +3053,130 @@ export class TournamentsService {
     return this.tournamentsRepository.findGroupStandings(tournamentId, divisionId);
   }
 
+  async getTournamentResults(tournamentId: string, divisionId?: string) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const matches = await this.tournamentsRepository.findTournamentResultMatches(tournamentId, divisionId);
+    const standings = await this.tournamentsRepository.findGroupStandings(tournamentId, divisionId);
+    const standingRows = Array.isArray(standings)
+      ? standings
+      : Array.isArray(standings?.standings)
+        ? standings.standings
+        : [];
+    const completed = tournament.status === 'COMPLETED';
+    const knockout = matches.filter((match) => match.stageType !== 'ROUND_ROBIN');
+    const final = [...knockout]
+      .filter((match) => match.status === 'COMPLETED' && ['GRAND_FINALS', 'FINAL', 'MAIN'].includes(match.bracketBranch))
+      .sort((a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder)[0];
+
+    const participant = (id: string | null, name: string | null) => id ? { participantId: id, teamName: name || 'Chưa xác định' } : null;
+    const awards = final
+      ? [
+          { rank: 1, shared: false, participant: participant(final.winnerId, final.winnerId === final.participant1Id ? final.participant1Name : final.participant2Name) },
+          { rank: 2, shared: false, participant: participant(final.winnerId === final.participant1Id ? final.participant2Id : final.participant1Id, final.winnerId === final.participant1Id ? final.participant2Name : final.participant1Name) },
+        ]
+      : [];
+
+    return {
+      tournamentId,
+      status: tournament.status,
+      finalized: completed && awards.every((award) => award.participant !== null),
+      awards: completed ? awards : [],
+      standings: Array.isArray(standings) ? [] : standings.standings,
+      matches: matches.map((match) => ({
+        id: match.id,
+        status: match.status,
+        roundNumber: match.roundNumber,
+        matchOrder: match.matchOrder,
+        bracketBranch: match.bracketBranch,
+        stageId: match.stageId,
+        stageName: match.stageName,
+        participant1: participant(match.participant1Id, match.participant1Name),
+        participant2: participant(match.participant2Id, match.participant2Name),
+        winnerId: match.winnerId,
+      })),
+    };
+  }
+
+  async getTournamentResultsV2(tournamentId: string, divisionId?: string) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const matches = await this.tournamentsRepository.findTournamentResultMatches(tournamentId, divisionId);
+    const standings = await this.tournamentsRepository.findGroupStandings(tournamentId, divisionId);
+    const standingRows = Array.isArray(standings)
+      ? standings
+      : Array.isArray(standings?.standings)
+        ? standings.standings
+        : [];
+    const participant = (id: string | null, name: string | null) => id
+      ? { participantId: id, teamName: name || 'Chua xac dinh' }
+      : null;
+    const completed = tournament.status === 'COMPLETED';
+    const knockout = matches.filter((match) => match.stageType !== 'ROUND_ROBIN' && match.status === 'COMPLETED' && match.winnerId);
+    const finalCandidates = knockout.filter((match) => {
+      const branch = (match.bracketBranch || '').toUpperCase();
+      const stageName = (match.stageName || '').toLowerCase();
+      return branch === 'GRAND_FINALS'
+        || branch === 'FINAL'
+        || stageName.includes('chung kết')
+        || stageName.includes('chung ket')
+        || stageName.includes('grand final');
+    });
+    const final = [...(finalCandidates.length > 0 ? finalCandidates : knockout.filter((match) => {
+      const branch = (match.bracketBranch || '').toUpperCase();
+      return branch === 'MAIN' || branch === '';
+    }))]
+      .sort((a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder)[0];
+    const loserOf = (match: typeof final) => match?.winnerId === match.participant1Id
+      ? participant(match.participant2Id, match.participant2Name)
+      : participant(match?.participant1Id ?? null, match?.participant1Name ?? null);
+    const awards: Array<{ rank: number; shared: boolean; participant: { participantId: string; teamName: string } | null }> = [];
+
+    if (final) {
+      awards.push({ rank: 1, shared: false, participant: participant(final.winnerId, final.winnerId === final.participant1Id ? final.participant1Name : final.participant2Name) });
+      awards.push({ rank: 2, shared: false, participant: loserOf(final) });
+      const config = (tournament.tournamentConfig ?? {}) as { thirdPlaceMatch?: boolean };
+      const semifinalLosers = knockout
+        .filter((match) => match.roundNumber === final.roundNumber - 1)
+        .map(loserOf)
+        .filter((item): item is { participantId: string; teamName: string } => item !== null);
+      const thirdPlace = config.thirdPlaceMatch
+        ? knockout.find((match) => match.roundNumber === final.roundNumber && match.id !== final.id && [match.participant1Id, match.participant2Id].some((id) => semifinalLosers.some((loser) => loser.participantId === id)))
+        : undefined;
+      if (thirdPlace) {
+        awards.push({ rank: 3, shared: false, participant: participant(thirdPlace.winnerId, thirdPlace.winnerId === thirdPlace.participant1Id ? thirdPlace.participant1Name : thirdPlace.participant2Name) });
+      } else {
+        for (const loser of semifinalLosers) awards.push({ rank: 3, shared: true, participant: loser });
+      }
+    } else if (standingRows.length) {
+      const groups = new Map<string, typeof standingRows>();
+      for (const row of standingRows) groups.set(row.groupId, [...(groups.get(row.groupId) ?? []), row]);
+      for (const rows of groups.values()) rows.slice(0, 3).forEach((row, index) => awards.push({ rank: index + 1, shared: false, participant: participant(row.participantId, row.teamName) }));
+    }
+
+    return {
+      tournamentId,
+      status: tournament.status,
+      finalized: completed && awards.length > 0 && awards.every((award) => award.participant !== null),
+      awards: completed ? awards : [],
+      standings: standingRows,
+      matches: matches.map((match) => ({
+        id: match.id,
+        status: match.status,
+        roundNumber: match.roundNumber,
+        matchOrder: match.matchOrder,
+        bracketBranch: match.bracketBranch,
+        stageId: match.stageId,
+        stageName: match.stageName,
+        participant1: participant(match.participant1Id, match.participant1Name),
+        participant2: participant(match.participant2Id, match.participant2Name),
+        winnerId: match.winnerId,
+      })),
+    };
+  }
+
   async addReferee(
     id: string,
     email: string,

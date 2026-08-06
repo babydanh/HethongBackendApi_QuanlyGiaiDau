@@ -4995,4 +4995,38 @@ export class TournamentsRepository {
       })),
     };
   }
+
+  async findTournamentResultMatches(tournamentId: string, divisionId?: string) {
+    const conditions = [
+      eq(schema.matches.tournamentId, tournamentId),
+      isNull(schema.matches.deletedAt),
+      isNull(schema.tournamentStages.deletedAt),
+    ];
+    if (divisionId) conditions.push(eq(schema.tournamentStages.tournamentDivisionId, divisionId));
+
+    return this.db
+      .select({
+        id: schema.matches.id,
+        status: schema.matches.status,
+        winnerId: schema.matches.winnerId,
+        participant1Id: schema.matches.participant1Id,
+        participant2Id: schema.matches.participant2Id,
+        roundNumber: schema.matches.roundNumber,
+        matchOrder: schema.matches.matchOrder,
+        bracketBranch: schema.matches.bracketBranch,
+        groupId: schema.matches.groupId,
+        stageId: schema.matches.stageId,
+        stageType: schema.tournamentStages.type,
+        stageName: schema.tournamentStages.name,
+        matchConfig: schema.matches.matchConfig,
+        participant1Name: sql<string | null>`p1.team_name`,
+        participant2Name: sql<string | null>`p2.team_name`,
+      })
+      .from(schema.matches)
+      .innerJoin(schema.tournamentStages, eq(schema.matches.stageId, schema.tournamentStages.id))
+      .leftJoin(sql`"tournament_participants" p1`, sql`p1.id = ${schema.matches.participant1Id}`)
+      .leftJoin(sql`"tournament_participants" p2`, sql`p2.id = ${schema.matches.participant2Id}`)
+      .where(and(...conditions))
+      .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
+  }
 }
