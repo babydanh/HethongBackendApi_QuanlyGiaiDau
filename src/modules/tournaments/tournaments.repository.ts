@@ -1306,15 +1306,27 @@ export class TournamentsRepository {
       const isDoubles = this.isDoublesMatchType(effectiveMatchType);
       const payableEntryFeeAmount = parseFloat(selectedDivision?.entryFee ?? tournament.entryFee ?? '0');
 
-      if (
-        selectedDivision?.registrationEndDate &&
-        now > new Date(selectedDivision.registrationEndDate)
-      ) {
+      const registrationDeadlines = [
+        selectedDivision?.registrationEndDate,
+        tournament.registrationEndDate,
+      ]
+        .filter(Boolean)
+        .map((value) => new Date(value as Date | string));
+      const registrationDeadline = registrationDeadlines.sort(
+        (a, b) => a.getTime() - b.getTime(),
+      )[0];
+
+      if (registrationDeadline && now >= registrationDeadline) {
         throw new BadRequestException('Hạn đăng ký của nội dung thi đấu này đã kết thúc.');
       }
 
       const teamInviteToken = isDoubles ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase() : null;
-      const partnerInviteExpiresAt = isDoubles ? new Date(Date.now() + 15 * 60 * 1000) : null;
+      const inviteBaseExpiresAt = new Date(now.getTime() + 60 * 60 * 1000);
+      const partnerInviteExpiresAt = isDoubles
+        ? registrationDeadline
+          ? new Date(Math.min(inviteBaseExpiresAt.getTime(), registrationDeadline.getTime()))
+          : inviteBaseExpiresAt
+        : null;
 
       const teamStatus = isWaitlisted
         ? 'WAITLISTED'
@@ -1394,7 +1406,7 @@ export class TournamentsRepository {
           .update(schema.tournamentParticipants)
           .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
           .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Lời mời ghép đôi này đã hết hạn 15 phút. Suất giữ chỗ đã bị giải phóng.');
+        throw new BadRequestException('Lời mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.');
       }
 
       if (participant.teamStatus !== 'PENDING_PARTNER') {
@@ -1403,6 +1415,35 @@ export class TournamentsRepository {
 
       if (participant.partnerUserId !== partnerUserId) {
         throw new BadRequestException('Chỉ đúng tài khoản đồng đội được mời mới có thể xác nhận lời mời này.');
+      }
+
+      const [tournament] = await tx
+        .select({
+          tournamentConfig: schema.tournaments.tournamentConfig,
+          registrationEndDate: schema.tournaments.registrationEndDate,
+        })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, participant.tournamentId))
+        .limit(1);
+      const [division] = participant.tournamentDivisionId
+        ? await tx
+            .select({ registrationEndDate: schema.tournamentDivisions.registrationEndDate })
+            .from(schema.tournamentDivisions)
+            .where(eq(schema.tournamentDivisions.id, participant.tournamentDivisionId))
+            .limit(1)
+        : [null];
+      const registrationDeadlines = [tournament?.registrationEndDate, division?.registrationEndDate]
+        .filter(Boolean)
+        .map((value) => new Date(value as Date | string));
+      const registrationDeadline = registrationDeadlines.sort(
+        (a, b) => a.getTime() - b.getTime(),
+      )[0];
+      if (registrationDeadline && new Date() >= registrationDeadline) {
+        await tx
+          .update(schema.tournamentParticipants)
+          .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
+          .where(eq(schema.tournamentParticipants.id, participantId));
+        throw new BadRequestException('Giải đấu đã đóng đăng ký. Lời mời ghép đôi không thể xác nhận thêm.');
       }
 
       // Check duplicate roster
@@ -1424,11 +1465,6 @@ export class TournamentsRepository {
         });
       }
 
-      const [tournament] = await tx
-        .select({ tournamentConfig: schema.tournaments.tournamentConfig })
-        .from(schema.tournaments)
-        .where(eq(schema.tournaments.id, participant.tournamentId))
-        .limit(1);
       const targetStatus = ((tournament?.tournamentConfig || {}) as Record<string, unknown>).registrationMode === 'APPROVAL'
         ? 'PENDING_APPROVAL'
         : 'COMPLETE';
@@ -1471,7 +1507,7 @@ export class TournamentsRepository {
           .update(schema.tournamentParticipants)
           .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
           .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Lời mời ghép đôi này đã hết hạn 15 phút.');
+        throw new BadRequestException('Lời mời ghép đôi đã hết hạn.');
       }
       if (participant.teamStatus !== 'PENDING_PARTNER') {
         throw new BadRequestException('Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.');
@@ -1559,7 +1595,7 @@ export class TournamentsRepository {
           .update(schema.tournamentParticipants)
           .set({ teamStatus: 'EXPIRED', teamInviteToken: null, partnerInviteExpiresAt: null })
           .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Mã mời ghép đôi đã hết hạn 15 phút. Suất giữ chỗ đã được giải phóng.');
+        throw new BadRequestException('Mã mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.');
       }
 
       if (participant.teamStatus !== 'PENDING_PARTNER') {
@@ -1591,6 +1627,20 @@ export class TournamentsRepository {
             .where(eq(schema.tournamentDivisions.id, participant.tournamentDivisionId))
             .limit(1)
         : [null];
+
+      const registrationDeadlines = [tournament.registrationEndDate, division?.registrationEndDate]
+        .filter(Boolean)
+        .map((value) => new Date(value as Date | string));
+      const registrationDeadline = registrationDeadlines.sort(
+        (a, b) => a.getTime() - b.getTime(),
+      )[0];
+      if (registrationDeadline && new Date() >= registrationDeadline) {
+        await tx
+          .update(schema.tournamentParticipants)
+          .set({ teamStatus: 'EXPIRED', teamInviteToken: null, partnerInviteExpiresAt: null })
+          .where(eq(schema.tournamentParticipants.id, participantId));
+        throw new BadRequestException('Giải đấu đã đóng đăng ký. Mã mời ghép đôi không thể sử dụng thêm.');
+      }
 
       // 4. Lấy giới tính của Leader và Partner để kiểm tra ràng buộc
       const leaderRoster = await tx

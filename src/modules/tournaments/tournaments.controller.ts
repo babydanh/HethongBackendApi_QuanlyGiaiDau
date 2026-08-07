@@ -596,7 +596,7 @@ export class TournamentsController {
   @Post('participants/:participantId/accept-partner')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Chấp nhận lời mời ghép đôi (Giữ chỗ 15 phút)' })
+  @ApiOperation({ summary: 'Chấp nhận lời mời ghép đôi (tối đa 1 giờ hoặc đến hạn đóng đăng ký)' })
   async acceptPartnerInvite(
     @Param('participantId', ParseUUIDPipe) participantId: string,
     @CurrentUser() user: JwtPayload,
@@ -607,7 +607,7 @@ export class TournamentsController {
   @Post('participants/:participantId/reject-partner')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Từ chối lời mời ghép đôi (Giữ chỗ 15 phút)' })
+  @ApiOperation({ summary: 'Từ chối lời mời ghép đôi' })
   async rejectPartnerInvite(
     @Param('participantId', ParseUUIDPipe) participantId: string,
     @CurrentUser() user: JwtPayload,

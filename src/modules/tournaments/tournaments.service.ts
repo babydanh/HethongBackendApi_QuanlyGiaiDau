@@ -1552,7 +1552,7 @@ export class TournamentsService {
             receiverId: partnerUser.id,
             type: 'PARTNER_INVITE_RECEIVED',
             title: 'Bạn có lời mời ghép đôi!',
-            content: `${tournament.name}: ${result.participant.teamName} mời bạn làm đồng đội. Xác nhận trong vòng 15 phút.`,
+            content: `${tournament.name}: ${result.participant.teamName} mời bạn làm đồng đội. Xác nhận trong tối đa 1 giờ hoặc trước khi đóng đăng ký.`,
             redirectUrl: `/tournaments/${id}/participants/${result.participant.id}/accept-partner`,
           }),
         );
@@ -3461,7 +3461,7 @@ export class TournamentsService {
         receiverId: updated.registeredBy,
         type: 'PARTNER_INVITE_REJECTED',
         title: 'Lời mời ghép đôi đã bị từ chối/hết hạn',
-        content: `Đồng đội đã từ chối lời mời hoặc thời gian giữ chỗ 15 phút đã kết thúc. Suất giữ chỗ đã được giải phóng.`,
+        content: `Đồng đội đã từ chối lời mời hoặc thời hạn ghép đôi đã kết thúc. Suất giữ chỗ đã được giải phóng.`,
         redirectUrl: `/tournaments/${updated.tournamentId}`,
       });
     }
