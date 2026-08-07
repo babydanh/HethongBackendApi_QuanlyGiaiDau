@@ -55,35 +55,35 @@ export class TournamentsController {
 
   @Public()
   @Get('fees')
-  @ApiOperation({ summary: 'Láº¥y cáº¥u hÃ¬nh cÃ¡c loáº¡i phÃ­ giáº£i Ä‘áº¥u vÃ  phÃ­ hoa há»“ng' })
+  @ApiOperation({ summary: 'Lấy cấu hình các loại phí giải đấu và phí hoa hồng' })
   async getFeesConfig() {
     return this.tournamentsService.getFeesConfig();
   }
 
   @Public()
   @Get('public')
-  @ApiOperation({ summary: 'Chá»‰ láº¥y danh sÃ¡ch giáº£i Ä‘áº¥u PUBLIC cÃ´ng khai' })
+  @ApiOperation({ summary: 'Chỉ lấy danh sách giải đấu PUBLIC công khai' })
   async findPublic(@Query() query: QueryTournamentDto) {
     return this.tournamentsService.findPublic(query);
   }
 
   @Get('my')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch giáº£i Ä‘áº¥u ngÆ°á»i dÃ¹ng táº¡o hoáº·c tham gia' })
+  @ApiOperation({ summary: 'Lấy danh sách giải đấu người dùng tạo hoặc tham gia' })
   async findMy(@CurrentUser() user: JwtPayload) {
     return this.tournamentsService.findMy(user.sub);
   }
 
   @Get('workspace/me')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Láº¥y workspace ngÆ°á»i dÃ¹ng theo vai trÃ²: tham gia, tá»• chá»©c, trá»ng tÃ i' })
+  @ApiOperation({ summary: 'Lấy workspace người dùng theo vai trò: tham gia, tổ chức, trọng tài' })
   async findMyWorkspace(@CurrentUser() user: JwtPayload) {
     return this.tournamentsService.getMyWorkspace(user.sub);
   }
 
   @Public()
   @Get('join/:inviteCode')
-  @ApiOperation({ summary: 'Xem thÃ´ng tin giáº£i Ä‘áº¥u qua mÃ£ má»i' })
+  @ApiOperation({ summary: 'Xem thông tin giải đấu qua mã mời' })
   async findByInviteCode(@Param('inviteCode') inviteCode: string) {
     return this.tournamentsService.findByInviteCode(inviteCode);
   }
@@ -91,7 +91,7 @@ export class TournamentsController {
   @Post('join/:inviteCode')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Tham gia giáº£i Ä‘áº¥u qua mÃ£ má»i' })
+  @ApiOperation({ summary: 'Tham gia giải đấu qua mã mời' })
   async joinByInviteCode(
     @Param('inviteCode') inviteCode: string,
     @Body() registerTournamentDto: RegisterTournamentDto,
@@ -111,7 +111,7 @@ export class TournamentsController {
   @Post('parent')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Táº¡o giáº£i Ä‘áº¥u cha (chuá»—i giáº£i Ä‘áº¥u / nhiá»u thá»ƒ loáº¡i)' })
+  @ApiOperation({ summary: 'Tạo giải đấu cha (chuỗi giải đấu / nhiều thể loại)' })
   async createParent(
     @Body() createParentTournamentDto: CreateParentTournamentDto,
     @CurrentUser() user: JwtPayload,
@@ -121,21 +121,21 @@ export class TournamentsController {
 
   @Get('parent/my')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch giáº£i Ä‘áº¥u cha cá»§a tÃ´i' })
+  @ApiOperation({ summary: 'Lấy danh sách giải đấu cha của tôi' })
   async findMyParents(@CurrentUser() user: JwtPayload) {
     return this.tournamentsService.findParentsByUser(user.sub);
   }
 
   @Public()
   @Get('parent/:id')
-  @ApiOperation({ summary: 'Láº¥y chi tiáº¿t giáº£i Ä‘áº¥u cha kÃ¨m danh sÃ¡ch cÃ¡c thá»ƒ loáº¡i/phÃ¢n háº¡ng' })
+  @ApiOperation({ summary: 'Lấy chi tiết giải đấu cha kèm danh sách các thể loại/phân hạng' })
   async findOneParent(@Param('id', ParseUUIDPipe) id: string) {
     return this.tournamentsService.findParentById(id);
   }
 
   @Public()
   @Get('parent/:id/aggregation')
-  @ApiOperation({ summary: 'Láº¥y thá»‘ng kÃª tá»•ng há»£p cá»§a giáº£i Ä‘áº¥u cha' })
+  @ApiOperation({ summary: 'Lấy thống kê tổng hợp của giải đấu cha' })
   async getParentAggregation(@Param('id', ParseUUIDPipe) id: string) {
     return this.tournamentsService.getParentWithAggregation(id);
   }
@@ -143,7 +143,7 @@ export class TournamentsController {
   @Patch('parent/:id')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Cáº­p nháº­t thÃ´ng tin giáº£i Ä‘áº¥u cha' })
+  @ApiOperation({ summary: 'Cập nhật thông tin giải đấu cha' })
   async updateParent(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateParentTournamentDto: UpdateParentTournamentDto,
@@ -155,7 +155,7 @@ export class TournamentsController {
   @Delete('parent/:id')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'XÃ³a giáº£i Ä‘áº¥u cha' })
+  @ApiOperation({ summary: 'Xóa giải đấu cha' })
   async removeParent(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -165,7 +165,7 @@ export class TournamentsController {
 
   @Public()
   @Get(':id/divisions')
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch báº£ng/ná»™i dung thi Ä‘áº¥u cá»§a giáº£i' })
+  @ApiOperation({ summary: 'Lấy danh sách bảng/nội dung thi đấu của giải' })
   async findDivisions(@Param('id', ParseUUIDPipe) id: string) {
     return this.tournamentsService.getDivisionsForTournament(id);
   }
@@ -173,7 +173,7 @@ export class TournamentsController {
   @Post(':id/divisions')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Táº¡o báº£ng/ná»™i dung thi Ä‘áº¥u cho giáº£i' })
+  @ApiOperation({ summary: 'Tạo bảng/nội dung thi đấu cho giải' })
   async createDivision(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() createDivisionDto: CreateDivisionDto,
@@ -185,7 +185,7 @@ export class TournamentsController {
   @Patch('divisions/:divisionId')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Cáº­p nháº­t báº£ng/ná»™i dung thi Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Cập nhật bảng/nội dung thi đấu' })
   async updateDivision(
     @Param('divisionId', ParseUUIDPipe) divisionId: string,
     @Body() updateDivisionDto: UpdateDivisionDto,
@@ -197,7 +197,7 @@ export class TournamentsController {
   @Patch(':id/divisions/:divisionId/config')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Báº­t/táº¯t vÃ  cáº­p nháº­t cáº¥u hÃ¬nh riÃªng cá»§a hÃ¬nh thá»©c thi Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Bật/tắt và cập nhật cấu hình riêng của hình thức thi đấu' })
   async updateDivisionConfig(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('divisionId', ParseUUIDPipe) divisionId: string,
@@ -209,7 +209,7 @@ export class TournamentsController {
 
   @Get(':id/divisions/:divisionId/participants')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch ngÆ°á»i chÆ¡i theo hÃ¬nh thá»©c thi Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Lấy danh sách người chơi theo hình thức thi đấu' })
   async findDivisionParticipants(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('divisionId', ParseUUIDPipe) divisionId: string,
@@ -220,7 +220,7 @@ export class TournamentsController {
   @Delete('divisions/:divisionId')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'XÃ³a báº£ng/ná»™i dung thi Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Xóa bảng/nội dung thi đấu' })
   async removeDivision(
     @Param('divisionId', ParseUUIDPipe) divisionId: string,
     @CurrentUser() user: JwtPayload,
@@ -231,7 +231,7 @@ export class TournamentsController {
   @Public()
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id')
-  @ApiOperation({ summary: 'Láº¥y chi tiáº¿t giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Lấy chi tiết giải đấu' })
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('invite') inviteCode?: string,
@@ -245,7 +245,7 @@ export class TournamentsController {
 
   @Public()
   @Post(':id/validate-invite')
-  @ApiOperation({ summary: 'Kiá»ƒm tra mÃ£ má»i giáº£i Ä‘áº¥u PRIVATE' })
+  @ApiOperation({ summary: 'Kiểm tra mã mời giải đấu PRIVATE' })
   async validateInvite(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('inviteCode') inviteCode: string,
@@ -316,13 +316,13 @@ export class TournamentsController {
   @Post()
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Táº¡o giáº£i Ä‘áº¥u má»›i (há»— trá»£ cáº£ Web vÃ  App)' })
+  @ApiOperation({ summary: 'Tạo giải đấu mới (hỗ trợ cả Web và App)' })
   async create(
     @Body() createTournamentDto: CreateTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
     if (!user?.sub) {
-      throw new UnauthorizedException('Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ táº¡o giáº£i Ä‘áº¥u.');
+      throw new UnauthorizedException('Bạn cần đăng nhập để tạo giải đấu.');
     }
     return this.tournamentsService.create(
       user.sub,
@@ -467,7 +467,7 @@ export class TournamentsController {
   @Patch(':id')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Cáº­p nháº­t giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Cập nhật giải đấu' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateTournamentDto: UpdateTournamentDto,
@@ -479,7 +479,7 @@ export class TournamentsController {
   @Delete(':id')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'XÃ³a giáº£i Ä‘áº¥u (Soft Delete)' })
+  @ApiOperation({ summary: 'Xóa giải đấu (Soft Delete)' })
   async remove(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -492,7 +492,7 @@ export class TournamentsController {
   @Post(':id/generate-bracket')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Sinh nhÃ¡nh Ä‘áº¥u tá»± Ä‘á»™ng (Bracket Generation)' })
+  @ApiOperation({ summary: 'Sinh nhánh đấu tự động (Bracket Generation)' })
   async generateBracket(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('divisionId') divisionId: string | undefined,
@@ -505,7 +505,7 @@ export class TournamentsController {
   @Post(':id/publish')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'CÃ´ng bá»‘ giáº£i Ä‘áº¥u tá»« DRAFT -> REGISTRATION_OPEN' })
+  @ApiOperation({ summary: 'Công bố giải đấu từ DRAFT -> REGISTRATION_OPEN' })
   async publish(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -516,7 +516,7 @@ export class TournamentsController {
   @Post(':id/follow')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Theo dÃµi giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Theo dõi giải đấu' })
   async follow(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -527,7 +527,7 @@ export class TournamentsController {
   @Delete(':id/follow')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Bá» theo dÃµi giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Bỏ theo dõi giải đấu' })
   async unfollow(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -537,7 +537,7 @@ export class TournamentsController {
 
   @Get('my/followed')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Danh sÃ¡ch giáº£i Ä‘áº¥u Ä‘ang theo dÃµi' })
+  @ApiOperation({ summary: 'Danh sách giải đấu đang theo dõi' })
   async getFollowed(@CurrentUser() user: JwtPayload) {
     return this.tournamentsService.getFollowedTournaments(user.sub);
   }
@@ -545,7 +545,7 @@ export class TournamentsController {
   @Patch(':id/seeds')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Cáº­p nháº­t háº¡t giá»‘ng hÃ ng loáº¡t cho cÃ¡c Ä‘á»™i/VÄV' })
+  @ApiOperation({ summary: 'Cập nhật hạt giống hàng loạt cho các đội/VĐV' })
   async updateSeeds(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('seeds') seeds: { participantId: string; seed: number }[],
@@ -557,7 +557,7 @@ export class TournamentsController {
   @Post(':id/lock')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Chá»‘t danh sÃ¡ch VÄV, tÃ­nh phÃ­ sÃ n vÃ  sinh bracket' })
+  @ApiOperation({ summary: 'Chốt danh sách VĐV, tính phí sàn và sinh bracket' })
   async lock(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -569,7 +569,7 @@ export class TournamentsController {
   @Verified()
   @ApiBearerAuth()
   @Throttle({ sensitive: { limit: 5, ttl: 60000 } })
-  @ApiOperation({ summary: 'ÄÄƒng kÃ½ tham gia giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Đăng ký tham gia giải đấu' })
   async register(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() registerTournamentDto: RegisterTournamentDto,
@@ -618,7 +618,7 @@ export class TournamentsController {
   @Post(':id/withdraw')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'RÃºt lui khá» i giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Rút lui khỏi giải đấu' })
   async withdraw(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -634,7 +634,7 @@ export class TournamentsController {
 
   @Get(':id/my-registration')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Kiá»ƒm tra tráº¡ng thÃ¡i Ä‘Äƒng kÃ½ cá»§a báº£n thÃ¢n trong giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Kiểm tra trạng thái đăng ký của bản thân trong giải đấu' })
   async myRegistration(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -646,7 +646,7 @@ export class TournamentsController {
   @Post(':id/regenerate-invite')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Táº¡o láº¡i mÃ£ má»i má»›i' })
+  @ApiOperation({ summary: 'Tạo lại mã mời mới' })
   async regenerateInvite(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -656,7 +656,7 @@ export class TournamentsController {
 
   @Public()
   @Get(':id/gallery')
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch áº£nh gallery cá»§a giáº£i Ä‘áº¥u (PUBLIC)' })
+  @ApiOperation({ summary: 'Lấy danh sách ảnh gallery của giải đấu (PUBLIC)' })
   async getGallery(@Param('id', ParseUUIDPipe) id: string) {
     return this.tournamentsService.getGallery(id);
   }
@@ -664,7 +664,7 @@ export class TournamentsController {
   @Post(':id/gallery')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'ThÃªm áº£nh má»›i vÃ o gallery' })
+  @ApiOperation({ summary: 'Thêm ảnh mới vào gallery' })
   async addGalleryImage(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() uploadGalleryDto: UploadGalleryDto,
@@ -676,7 +676,7 @@ export class TournamentsController {
   @Delete(':id/gallery/:index')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'XÃ³a áº£nh khá»i gallery theo index' })
+  @ApiOperation({ summary: 'Xóa ảnh khỏi gallery theo index' })
   async removeGalleryImage(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('index', ParseIntPipe) index: number,
@@ -687,7 +687,7 @@ export class TournamentsController {
 
   @Public()
   @Get(':id/participants')
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch VÄV Ä‘Äƒng kÃ½ tham gia kÃ¨m rosters' })
+  @ApiOperation({ summary: 'Lấy danh sách VĐV đăng ký tham gia kèm rosters' })
   async findParticipants(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('divisionId') divisionId?: string,
@@ -697,7 +697,7 @@ export class TournamentsController {
 
   @Get(':id/manage/participants')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch participant Ä‘áº§y Ä‘á»§ cho BTC' })
+  @ApiOperation({ summary: 'Lấy danh sách participant đầy đủ cho BTC' })
   async findParticipantsForOrganizer(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('divisionId') divisionId?: string,
@@ -707,7 +707,7 @@ export class TournamentsController {
 
   @Get(':id/referees')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Láº¥y danh sÃ¡ch trá»ng tÃ i cá»§a giáº£i Ä‘áº¥u' })
+  @ApiOperation({ summary: 'Lấy danh sách trọng tài của giải đấu' })
   async findReferees(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -718,7 +718,7 @@ export class TournamentsController {
   @Post(':id/referees')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Má»i trá»ng tÃ i tham gia giáº£i Ä‘áº¥u báº±ng Email/Gmail' })
+  @ApiOperation({ summary: 'Mời trọng tài tham gia giải đấu bằng Email/Gmail' })
   async addReferee(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: AddRefereeDto,
@@ -730,8 +730,8 @@ export class TournamentsController {
   @Patch(':id/referees/:refereeId/respond')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Trá»ng tÃ i cháº¥p nháº­n/tá»« chá»‘i lá»i má»i lÃ m trá»ng tÃ i' })
-  @ApiResponse({ status: 200, description: 'Pháº£n há»“i lá»i má»i thÃ nh cÃ´ng' })
+  @ApiOperation({ summary: 'Trọng tài chấp nhận/từ chối lời mời làm trọng tài' })
+  @ApiResponse({ status: 200, description: 'Phản hồi lời mời thành công' })
   async respondToRefereeInvite(
     @Param('id', ParseUUIDPipe) tournamentId: string,
     @Param('refereeId', ParseUUIDPipe) refereeId: string,
@@ -744,7 +744,7 @@ export class TournamentsController {
   @Delete(':id/referees/:refereeId')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'BTC thu há»“i lá»i má»i trá»ng tÃ i Ä‘ang chá» pháº£n há»“i' })
+  @ApiOperation({ summary: 'BTC thu hồi lời mời trọng tài đang chờ phản hồi' })
   async revokeRefereeInvite(
     @Param('id', ParseUUIDPipe) tournamentId: string,
     @Param('refereeId', ParseUUIDPipe) refereeId: string,
@@ -761,7 +761,7 @@ export class TournamentsController {
   @Public()
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/bracket')
-  @ApiOperation({ summary: 'Láº¥y full bracket data' })
+  @ApiOperation({ summary: 'Lấy full bracket data' })
   async findBracket(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('divisionId') divisionId?: string,
@@ -772,7 +772,7 @@ export class TournamentsController {
   @Patch('stages/:id')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Cáº­p nháº­t cáº¥u hÃ¬nh vÃ²ng Ä‘áº¥u (Stage)' })
+  @ApiOperation({ summary: 'Cập nhật cấu hình vòng đấu (Stage)' })
   async updateStage(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateStageDto: UpdateStageDto,
@@ -784,7 +784,7 @@ export class TournamentsController {
   @Post(':id/mock-participants')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Sinh danh sÃ¡ch VÄV giáº£ láº­p Ä‘á»ƒ test' })
+  @ApiOperation({ summary: 'Sinh danh sách VĐV giả lập để test' })
   async seedMockParticipants(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SeedMockParticipantsDto,
@@ -802,7 +802,7 @@ export class TournamentsController {
   @Delete(':id/mock-participants')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'XÃ³a toÃ n bá»™ VÄV giáº£ láº­p' })
+  @ApiOperation({ summary: 'Xóa toàn bộ VĐV giả lập' })
   async clearMockParticipants(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('divisionId') divisionId: string | undefined,
@@ -814,7 +814,7 @@ export class TournamentsController {
   @Delete(':id/participants/:participantId/mock')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'XÃ³a má»™t participant giáº£ láº­p' })
+  @ApiOperation({ summary: 'Xóa một participant giả lập' })
   async deleteMockParticipant(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('participantId', ParseUUIDPipe) participantId: string,
@@ -826,7 +826,7 @@ export class TournamentsController {
   @Patch(':id/participants/:participantId')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Duyá»‡t hoáº·c tá»« chá»‘i váº­n Ä‘á»™ng viÃªn Ä‘Äƒng kÃ½' })
+  @ApiOperation({ summary: 'Duyệt hoặc từ chối vận động viên đăng ký' })
   async updateParticipantStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('participantId', ParseUUIDPipe) participantId: string,
@@ -839,7 +839,7 @@ export class TournamentsController {
   @Post(':id/reserve-slots')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'GÃ¡n trá»±c tiáº¿p ngÆ°á»i chÆ¡i vÃ o slot giá»¯ chá»— (Wildcard)' })
+  @ApiOperation({ summary: 'Gán trực tiếp người chơi vào slot giữ chỗ (Wildcard)' })
   async assignReservedSlot(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('userEmailOrPhone') userEmailOrPhone: string,
@@ -862,7 +862,7 @@ export class TournamentsController {
   @Post(':id/participants/:participantId/kick')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Kick váº­n Ä‘á»™ng viÃªn/Ä‘á»™i thi Ä‘áº¥u khá»i giáº£i vÃ  hoÃ n tiá»n' })
+  @ApiOperation({ summary: 'Kick vận động viên/đội thi đấu khỏi giải và hoàn tiền' })
   async kickParticipant(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('participantId', ParseUUIDPipe) participantId: string,
@@ -874,7 +874,7 @@ export class TournamentsController {
 
   @Get(':id/ops-audit-logs')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Láº¥y nháº­t kÃ½ váº­n hÃ nh cho organizer ops panel' })
+  @ApiOperation({ summary: 'Lấy nhật ký vận hành cho organizer ops panel' })
   async getOpsAuditLogs(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('divisionId') divisionId: string | undefined,
@@ -886,7 +886,7 @@ export class TournamentsController {
   @Post(':id/cancel')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Há»§y giáº£i Ä‘áº¥u / ná»™i dung thi Ä‘áº¥u vÃ  hoÃ n tiá»n cho má»i ngÆ°á»i' })
+  @ApiOperation({ summary: 'Hủy giải đấu / nội dung thi đấu và hoàn tiền cho mọi người' })
   async cancelTournament(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -925,7 +925,7 @@ export class TournamentsController {
   @Post(':id/auto-seed')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Tá»± Ä‘á»™ng xáº¿p háº¡t giá»‘ng theo ELO' })
+  @ApiOperation({ summary: 'Tự động xếp hạt giống theo ELO' })
   async autoSeed(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('divisionId') divisionId: string | undefined,
