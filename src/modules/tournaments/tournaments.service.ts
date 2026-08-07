@@ -3454,8 +3454,8 @@ export class TournamentsService {
     return updated;
   }
 
-  async rejectPartnerInvite(participantId: string) {
-    const updated = await this.tournamentsRepository.rejectPartnerInvite(participantId);
+  async rejectPartnerInvite(participantId: string, partnerUserId: string) {
+    const updated = await this.tournamentsRepository.rejectPartnerInvite(participantId, partnerUserId);
     if (updated && updated.registeredBy) {
       await this.notificationsService.sendNotification({
         receiverId: updated.registeredBy,

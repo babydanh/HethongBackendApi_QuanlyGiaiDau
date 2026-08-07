@@ -1346,6 +1346,7 @@ export class TournamentsRepository {
           isPaid,
           teamInviteToken: partnerId ? null : teamInviteToken,
           teamStatus,
+          partnerUserId: isDoubles ? partnerId : null,
           partnerInviteExpiresAt,
         })
         .returning();
@@ -1381,22 +1382,27 @@ export class TournamentsRepository {
         .select()
         .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, participantId))
+        .for('update')
         .limit(1);
 
       if (!participant) {
         throw new NotFoundException('Lời mời ghép đôi không tồn tại hoặc đã bị hủy.');
       }
 
+      if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
+        await tx
+          .update(schema.tournamentParticipants)
+          .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
+          .where(eq(schema.tournamentParticipants.id, participantId));
+        throw new BadRequestException('Lời mời ghép đôi này đã hết hạn 15 phút. Suất giữ chỗ đã bị giải phóng.');
+      }
+
       if (participant.teamStatus !== 'PENDING_PARTNER') {
         throw new BadRequestException('Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.');
       }
 
-      if (participant.partnerInviteExpiresAt && new Date() > participant.partnerInviteExpiresAt) {
-        await tx
-          .update(schema.tournamentParticipants)
-          .set({ teamStatus: 'EXPIRED' })
-          .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Lời mời ghép đôi này đã hết hạn 15 phút. Suất giữ chỗ đã bị giải phóng.');
+      if (participant.partnerUserId !== partnerUserId) {
+        throw new BadRequestException('Chỉ đúng tài khoản đồng đội được mời mới có thể xác nhận lời mời này.');
       }
 
       // Check duplicate roster
@@ -1418,10 +1424,19 @@ export class TournamentsRepository {
         });
       }
 
+      const [tournament] = await tx
+        .select({ tournamentConfig: schema.tournaments.tournamentConfig })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, participant.tournamentId))
+        .limit(1);
+      const targetStatus = ((tournament?.tournamentConfig || {}) as Record<string, unknown>).registrationMode === 'APPROVAL'
+        ? 'PENDING_APPROVAL'
+        : 'COMPLETE';
+
       const [updated] = await tx
         .update(schema.tournamentParticipants)
         .set({
-          teamStatus: 'COMPLETE',
+          teamStatus: targetStatus,
           partnerInviteExpiresAt: null,
         })
         .where(eq(schema.tournamentParticipants.id, participantId))
@@ -1431,13 +1446,44 @@ export class TournamentsRepository {
     });
   }
 
-  async rejectPartnerInvite(participantId: string) {
-    const [updated] = await this.db
-      .update(schema.tournamentParticipants)
-      .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
-      .where(eq(schema.tournamentParticipants.id, participantId))
-      .returning();
-    return updated;
+  async rejectPartnerInvite(participantId: string, partnerUserId: string) {
+    return await this.db.transaction(async (tx) => {
+      const [participant] = await tx
+        .select({
+          id: schema.tournamentParticipants.id,
+          partnerUserId: schema.tournamentParticipants.partnerUserId,
+          teamStatus: schema.tournamentParticipants.teamStatus,
+          partnerInviteExpiresAt: schema.tournamentParticipants.partnerInviteExpiresAt,
+        })
+        .from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .for('update')
+        .limit(1);
+
+      if (!participant) {
+        throw new NotFoundException('Lời mời ghép đôi không tồn tại hoặc đã bị hủy.');
+      }
+      if (participant.partnerUserId !== partnerUserId) {
+        throw new BadRequestException('Chỉ đúng tài khoản đồng đội được mời mới có thể từ chối lời mời này.');
+      }
+      if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
+        await tx
+          .update(schema.tournamentParticipants)
+          .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
+          .where(eq(schema.tournamentParticipants.id, participantId));
+        throw new BadRequestException('Lời mời ghép đôi này đã hết hạn 15 phút.');
+      }
+      if (participant.teamStatus !== 'PENDING_PARTNER') {
+        throw new BadRequestException('Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.');
+      }
+
+      const [updated] = await tx
+        .update(schema.tournamentParticipants)
+        .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+      return updated;
+    });
   }
 
   async joinTeam(tournamentId: string, userId: string, participantId: string, teamInviteToken: string) {
@@ -1501,10 +1547,19 @@ export class TournamentsRepository {
             eq(schema.tournamentParticipants.teamInviteToken, teamInviteToken)
           )
         )
+        .for('update')
         .limit(1);
 
       if (!participant) {
         throw new BadRequestException('Mã mời đồng đội hoặc đội thi đấu không hợp lệ.');
+      }
+
+      if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
+        await tx
+          .update(schema.tournamentParticipants)
+          .set({ teamStatus: 'EXPIRED', teamInviteToken: null, partnerInviteExpiresAt: null })
+          .where(eq(schema.tournamentParticipants.id, participantId));
+        throw new BadRequestException('Mã mời ghép đôi đã hết hạn 15 phút. Suất giữ chỗ đã được giải phóng.');
       }
 
       if (participant.teamStatus !== 'PENDING_PARTNER') {
