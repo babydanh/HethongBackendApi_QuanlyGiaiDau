@@ -610,8 +610,9 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Từ chối lời mời ghép đôi (Giữ chỗ 15 phút)' })
   async rejectPartnerInvite(
     @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.rejectPartnerInvite(participantId);
+    return this.tournamentsService.rejectPartnerInvite(participantId, user.sub);
   }
 
   @Post(':id/withdraw')
