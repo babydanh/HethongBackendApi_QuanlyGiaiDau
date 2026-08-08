@@ -211,7 +211,9 @@ export class TournamentsService {
       defaultTournamentType: null,
       defaultVisibility: 'PUBLIC',
     });
-    result.data = result.data.map(t => this.mapTournamentFormat(t));
+    result.data = result.data
+      .filter((t) => !['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED'].includes(t.status))
+      .map(t => this.mapTournamentFormat(t));
 
     try {
       await this.redisService.set(cacheKey, JSON.stringify(result), 60);
@@ -235,7 +237,7 @@ export class TournamentsService {
       defaultVisibility: 'PUBLIC',
     });
     result.data = result.data
-      .filter((t) => t.status !== 'DRAFT' && t.status !== 'CANCELLED')
+      .filter((t) => !['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED'].includes(t.status))
       .map(t => this.mapPublicTournament(this.mapTournamentFormat(t)));
     return result;
   }
