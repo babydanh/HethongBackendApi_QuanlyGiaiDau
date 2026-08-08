@@ -35,6 +35,33 @@ export class TournamentsRepository {
     return matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
   }
 
+  /** Preserve unrelated stage settings when a partial round configuration is saved. */
+  private mergeRoundConfig(existing: unknown, incoming: unknown): Record<string, unknown> {
+    const previous = existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {};
+    const next = incoming && typeof incoming === 'object' && !Array.isArray(incoming)
+      ? (incoming as Record<string, unknown>)
+      : {};
+    const merged: Record<string, unknown> = { ...previous, ...next };
+
+    for (const key of ['groupsConfig', 'advancementConfig', 'playoffConfig', 'scoring', 'tiebreakerRules', 'rounds']) {
+      const previousValue = previous[key];
+      const nextValue = next[key];
+      if (
+        previousValue && typeof previousValue === 'object' && !Array.isArray(previousValue) &&
+        nextValue && typeof nextValue === 'object' && !Array.isArray(nextValue)
+      ) {
+        merged[key] = {
+          ...(previousValue as Record<string, unknown>),
+          ...(nextValue as Record<string, unknown>),
+        };
+      }
+    }
+
+    return merged;
+  }
+
   private async resolveDivisionEntryFee(
     tx: Transaction | AppDbOrTx,
     tournament: { entryFee: string | null },
@@ -4098,6 +4125,10 @@ export class TournamentsRepository {
           throw new NotFoundException('Không tìm thấy nội dung thi đấu');
         }
 
+        const mergedRoundConfig = dto.roundConfig === undefined
+          ? undefined
+          : this.mergeRoundConfig(oldRecord.roundConfig, dto.roundConfig);
+
         const [updated] = await tx
           .update(schema.tournamentDivisions)
           .set({
@@ -4118,7 +4149,7 @@ export class TournamentsRepository {
             }),
             ...(dto.venueId !== undefined && { venueId: dto.venueId }),
             ...(dto.bracketType !== undefined && { bracketType: dto.bracketType }),
-            ...(dto.roundConfig !== undefined && { roundConfig: dto.roundConfig }),
+            ...(mergedRoundConfig !== undefined && { roundConfig: mergedRoundConfig }),
             ...(dto.startDate !== undefined && {
               startDate: dto.startDate ? new Date(dto.startDate) : null,
             }),
