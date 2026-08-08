@@ -88,20 +88,27 @@ function normalizeKind(raw: unknown): SportRuleKind | null {
 }
 
 function inferKindFromCategoryName(categorySlug?: string | null, categoryName?: string | null): SportRuleKind | null {
-  const slug = (categorySlug || '').trim().toLowerCase();
-  const name = (categoryName || '').trim().toLowerCase();
+  const normalizeCategoryText = (value?: string | null) => String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase()
+    .replace(/[-_]+/g, ' ')
+    .trim();
+  const slug = normalizeCategoryText(categorySlug);
+  const name = normalizeCategoryText(categoryName);
   const combined = `${slug} ${name}`;
 
-  if (combined.includes('badminton') || combined.includes('cầu lông')) {
+  if (combined.includes('badminton') || combined.includes('cau long')) {
     return 'BADMINTON';
   }
-  if (combined.includes('table-tennis') || combined.includes('bóng bàn') || combined.includes('ping pong')) {
+  if (combined.includes('table tennis') || combined.includes('bong ban') || combined.includes('ping pong')) {
     return 'TABLE_TENNIS';
   }
   if (combined.includes('pickleball')) {
     return 'PICKLEBALL_RALLY';
   }
-  if (combined.includes('tennis') || combined.includes('quần vợt')) {
+  if (combined.includes('tennis') || combined.includes('quan vot')) {
     return 'TENNIS';
   }
 
