@@ -953,7 +953,7 @@ export class TournamentsRepository {
         .limit(1);
 
       if (!tournament) {
-        throw new BadRequestException('Tournament not found');
+        throw new BadRequestException('Giải đấu không tồn tại');
       }
 
       if (tournament.isRanked && data.rankingConsent !== true) {
@@ -1557,7 +1557,7 @@ export class TournamentsRepository {
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
-      if (!tournament) throw new NotFoundException('Tournament not found');
+      if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
       // 1.5 Kiểm tra Exclusion Rule cho đồng đội (partner)
       const [seriesEvent] = await tx
@@ -1822,7 +1822,7 @@ export class TournamentsRepository {
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
 
-      if (!tournament) throw new NotFoundException('Tournament not found');
+      if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
       if (tournament.status === 'IN_PROGRESS' || tournament.status === 'COMPLETED') {
         throw new BadRequestException('Giải đấu đã bắt đầu hoặc kết thúc, không thể rút lui.');
@@ -1914,7 +1914,7 @@ export class TournamentsRepository {
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
 
-      if (!tournament) throw new NotFoundException('Tournament not found');
+      if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
       // 2. Kiểm tra participant
       const [participant] = await tx
@@ -2614,7 +2614,20 @@ export class TournamentsRepository {
         )
       );
 
-    const ids = Array.from(new Set([...created.map(t => t.id), ...joined.map(t => t.id)]));
+    // 3. Tournaments where the user is a co-organizer (invited via staff)
+    const coOrganized = await this.db
+      .select({ id: schema.tournaments.id })
+      .from(schema.tournaments)
+      .innerJoin(schema.tournamentStaff, eq(schema.tournaments.id, schema.tournamentStaff.tournamentId))
+      .where(
+        and(
+          eq(schema.tournamentStaff.userId, userId),
+          eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
+          sql`${schema.tournaments.deletedAt} IS NULL`
+        )
+      );
+
+    const ids = Array.from(new Set([...created.map(t => t.id), ...joined.map(t => t.id), ...coOrganized.map(t => t.id)]));
     if (ids.length === 0) return [];
 
     return await this.db
@@ -3109,7 +3122,7 @@ export class TournamentsRepository {
         .limit(1)
         .then(res => res[0]);
 
-      if (!tournament) throw new BadRequestException('Tournament not found');
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
       // Check division if divisionId provided, else use tournament matchType
       let matchType = tournament.matchType;
@@ -3290,7 +3303,7 @@ export class TournamentsRepository {
       }
 
       if (!participant.isMock) {
-        throw new BadRequestException('Only mock participants can be deleted through this action');
+        throw new BadRequestException('Chỉ có thể xóa các VĐV giả lập bằng hành động này');
       }
 
       const mockRosters = await tx
@@ -3414,7 +3427,7 @@ export class TournamentsRepository {
         .limit(1)
         .then(res => res[0]);
 
-      if (!tournament) throw new BadRequestException('Tournament not found');
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
       let divisionMatchType = tournament.matchType;
       if (divisionId) {
@@ -3446,7 +3459,7 @@ export class TournamentsRepository {
           tournamentId,
           tournamentDivisionId: divisionId ?? null,
           registeredBy: userId,
-          teamName: teamName || 'Guest Team',
+          teamName: teamName || 'Đội khách mời',
           isPaid: true,
           isWildcard: true,
           teamStatus,
@@ -3941,7 +3954,19 @@ export class TournamentsRepository {
         ),
       )
       .limit(1);
-    if (existing) return existing;
+    if (existing) {
+      const [updated] = await this.db
+        .update(schema.tournamentStaff)
+        .set({ role })
+        .where(
+          and(
+            eq(schema.tournamentStaff.tournamentId, tournamentId),
+            eq(schema.tournamentStaff.userId, userId),
+          ),
+        )
+        .returning();
+      return updated ?? existing;
+    }
     const [record] = await this.db
       .insert(schema.tournamentStaff)
       .values({ tournamentId, userId, role, createdBy })
@@ -3962,10 +3987,25 @@ export class TournamentsRepository {
     return record;
   }
 
+  async isCoOrganizer(tournamentId: string, userId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: schema.tournamentStaff.id })
+      .from(schema.tournamentStaff)
+      .where(
+        and(
+          eq(schema.tournamentStaff.tournamentId, tournamentId),
+          eq(schema.tournamentStaff.userId, userId),
+          eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
   async findStaffByTournament(tournamentId: string, role?: string) {
     const conditions: SQL[] = [eq(schema.tournamentStaff.tournamentId, tournamentId)];
     if (role) conditions.push(eq(schema.tournamentStaff.role, role));
-    return this.db
+    const rows = await this.db
       .select({
         userId: schema.tournamentStaff.userId,
         role: schema.tournamentStaff.role,
@@ -3975,8 +4015,15 @@ export class TournamentsRepository {
       })
       .from(schema.tournamentStaff)
       .innerJoin(schema.users, eq(schema.tournamentStaff.userId, schema.users.id))
-      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(and(...conditions));
+    // Người được mời chưa có hồ sơ (profiles) vẫn phải xuất hiện trong danh sách
+    // — dùng leftJoin + fallback để không bị lọc mất khi chưa tạo hồ sơ.
+    return rows.map((row) => ({
+      ...row,
+      fullName: row.fullName || row.email,
+      avatarUrl: row.avatarUrl || null,
+    }));
   }
 
   async findParticipantsForSeeding(tournamentId: string, divisionId?: string) {
@@ -4912,7 +4959,7 @@ export class TournamentsRepository {
       .limit(1)
       .for('update');
 
-    if (!tournament) throw new BadRequestException('Tournament not found');
+    if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
     const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
     if (tCfg.mode !== 'LITE') {

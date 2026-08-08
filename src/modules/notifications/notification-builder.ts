@@ -582,6 +582,21 @@ export const buildRefereeAssignedNotification = (params: {
   }),
 });
 
+export const buildStaffAddedNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  roleLabel: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.STAFF_ADDED,
+  title: 'Bạn được thêm vào ban tổ chức của giải đấu',
+  content: `Bạn đã được thêm vào giải ${params.tournamentName} với vai trò ${params.roleLabel}. Giải đấu hiện nằm trong danh sách quản lý của bạn.`,
+  redirectUrl: getOrganizerTournamentRedirect(params.tournamentId, {
+    tab: 'overview',
+  }),
+});
+
 export const buildRefereeInviteNotification = (params: {
   tournamentId: string;
   tournamentName: string;

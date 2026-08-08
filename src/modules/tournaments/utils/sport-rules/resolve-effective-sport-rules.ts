@@ -184,30 +184,47 @@ function readBoolean(
   return undefined;
 }
 
-function resolveRuleKind(input: SportRuleResolutionInput): SportRuleKind {
+function readExplicitKind(source: Record<string, unknown> | null): SportRuleKind | undefined {
+  if (!source) {
+    return undefined;
+  }
+
+  return normalizeKind(source.kind) || normalizeKind(getScoringView(source)?.kind) || undefined;
+}
+
+function resolveRuleKind(
+  input: SportRuleResolutionInput,
+  overrides: {
+    stageConfig: Record<string, unknown> | null;
+    roundOverride: Record<string, unknown> | null;
+    matchOverride: Record<string, unknown> | null;
+  },
+): SportRuleKind {
   const tournamentRules = asRecord(input.tournamentSportRules);
   const categoryConfig = asRecord(input.categoryConfig);
   const categoryDefaults = getNestedRecord(categoryConfig, 'defaultSportRules');
 
   return (
-    normalizeKind(tournamentRules?.kind) ||
+    readExplicitKind(overrides.matchOverride) ||
+    readExplicitKind(overrides.roundOverride) ||
+    readExplicitKind(overrides.stageConfig) ||
+    readExplicitKind(tournamentRules) ||
     normalizeKind(categoryConfig?.ruleKind) ||
-    normalizeKind(categoryDefaults?.kind) ||
+    readExplicitKind(categoryDefaults) ||
     inferKindFromCategoryName(input.categorySlug, input.categoryName) ||
     'BADMINTON'
   );
 }
 
 export function resolveEffectiveSportRules(input: SportRuleResolutionInput): ResolvedSportRulesConfig {
-  const kind = resolveRuleKind(input);
-  const defaults = SPORT_DEFAULTS[kind];
-
   const tournamentRules = asRecord(input.tournamentSportRules);
   const categoryConfig = asRecord(input.categoryConfig);
   const categoryDefaults = getNestedRecord(categoryConfig, 'defaultSportRules');
   const stageConfig = asRecord(input.stageRoundConfig);
   const roundOverride = getRoundOverride(stageConfig, input.roundNumber);
   const matchOverride = asRecord(input.matchConfig);
+  const kind = resolveRuleKind(input, { stageConfig, roundOverride, matchOverride });
+  const defaults = SPORT_DEFAULTS[kind];
 
   const scoringSources = [
     getScoringView(matchOverride),

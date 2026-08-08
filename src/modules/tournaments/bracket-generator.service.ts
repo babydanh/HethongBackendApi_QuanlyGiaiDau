@@ -14,6 +14,43 @@ import {
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
 
+// Only copy explicit sport-rule overrides into generated group-stage matches.
+// Presets remain the fallback; playoff rules must stay independent.
+const STAGE_SPORT_RULE_KEYS = [
+  'kind',
+  'format',
+  'scoringModel',
+  'bestOf',
+  'best_of',
+  'setsToWin',
+  'sets_to_win',
+  'pointsPerSet',
+  'points_per_set',
+  'mustWinByTwo',
+  'must_win_by_two',
+  'winByTwo',
+  'win_by_two',
+  'deuceEnabled',
+  'deuce_enabled',
+  'maxPoints',
+  'max_points',
+  'maxPointsPerSet',
+  'tiebreakAt',
+  'tiebreak_at',
+  'tiebreakPoints',
+  'tiebreak_points',
+] as const;
+
+function extractExplicitSportRuleOverrides(config: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of STAGE_SPORT_RULE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(config, key) && config[key] != null) {
+      result[key] = config[key];
+    }
+  }
+  return result;
+}
+
 @Injectable()
 export class BracketGeneratorService {
   constructor(
@@ -34,7 +71,7 @@ export class BracketGeneratorService {
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
 
-      if (!tournament) throw new BadRequestException('Tournament not found');
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -62,7 +99,7 @@ export class BracketGeneratorService {
       const numParticipants = participants.length;
       if (numParticipants < 2) {
         throw new BadRequestException(
-          'At least 2 participants required to generate bracket',
+          'Cần ít nhất 2 đội để tạo sơ đồ loại trực tiếp',
         );
       }
 
@@ -209,7 +246,7 @@ export class BracketGeneratorService {
       }
 
       return {
-        message: 'Bracket generated successfully',
+        message: 'Sơ đồ loại trực tiếp đã được tạo thành công',
         stageId: stage.id,
         totalMatches: totalRounds > 0 ? Array.from(matchNodesByRound.values()).reduce((acc, val) => acc + val.length, 0) : 0,
       };
@@ -230,7 +267,7 @@ export class BracketGeneratorService {
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
 
-      if (!tournament) throw new BadRequestException('Tournament not found');
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -636,7 +673,7 @@ export class BracketGeneratorService {
       }
 
       return {
-        message: 'Double Elimination bracket generated successfully',
+        message: 'Sơ đồ nhánh thắng/thua đã được tạo thành công',
         stageId: stage.id,
         totalMatches: allMatchesList.length,
       };
@@ -657,7 +694,7 @@ export class BracketGeneratorService {
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
 
-      if (!tournament) throw new BadRequestException('Tournament not found');
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -685,7 +722,7 @@ export class BracketGeneratorService {
       const numParticipants = participants.length;
       if (numParticipants < 2) {
         throw new BadRequestException(
-          'At least 2 participants required to generate round robin group',
+          'Cần ít nhất 2 đội để tạo bảng đấu vòng tròn',
         );
       }
 
@@ -741,7 +778,7 @@ export class BracketGeneratorService {
       if (!roundRobinLegs || roundRobinLegs < 1) roundRobinLegs = (config.roundRobinLegs as number) || 1;
 
       if (maxGroupSize > 8) {
-        throw new BadRequestException('Max 8 đội/bảng');
+        throw new BadRequestException('Tối đa 8 đội/bảng');
       }
 
       const [stage] = await tx
@@ -872,7 +909,7 @@ export class BracketGeneratorService {
       }
 
       return {
-        message: 'Round Robin group stage generated successfully',
+        message: 'Đã tạo bảng đấu vòng tròn thành công',
         stageId: stage.id,
         totalMatches: allMatchesToInsert.length,
       };
@@ -1062,7 +1099,7 @@ export class BracketGeneratorService {
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
 
-      if (!tournament) throw new BadRequestException('Tournament not found');
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -1095,7 +1132,7 @@ export class BracketGeneratorService {
 
       const numParticipants = participants.length;
       if (numParticipants < 2) {
-        throw new BadRequestException('At least 2 participants required');
+        throw new BadRequestException('Cần ít nhất 2 đội tham gia');
       }
 
       // 3. Đọc division + roundConfig
@@ -1116,6 +1153,12 @@ export class BracketGeneratorService {
       const playoffConfig = (divConfig.playoffConfig || config.playoffConfig || {}) as Record<string, unknown>;
       const scoring = (divConfig.scoring || config.scoring || { winPoints: 3, drawPoints: 1, lossPoints: 0 }) as Record<string, unknown>;
       const tiebreakerRules = (divConfig.tiebreakerRules || config.tiebreakerRules || { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] }) as Record<string, unknown>;
+      const stageSportRuleOverrides = {
+        ...extractExplicitSportRuleOverrides(divConfig),
+        ...(divConfig.rounds && typeof divConfig.rounds === 'object'
+          ? { rounds: divConfig.rounds }
+          : {}),
+      };
 
       const requestedNumGroups = (groupsConfig.numGroups as number) || 2;
       const teamsPerGroup = (groupsConfig.teamsPerGroup as number) || 4;
@@ -1126,29 +1169,29 @@ export class BracketGeneratorService {
       const rtp = (groupsConfig.roundsToPlay as number) || 1;
 
       if (numParticipants < 2) {
-        throw new BadRequestException('At least 2 participants required');
+        throw new BadRequestException('Cần ít nhất 2 đội tham gia');
       }
 
       // Validate groups config. Use the organizer's saved settings, not an inferred group count.
       const actualNumGroups = requestedNumGroups;
       if (!Number.isInteger(actualNumGroups) || actualNumGroups < 2) {
-        throw new BadRequestException('Need at least 2 groups for group stage knockout');
+        throw new BadRequestException('Cần ít nhất 2 bảng để tạo vòng loại trực tiếp');
       }
       if (!Number.isInteger(teamsPerGroup) || teamsPerGroup < 2) {
-        throw new BadRequestException('Each group needs at least 2 teams');
+        throw new BadRequestException('Mỗi bảng cần ít nhất 2 đội');
       }
       if (actualNumGroups > Math.floor(numParticipants / 2)) {
-        throw new BadRequestException('Too many groups for the current participant count');
+        throw new BadRequestException('Số bảng quá nhiều so với số đội tham gia hiện tại');
       }
       if (actualNumGroups * teamsPerGroup < numParticipants) {
-        throw new BadRequestException('Group settings do not have enough slots for all participants');
+        throw new BadRequestException('Cấu hình bảng không đủ chỗ cho tất cả đội tham gia');
       }
       const smallestGroupSize = Math.floor(numParticipants / actualNumGroups);
       if (!Number.isInteger(teamsAdvancing) || teamsAdvancing < 1 || teamsAdvancing >= smallestGroupSize) {
-        throw new BadRequestException('Invalid teams advancing per group');
+        throw new BadRequestException('Số số đi tiếp mỗi bảng không hợp lệ');
       }
       if (allowWildcard && (!Number.isInteger(wildcardTeams) || wildcardTeams < 1 || wildcardTeams > actualNumGroups)) {
-        throw new BadRequestException('Invalid wildcard teams advancing');
+        throw new BadRequestException('Số đội wildcard đi tiếp không hợp lệ');
       }
 
       // 3. Soft-delete các Stage/Group/Matches cũ
@@ -1178,6 +1221,7 @@ export class BracketGeneratorService {
           order: 1,
           tournamentDivisionId: divisionId ?? null,
           roundConfig: {
+            ...stageSportRuleOverrides,
             scoring: { winPoints: winPts, drawPoints: drawPts, lossPoints: lossPts },
             tiebreakerRules,
             advanceConfig: {
@@ -1528,7 +1572,7 @@ export class BracketGeneratorService {
       }
 
       return {
-        message: 'Group Stage + Knockout generated successfully',
+        message: 'Đã tạo bảng + vòng loại trực tiếp thành công',
         stage1Id: stage1.id,
         stage2Id: stage2.id,
         totalGroups: actualNumGroups,
@@ -1551,8 +1595,8 @@ export class BracketGeneratorService {
         .where(eq(schema.tournamentStages.id, stageId))
         .limit(1);
 
-      if (!stage1) throw new BadRequestException('Stage not found');
-      if (stage1.type !== 'ROUND_ROBIN') throw new BadRequestException('Stage must be ROUND_ROBIN');
+      if (!stage1) throw new BadRequestException('Không tìm thấy vòng đấu');
+      if (stage1.type !== 'ROUND_ROBIN') throw new BadRequestException('Vòng đấu phải là hình thức vòng tròn');
 
       const advanceConfig = (stage1.roundConfig as Record<string, unknown>)?.advanceConfig as Record<string, unknown> || {};
       const teamsAdvancing = (advanceConfig.teamsAdvancing as number) || 1;
@@ -1574,7 +1618,7 @@ export class BracketGeneratorService {
         .limit(1);
 
       const stage2 = stages[0];
-      if (!stage2) throw new BadRequestException('Stage 2 (knockout) not found. Generate bracket first.');
+      if (!stage2) throw new BadRequestException('Chưa tìm thấy vòng loại trực tiếp (vòng 2). Vui lòng tạo sơ đồ trước.');
 
       // 3. Load groups + standings for stage 1
       const groups = await tx
@@ -1694,7 +1738,7 @@ export class BracketGeneratorService {
         .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
 
       if (koMatches.length === 0) {
-        throw new BadRequestException('No knockout matches found in stage 2');
+        throw new BadRequestException('Không tìm thấy trận đấu loại trực tiếp ở vòng 2');
       }
 
       // Cross-group seeding: A1 vs B2, B1 vs A2, etc.
@@ -1741,7 +1785,7 @@ export class BracketGeneratorService {
       }
 
       return {
-        message: 'Standings advanced to knockout stage successfully',
+        message: 'Đã đưa đội đi tiếp vào vòng loại trực tiếp thành công',
         stage2Id: stage2.id,
         advancingParticipants: advancingParticipants.length,
       };
