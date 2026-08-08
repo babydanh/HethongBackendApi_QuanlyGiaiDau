@@ -99,7 +99,7 @@ export class LivestreamService {
   private async assertTournamentOperator(tournamentId: string, user: JwtPayload) {
     const tournament = await this.livestreamRepository.findTournamentById(tournamentId);
     if (!tournament) {
-      throw new NotFoundException('Tournament not found');
+      throw new NotFoundException('Giải đấu không tồn tại');
     }
 
     if (this.isAdmin(user) || tournament.createdBy === user.sub) {
@@ -117,7 +117,7 @@ export class LivestreamService {
   private async assertCanControlMatchStream(matchId: string, user: JwtPayload) {
     const match = await this.livestreamRepository.findMatchWithTournament(matchId);
     if (!match) {
-      throw new NotFoundException('Match not found');
+      throw new NotFoundException('Trận đấu không tồn tại');
     }
 
     const isOperator =
@@ -180,7 +180,7 @@ export class LivestreamService {
   async deleteCamera(cameraId: string, user: JwtPayload) {
     const camera = await this.livestreamRepository.findCameraById(cameraId);
     if (!camera) {
-      throw new NotFoundException('Camera not found');
+      throw new NotFoundException('Camera không tồn tại');
     }
 
     await this.assertTournamentOperator(camera.tournamentId, user);
@@ -190,7 +190,7 @@ export class LivestreamService {
   async assignCamera(matchId: string, user: JwtPayload, data: AssignCameraDto) {
     const match = await this.livestreamRepository.findMatchWithTournament(matchId);
     if (!match) {
-      throw new NotFoundException('Match not found');
+      throw new NotFoundException('Trận đấu không tồn tại');
     }
 
     await this.assertTournamentOperator(match.tournamentId, user);
@@ -248,7 +248,7 @@ export class LivestreamService {
   async getMatchPlayback(matchId: string) {
     const match = await this.livestreamRepository.findMatchWithTournament(matchId);
     if (!match) {
-      throw new NotFoundException('Match not found');
+      throw new NotFoundException('Trận đấu không tồn tại');
     }
 
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));

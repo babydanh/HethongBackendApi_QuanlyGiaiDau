@@ -19,7 +19,7 @@ import * as schema from '../../database/schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Cron } from '@nestjs/schedule';
 import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
-import { CreateDivisionDto } from './dto/create-division.dto';
+import { CreateDivisionDto, GenderRestriction } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { resolveEffectiveSportRules } from './utils/sport-rules/resolve-effective-sport-rules';
 import {
@@ -872,8 +872,8 @@ export class TournamentsService {
 
     // Auto-heal corrupted gender restriction in database
     if (finalMatchType === 'MIXED_DOUBLES' && finalGenderRestriction !== 'MIXED') {
-      finalGenderRestriction = 'MIXED';
-      updateTournamentDto.genderRestriction = 'MIXED'; // ensure it overwrites corrupted DB state
+      finalGenderRestriction = GenderRestriction.MIXED;
+      updateTournamentDto.genderRestriction = GenderRestriction.MIXED; // ensure it overwrites corrupted DB state
     } else if ((finalMatchType === 'SINGLES' || finalMatchType === 'DOUBLES') && finalGenderRestriction === 'MIXED') {
       finalGenderRestriction = null;
       updateTournamentDto.genderRestriction = null;
@@ -2947,8 +2947,8 @@ export class TournamentsService {
 
     // Auto-heal corrupted gender restriction in database
     if (nextMatchType === 'MIXED_DOUBLES' && nextGenderRestriction !== 'MIXED') {
-      nextGenderRestriction = 'MIXED';
-      updateDivisionDto.genderRestriction = 'MIXED';
+      nextGenderRestriction = GenderRestriction.MIXED;
+      updateDivisionDto.genderRestriction = GenderRestriction.MIXED;
     } else if ((nextMatchType === 'SINGLES' || nextMatchType === 'DOUBLES') && nextGenderRestriction === 'MIXED') {
       nextGenderRestriction = null;
       updateDivisionDto.genderRestriction = null;
@@ -3022,8 +3022,8 @@ export class TournamentsService {
 
     // Auto-heal corrupted gender restriction in database
     if (nextMatchType === 'MIXED_DOUBLES' && nextGenderRestriction !== 'MIXED') {
-      nextGenderRestriction = 'MIXED';
-      updateDivisionDto.genderRestriction = 'MIXED';
+      nextGenderRestriction = GenderRestriction.MIXED;
+      updateDivisionDto.genderRestriction = GenderRestriction.MIXED;
     } else if ((nextMatchType === 'SINGLES' || nextMatchType === 'DOUBLES') && nextGenderRestriction === 'MIXED') {
       nextGenderRestriction = null;
       updateDivisionDto.genderRestriction = null;
@@ -3124,7 +3124,7 @@ export class TournamentsService {
       status: tournament.status,
       finalized: completed && awards.every((award) => award.participant !== null),
       awards: completed ? awards : [],
-      standings: Array.isArray(standings) ? [] : standings.standings,
+      standings: standingRows,
       matches: matches.map((match) => ({
         id: match.id,
         status: match.status,
