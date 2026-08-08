@@ -40,7 +40,7 @@ const getParticipantTournamentRedirect = (
 const getOrganizerTournamentRedirect = (
   tournamentId: string,
   options?: {
-    tab?: 'basic' | 'schedule' | 'registration' | 'bracket' | 'finance' | 'permissions';
+    tab?: 'overview' | 'basic' | 'schedule' | 'registration' | 'bracket' | 'finance' | 'permissions';
     divisionId?: string;
   },
 ): string =>
