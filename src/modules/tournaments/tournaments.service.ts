@@ -2715,7 +2715,11 @@ export class TournamentsService {
     const isAuthorized = await this.isManager(tournament, userId, systemRoles);
     if (!isAuthorized) throw new ForbiddenException('Bạn không có quyền thêm thành viên ban tổ chức');
     const userToInvite = await this.tournamentsRepository.findUserByEmail(email);
-    if (!userToInvite) throw new NotFoundException('Không tìm thấy tài khoản với email này.');
+    if (!userToInvite) {
+      throw new NotFoundException(
+        `Email "${email}" chưa đăng ký tài khoản trên hệ thống. Người được mời cần có tài khoản trước khi trở thành ${role === 'REFEREE' ? 'trọng tài' : role === 'SPECTATOR' ? 'khách xem' : 'ban tổ chức'}.`,
+      );
+    }
     const record = await this.tournamentsRepository.addStaffMember(id, userToInvite.id, role, userId);
 
     const roleLabel = role === 'REFEREE' ? 'trọng tài' : role === 'SPECTATOR' ? 'khách xem' : 'đồng tổ chức';
@@ -2939,7 +2943,17 @@ export class TournamentsService {
     }
 
     const nextMatchType = updateDivisionDto.matchType ?? division.matchType;
-    const nextGenderRestriction = updateDivisionDto.genderRestriction ?? division.genderRestriction;
+    let nextGenderRestriction = updateDivisionDto.genderRestriction !== undefined ? updateDivisionDto.genderRestriction : division.genderRestriction;
+
+    // Auto-heal corrupted gender restriction in database
+    if (nextMatchType === 'MIXED_DOUBLES' && nextGenderRestriction !== 'MIXED') {
+      nextGenderRestriction = 'MIXED';
+      updateDivisionDto.genderRestriction = 'MIXED';
+    } else if ((nextMatchType === 'SINGLES' || nextMatchType === 'DOUBLES') && nextGenderRestriction === 'MIXED') {
+      nextGenderRestriction = null;
+      updateDivisionDto.genderRestriction = null;
+    }
+
     const categoryConfig = category.categoryConfig as CategoryConfig | null | undefined;
     this.validateMatchTypeAgainstCategory(categoryConfig, nextMatchType, 'division');
     this.validateMatchTypeGenderRestriction(nextMatchType, nextGenderRestriction, 'division');
@@ -3004,7 +3018,17 @@ export class TournamentsService {
     }
 
     const nextMatchType = updateDivisionDto.matchType ?? currentDivision.matchType;
-    const nextGenderRestriction = updateDivisionDto.genderRestriction ?? currentDivision.genderRestriction;
+    let nextGenderRestriction = updateDivisionDto.genderRestriction !== undefined ? updateDivisionDto.genderRestriction : currentDivision.genderRestriction;
+
+    // Auto-heal corrupted gender restriction in database
+    if (nextMatchType === 'MIXED_DOUBLES' && nextGenderRestriction !== 'MIXED') {
+      nextGenderRestriction = 'MIXED';
+      updateDivisionDto.genderRestriction = 'MIXED';
+    } else if ((nextMatchType === 'SINGLES' || nextMatchType === 'DOUBLES') && nextGenderRestriction === 'MIXED') {
+      nextGenderRestriction = null;
+      updateDivisionDto.genderRestriction = null;
+    }
+
     const categoryConfig = category.categoryConfig as CategoryConfig | null | undefined;
     this.validateMatchTypeAgainstCategory(categoryConfig, nextMatchType, 'division');
     this.validateMatchTypeGenderRestriction(nextMatchType, nextGenderRestriction, 'division');
