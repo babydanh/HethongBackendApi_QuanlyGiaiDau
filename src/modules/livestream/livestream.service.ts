@@ -254,6 +254,14 @@ export class LivestreamService {
     if (!match) {
       throw new NotFoundException('Trận đấu không tồn tại');
     }
+    if (
+      match.tournamentVisibility !== 'PUBLIC' ||
+      ['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete'].includes(
+        match.tournamentStatus as string,
+      )
+    ) {
+      throw new NotFoundException('Trận đấu không tồn tại');
+    }
 
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
     if (!stream?.cameraId || !stream.cameraName) {

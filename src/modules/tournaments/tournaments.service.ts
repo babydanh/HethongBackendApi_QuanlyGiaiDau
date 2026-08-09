@@ -452,6 +452,7 @@ export class TournamentsService {
     // Invalidate tournament list cache
     try {
       await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
     } catch (e) {
       // Redis down — ignore
     }
@@ -583,6 +584,7 @@ export class TournamentsService {
     // Invalidate tournament list cache
     try {
       await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
     } catch (e) {
       // Redis down — ignore
     }
@@ -988,6 +990,7 @@ export class TournamentsService {
     // Invalidate tournament list cache
     try {
       await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
     } catch (e) {
       // Redis down — ignore
     }
@@ -1050,6 +1053,7 @@ export class TournamentsService {
       const archived = await this.tournamentsRepository.archive(id, userId);
       try {
         await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
       } catch (e) {
         // Redis down - ignore
       }
@@ -1067,6 +1071,7 @@ export class TournamentsService {
       // Invalidate tournament list cache
       try {
         await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
       } catch (e) {
         // Redis down — ignore
       }
@@ -1096,6 +1101,7 @@ export class TournamentsService {
     // Invalidate tournament list cache
     try {
       await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
     } catch (e) {
       // Redis down — ignore
     }
@@ -1144,6 +1150,7 @@ export class TournamentsService {
       }
       try {
         await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
       } catch (e) {
         // Redis down - ignore
       }
@@ -1160,6 +1167,7 @@ export class TournamentsService {
       // Invalidate tournament list cache
       try {
         await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
       } catch (e) {
         // Redis down — ignore
       }
@@ -1190,6 +1198,7 @@ export class TournamentsService {
     // Invalidate tournament list cache
     try {
       await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
     } catch (e) {
       // Redis down — ignore
     }

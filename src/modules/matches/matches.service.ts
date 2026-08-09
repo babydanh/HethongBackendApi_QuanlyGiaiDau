@@ -377,6 +377,16 @@ export class MatchesService {
     if (!match) {
       throw new NotFoundException('Match not found');
     }
+    const t = match.tournament;
+    if (
+      t &&
+      (t.visibility !== 'PUBLIC' ||
+        ['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete'].includes(
+          t.status as string,
+        ))
+    ) {
+      throw new NotFoundException('Match not found');
+    }
     if (match.status === 'ONGOING') {
       try {
         const live = await this.redisService.hgetall(`match:live:${id}`);

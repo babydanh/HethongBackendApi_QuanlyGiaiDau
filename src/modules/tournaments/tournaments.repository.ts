@@ -143,10 +143,8 @@ export class TournamentsRepository {
     // Always exclude soft-deleted tournaments
     conditions.push(sql`${schema.tournaments.deletedAt} IS NULL`);
 
-    // Exclude DRAFT, PENDING_APPROVAL, SUSPENDED, CANCELLED, and PENDING_DELETE tournaments from public listing (unless createdBy is specified)
-    if (!createdBy) {
-      conditions.push(sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`);
-    }
+    // Exclude DRAFT, PENDING_APPROVAL, SUSPENDED, CANCELLED, and PENDING_DELETE tournaments from public listing
+    conditions.push(sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`);
 
     if (search) {
       const pattern = `%${search}%`;
@@ -3040,7 +3038,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournaments.parentId, id),
-          sql`${schema.tournaments.deletedAt} IS NULL`
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+          sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`
         )
       );
 
