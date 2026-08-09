@@ -142,9 +142,9 @@ export class TournamentsRepository {
     // Always exclude soft-deleted tournaments
     conditions.push(sql`${schema.tournaments.deletedAt} IS NULL`);
 
-    // Exclude DRAFT, PENDING_APPROVAL, SUSPENDED, and CANCELLED tournaments from public listing (unless createdBy is specified)
+    // Exclude DRAFT, PENDING_APPROVAL, SUSPENDED, CANCELLED, and PENDING_DELETE tournaments from public listing (unless createdBy is specified)
     if (!createdBy) {
-      conditions.push(sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`);
+      conditions.push(sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`);
     }
 
     if (search) {
@@ -1003,13 +1003,9 @@ export class TournamentsRepository {
         }
       }
 
-      // 2. Kiểm tra trạng thái - phải mở đăng ký (REGISTRATION_OPEN hoặc UPCOMING) hoặc cho phép nếu DRAFT đi kèm inviteCode trùng khớp
+      // 2. Kiểm tra trạng thái - chỉ mở đăng ký khi REGISTRATION_OPEN hoặc UPCOMING (DRAFT không cho đăng ký dù có mã mời)
       if (tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
-        if (tournament.status === 'DRAFT' && inviteCode && tournament.inviteCode === inviteCode) {
-          // Cho phép đăng ký sớm bằng mã mời khi giải vẫn là DRAFT
-        } else {
-          throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký.');
-        }
+        throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký.');
       }
 
       // 3. Kiểm tra thời hạn đăng ký
@@ -2090,6 +2086,7 @@ export class TournamentsRepository {
         id: participant.id,
         teamName: participant.teamName,
         teamStatus: participant.teamStatus,
+        partnerUserId: participant.partnerUserId,
         isPaid: participant.isPaid,
         tournamentDivisionId: participant.tournamentDivisionId,
         registeredAt: participant.registeredAt,

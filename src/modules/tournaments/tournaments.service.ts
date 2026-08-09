@@ -37,6 +37,10 @@ import {
   buildParticipantRegistrationSuccessNotification,
   buildParticipantTeammateJoinedNotification,
   buildParticipantWithdrawnNotification,
+  buildPartnerInviteAcceptedNotification,
+  buildPartnerInviteCancelledNotification,
+  buildPartnerInviteReceivedNotification,
+  buildPartnerInviteRejectedNotification,
   buildRefereeInviteAcceptedNotification,
   buildRefereeInviteDeclinedNotification,
   buildRefereeInviteNotification,
@@ -212,7 +216,7 @@ export class TournamentsService {
       defaultVisibility: 'PUBLIC',
     });
     result.data = result.data
-      .filter((t) => !['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED'].includes(t.status))
+      .filter((t) => !['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE'].includes(t.status))
       .map(t => this.mapTournamentFormat(t));
 
     try {
@@ -237,7 +241,7 @@ export class TournamentsService {
       defaultVisibility: 'PUBLIC',
     });
     result.data = result.data
-      .filter((t) => !['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED'].includes(t.status))
+      .filter((t) => !['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE'].includes(t.status))
       .map(t => this.mapPublicTournament(this.mapTournamentFormat(t)));
     return result;
   }
@@ -274,7 +278,7 @@ export class TournamentsService {
     const isOwner = userId && tournament.createdBy === userId;
     const isAdmin = systemRoles.includes('ADMIN');
 
-    if (['DRAFT', 'PENDING_APPROVAL'].includes(tournament.status) && !isOwner && !isAdmin) {
+    if (['DRAFT', 'PENDING_APPROVAL', 'PENDING_DELETE'].includes(tournament.status) && !isOwner && !isAdmin) {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
 
@@ -1453,20 +1457,13 @@ export class TournamentsService {
   ) {
     const status = tournament.status || '';
     const allowDraft = options?.allowDraft === true;
-    const inviteCode = options?.inviteCode;
-    const matchesDraftInvite =
-      status === 'DRAFT' &&
-      !!inviteCode &&
-      !!tournament.inviteCode &&
-      tournament.inviteCode === inviteCode;
 
     if (
       status !== 'REGISTRATION_OPEN' &&
       status !== 'UPCOMING' &&
-      !allowDraft &&
-      !matchesDraftInvite
+      !allowDraft
     ) {
-      throw new BadRequestException('Tournament registration is closed');
+      throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký');
     }
 
     if (
@@ -1567,13 +1564,16 @@ export class TournamentsService {
       } else if (result.participant.teamStatus === 'PENDING_PARTNER' && partnerUser) {
         // VĐV 1 đã nhập email/SĐT VĐV 2 — gửi thông báo mời cho VĐV 2
         notifications.push(
-          this.notificationsService.sendNotification({
-            receiverId: partnerUser.id,
-            type: 'PARTNER_INVITE_RECEIVED',
-            title: 'Bạn có lời mời ghép đôi!',
-            content: `${tournament.name}: ${result.participant.teamName} mời bạn làm đồng đội. Xác nhận trong tối đa 1 giờ hoặc trước khi đóng đăng ký.`,
-            redirectUrl: `/tournaments/${id}/participants/${result.participant.id}/accept-partner`,
-          }),
+          this.notificationsService.sendNotification(
+            buildPartnerInviteReceivedNotification({
+              tournamentId: id,
+              tournamentName: tournament.name,
+              receiverId: partnerUser.id,
+              senderId: userId,
+              teamName: result.participant.teamName,
+              participantId: result.participant.id,
+            }),
+          ),
         );
       } else if (result.participant.teamStatus === 'PENDING_APPROVAL') {
         notifications.push(
@@ -1769,6 +1769,22 @@ export class TournamentsService {
           }),
         );
       }
+
+      // Nếu còn lời mời ghép đôi chưa xử lý — báo cho người được mời là lời mời đã bị thu hồi
+      if (
+        currentRegistration.registered &&
+        currentRegistration.participant &&
+        currentRegistration.participant.teamStatus === 'PENDING_PARTNER' &&
+        currentRegistration.participant.partnerUserId
+      ) {
+        await this.notificationsService.sendNotification(
+          buildPartnerInviteCancelledNotification({
+            receiverId: currentRegistration.participant.partnerUserId,
+            tournamentId,
+            divisionId: currentRegistration.participant.tournamentDivisionId,
+          }),
+        );
+      }
     } catch (err) {
       console.error('Failed to send withdraw notification:', err);
     }
@@ -1820,6 +1836,7 @@ export class TournamentsService {
     if (!tournament) {
       throw new NotFoundException('Không tìm thấy giải đấu cho mã mời này');
     }
+    this.assertInviteReachable(tournament);
     return this.mapTournamentFormat(tournament);
   }
 
@@ -1828,8 +1845,26 @@ export class TournamentsService {
     if (!tournament) {
       throw new NotFoundException('Không tìm thấy giải đấu cho mã mời này');
     }
+    this.assertInviteReachable(tournament);
 
     return this.register(tournament.id, userId, registerTournamentDto, inviteCode);
+  }
+
+  /**
+   * Mã mời chỉ có hiệu lực khi giải đã được công bố và không bị khóa.
+   * Giải DRAFT/PENDING_APPROVAL ẩn hoàn toàn; SUSPENDED/CANCELLED chặn truy cập.
+   */
+  private assertInviteReachable(tournament: { status?: string | null }) {
+    const status = tournament.status || '';
+    if (['DRAFT', 'PENDING_APPROVAL', 'PENDING_DELETE'].includes(status)) {
+      throw new NotFoundException('Không tìm thấy giải đấu cho mã mời này');
+    }
+    if (status === 'SUSPENDED') {
+      throw new ForbiddenException('Giải đấu đang bị tạm đình chỉ do vi phạm điều khoản dịch vụ');
+    }
+    if (status === 'CANCELLED') {
+      throw new ForbiddenException('Giải đấu đã bị cấm hoặc hủy vĩnh viễn');
+    }
   }
 
   async regenerateInviteCode(id: string, userId: string, systemRoles: string[] = []) {
@@ -3491,13 +3526,13 @@ export class TournamentsService {
   async acceptPartnerInvite(participantId: string, partnerUserId: string) {
     const updated = await this.tournamentsRepository.acceptPartnerInvite(participantId, partnerUserId);
     if (updated && updated.registeredBy) {
-      await this.notificationsService.sendNotification({
-        receiverId: updated.registeredBy,
-        type: 'PARTNER_INVITE_ACCEPTED',
-        title: 'Đồng đội đã chấp nhận lời mời ghép đôi!',
-        content: `Đồng đội của bạn đã đồng ý tham gia giải đấu. Đội của bạn hiện đã hợp lệ!`,
-        redirectUrl: `/tournaments/${updated.tournamentId}`,
-      });
+      await this.notificationsService.sendNotification(
+        buildPartnerInviteAcceptedNotification({
+          receiverId: updated.registeredBy,
+          tournamentId: updated.tournamentId,
+          divisionId: updated.tournamentDivisionId,
+        }),
+      );
     }
     return updated;
   }
@@ -3505,13 +3540,13 @@ export class TournamentsService {
   async rejectPartnerInvite(participantId: string, partnerUserId: string) {
     const updated = await this.tournamentsRepository.rejectPartnerInvite(participantId, partnerUserId);
     if (updated && updated.registeredBy) {
-      await this.notificationsService.sendNotification({
-        receiverId: updated.registeredBy,
-        type: 'PARTNER_INVITE_REJECTED',
-        title: 'Lời mời ghép đôi đã bị từ chối/hết hạn',
-        content: `Đồng đội đã từ chối lời mời hoặc thời hạn ghép đôi đã kết thúc. Suất giữ chỗ đã được giải phóng.`,
-        redirectUrl: `/tournaments/${updated.tournamentId}`,
-      });
+      await this.notificationsService.sendNotification(
+        buildPartnerInviteRejectedNotification({
+          receiverId: updated.registeredBy,
+          tournamentId: updated.tournamentId,
+          divisionId: updated.tournamentDivisionId,
+        }),
+      );
     }
     return updated;
   }
