@@ -10,6 +10,7 @@ import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
 import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { BracketGeneratorService } from './bracket-generator.service';
@@ -2215,11 +2216,51 @@ export class TournamentsService {
             categorySlug: category.slug,
           }),
           sourceLabel: 'roundConfig',
+          allowRoundStructure: true,
           allowRoundMetadata: true,
         });
     }
 
     return this.tournamentsRepository.updateStage(stageId, userId, data);
+  }
+
+  async updateGroup(groupId: string, userId: string, data: UpdateGroupDto, systemRoles: string[] = []) {
+    const group = await this.tournamentsRepository.findGroupById(groupId);
+    if (!group) throw new NotFoundException('Bảng đấu không tồn tại');
+
+    const tournament = await this.tournamentsRepository.findById(group.tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    let isAuthorized = await this.isManager(tournament, userId, systemRoles);
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+      isAuthorized = member?.role === 'OWNER' || member?.role === 'MODERATOR';
+    }
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền cập nhật bảng đấu này');
+    }
+
+    if (data.roundConfig) {
+      const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
+      if (!category) throw new NotFoundException('Hạng đấu không tồn tại');
+      validateSportRuleConfig(data.roundConfig, {
+        expectedKind: inferExpectedSportRuleKind({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        allowedKinds: inferAllowedSportRuleKinds({
+          categoryConfig: category.categoryConfig as Record<string, unknown> | null | undefined,
+          categoryName: category.name,
+          categorySlug: category.slug,
+        }),
+        sourceLabel: 'group.roundConfig',
+        allowRoundStructure: true,
+        allowRoundMetadata: true,
+      });
+    }
+
+    return this.tournamentsRepository.updateGroup(groupId, userId, data);
   }
 
   async validateInvite(id: string, inviteCode: string) {

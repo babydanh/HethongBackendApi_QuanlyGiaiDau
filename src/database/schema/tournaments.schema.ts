@@ -155,6 +155,7 @@ export const tournamentGroups = pgTable('tournament_groups', {
     .references(() => tournamentStages.id, { onDelete: 'cascade' })
     .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
+  roundConfig: jsonb('round_config'),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => ({
   idxGroupsStageId: index('idx_groups_stage_id').on(table.stageId),

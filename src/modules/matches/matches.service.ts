@@ -198,6 +198,7 @@ export class MatchesService {
       categoryName: match.tournament?.categoryName,
       categorySlug: match.tournament?.categorySlug,
       stageRoundConfig: match.stage?.roundConfig as Record<string, unknown> | null | undefined,
+      groupConfig: match.group?.roundConfig as Record<string, unknown> | null | undefined,
       roundNumber: match.roundNumber,
       matchConfig: match.matchConfig as Record<string, unknown> | null | undefined,
     });
@@ -773,6 +774,8 @@ export class MatchesService {
         categoryName: existing.tournament?.categoryName,
         categorySlug: existing.tournament?.categorySlug,
         stageRoundConfig: existing.stage?.roundConfig as Record<string, unknown> | null | undefined,
+        groupConfig: existing.group?.roundConfig as Record<string, unknown> | null | undefined,
+        roundNumber: existing.roundNumber,
       }).kind;
 
       validateSportRuleConfig(data.matchConfig, {

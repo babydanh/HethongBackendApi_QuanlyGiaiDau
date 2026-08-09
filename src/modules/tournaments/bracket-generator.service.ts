@@ -13,43 +13,15 @@ import {
   resolveWinnersLoserTargetIndex,
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
-
-// Only copy explicit sport-rule overrides into generated group-stage matches.
-// Presets remain the fallback; playoff rules must stay independent.
-const STAGE_SPORT_RULE_KEYS = [
-  'kind',
-  'format',
-  'scoringModel',
-  'bestOf',
-  'best_of',
-  'setsToWin',
-  'sets_to_win',
-  'pointsPerSet',
-  'points_per_set',
-  'mustWinByTwo',
-  'must_win_by_two',
-  'winByTwo',
-  'win_by_two',
-  'deuceEnabled',
-  'deuce_enabled',
-  'maxPoints',
-  'max_points',
-  'maxPointsPerSet',
-  'tiebreakAt',
-  'tiebreak_at',
-  'tiebreakPoints',
-  'tiebreak_points',
-] as const;
-
-function extractExplicitSportRuleOverrides(config: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key of STAGE_SPORT_RULE_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(config, key) && config[key] != null) {
-      result[key] = config[key];
-    }
-  }
-  return result;
-}
+import {
+  allocateRoundRobinGroups,
+  asConfigRecord,
+  buildRoundRobinSchedule,
+  extractSportRuleOverrides,
+  resolveConfiguredGroups,
+  resolveRoundRobinGroupCount,
+  resolveRoundsToPlay,
+} from './utils/round-robin-config';
 
 @Injectable()
 export class BracketGeneratorService {
@@ -744,41 +716,54 @@ export class BracketGeneratorService {
       const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
 
       // Đọc config từ division.roundConfig (ưu tiên) hoặc tournament config
-      let maxGroupSize = (config.roundRobinGroupSize as number) || 8;
-      let winPoints = 3, drawPoints = 1, lossPoints = 0;
-      let tiebreakerRules: Record<string, unknown> = { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] };
-      let roundRobinLegs = 1;
-
+      let divisionConfig: Record<string, unknown> = {};
       if (divisionId) {
         const divisions = await tx
           .select()
           .from(schema.tournamentDivisions)
           .where(eq(schema.tournamentDivisions.id, divisionId))
           .limit(1);
-        const div = divisions[0];
-        if (div) {
-          const rc = div.roundConfig as Record<string, unknown> | null;
-          if (rc) {
-            const gs = rc.groupsConfig as Record<string, unknown> | null;
-            if (gs?.maxGroupSize && Number(gs.maxGroupSize) <= 8) {
-              maxGroupSize = Number(gs.maxGroupSize);
-            }
-            const sc = rc.scoring as Record<string, unknown> | null;
-            if (sc) {
-              if (typeof sc.winPoints === 'number') winPoints = Number(sc.winPoints);
-              if (typeof sc.drawPoints === 'number') drawPoints = Number(sc.drawPoints);
-              if (typeof sc.lossPoints === 'number') lossPoints = Number(sc.lossPoints);
-            }
-            if (rc.tiebreakerRules) tiebreakerRules = rc.tiebreakerRules as Record<string, unknown>;
-            const rtp = rc.roundsToPlay;
-            if (typeof rtp === 'number' && rtp > 0 && rtp <= 20) roundRobinLegs = rtp;
-          }
-        }
+        divisionConfig = asConfigRecord(divisions[0]?.roundConfig) || {};
       }
-      if (!roundRobinLegs || roundRobinLegs < 1) roundRobinLegs = (config.roundRobinLegs as number) || 1;
 
-      if (maxGroupSize > 8) {
+      const tournamentGroupsConfig = asConfigRecord(config.groupsConfig) || {};
+      const divisionGroupsConfig = asConfigRecord(divisionConfig.groupsConfig) || {};
+      const groupsConfig = { ...tournamentGroupsConfig, ...divisionGroupsConfig };
+      const scoring = {
+        ...(asConfigRecord(config.scoring) || {}),
+        ...(asConfigRecord(divisionConfig.scoring) || {}),
+        ...(asConfigRecord(groupsConfig.scoring) || {}),
+      };
+      const maxGroupSize = Number(
+        groupsConfig.teamsPerGroup ??
+        groupsConfig.teams_per_group ??
+        groupsConfig.maxGroupSize ??
+        config.roundRobinGroupSize ??
+        8,
+      );
+      const winPoints = typeof scoring.winPoints === 'number' ? scoring.winPoints : 3;
+      const drawPoints = typeof scoring.drawPoints === 'number' ? scoring.drawPoints : 1;
+      const lossPoints = typeof scoring.lossPoints === 'number' ? scoring.lossPoints : 0;
+      const tiebreakerRules = {
+        primary: 'H2H_POINTS',
+        secondary: ['SET_DIFF', 'POINT_DIFF'],
+        ...(asConfigRecord(config.tiebreakerRules) || {}),
+        ...(asConfigRecord(divisionConfig.tiebreakerRules) || {}),
+      };
+      const roundRobinLegs = resolveRoundsToPlay(divisionConfig, { groupsConfig }, config);
+      const configuredGroups = resolveConfiguredGroups(divisionConfig, config);
+      const stageSportRuleOverrides = {
+        ...extractSportRuleOverrides(config),
+        ...extractSportRuleOverrides(tournamentGroupsConfig),
+        ...extractSportRuleOverrides(divisionConfig),
+        ...extractSportRuleOverrides(divisionGroupsConfig),
+      };
+
+      if (!Number.isInteger(maxGroupSize) || maxGroupSize < 2 || maxGroupSize > 8) {
         throw new BadRequestException('Tối đa 8 đội/bảng');
+      }
+      if (!Number.isInteger(roundRobinLegs) || roundRobinLegs < 1 || roundRobinLegs > 5) {
+        throw new BadRequestException('Số lượt vòng tròn phải nằm trong khoảng 1-5');
       }
 
       const [stage] = await tx
@@ -790,7 +775,13 @@ export class BracketGeneratorService {
           order: 1,
           tournamentDivisionId: divisionId ?? null,
           roundConfig: {
-            scoring: { winPoints, drawPoints, lossPoints },
+            ...stageSportRuleOverrides,
+            scoring: {
+              ...(asConfigRecord(stageSportRuleOverrides.scoring) || {}),
+              winPoints,
+              drawPoints,
+              lossPoints,
+            },
             tiebreakerRules,
             maxGroupSize,
             roundsToPlay: roundRobinLegs,
@@ -811,14 +802,23 @@ export class BracketGeneratorService {
         }
       }
 
-      const numGroups = Math.max(1, Math.ceil(numParticipants / maxGroupSize));
-      const groupParticipants: Array<Array<typeof participants[0]>> = Array.from({ length: numGroups }, () => []);
-      // Snake draft: vòng 0 forward (G0→Gn), vòng 1 backward (Gn→G0), vòng 2 forward...
-      for (let i = 0; i < sortedParticipants.length; i++) {
-        const round = Math.floor(i / numGroups);
-        const pos = i % numGroups;
-        const groupIndex = round % 2 === 0 ? pos : (numGroups - 1 - pos);
-        groupParticipants[groupIndex].push(sortedParticipants[i]);
+      const requestedCount = groupsConfig.numGroups ?? groupsConfig.num_groups ?? config.numberOfGroups;
+      const numGroups = resolveRoundRobinGroupCount(
+        { ...groupsConfig, ...(requestedCount !== undefined ? { numGroups: requestedCount } : {}) },
+        configuredGroups,
+        numParticipants,
+        maxGroupSize,
+      );
+      let groupParticipants: Array<Array<typeof participants[0]>>;
+      try {
+        groupParticipants = allocateRoundRobinGroups(
+          sortedParticipants,
+          numGroups,
+          configuredGroups,
+          maxGroupSize,
+        );
+      } catch (error) {
+        throw new BadRequestException(error instanceof Error ? error.message : 'Cấu hình bảng không hợp lệ');
       }
 
       // Tạo groups + standings
@@ -828,7 +828,8 @@ export class BracketGeneratorService {
           .insert(schema.tournamentGroups)
           .values({
             stageId: stage.id,
-            name: numGroups > 1 ? `Bảng ${String.fromCharCode(65 + g)}` : 'Vòng bảng',
+            name: configuredGroups[g]?.name || (numGroups > 1 ? `Bảng ${String.fromCharCode(65 + g)}` : 'Vòng bảng'),
+            roundConfig: configuredGroups[g]?.roundConfig || null,
           })
           .returning();
         groups.push(newGroup);
@@ -856,51 +857,27 @@ export class BracketGeneratorService {
       for (let g = 0; g < groups.length; g++) {
         const group = groups[g];
         const participantIds = groupParticipants[g].map(p => p.id);
-        const teamList: (string | null)[] = [...participantIds];
-        if (teamList.length < 2) continue;
-        if (teamList.length % 2 !== 0) teamList.push(null);
-
-        const N = teamList.length;
-        const roundsCount = N - 1;
-        const matchesPerRound = N / 2;
-
-        for (let leg = 0; leg < roundRobinLegs; leg++) {
-          const teams = [...teamList];
-
-          for (let round = 1; round <= roundsCount; round++) {
-            // Mỗi leg = 1 vòng đấu hoàn chỉnh (tất cả teams gặp nhau 1 lần)
-            // roundNumber = leg + 1 (Vòng 1: lượt đi, Vòng 2: lượt về...)
-            const currentRoundNumber = leg + 1;
-
-            for (let i = 0; i < matchesPerRound; i++) {
-              const home = teams[i];
-              const away = teams[N - 1 - i];
-              if (home && away) {
-                allMatchesToInsert.push({
-                  id: randomUUID(),
-                  groupId: group.id,
-                  roundNumber: currentRoundNumber,
-                  matchOrder: globalMatchCounter++,
-                  bracketBranch: 'MAIN',
-                  status: 'SCHEDULED',
-                  isBye: false,
-                  participant1Id: (leg % 2 === 0) ? home : away,
-                  participant2Id: (leg % 2 === 0) ? away : home,
-                  winnerId: null,
-                  p1SetsWon: 0,
-                  p2SetsWon: 0,
-                  totalSetsPlayed: 0,
-                  nextMatchId: null,
-                  loserNextMatchId: null,
-                  tournamentId,
-                  stageId: stage.id,
-                  updatedAt: new Date(),
-                });
-              }
-            }
-            const last = teams.pop()!;
-            teams.splice(1, 0, last);
-          }
+        for (const scheduled of buildRoundRobinSchedule(participantIds, roundRobinLegs)) {
+          allMatchesToInsert.push({
+            id: randomUUID(),
+            groupId: group.id,
+            roundNumber: scheduled.roundNumber,
+            matchOrder: globalMatchCounter++,
+            bracketBranch: 'MAIN',
+            status: 'SCHEDULED',
+            isBye: false,
+            participant1Id: scheduled.participant1Id,
+            participant2Id: scheduled.participant2Id,
+            winnerId: null,
+            p1SetsWon: 0,
+            p2SetsWon: 0,
+            totalSetsPlayed: 0,
+            nextMatchId: null,
+            loserNextMatchId: null,
+            tournamentId,
+            stageId: stage.id,
+            updatedAt: new Date(),
+          });
         }
       }
 
@@ -971,7 +948,7 @@ export class BracketGeneratorService {
     tx: any,
     tournamentId: string,
     stageId: string,
-    groupId: string,
+    configuredGroupId: string,
     standings: Array<{ participantId: string; totalPoints: number; pointsFor: number; pointsAgainst: number }>,
     _tiebreakerRules: { primary: string; secondary: string[] },
   ): Promise<string[]> {
@@ -995,7 +972,7 @@ export class BracketGeneratorService {
         const groups = await tx
           .select()
           .from(schema.tournamentGroups)
-          .where(eq(schema.tournamentGroups.stageId, stageId))
+          .where(eq(schema.tournamentGroups.id, configuredGroupId))
           .limit(1);
         const groupId = groups[0]?.id;
         if (groupId) {
@@ -1028,7 +1005,7 @@ export class BracketGeneratorService {
         const groups = await tx
           .select()
           .from(schema.tournamentGroups)
-          .where(eq(schema.tournamentGroups.stageId, stageId))
+          .where(eq(schema.tournamentGroups.id, configuredGroupId))
           .limit(1);
         const groupId = groups[0]?.id;
         if (groupId) {
@@ -1148,25 +1125,66 @@ export class BracketGeneratorService {
 
       const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
       const divConfig = division?.roundConfig as Record<string, unknown> | null || {};
-      const groupsConfig = (divConfig.groupsConfig || config.groupsConfig || {}) as Record<string, unknown>;
-      const advancementConfig = (divConfig.advancementConfig || config.advancementConfig || {}) as Record<string, unknown>;
-      const playoffConfig = (divConfig.playoffConfig || config.playoffConfig || {}) as Record<string, unknown>;
-      const scoring = (divConfig.scoring || config.scoring || { winPoints: 3, drawPoints: 1, lossPoints: 0 }) as Record<string, unknown>;
-      const tiebreakerRules = (divConfig.tiebreakerRules || config.tiebreakerRules || { primary: 'H2H_POINTS', secondary: ['SET_DIFF', 'POINT_DIFF'] }) as Record<string, unknown>;
-      const stageSportRuleOverrides = {
-        ...extractExplicitSportRuleOverrides(divConfig),
-        ...(divConfig.rounds && typeof divConfig.rounds === 'object'
-          ? { rounds: divConfig.rounds }
-          : {}),
+      const tournamentGroupsConfig = asConfigRecord(config.groupsConfig) || {};
+      const divisionGroupsConfig = asConfigRecord(divConfig.groupsConfig) || {};
+      const groupsConfig = { ...tournamentGroupsConfig, ...divisionGroupsConfig };
+      const advancementConfig = {
+        ...(asConfigRecord(config.advancementConfig) || {}),
+        ...(asConfigRecord(divConfig.advancementConfig) || {}),
       };
+      const playoffConfig = {
+        ...(asConfigRecord(config.playoffConfig) || {}),
+        ...(asConfigRecord(divConfig.playoffConfig) || {}),
+      };
+      const scoring = {
+        winPoints: 3,
+        drawPoints: 1,
+        lossPoints: 0,
+        ...(asConfigRecord(config.scoring) || {}),
+        ...(asConfigRecord(divConfig.scoring) || {}),
+        ...(asConfigRecord(groupsConfig.scoring) || {}),
+      };
+      const tiebreakerRules = {
+        primary: 'H2H_POINTS',
+        secondary: ['SET_DIFF', 'POINT_DIFF'],
+        ...(asConfigRecord(config.tiebreakerRules) || {}),
+        ...(asConfigRecord(divConfig.tiebreakerRules) || {}),
+      };
+      const stageSportRuleOverrides = {
+        ...extractSportRuleOverrides(config),
+        ...extractSportRuleOverrides(tournamentGroupsConfig),
+        ...extractSportRuleOverrides(divConfig),
+        ...extractSportRuleOverrides(divisionGroupsConfig),
+      };
+      const configuredGroups = resolveConfiguredGroups(divConfig, config);
+      const playoffSportRuleOverrides = extractSportRuleOverrides(playoffConfig);
 
-      const requestedNumGroups = (groupsConfig.numGroups as number) || 2;
-      const teamsPerGroup = (groupsConfig.teamsPerGroup as number) || 4;
-      const teamsAdvancing = (advancementConfig.teamsAdvancing as number) || 1;
+      const requestedNumGroups = resolveRoundRobinGroupCount(
+        { ...groupsConfig, ...(config.numberOfGroups !== undefined && groupsConfig.numGroups === undefined && groupsConfig.num_groups === undefined
+          ? { numGroups: config.numberOfGroups }
+          : {}) },
+        configuredGroups,
+        numParticipants,
+        Number(groupsConfig.teamsPerGroup ?? groupsConfig.teams_per_group) || 8,
+      );
+      const configuredGroupCapacity = configuredGroups.reduce(
+        (maximum, group) => Math.max(maximum, group.participantIds.length),
+        0,
+      );
+      const teamsPerGroup = Number(groupsConfig.teamsPerGroup ?? groupsConfig.teams_per_group) || Math.max(
+        2,
+        configuredGroupCapacity,
+        Math.ceil(numParticipants / requestedNumGroups),
+      );
+      const teamsAdvancing = Number(
+        advancementConfig.teamsAdvancing ?? config.teamsAdvancingPerGroup ?? 1,
+      );
       const allowWildcard = (advancementConfig.allowWildcardThird as boolean) || false;
       const wildcardTeams = (advancementConfig.wildcardTeamsAdvancing as number) || 0;
-      const playoffType = (playoffConfig.type as string) || 'SINGLE_ELIMINATION';
-      const rtp = (groupsConfig.roundsToPlay as number) || 1;
+      const playoffType = String(
+        playoffConfig.type ?? config.knockoutBracketType ?? 'SINGLE_ELIMINATION',
+      );
+      const rtp = resolveRoundsToPlay(divConfig, { groupsConfig }, config);
 
       if (numParticipants < 2) {
         throw new BadRequestException('Cần ít nhất 2 đội tham gia');
@@ -1192,6 +1210,9 @@ export class BracketGeneratorService {
       }
       if (allowWildcard && (!Number.isInteger(wildcardTeams) || wildcardTeams < 1 || wildcardTeams > actualNumGroups)) {
         throw new BadRequestException('Số đội wildcard đi tiếp không hợp lệ');
+      }
+      if (!Number.isInteger(rtp) || rtp < 1 || rtp > 5) {
+        throw new BadRequestException('Số lượt vòng bảng phải nằm trong khoảng 1-5');
       }
 
       // 3. Soft-delete các Stage/Group/Matches cũ
@@ -1222,7 +1243,12 @@ export class BracketGeneratorService {
           tournamentDivisionId: divisionId ?? null,
           roundConfig: {
             ...stageSportRuleOverrides,
-            scoring: { winPoints: winPts, drawPoints: drawPts, lossPoints: lossPts },
+            scoring: {
+              ...(asConfigRecord(stageSportRuleOverrides.scoring) || {}),
+              winPoints: winPts,
+              drawPoints: drawPts,
+              lossPoints: lossPts,
+            },
             tiebreakerRules,
             advanceConfig: {
               teamsAdvancing: advancementConfig.teamsAdvancing || 1,
@@ -1248,26 +1274,16 @@ export class BracketGeneratorService {
         }
       }
 
-      const baseSize = Math.floor(numParticipants / actualNumGroups);
-      const extra = numParticipants % actualNumGroups;
-      const groupSizes: number[] = [];
-      for (let g = 0; g < actualNumGroups; g++) {
-        groupSizes.push(g < extra ? baseSize + 1 : baseSize);
-      }
-
-      // Snake-draft participants into groups (alternating direction per round)
-      const groupParticipants: Array<Array<typeof participants[0]>> = Array.from({ length: actualNumGroups }, () => []);
-      let participantIndex = 0;
-      const maxRound = Math.max(...groupSizes);
-      for (let round = 0; round < maxRound; round++) {
-        const groupsInOrder = round % 2 === 0
-          ? Array.from({ length: actualNumGroups }, (_, i) => i)          // forward
-          : Array.from({ length: actualNumGroups }, (_, i) => actualNumGroups - 1 - i); // backward
-        for (const g of groupsInOrder) {
-          if (round < groupSizes[g] && participantIndex < sortedParticipants.length) {
-            groupParticipants[g].push(sortedParticipants[participantIndex++]);
-          }
-        }
+      let groupParticipants: Array<Array<typeof participants[0]>>;
+      try {
+        groupParticipants = allocateRoundRobinGroups(
+          sortedParticipants,
+          actualNumGroups,
+          configuredGroups,
+          teamsPerGroup,
+        );
+      } catch (error) {
+        throw new BadRequestException(error instanceof Error ? error.message : 'Cấu hình bảng không hợp lệ');
       }
 
       // Tạo groups + standings
@@ -1277,7 +1293,8 @@ export class BracketGeneratorService {
           .insert(schema.tournamentGroups)
           .values({
             stageId: stage1.id,
-            name: `Bảng ${String.fromCharCode(65 + g)}`,
+            name: configuredGroups[g]?.name || `Bảng ${String.fromCharCode(65 + g)}`,
+            roundConfig: configuredGroups[g]?.roundConfig || null,
           })
           .returning();
         groups.push(newGroup);
@@ -1305,50 +1322,27 @@ export class BracketGeneratorService {
       for (let g = 0; g < groups.length; g++) {
         const group = groups[g];
         const participantIds = groupParticipants[g].map(p => p.id);
-        const teamList: (string | null)[] = [...participantIds];
-        if (teamList.length < 2) continue;
-        if (teamList.length % 2 !== 0) teamList.push(null);
-
-        const N = teamList.length;
-        const roundsCount = N - 1;
-        const matchesPerRound = N / 2;
-
-        for (let leg = 0; leg < rtp; leg++) {
-          const teams = [...teamList];
-
-          for (let round = 1; round <= roundsCount; round++) {
-            // Mỗi leg = 1 vòng hoàn chỉnh
-            const currentRoundNumber = leg + 1;
-
-            for (let i = 0; i < matchesPerRound; i++) {
-              const home = teams[i];
-              const away = teams[N - 1 - i];
-              if (home && away) {
-                allMatchesToInsert.push({
-                  id: randomUUID(),
-                  groupId: group.id,
-                  roundNumber: currentRoundNumber,
-                  matchOrder: globalMatchCounter++,
-                  bracketBranch: 'MAIN',
-                  status: 'SCHEDULED',
-                  isBye: false,
-                  participant1Id: (leg % 2 === 0) ? home : away,
-                  participant2Id: (leg % 2 === 0) ? away : home,
-                  winnerId: null,
-                  p1SetsWon: 0,
-                  p2SetsWon: 0,
-                  totalSetsPlayed: 0,
-                  nextMatchId: null,
-                  loserNextMatchId: null,
-                  tournamentId,
-                  stageId: stage1.id,
-                  updatedAt: new Date(),
-                });
-              }
-            }
-            const last = teams.pop()!;
-            teams.splice(1, 0, last);
-          }
+        for (const scheduled of buildRoundRobinSchedule(participantIds, rtp)) {
+          allMatchesToInsert.push({
+            id: randomUUID(),
+            groupId: group.id,
+            roundNumber: scheduled.roundNumber,
+            matchOrder: globalMatchCounter++,
+            bracketBranch: 'MAIN',
+            status: 'SCHEDULED',
+            isBye: false,
+            participant1Id: scheduled.participant1Id,
+            participant2Id: scheduled.participant2Id,
+            winnerId: null,
+            p1SetsWon: 0,
+            p2SetsWon: 0,
+            totalSetsPlayed: 0,
+            nextMatchId: null,
+            loserNextMatchId: null,
+            tournamentId,
+            stageId: stage1.id,
+            updatedAt: new Date(),
+          });
         }
       }
 
@@ -1370,6 +1364,7 @@ export class BracketGeneratorService {
           order: 2,
           tournamentDivisionId: divisionId ?? null,
           roundConfig: {
+            ...playoffSportRuleOverrides,
             advanceMapping: {
               numGroups: actualNumGroups,
               teamsAdvancing,

@@ -24,11 +24,12 @@ export class UpdateMatchScheduleDto {
 
   @ApiPropertyOptional({
     description: 'Cấu hình ghi đè cho trận đấu cụ thể',
-    example: { setsToWin: 2, pointsPerSet: 21, deuceEnabled: true, tiebreakAt: 20, maxPoints: 30 }
+    example: { bestOf: 3, pointsPerSet: 21, deuceEnabled: true, tiebreakAt: 20, maxPoints: 30 }
   })
   @IsOptional()
   @IsObject()
   matchConfig?: {
+    bestOf?: number;
     setsToWin?: number;
     pointsPerSet?: number;
     deuceEnabled?: boolean;

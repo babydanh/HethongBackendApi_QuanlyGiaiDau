@@ -271,6 +271,8 @@ export class MatchesRepository {
       name: string; 
       stageName: string; 
       stageType?: string;
+      stageRoundConfig?: Record<string, unknown> | null;
+      groupRoundConfig?: Record<string, unknown> | null;
       tournamentName?: string; 
       categoryId?: string; 
       categoryName?: string;
@@ -284,6 +286,8 @@ export class MatchesRepository {
           groupName: schema.tournamentGroups.name,
           stageName: schema.tournamentStages.name,
           stageType: schema.tournamentStages.type,
+          stageRoundConfig: schema.tournamentStages.roundConfig,
+          groupRoundConfig: schema.tournamentGroups.roundConfig,
           tournamentName: schema.tournaments.name,
           categoryId: schema.tournaments.categoryId,
           categoryName: schema.categories.name,
@@ -307,6 +311,8 @@ export class MatchesRepository {
           name: g.groupName,
           stageName: g.stageName,
           stageType: g.stageType || undefined,
+          stageRoundConfig: g.stageRoundConfig as Record<string, unknown> | null,
+          groupRoundConfig: g.groupRoundConfig as Record<string, unknown> | null,
           tournamentName: g.tournamentName,
           categoryId: g.categoryId || undefined,
           categoryName: g.categoryName || undefined,
@@ -327,10 +333,13 @@ export class MatchesRepository {
         participant1: p1 ? { id: p1.id, teamName: p1.teamName, seed: p1.seed, members: p1.members } : null,
         participant2: p2 ? { id: p2.id, teamName: p2.teamName, seed: p2.seed, members: p2.members } : null,
         group: groupStage ? {
+          id: groupStage.id,
           name: groupStage.name,
+          roundConfig: groupStage.groupRoundConfig,
           stage: {
             name: groupStage.stageName,
             type: groupStage.stageType,
+            roundConfig: groupStage.stageRoundConfig,
           }
         } : null,
         tournament: groupStage ? {
@@ -380,8 +389,11 @@ export class MatchesRepository {
     // Find the group to get stage and tournament details
     const [group] = await this.db
       .select({
+        groupId: schema.tournamentGroups.id,
         name: schema.tournamentGroups.name,
+        groupRoundConfig: schema.tournamentGroups.roundConfig,
         stageId: schema.tournamentStages.id,
+        stageName: schema.tournamentStages.name,
         tournamentId: schema.tournaments.id,
         tournamentName: schema.tournaments.name,
         tournamentType: schema.tournaments.tournamentType,
@@ -557,7 +569,17 @@ export class MatchesRepository {
             tournamentConfig: group.tournamentConfig,
           }
         : null,
-      stage: group ? { type: group.stageType, roundConfig: group.roundConfig } : null,
+      stage: group ? {
+        id: group.stageId,
+        name: group.stageName,
+        type: group.stageType,
+        roundConfig: group.roundConfig,
+      } : null,
+      group: group?.groupId ? {
+        id: group.groupId,
+        name: group.name,
+        roundConfig: group.groupRoundConfig,
+      } : null,
       participant1,
       participant2,
     };

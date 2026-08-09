@@ -11,6 +11,7 @@ import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
@@ -1119,8 +1120,10 @@ export class TournamentsRepository {
         }
 
         const divGender = (selectedDivision.genderRestriction || '').toUpperCase();
+        const isMatchTypeValid = selectedDivision.matchType === targetMatchType || 
+          (selectedDivision.matchType === 'DOUBLES' && targetMatchType === 'MIXED_DOUBLES' && (!divGender || divGender === 'OPEN'));
         if (
-          selectedDivision.matchType !== targetMatchType ||
+          !isMatchTypeValid ||
           (divGender && divGender !== 'OPEN' && divGender !== targetGenderRestriction)
         ) {
           throw new BadRequestException('Hình thức thi đấu đã chọn không phù hợp với giới tính hoặc loại đăng ký.');
@@ -1689,43 +1692,46 @@ export class TournamentsRepository {
         .where(eq(schema.profiles.userId, userId))
         .limit(1);
 
-      const leaderGender = leaderProfile?.gender?.toUpperCase();
-      const partnerGender = partnerProfile?.gender?.toUpperCase();
+      const teamLeaderGender = leaderProfile?.gender?.toUpperCase();
+      const teamPartnerGender = partnerProfile?.gender?.toUpperCase();
 
       if (division) {
         if (
-          (leaderGender !== 'MALE' && leaderGender !== 'FEMALE') ||
-          (partnerGender !== 'MALE' && partnerGender !== 'FEMALE')
+          (teamLeaderGender !== 'MALE' && teamLeaderGender !== 'FEMALE') ||
+          (teamPartnerGender !== 'MALE' && teamPartnerGender !== 'FEMALE')
         ) {
           throw new BadRequestException('Cả hai VĐV cần cập nhật giới tính trong hồ sơ để tham gia.');
         }
 
-        const targetGenderRestriction = leaderGender === partnerGender ? leaderGender : 'MIXED';
+        const targetGenderRestriction = teamLeaderGender === teamPartnerGender ? teamLeaderGender : 'MIXED';
         const targetMatchType = targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
 
+        const divGender = (division.genderRestriction || '').toUpperCase();
+        const isMatchTypeValid = division.matchType === targetMatchType || 
+          (division.matchType === 'DOUBLES' && targetMatchType === 'MIXED_DOUBLES' && (!divGender || divGender === 'OPEN'));
         if (
-          division.matchType !== targetMatchType ||
-          division.genderRestriction !== targetGenderRestriction
+          !isMatchTypeValid ||
+          (divGender && divGender !== 'OPEN' && divGender !== targetGenderRestriction)
         ) {
           throw new BadRequestException('Đồng đội không phù hợp với hình thức thi đấu đã đăng ký.');
         }
       } else if (tournament.genderRestriction) {
-        if (!partnerGender) {
+        if (!teamPartnerGender) {
           throw new BadRequestException('Vui lòng cập nhật giới tính trong hồ sơ để tham gia.');
         }
         const restriction = tournament.genderRestriction.toUpperCase();
 
-        if (restriction === 'MALE' && partnerGender !== 'MALE') {
+        if (restriction === 'MALE' && teamPartnerGender !== 'MALE') {
           throw new BadRequestException('Giải đấu chỉ dành cho Nam.');
         }
-        if (restriction === 'FEMALE' && partnerGender !== 'FEMALE') {
+        if (restriction === 'FEMALE' && teamPartnerGender !== 'FEMALE') {
           throw new BadRequestException('Giải đấu chỉ dành cho Nữ.');
         }
         if (restriction === 'MIXED') {
-          if (!leaderGender) {
+          if (!teamLeaderGender) {
             throw new BadRequestException('Không tìm thấy giới tính của trưởng nhóm để xác nhận Mixed Doubles.');
           }
-          if (leaderGender === partnerGender) {
+          if (teamLeaderGender === teamPartnerGender) {
             throw new BadRequestException('Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.');
           }
         }
@@ -2533,6 +2539,7 @@ export class TournamentsRepository {
       list.push({
         id: g.id,
         name: g.name,
+        roundConfig: (g.roundConfig as Record<string, unknown>) || null,
         matches: groupMatches,
       });
       groupsMap.set(g.stageId, list);
@@ -2544,6 +2551,8 @@ export class TournamentsRepository {
         name: s.name,
         type: s.type,
         order: s.order,
+        roundConfig: (s.roundConfig as Record<string, unknown>) || null,
+        matchSettings: (s.matchSettings as Record<string, unknown>) || null,
         groups: groupsMap.get(s.id) || [],
       })),
     };
@@ -2901,6 +2910,49 @@ export class TournamentsRepository {
         .returning();
 
       await this.auditService.logUpdate(tx, userId, 'tournament_stages', id, oldRecord, updated);
+      return updated;
+    });
+  }
+
+  async findGroupById(id: string) {
+    const result = await this.db
+      .select({
+        id: schema.tournamentGroups.id,
+        stageId: schema.tournamentGroups.stageId,
+        name: schema.tournamentGroups.name,
+        roundConfig: schema.tournamentGroups.roundConfig,
+        tournamentId: schema.tournamentStages.tournamentId,
+      })
+      .from(schema.tournamentGroups)
+      .innerJoin(
+        schema.tournamentStages,
+        eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+      )
+      .where(eq(schema.tournamentGroups.id, id))
+      .limit(1);
+    return result[0] || null;
+  }
+
+  async updateGroup(id: string, userId: string, data: UpdateGroupDto) {
+    return await this.db.transaction(async (tx) => {
+      const [oldRecord] = await tx
+        .select()
+        .from(schema.tournamentGroups)
+        .where(eq(schema.tournamentGroups.id, id))
+        .limit(1);
+
+      if (!oldRecord) return null;
+
+      const [updated] = await tx
+        .update(schema.tournamentGroups)
+        .set({
+          ...(data.name && { name: data.name }),
+          ...(data.roundConfig !== undefined && { roundConfig: data.roundConfig }),
+        })
+        .where(eq(schema.tournamentGroups.id, id))
+        .returning();
+
+      await this.auditService.logUpdate(tx, userId, 'tournament_groups', id, oldRecord, updated);
       return updated;
     });
   }
