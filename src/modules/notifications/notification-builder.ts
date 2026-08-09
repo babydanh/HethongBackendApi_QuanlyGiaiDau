@@ -259,6 +259,60 @@ export const buildParticipantTeammateJoinedNotification = (params: {
   }),
 });
 
+export const buildPartnerInviteReceivedNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  senderId: string;
+  teamName: string;
+  participantId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  senderId: params.senderId,
+  type: NOTIFICATION_TYPES.PARTNER_INVITE_RECEIVED,
+  title: 'Bạn có lời mời ghép đôi!',
+  content: `${params.tournamentName}: ${params.teamName} mời bạn làm đồng đội. Xác nhận trong tối đa 1 giờ hoặc trước khi đóng đăng ký.`,
+  redirectUrl: `/tournaments/${params.tournamentId}/participants/${params.participantId}/accept-partner`,
+});
+
+export const buildPartnerInviteAcceptedNotification = (params: {
+  tournamentId: string;
+  receiverId: string;
+  divisionId?: string | null;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.PARTNER_INVITE_ACCEPTED,
+  title: 'Đồng đội đã chấp nhận lời mời ghép đôi!',
+  content: 'Đồng đội của bạn đã đồng ý tham gia giải đấu. Đội của bạn hiện đã hợp lệ!',
+  redirectUrl: `/tournaments/${params.tournamentId}/register${params.divisionId ? `?divisionId=${params.divisionId}` : ''}`,
+});
+
+export const buildPartnerInviteRejectedNotification = (params: {
+  tournamentId: string;
+  receiverId: string;
+  divisionId?: string | null;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.PARTNER_INVITE_REJECTED,
+  title: 'Lời mời ghép đôi đã bị từ chối',
+  content: 'Đồng đội đã từ chối lời mời hoặc thời hạn ghép đôi đã kết thúc. Suất giữ chỗ đã được giải phóng.',
+  redirectUrl: `/tournaments/${params.tournamentId}/register${params.divisionId ? `?divisionId=${params.divisionId}` : ''}`,
+});
+
+export const buildPartnerInviteCancelledNotification = (params: {
+  tournamentId: string;
+  receiverId: string;
+  divisionId?: string | null;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.PARTNER_INVITE_CANCELLED,
+  title: 'Lời mời ghép đôi đã bị thu hồi',
+  content: 'Đồng đội đã hủy lời mời ghép đôi hoặc đội đã rút khỏi giải đấu. Lời mời không còn hiệu lực.',
+  redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
+    divisionId: params.divisionId ?? undefined,
+  }),
+});
+
 export const buildParticipantWithdrawnNotification = (params: {
   tournamentId: string;
   tournamentName: string;

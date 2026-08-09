@@ -140,12 +140,15 @@ function getScoringView(source: Record<string, unknown> | null): Record<string, 
     return null;
   }
 
-  return (
-    getNestedRecord(source, 'scoring') ||
-    getNestedRecord(source, 'rules') ||
-    getNestedRecord(source, 'matchRules') ||
-    source
-  );
+  // Keep direct overrides while allowing the more specific nested block to win.
+  // Some older configs store `bestOf` beside `scoring`, so returning only the
+  // nested object would silently discard the direct value.
+  return {
+    ...source,
+    ...(getNestedRecord(source, 'matchRules') || {}),
+    ...(getNestedRecord(source, 'rules') || {}),
+    ...(getNestedRecord(source, 'scoring') || {}),
+  };
 }
 
 function readNumber(
