@@ -116,6 +116,8 @@ export class LivestreamRepository {
         participant2Id: schema.matches.participant2Id,
         tournamentCreatedBy: schema.tournaments.createdBy,
         tournamentName: schema.tournaments.name,
+        tournamentStatus: schema.tournaments.status,
+        tournamentVisibility: schema.tournaments.visibility,
       })
       .from(schema.matches)
       .innerJoin(schema.tournaments, eq(schema.matches.tournamentId, schema.tournaments.id))

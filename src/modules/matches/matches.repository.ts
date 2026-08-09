@@ -59,6 +59,7 @@ export class MatchesRepository {
             select 1 from ${schema.tournaments} t
             where t.id = ${schema.matches.tournamentId}
             and t.deleted_at is null
+            and t.visibility = 'PUBLIC'
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
           or exists (
@@ -67,6 +68,7 @@ export class MatchesRepository {
             join ${schema.tournaments} t on s.tournament_id = t.id
             where g.id = ${schema.matches.groupId}
             and t.deleted_at is null
+            and t.visibility = 'PUBLIC'
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
         )`
@@ -397,6 +399,8 @@ export class MatchesRepository {
         tournamentId: schema.tournaments.id,
         tournamentName: schema.tournaments.name,
         tournamentType: schema.tournaments.tournamentType,
+        tournamentStatus: schema.tournaments.status,
+        tournamentVisibility: schema.tournaments.visibility,
         isRanked: schema.tournaments.isRanked,
         communityId: schema.tournaments.communityId,
         categoryId: schema.tournaments.categoryId,
@@ -556,6 +560,8 @@ export class MatchesRepository {
             id: group.tournamentId,
             name: group.tournamentName,
             tournamentType: group.tournamentType,
+            status: group.tournamentStatus,
+            visibility: group.tournamentVisibility,
             isRanked: group.isRanked,
             communityId: group.communityId,
             categoryId: group.categoryId,
