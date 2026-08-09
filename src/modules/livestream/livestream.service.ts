@@ -68,7 +68,10 @@ export class LivestreamService {
 
   // ENDED was used by the old stop flow. Replay is not supported yet, so it
   // must not permanently block a match or a newly assigned camera.
-  private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T): T {
+  private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T): T;
+  private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T | null | undefined): T | null;
+  private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T | null | undefined): T | null {
+    if (!stream) return null;
     if (stream.streamStatus !== 'ENDED') return stream;
     return {
       ...stream,
@@ -147,6 +150,7 @@ export class LivestreamService {
     const streams = await this.livestreamRepository.listMatchLivestreams(tournamentId);
     return streams.map((stream) => {
       const normalized = this.normalizeStream(stream);
+      if (!normalized) return stream;
       // A soft-deleted camera is intentionally treated as unassigned, even
       // when an old match row still contains its cameraId.
       return normalized.cameraName
