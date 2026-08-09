@@ -112,4 +112,29 @@ describe('validateSportRuleConfig', () => {
       ),
     ).toThrow(BadRequestException);
   });
+
+  it('accepts separate configured groups with per-group BO rules', () => {
+    expect(() =>
+      validateSportRuleConfig(
+        {
+          kind: 'BADMINTON',
+          groupsConfig: {
+            numGroups: 2,
+            teamsPerGroup: 2,
+            roundsToPlay: 2,
+            groups: [
+              { name: 'A', participantIds: ['p1', 'p2'], bestOf: 1 },
+              { name: 'B', participantIds: ['p3', 'p4'], roundConfig: { bestOf: 5 } },
+            ],
+          },
+        },
+        {
+          sourceLabel: 'roundConfig',
+          expectedKind: 'BADMINTON',
+          allowedKinds: ['BADMINTON'],
+          allowRoundStructure: true,
+        },
+      ),
+    ).not.toThrow();
+  });
 });

@@ -123,11 +123,11 @@ function getNestedRecord(source: Record<string, unknown> | null, key: string): R
 }
 
 function getRoundOverride(
-  stageRoundConfig: Record<string, unknown> | null | undefined,
+  config: Record<string, unknown> | null | undefined,
   roundNumber: number | null | undefined,
 ): Record<string, unknown> | null {
-  const stageConfig = asRecord(stageRoundConfig);
-  const rounds = getNestedRecord(stageConfig, 'rounds');
+  const source = asRecord(config);
+  const rounds = getNestedRecord(source, 'rounds') || getNestedRecord(source, 'roundConfigs');
   if (!rounds || roundNumber == null) {
     return null;
   }
@@ -145,6 +145,7 @@ function getScoringView(source: Record<string, unknown> | null): Record<string, 
   // nested object would silently discard the direct value.
   return {
     ...source,
+    ...(getNestedRecord(source, 'format') || {}),
     ...(getNestedRecord(source, 'matchRules') || {}),
     ...(getNestedRecord(source, 'rules') || {}),
     ...(getNestedRecord(source, 'scoring') || {}),
@@ -199,7 +200,9 @@ function resolveRuleKind(
   input: SportRuleResolutionInput,
   overrides: {
     stageConfig: Record<string, unknown> | null;
-    roundOverride: Record<string, unknown> | null;
+    groupConfig: Record<string, unknown> | null;
+    stageRoundOverride: Record<string, unknown> | null;
+    groupRoundOverride: Record<string, unknown> | null;
     matchOverride: Record<string, unknown> | null;
   },
 ): SportRuleKind {
@@ -209,7 +212,9 @@ function resolveRuleKind(
 
   return (
     readExplicitKind(overrides.matchOverride) ||
-    readExplicitKind(overrides.roundOverride) ||
+    readExplicitKind(overrides.groupRoundOverride) ||
+    readExplicitKind(overrides.stageRoundOverride) ||
+    readExplicitKind(overrides.groupConfig) ||
     readExplicitKind(overrides.stageConfig) ||
     readExplicitKind(tournamentRules) ||
     normalizeKind(categoryConfig?.ruleKind) ||
@@ -223,38 +228,57 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
   const tournamentRules = asRecord(input.tournamentSportRules);
   const categoryConfig = asRecord(input.categoryConfig);
   const categoryDefaults = getNestedRecord(categoryConfig, 'defaultSportRules');
-  const stageConfig = asRecord(input.stageRoundConfig);
-  const roundOverride = getRoundOverride(stageConfig, input.roundNumber);
+  const stageConfig = asRecord(input.stageConfig) || asRecord(input.stageRoundConfig);
+  const groupConfig = asRecord(input.groupConfig);
+  const stageRoundOverride = getRoundOverride(stageConfig, input.roundNumber);
+  const groupRoundOverride = getRoundOverride(groupConfig, input.roundNumber);
   const matchOverride = asRecord(input.matchConfig);
-  const kind = resolveRuleKind(input, { stageConfig, roundOverride, matchOverride });
+  const kind = resolveRuleKind(input, {
+    stageConfig,
+    groupConfig,
+    stageRoundOverride,
+    groupRoundOverride,
+    matchOverride,
+  });
   const defaults = SPORT_DEFAULTS[kind];
 
   const scoringSources = [
     getScoringView(matchOverride),
-    getScoringView(roundOverride),
+    getScoringView(groupRoundOverride),
+    getScoringView(stageRoundOverride),
+    getScoringView(groupConfig),
     getScoringView(stageConfig),
     getScoringView(tournamentRules),
     getScoringView(categoryDefaults),
   ];
 
-  const setsToWin = Math.max(
-    1,
-    Math.trunc(
-      readNumber(scoringSources, ['setsToWin', 'sets_to_win']) ?? defaults.setsToWin,
-    ),
-  );
-
-  const bestOf = Math.max(
-    1,
-    Math.trunc(
-      readNumber(scoringSources, ['bestOf', 'best_of']) ?? (setsToWin * 2 - 1),
-    ),
-  );
+  // BO and sets-to-win describe the same setting. Resolve both from the most
+  // specific layer that defines either value so a group BO1 can override a
+  // tournament BO3 without inheriting tournament setsToWin=2.
+  let bestOf = defaults.setsToWin * 2 - 1;
+  let setsToWin = defaults.setsToWin;
+  for (const source of scoringSources) {
+    const sourceBestOf = readNumber([source], ['bestOf', 'best_of', 'bestOfSets', 'max_sets']);
+    const sourceSetsToWin = readNumber([source], ['setsToWin', 'sets_to_win']);
+    if (sourceBestOf != null || sourceSetsToWin != null) {
+      bestOf = Math.max(1, Math.trunc(sourceBestOf ?? (Math.max(1, Math.trunc(sourceSetsToWin!)) * 2 - 1)));
+      setsToWin = Math.ceil(bestOf / 2);
+      break;
+    }
+  }
 
   const pointsPerSet = Math.max(
     1,
     Math.trunc(
-      readNumber(scoringSources, ['pointsPerSet', 'points_per_set']) ?? defaults.pointsPerSet,
+      readNumber(scoringSources, [
+        'pointsPerSet',
+        'points_per_set',
+        'pointsPerGame',
+        'points_per_game',
+        'gamePoint',
+        'game_point',
+        'gamesPerSet',
+      ]) ?? defaults.pointsPerSet,
     ),
   );
 
@@ -270,7 +294,7 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
   const maxPoints = Math.max(
     pointsPerSet,
     Math.trunc(
-      readNumber(scoringSources, ['maxPoints', 'max_points', 'maxPointsPerSet']) ?? defaults.maxPoints,
+      readNumber(scoringSources, ['maxPoints', 'max_points', 'maxPointsPerSet', 'capAt']) ?? defaults.maxPoints,
     ),
   );
 
@@ -298,7 +322,9 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     version,
     kind,
     scoringModel: defaults.scoringModel,
-    format: getNestedRecord(tournamentRules, 'format') || {},
+    format: scoringSources
+      .map((source) => getNestedRecord(source, 'format'))
+      .find((format): format is Record<string, unknown> => format !== null) || {},
     bestOf,
     setsToWin,
     pointsPerSet,

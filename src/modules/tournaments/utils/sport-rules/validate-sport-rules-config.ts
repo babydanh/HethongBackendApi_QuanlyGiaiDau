@@ -74,12 +74,15 @@ const COMMON_ROOT_KEYS = new Set([
 
 const ROUND_STRUCTURE_KEYS = new Set([
   'rounds',
+  'roundConfigs',
   'defaultOverride',
   'default_override',
   'groupsConfig',
   'advancementConfig',
   'playoffConfig',
   'tiebreakerRules',
+  'configuredGroups',
+  'groupConfigs',
 ]);
 
 const ROUND_METADATA_KEYS = new Set([
@@ -402,16 +405,31 @@ function validateGroupStageStructure(payload: Record<string, unknown>, sourceLab
     throw new BadRequestException(`${sourceLabel}: groupsConfig phải là object.`);
   }
   if (groupsConfig) {
-    assertPositiveInteger(groupsConfig, ['numGroups'], sourceLabel, 'số bảng');
-    assertPositiveInteger(groupsConfig, ['teamsPerGroup'], sourceLabel, 'số đội mỗi bảng');
-    assertPositiveInteger(groupsConfig, ['roundsToPlay'], sourceLabel, 'số lượt vòng bảng');
-    const numGroups = readNumber(groupsConfig, ['numGroups']);
-    const teamsPerGroup = readNumber(groupsConfig, ['teamsPerGroup']);
+    assertPositiveInteger(groupsConfig, ['numGroups', 'num_groups'], sourceLabel, 'số bảng');
+    assertPositiveInteger(groupsConfig, ['teamsPerGroup', 'teams_per_group'], sourceLabel, 'số đội mỗi bảng');
+    assertPositiveInteger(groupsConfig, ['roundsToPlay', 'rounds_to_play'], sourceLabel, 'số lượt vòng bảng');
+    const numGroups = readNumber(groupsConfig, ['numGroups', 'num_groups']);
+    const teamsPerGroup = readNumber(groupsConfig, ['teamsPerGroup', 'teams_per_group']);
     if (numGroups != null && numGroups < 2) {
       throw new BadRequestException(`${sourceLabel}: vòng bảng + loại trực tiếp phải có ít nhất 2 bảng.`);
     }
     if (teamsPerGroup != null && teamsPerGroup < 2) {
       throw new BadRequestException(`${sourceLabel}: mỗi bảng phải có ít nhất 2 đội.`);
+    }
+
+    const configuredGroups = groupsConfig.groups ?? groupsConfig.configuredGroups ?? groupsConfig.groupConfigs;
+    if (configuredGroups !== undefined && !Array.isArray(configuredGroups)) {
+      throw new BadRequestException(`${sourceLabel}: danh sách cấu hình bảng phải là array.`);
+    }
+    if (Array.isArray(configuredGroups)) {
+      if (numGroups != null && configuredGroups.length !== numGroups) {
+        throw new BadRequestException(`${sourceLabel}: số cấu hình bảng phải khớp numGroups.`);
+      }
+      for (const [index, configuredGroup] of configuredGroups.entries()) {
+        if (!isRecord(configuredGroup)) {
+          throw new BadRequestException(`${sourceLabel}.groupsConfig.groups.${index}: cấu hình bảng phải là object.`);
+        }
+      }
     }
   }
 
@@ -533,7 +551,7 @@ export function validateSportRuleConfig(
       });
     }
 
-    const rounds = asRecord(payload.rounds);
+    const rounds = asRecord(payload.rounds ?? payload.roundConfigs);
     if (rounds) {
       for (const [roundKey, roundValue] of Object.entries(rounds)) {
         if (!isRecord(roundValue)) {

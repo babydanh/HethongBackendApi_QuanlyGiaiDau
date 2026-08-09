@@ -82,6 +82,7 @@ export type BracketMatch = typeof schema.matches.$inferSelect & {
 export interface BracketGroup {
   id: string;
   name: string;
+  roundConfig: Record<string, unknown> | null;
   matches: BracketMatch[];
 }
 
@@ -90,6 +91,8 @@ export interface BracketStage {
   name: string;
   type: string;
   order: number;
+  roundConfig: Record<string, unknown> | null;
+  matchSettings: Record<string, unknown> | null;
   groups: BracketGroup[];
 }
 

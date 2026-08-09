@@ -23,6 +23,7 @@ import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
 import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
@@ -779,6 +780,18 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.updateStage(id, user.sub, updateStageDto, this.getSystemRoles(user));
+  }
+
+  @Patch('groups/:id')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật cấu hình luật cho một bảng đấu' })
+  async updateGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateGroupDto: UpdateGroupDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateGroup(id, user.sub, updateGroupDto, this.getSystemRoles(user));
   }
 
   @Post(':id/mock-participants')
