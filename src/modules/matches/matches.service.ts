@@ -382,7 +382,7 @@ export class MatchesService {
       t &&
       (t.visibility !== 'PUBLIC' ||
         ['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete'].includes(
-          t.status as string,
+          t.status,
         ))
     ) {
       throw new NotFoundException('Match not found');

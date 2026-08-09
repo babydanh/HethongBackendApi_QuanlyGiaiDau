@@ -257,7 +257,7 @@ export class LivestreamService {
     if (
       match.tournamentVisibility !== 'PUBLIC' ||
       ['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete'].includes(
-        match.tournamentStatus as string,
+        match.tournamentStatus,
       )
     ) {
       throw new NotFoundException('Trận đấu không tồn tại');
