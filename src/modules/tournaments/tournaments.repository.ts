@@ -1814,6 +1814,10 @@ export class TournamentsRepository {
         .limit(1);
 
       if (!oldParticipant) throw new NotFoundException('Không tìm thấy người tham gia');
+      
+      if (oldParticipant.teamStatus === 'APPROVED' || oldParticipant.teamStatus === 'COMPLETE') {
+        throw new BadRequestException('Đội đã được xét duyệt hoặc đã đóng phí, không thể tự rút lui. Vui lòng liên hệ BTC.');
+      }
 
       // 2. Kiểm tra giải đấu chưa bắt đầu
       const [tournament] = await tx
@@ -1924,6 +1928,10 @@ export class TournamentsRepository {
         .limit(1);
 
       if (!participant) throw new NotFoundException('Không tìm thấy người tham gia');
+      
+      if (participant.teamStatus === 'APPROVED' || participant.teamStatus === 'COMPLETE') {
+        throw new BadRequestException('Không thể xóa đội đã qua xét duyệt. Hãy chuyển trạng thái đội về "Chờ duyệt" hoặc "Từ chối" trước khi xóa.');
+      }
 
       // 3. Cập nhật trạng thái sang KICKED
       const [updatedParticipant] = await tx
