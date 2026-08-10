@@ -1754,11 +1754,11 @@ export class TournamentsService {
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
     const now = new Date();
-    if (
-      tournament.status !== 'REGISTRATION_OPEN' ||
-      (tournament.registrationEndDate && now > new Date(tournament.registrationEndDate))
-    ) {
-      throw new BadRequestException('Hạn đăng ký đã qua hoặc danh sách đã chốt, không thể tự hủy đăng ký.');
+    if (['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(tournament.status)) {
+      throw new BadRequestException('Giải đấu đã bắt đầu hoặc kết thúc, không thể tự rút lui.');
+    }
+    if (tournament.registrationEndDate && now > new Date(tournament.registrationEndDate) && tournament.status !== 'UPCOMING') {
+      throw new BadRequestException('Đã quá thời hạn rút lui của giải đấu.');
     }
 
     const currentRegistration = await this.tournamentsRepository.myRegistration(tournamentId, userId, divisionId);
