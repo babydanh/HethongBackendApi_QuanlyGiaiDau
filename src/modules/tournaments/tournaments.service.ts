@@ -2068,9 +2068,10 @@ export class TournamentsService {
     // Xóa dữ liệu mock trước khi mở đăng ký
     await this.tournamentsRepository.clearMockParticipants(id);
 
-    // Nếu chưa tới ngày mở đăng ký → UPCOMING, nếu tới rồi → REGISTRATION_OPEN
+    // Tất cả giải đấu do Ban tổ chức/Người dùng tạo (không phải Admin) đều phải chuyển sang PENDING_APPROVAL để Admin phê duyệt
+    const isAdmin = systemRoles.includes('ADMIN');
     const notYetOpen = existing.registrationStartDate && new Date(existing.registrationStartDate) > new Date();
-    const targetStatus = existing.isRanked
+    const targetStatus = !isAdmin
       ? 'PENDING_APPROVAL'
       : notYetOpen
         ? 'UPCOMING'
