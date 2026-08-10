@@ -957,7 +957,7 @@ export class TournamentsRepository {
 
       if (tournament.isRanked && data.rankingConsent !== true) {
         throw new BadRequestException(
-          'Giai dau co xep hang yeu cau ban dong y gui ket qua va diem ELO len bang xep hang.',
+          'Giải đấu có xếp hạng yêu cầu bạn đồng ý gửi kết quả lên bảng xếp hạng.',
         );
       }
 
@@ -1233,7 +1233,8 @@ export class TournamentsRepository {
             eq(schema.tournamentRosters.userId, userId),
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
             ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            ne(schema.tournamentParticipants.teamStatus, 'EXPIRED')
           )
         );
       if (existingRosters.length > 0) {
@@ -1277,7 +1278,8 @@ export class TournamentsRepository {
               eq(schema.tournamentRosters.userId, partnerUser.id),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED')
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED')
             )
           );
         if (partnerExisting.length > 0) {
@@ -2066,7 +2068,8 @@ export class TournamentsRepository {
             ...(divisionId ? [eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)] : []),
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
             ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            ne(schema.tournamentParticipants.teamStatus, 'EXPIRED')
           )
         )
         .limit(1);
@@ -2106,6 +2109,7 @@ export class TournamentsRepository {
         tournamentDivisionId: participant.tournamentDivisionId,
         registeredAt: participant.registeredAt,
         teamInviteToken: participant.teamInviteToken,
+        partnerInviteExpiresAt: participant.partnerInviteExpiresAt,
         members,
         teamMembers: members,
         teamInviteLink:
