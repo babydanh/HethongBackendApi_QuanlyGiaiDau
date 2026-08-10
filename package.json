@@ -23,6 +23,7 @@
     "repair:hide-banner": "npx ts-node src/database/seeds/repair-hide-banner-seed.ts",
     "repair:brackets": "npx ts-node src/database/seeds/repair-double-elim-brackets.ts",
     "seed:clear": "npx ts-node src/database/seeds/clear-tournaments.ts",
+    "seed:standings-recompute": "npx ts-node src/database/seeds/recompute-group-standings.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
