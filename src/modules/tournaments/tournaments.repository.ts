@@ -1815,9 +1815,8 @@ export class TournamentsRepository {
 
       if (!oldParticipant) throw new NotFoundException('Không tìm thấy người tham gia');
       
-      if (oldParticipant.teamStatus === 'APPROVED' || oldParticipant.teamStatus === 'COMPLETE') {
-        throw new BadRequestException('Đội đã được xét duyệt hoặc đã đóng phí, không thể tự rút lui. Vui lòng liên hệ BTC.');
-      }
+      // A confirmed participant may still withdraw before the tournament starts.
+      // Paid registrations become PENDING_REFUND and are handled by the organizer.
 
       // 2. Kiểm tra giải đấu chưa bắt đầu
       const [tournament] = await tx
@@ -1928,9 +1927,13 @@ export class TournamentsRepository {
         .limit(1);
 
       if (!participant) throw new NotFoundException('Không tìm thấy người tham gia');
+
+      if (participant.tournamentId !== tournamentId) {
+        throw new NotFoundException('Người tham gia không thuộc giải đấu này');
+      }
       
-      if (participant.teamStatus === 'APPROVED' || participant.teamStatus === 'COMPLETE') {
-        throw new BadRequestException('Không thể xóa đội đã qua xét duyệt. Hãy chuyển trạng thái đội về "Chờ duyệt" hoặc "Từ chối" trước khi xóa.');
+      if (['COMPLETED', 'CANCELLED'].includes(tournament.status)) {
+        throw new BadRequestException('Giải đấu đã kết thúc, không thể kick người tham gia.');
       }
 
       // 3. Cập nhật trạng thái sang KICKED
@@ -3415,6 +3418,10 @@ export class TournamentsRepository {
         return null;
       }
 
+      if (status === 'REJECTED' && (existing.teamStatus === 'COMPLETE' || existing.teamStatus === 'APPROVED')) {
+        throw new BadRequestException('Không thể từ chối đội đã được duyệt hoặc hoàn tất đăng ký.');
+      }
+
       const [updated] = await tx
         .update(schema.tournamentParticipants)
         .set({ teamStatus: status })
@@ -4141,11 +4148,34 @@ export class TournamentsRepository {
   // Division-related methods
   async getDivisionsByTournament(tournamentId: string) {
     try {
-      return await this.db
+      const divisions = await this.db
         .select()
         .from(schema.tournamentDivisions)
         .where(eq(schema.tournamentDivisions.tournamentId, tournamentId))
         .orderBy(schema.tournamentDivisions.createdAt);
+
+      return await Promise.all(
+        divisions.map(async (division) => {
+          const [participantCountByDivision] = await this.db
+            .select({ count: count() })
+            .from(schema.tournamentParticipants)
+            .where(
+              and(
+                eq(schema.tournamentParticipants.tournamentDivisionId, division.id),
+                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ),
+            );
+
+          return {
+            ...division,
+            _count: {
+              participants: participantCountByDivision.count,
+            },
+          };
+        })
+      );
     } catch (error) {
       console.error(`Failed to get divisions for tournament ${tournamentId}:`, error);
       throw error;
