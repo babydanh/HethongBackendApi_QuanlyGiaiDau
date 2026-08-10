@@ -13,6 +13,26 @@ import {
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
 
+/**
+ * Tổng điểm ghi được của mỗi bên từ scoreDetails (sum team1Score / team2Score
+ * qua từng set). Dùng để lưu group_standings.points_for/points_against = TỔNG
+ * ĐIỂM (chuẩn hiệu số điểm pickleball rally), khớp cách web tính và
+ * rankings.service.extractScoreRatio — KHÔNG phải số set thắng.
+ */
+function sumSetPoints(
+  scoreDetails: Record<string, unknown> | null | undefined,
+): { p1: number; p2: number } {
+  let p1 = 0;
+  let p2 = 0;
+  if (scoreDetails?.sets && Array.isArray(scoreDetails.sets)) {
+    for (const set of scoreDetails.sets as Array<Record<string, unknown>>) {
+      p1 += Number(set.team1Score) || 0;
+      p2 += Number(set.team2Score) || 0;
+    }
+  }
+  return { p1, p2 };
+}
+
 @Injectable()
 export class MatchesRepository {
   constructor(
@@ -822,12 +842,16 @@ export class MatchesRepository {
         const participants = [p1Id, p2Id];
         const isDraw = !winnerId && p1Id && p2Id;
 
+        // points_for/points_against = TỔNG điểm ghi được qua các set (chuẩn
+        // hiệu số điểm), không phải số set thắng. totalPoints giữ nguyên 3/1/0.
+        const { p1: team1Total, p2: team2Total } = sumSetPoints(matchDetails.scoreDetails);
+
         for (const pId of participants) {
           if (!pId) continue;
           const isWinner = pId === winnerId;
           const pointsEarned = isDraw ? drawPoints : (isWinner ? winPoints : lossPoints);
-          const setPointsFor = pId === p1Id ? matchDetails.p1SetsWon : matchDetails.p2SetsWon;
-          const setPointsAgainst = pId === p1Id ? matchDetails.p2SetsWon : matchDetails.p1SetsWon;
+          const pointsFor = pId === p1Id ? team1Total : team2Total;
+          const pointsAgainst = pId === p1Id ? team2Total : team1Total;
 
           // Atomic upsert (NOTE-2): INSERT ... ON CONFLICT DO UPDATE with
           // SQL-side increments. Replaces read-modify-write, so concurrent
@@ -841,8 +865,8 @@ export class MatchesRepository {
               won: isWinner ? 1 : 0,
               lost: (!isWinner && !isDraw) ? 1 : 0,
               draws: isDraw ? 1 : 0,
-              pointsFor: setPointsFor,
-              pointsAgainst: setPointsAgainst,
+              pointsFor: pointsFor,
+              pointsAgainst: pointsAgainst,
               totalPoints: pointsEarned,
               updatedAt: new Date(),
             })
@@ -853,8 +877,8 @@ export class MatchesRepository {
                 won: sql`${schema.groupStandings.won} + ${isWinner ? 1 : 0}`,
                 lost: sql`${schema.groupStandings.lost} + ${(!isWinner && !isDraw) ? 1 : 0}`,
                 draws: sql`${schema.groupStandings.draws} + ${isDraw ? 1 : 0}`,
-                pointsFor: sql`${schema.groupStandings.pointsFor} + ${setPointsFor}`,
-                pointsAgainst: sql`${schema.groupStandings.pointsAgainst} + ${setPointsAgainst}`,
+                pointsFor: sql`${schema.groupStandings.pointsFor} + ${pointsFor}`,
+                pointsAgainst: sql`${schema.groupStandings.pointsAgainst} + ${pointsAgainst}`,
                 totalPoints: sql`${schema.groupStandings.totalPoints} + ${pointsEarned}`,
                 updatedAt: new Date(),
               },
