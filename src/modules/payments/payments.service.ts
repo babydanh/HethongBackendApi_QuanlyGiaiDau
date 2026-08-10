@@ -618,7 +618,7 @@ export class PaymentsService {
           );
         }
       } else if (payment.purpose === 'TOURNAMENT_PUBLISH_FEE') {
-        const nextStatus = tournament.isRanked ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN';
+        const nextStatus = 'PENDING_APPROVAL';
         await this.paymentsRepository.setTournamentStatus(tournament.id, nextStatus);
         await this.notificationsService.sendNotification(
           buildTournamentPublishApprovedNotification({
