@@ -1396,7 +1396,9 @@ export class TournamentsRepository {
           teamName: finalTeamName,
           rankingConsent: data.rankingConsent === true,
           isPaid,
-          teamInviteToken: partnerId ? null : teamInviteToken,
+          // Keep the invite token even when a known partner was selected so the
+          // invited account can confirm through the same join URL/QR flow.
+          teamInviteToken,
           teamStatus,
           partnerUserId: isDoubles ? partnerId : null,
           partnerInviteExpiresAt,
@@ -1420,7 +1422,7 @@ export class TournamentsRepository {
         participant,
         entryFee: payableEntryFeeAmount,
         paymentUrl,
-        teamInviteLink: (isDoubles && !partnerId)
+        teamInviteLink: isDoubles
           ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
           : null,
         isWaitlisted,
@@ -1675,6 +1677,10 @@ export class TournamentsRepository {
 
       if (participant.teamStatus !== 'PENDING_PARTNER') {
         throw new BadRequestException('Đội thi đấu này đã đủ thành viên hoặc không ở trạng thái chờ.');
+      }
+
+      if (participant.partnerUserId && participant.partnerUserId !== userId) {
+        throw new BadRequestException('Chỉ đúng tài khoản đồng đội đã được mời mới có thể tham gia đội này.');
       }
 
       // 3. Kiểm tra user chưa đăng ký giải này
