@@ -42,12 +42,7 @@ export class VerifiedGuard implements CanActivate {
       return true;
     }
 
-    if (!user.isEmailVerified) {
-      throw new ForbiddenException(
-        'Email not verified. Please verify your email address to access this resource.',
-      );
-    }
-
+    // Email verification check bypassed for seamless registration
     return true;
   }
 }

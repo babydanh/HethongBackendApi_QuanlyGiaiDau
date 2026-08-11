@@ -247,7 +247,9 @@ export class LiveScoreGateway
   broadcastComment(matchId: string, comment: unknown) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(comment);
-    this.server.volatile.to(`match:${matchId}`).emit('comment:new', rawPayload);
+    // Không volatile: bình luận là dữ liệu quan trọng, không được drop khi
+    // server tải cao, kẻo người xem (kể cả người gửi) không thấy comment.
+    this.server.to(`match:${matchId}`).emit('comment:new', rawPayload);
   }
 
   broadcastCheerUpdate(matchId: string, cheerCount: number) {

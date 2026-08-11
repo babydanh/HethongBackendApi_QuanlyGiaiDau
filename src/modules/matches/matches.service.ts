@@ -420,7 +420,6 @@ export class MatchesService {
 
     const isReferee = existing.refereeId === user.sub;
     const isAdmin = this.isAdmin(user);
-
     if (!isAdmin && !isReferee) {
       throw new ForbiddenException('Bạn không có quyền nhập điểm cho trận đấu này');
     }
@@ -592,7 +591,8 @@ export class MatchesService {
 
     const canClaimAsReferee =
       updateMatchStatusDto.status === 'ONGOING' && hasRole(user, UserRole.REFEREE);
-    if (!isAdmin && !isReferee && !canClaimAsReferee) {
+    const isOrganizer = hasRole(user, UserRole.ORGANIZER);
+    if (!isAdmin && !isOrganizer && !isReferee && !canClaimAsReferee) {
       throw new ForbiddenException('Bạn không có quyền thay đổi trạng thái trận đấu này');
     }
 

@@ -26,6 +26,12 @@ import {
 
 @Injectable()
 export class TournamentsRepository {
+  private normalizeGender(value: string | null | undefined): 'MALE' | 'FEMALE' | null {
+    const normalized = value?.trim().toUpperCase();
+    if (normalized === 'MALE' || normalized === 'NAM') return 'MALE';
+    if (normalized === 'FEMALE' || normalized === 'NU' || normalized === 'NỮ') return 'FEMALE';
+    return null;
+  }
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly auditService: AuditService,
@@ -1072,6 +1078,7 @@ export class TournamentsRepository {
         if (divisions.length === 0) return null;
 
         const leaderGender = await getProfileGender(userId, 'Bạn');
+        const requestedDivisionId = data.tournamentDivisionId ?? data.divisionId;
         let targetMatchType = normalizeMatchType(tournament.matchType);
         let targetGenderRestriction: 'MALE' | 'FEMALE' | 'MIXED' =
           leaderGender === 'MALE' ? 'MALE' : 'FEMALE';
@@ -1080,11 +1087,19 @@ export class TournamentsRepository {
           const partnerGender = await getProfileGender(partnerUserId, 'Đồng đội');
           targetGenderRestriction = leaderGender === partnerGender ? leaderGender : 'MIXED';
           targetMatchType = targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
-        } else if (targetMatchType === 'MIXED_DOUBLES') {
+        } else if (targetMatchType === 'MIXED_DOUBLES' && !requestedDivisionId) {
           throw new BadRequestException('Hình thức Đôi Nam Nữ yêu cầu nhập đồng đội để xác định giới tính cặp.');
         }
 
-        if (tournament.genderRestriction) {
+        if (!partnerUserId && requestedDivisionId) {
+          const requestedDivision = divisions.find((division) => division.id === requestedDivisionId);
+          if (requestedDivision?.matchType === 'MIXED_DOUBLES') {
+            targetMatchType = 'MIXED_DOUBLES';
+            targetGenderRestriction = 'MIXED';
+          }
+        }
+
+        if (tournament.genderRestriction && !requestedDivisionId) {
           const restriction = tournament.genderRestriction.toUpperCase();
           if (restriction === 'MALE' && targetGenderRestriction !== 'MALE') {
             throw new BadRequestException('Giải đấu chỉ dành cho Nam.');
@@ -1097,7 +1112,6 @@ export class TournamentsRepository {
           }
         }
 
-        const requestedDivisionId = data.tournamentDivisionId ?? data.divisionId;
         const selectedDivision = requestedDivisionId
           ? divisions.find((division) => division.id === requestedDivisionId)
           : divisions.find(
@@ -1287,7 +1301,7 @@ export class TournamentsRepository {
         }
 
         // Enforce gender constraints for partner if any
-        if (tournament.genderRestriction) {
+        if (tournament.genderRestriction && !(data.tournamentDivisionId ?? data.divisionId)) {
           const [partnerProfile] = await tx
             .select({ gender: schema.profiles.gender })
             .from(schema.profiles)
@@ -1453,7 +1467,11 @@ export class TournamentsRepository {
         .limit(1);
       const [division] = participant.tournamentDivisionId
         ? await tx
-            .select({ registrationEndDate: schema.tournamentDivisions.registrationEndDate })
+            .select({
+              registrationEndDate: schema.tournamentDivisions.registrationEndDate,
+              matchType: schema.tournamentDivisions.matchType,
+              genderRestriction: schema.tournamentDivisions.genderRestriction,
+            })
             .from(schema.tournamentDivisions)
             .where(eq(schema.tournamentDivisions.id, participant.tournamentDivisionId))
             .limit(1)
@@ -1470,6 +1488,37 @@ export class TournamentsRepository {
           .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
           .where(eq(schema.tournamentParticipants.id, participantId));
         throw new BadRequestException('Giải đấu đã đóng đăng ký. Lời mời ghép đôi không thể xác nhận thêm.');
+      }
+
+      const [leaderRoster] = await tx
+        .select({ userId: schema.tournamentRosters.userId })
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, participantId))
+        .limit(1);
+      const [leaderProfile] = leaderRoster
+        ? await tx.select({ gender: schema.profiles.gender })
+            .from(schema.profiles)
+            .where(eq(schema.profiles.userId, leaderRoster.userId))
+            .limit(1)
+        : [null];
+      const [partnerProfile] = await tx
+        .select({ gender: schema.profiles.gender })
+        .from(schema.profiles)
+        .where(eq(schema.profiles.userId, partnerUserId))
+        .limit(1);
+      const leaderGender = this.normalizeGender(leaderProfile?.gender);
+      const partnerGender = this.normalizeGender(partnerProfile?.gender);
+      if (!leaderGender || !partnerGender) {
+        throw new BadRequestException('Cáº£ hai VÄV cáº§n cáº­p nháº­t giá»›i tÃ­nh trong há»“ sÆ¡ Ä‘á»ƒ tham gia.');
+      }
+      const targetGender = leaderGender === partnerGender ? leaderGender : 'MIXED';
+      const targetMatchType = targetGender === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
+      const divisionGender = this.normalizeGender(division?.genderRestriction) ??
+        (division?.genderRestriction || '').toUpperCase();
+      if (division &&
+          (division.matchType !== targetMatchType ||
+            (divisionGender && divisionGender !== 'OPEN' && divisionGender !== targetGender))) {
+        throw new BadRequestException('Äá»“ng Ä‘á»™i khÃ´ng phÃ¹ há»£p vá»›i hÃ¬nh thá»©c thi Ä‘áº¥u Ä‘Ã£ Ä‘Äƒng kÃ½.');
       }
 
       // Check duplicate roster
@@ -1692,8 +1741,8 @@ export class TournamentsRepository {
         .where(eq(schema.profiles.userId, userId))
         .limit(1);
 
-      const teamLeaderGender = leaderProfile?.gender?.toUpperCase();
-      const teamPartnerGender = partnerProfile?.gender?.toUpperCase();
+      const teamLeaderGender = this.normalizeGender(leaderProfile?.gender);
+      const teamPartnerGender = this.normalizeGender(partnerProfile?.gender);
 
       if (division) {
         if (
@@ -1706,7 +1755,8 @@ export class TournamentsRepository {
         const targetGenderRestriction = teamLeaderGender === teamPartnerGender ? teamLeaderGender : 'MIXED';
         const targetMatchType = targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
 
-        const divGender = (division.genderRestriction || '').toUpperCase();
+        const divGender = this.normalizeGender(division.genderRestriction) ??
+          (division.genderRestriction || '').toUpperCase();
         const isMatchTypeValid = division.matchType === targetMatchType || 
           (division.matchType === 'DOUBLES' && targetMatchType === 'MIXED_DOUBLES' && (!divGender || divGender === 'OPEN'));
         if (
@@ -1719,7 +1769,8 @@ export class TournamentsRepository {
         if (!teamPartnerGender) {
           throw new BadRequestException('Vui lòng cập nhật giới tính trong hồ sơ để tham gia.');
         }
-        const restriction = tournament.genderRestriction.toUpperCase();
+        const restriction = this.normalizeGender(tournament.genderRestriction) ??
+          tournament.genderRestriction.toUpperCase();
 
         if (restriction === 'MALE' && teamPartnerGender !== 'MALE') {
           throw new BadRequestException('Giải đấu chỉ dành cho Nam.');

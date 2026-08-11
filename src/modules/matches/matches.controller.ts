@@ -84,7 +84,7 @@ export class MatchesController {
   @Patch(':id/status')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.REFEREE, UserRole.ADMIN)
+  @Roles(UserRole.REFEREE, UserRole.ADMIN, UserRole.ORGANIZER)
   @ApiOperation({
     summary: 'Cập nhật trạng thái trận đấu (ONGOING, COMPLETED)',
   })
