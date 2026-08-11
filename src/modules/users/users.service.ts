@@ -27,6 +27,17 @@ export class UsersService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private normalizeGenderValue(value?: string | null): 'MALE' | 'FEMALE' | null {
+    const normalized = String(value ?? '')
+      .trim()
+      .toUpperCase()
+      .replace(/[-–\s]/g, '_');
+
+    if (['MALE', 'MEN', 'NAM'].includes(normalized)) return 'MALE';
+    if (['FEMALE', 'WOMEN', 'NU', 'NỮ'].includes(normalized)) return 'FEMALE';
+    return null;
+  }
+
   async findAll(query: QueryUserDto) {
     return await this.usersRepository.findAll(query);
   }
@@ -53,7 +64,8 @@ export class UsersService {
     if (
       updateUserDto.gender !== undefined &&
       currentUser.profile?.isGenderLocked &&
-      updateUserDto.gender !== currentUser.profile.gender
+      this.normalizeGenderValue(updateUserDto.gender) !==
+        this.normalizeGenderValue(currentUser.profile.gender)
     ) {
       throw new BadRequestException(
         'Giới tính của bạn đã bị khóa. Vui lòng gửi yêu cầu hỗ trợ tới Admin để được cập nhật.',
