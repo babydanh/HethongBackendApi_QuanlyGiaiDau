@@ -1080,8 +1080,7 @@ export class TournamentsRepository {
         const leaderGender = await getProfileGender(userId, 'Bạn');
         const requestedDivisionId = data.tournamentDivisionId ?? data.divisionId;
         let targetMatchType = normalizeMatchType(tournament.matchType);
-        let targetGenderRestriction: 'MALE' | 'FEMALE' | 'MIXED' =
-          leaderGender === 'MALE' ? 'MALE' : 'FEMALE';
+        let targetGenderRestriction: 'MALE' | 'FEMALE' | 'MIXED' = leaderGender === 'MALE' ? 'MALE' : 'FEMALE';
 
         if (partnerUserId) {
           const partnerGender = await getProfileGender(partnerUserId, 'Đồng đội');
