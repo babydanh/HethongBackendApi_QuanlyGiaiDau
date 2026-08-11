@@ -114,6 +114,18 @@ describe('round-robin config compatibility', () => {
     )).toBe(true);
   });
 
+  it('uses distinct global rounds and reverses home-away order for leg two', () => {
+    const schedule = buildRoundRobinSchedule(['p1', 'p2', 'p3', 'p4'], 2);
+    const firstLeg = schedule.filter((match) => match.leg === 1);
+    const secondLeg = schedule.filter((match) => match.leg === 2);
+
+    expect(new Set(firstLeg.map((match) => match.roundNumber))).toEqual(new Set([1, 2, 3]));
+    expect(new Set(secondLeg.map((match) => match.roundNumber))).toEqual(new Set([4, 5, 6]));
+    expect(secondLeg.map((match) => [match.participant1Id, match.participant2Id])).toEqual(
+      firstLeg.map((match) => [match.participant2Id, match.participant1Id]),
+    );
+  });
+
   it('does not silently truncate or default invalid leg counts', () => {
     expect(resolveRoundsToPlay({ groupsConfig: { roundsToPlay: 2.5 } })).toBe(2.5);
     expect(resolveRoundsToPlay({ groupsConfig: { roundsToPlay: '5' } })).toBe(5);
