@@ -158,6 +158,7 @@ export class CommunitiesRepository {
       .where(
         and(
           eq(schema.communities.creatorId, userId),
+          eq(schema.communities.status, 'ACTIVE'),
           isNull(schema.communities.deletedAt),
         ),
       );
@@ -177,6 +178,7 @@ export class CommunitiesRepository {
           eq(schema.communityMembers.userId, userId),
           eq(schema.communityMembers.status, 'JOINED'),
           sql`${schema.communities.creatorId} != ${userId}`,
+          eq(schema.communities.status, 'ACTIVE'),
           isNull(schema.communities.deletedAt),
         ),
       );
