@@ -53,6 +53,18 @@ describe('resolveEffectiveSportRules', () => {
     expect(resolved.pointsPerSet).toBe(15);
   });
 
+  it('falls back to the category sport when legacy tournament rules have another sport', () => {
+    const resolved = resolveEffectiveSportRules({
+      categoryConfig: { ruleKind: 'PICKLEBALL_RALLY' },
+      categorySlug: 'pickleball',
+      categoryName: 'Pickleball',
+      tournamentSportRules: { kind: 'BADMINTON', pointsPerSet: 21 },
+    });
+
+    expect(resolved.kind).toBe('PICKLEBALL_RALLY');
+    expect(resolved.pointsPerSet).toBe(11);
+  });
+
   it('does not leak group-stage BO into knockout stage resolution', () => {
     const groupStage = resolveEffectiveSportRules({
       categoryConfig,

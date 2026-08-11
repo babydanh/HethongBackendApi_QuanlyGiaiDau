@@ -196,6 +196,12 @@ function readExplicitKind(source: Record<string, unknown> | null): SportRuleKind
   return normalizeKind(source.kind) || normalizeKind(getScoringView(source)?.kind) || undefined;
 }
 
+function areKindsCompatible(categoryKind: SportRuleKind | undefined, configuredKind: SportRuleKind | undefined) {
+  if (!categoryKind || !configuredKind) return true;
+  if (categoryKind === configuredKind) return true;
+  return categoryKind.startsWith('PICKLEBALL_') && configuredKind.startsWith('PICKLEBALL_');
+}
+
 function resolveRuleKind(
   input: SportRuleResolutionInput,
   overrides: {
@@ -209,6 +215,14 @@ function resolveRuleKind(
   const tournamentRules = asRecord(input.tournamentSportRules);
   const categoryConfig = asRecord(input.categoryConfig);
   const categoryDefaults = getNestedRecord(categoryConfig, 'defaultSportRules');
+  const categoryKind = normalizeKind(categoryConfig?.ruleKind) ||
+    readExplicitKind(categoryDefaults) ||
+    inferKindFromCategoryName(input.categorySlug, input.categoryName) ||
+    undefined;
+  const tournamentKind = readExplicitKind(tournamentRules);
+  const compatibleTournamentKind = areKindsCompatible(categoryKind, tournamentKind)
+    ? tournamentKind
+    : undefined;
 
   return (
     readExplicitKind(overrides.matchOverride) ||
@@ -216,10 +230,8 @@ function resolveRuleKind(
     readExplicitKind(overrides.stageRoundOverride) ||
     readExplicitKind(overrides.groupConfig) ||
     readExplicitKind(overrides.stageConfig) ||
-    readExplicitKind(tournamentRules) ||
-    normalizeKind(categoryConfig?.ruleKind) ||
-    readExplicitKind(categoryDefaults) ||
-    inferKindFromCategoryName(input.categorySlug, input.categoryName) ||
+    compatibleTournamentKind ||
+    categoryKind ||
     'BADMINTON'
   );
 }
@@ -240,6 +252,13 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     groupRoundOverride,
     matchOverride,
   });
+  const categoryKind = normalizeKind(categoryConfig?.ruleKind) ||
+    readExplicitKind(categoryDefaults) ||
+    inferKindFromCategoryName(input.categorySlug, input.categoryName) ||
+    undefined;
+  const tournamentKind = readExplicitKind(tournamentRules);
+  const tournamentRulesMatchCategory = areKindsCompatible(categoryKind, tournamentKind);
+  const effectiveTournamentRules = tournamentRulesMatchCategory ? tournamentRules : null;
   const defaults = SPORT_DEFAULTS[kind];
 
   const scoringSources = [
@@ -248,7 +267,7 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     getScoringView(stageRoundOverride),
     getScoringView(groupConfig),
     getScoringView(stageConfig),
-    getScoringView(tournamentRules),
+    getScoringView(effectiveTournamentRules),
     getScoringView(categoryDefaults),
   ];
 
@@ -315,7 +334,7 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
 
   const version = Math.max(
     1,
-    Math.trunc(readNumber([tournamentRules], ['version']) ?? 1),
+    Math.trunc(readNumber([effectiveTournamentRules], ['version']) ?? 1),
   );
 
   return {
