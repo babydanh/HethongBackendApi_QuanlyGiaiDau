@@ -1453,6 +1453,64 @@ export class TournamentsService {
     }
   }
 
+  // ═══════════════ Ràng buộc GIỚI TÍNH khi ghép đôi ═══════════════
+  // Gotcha: profile lưu giới tính tiếng Việt ('Nữ'/'Nam'), division lưu
+  // 'FEMALE'/'MALE'/'MIXED' → phải normalize CẢ 2 PHÍA trước khi so sánh.
+  private normalizeGenderValue(value?: string | null): 'MALE' | 'FEMALE' | null {
+    const v = String(value ?? '')
+      .trim()
+      .toUpperCase()
+      .replace(/[-–\s]/g, '_');
+    if (['MALE', 'MEN', 'NAM'].includes(v)) return 'MALE';
+    if (['FEMALE', 'WOMEN', 'NU', 'NỮ'].includes(v)) return 'FEMALE';
+    return null; // không nhận biết → không block (tránh chặn oan)
+  }
+
+  /**
+   * Chặn đội vi phạm genderRestriction của division.
+   * - 'MALE'/'FEMALE': mọi thành viên ĐÃ BIẾT giới phải trùng.
+   * - 'MIXED' (MIXED_DOUBLES): cặp phải đủ 1 nam + 1 nữ.
+   * null/COED hoặc có thành viên giới không nhận biết → bỏ qua.
+   */
+  private async validateGenderRestriction(
+    division: { genderRestriction?: string | null } | null,
+    userIds: Array<string | null | undefined>,
+  ): Promise<void> {
+    if (!division?.genderRestriction) return;
+    const restriction = String(division.genderRestriction).trim().toUpperCase();
+    const knownUsers = userIds.filter(Boolean) as string[];
+
+    if (restriction === 'MIXED') {
+      let male = 0;
+      let female = 0;
+      let knownGenderCount = 0;
+      for (const uid of knownUsers) {
+        const profile = await this.tournamentsRepository.findUserProfile(uid);
+        const g = this.normalizeGenderValue(profile?.gender);
+        if (g === 'MALE') { male++; knownGenderCount++; }
+        else if (g === 'FEMALE') { female++; knownGenderCount++; }
+      }
+      if (knownGenderCount === knownUsers.length && (male === 0 || female === 0)) {
+        throw new BadRequestException('Division đôi nam nữ yêu cầu đúng 1 nam + 1 nữ.');
+      }
+      return;
+    }
+
+    if (restriction !== 'MALE' && restriction !== 'FEMALE') return;
+    for (const uid of knownUsers) {
+      const profile = await this.tournamentsRepository.findUserProfile(uid);
+      const g = this.normalizeGenderValue(profile?.gender);
+      if (g === null) continue;
+      if (g !== restriction) {
+        throw new BadRequestException(
+          restriction === 'MALE'
+            ? 'Division này chỉ dành cho Nam.'
+            : 'Division này chỉ dành cho Nữ.',
+        );
+      }
+    }
+  }
+
   private assertRegistrationAccessible(
     tournament: {
       status?: string | null;
@@ -1524,6 +1582,8 @@ export class TournamentsService {
       : null;
 
     await this.validateEloLimits(tournament, userIds, { division: requestedDivision });
+    // Khi mời partner ngay: chặn đội vi phạm genderRestriction của division
+    await this.validateGenderRestriction(requestedDivision, [userId, partnerUser?.id]);
 
     const result = await this.tournamentsRepository.registerParticipant(id, userId, registerTournamentDto, inviteCode);
 
@@ -1659,6 +1719,8 @@ export class TournamentsService {
       : null;
 
     await this.validateEloLimits(tournament, userIds, { division });
+    // Partner bấm link/QR join: chặn đội vi phạm genderRestriction của division
+    await this.validateGenderRestriction(division, [userId, leaderRoster?.userId]);
 
     const result = await this.tournamentsRepository.joinTeam(tournamentId, userId, participantId, teamInviteToken);
 
@@ -3575,6 +3637,17 @@ export class TournamentsService {
   }
 
   async acceptPartnerInvite(participantId: string, partnerUserId: string) {
+    // Đồng ý ghép đôi qua thông báo → vẫn phải chặn vi phạm giới tính
+    const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (participant) {
+      const division = participant.tournamentDivisionId
+        ? await this.tournamentsRepository.findDivisionById(participant.tournamentDivisionId)
+        : null;
+      const leaderRoster =
+        await this.tournamentsRepository.findLeaderByParticipantId(participantId);
+      await this.validateGenderRestriction(division, [leaderRoster?.userId, partnerUserId]);
+    }
+
     const updated = await this.tournamentsRepository.acceptPartnerInvite(participantId, partnerUserId);
     if (updated && updated.registeredBy) {
       await this.notificationsService.sendNotification(
