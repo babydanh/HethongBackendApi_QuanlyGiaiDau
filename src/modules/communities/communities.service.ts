@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   ConflictException,
@@ -32,6 +33,8 @@ type CommunityMemberStatus = 'JOINED' | 'PENDING' | 'INVITED' | 'REJECTED' | 'BA
 
 @Injectable()
 export class CommunitiesService {
+  private readonly logger = new Logger(CommunitiesService.name);
+
   constructor(
     private readonly communitiesRepository: CommunitiesRepository,
     private readonly notificationsService: NotificationsService,
@@ -46,6 +49,11 @@ export class CommunitiesService {
 
   async findMyCommunities(userId: string) {
     return await this.communitiesRepository.findMyCommunities(userId);
+  }
+
+  async getMyInvites(userId: string) {
+    this.logger.log(`Lấy danh sách lời mời cộng đồng của user ${userId}`);
+    return await this.communitiesRepository.findInvitesByUser(userId);
   }
 
   async findById(id: string, user?: { id: string; roles: string[] }) {

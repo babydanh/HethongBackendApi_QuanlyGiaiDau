@@ -85,17 +85,19 @@ export function validatePickleballSideOutScoreDetails(
 
     if (winnerReachedAtSetIndex === null && (p1SetsWon >= setsToWin || p2SetsWon >= setsToWin)) {
       winnerReachedAtSetIndex = index;
-    } else if (winnerReachedAtSetIndex !== null) {
+    } else if (winnerReachedAtSetIndex !== null && resolvedConfig.mode !== 'LITE') {
       throw new BadRequestException(`Không được nhập thêm ${entry.key} sau khi trận đã chốt người thắng từ trước.`);
     }
   }
 
-  if (p1SetsWon > setsToWin || p2SetsWon > setsToWin) {
-    throw new BadRequestException('Số game thắng đang vượt quá cấu hình pickleball side-out.');
-  }
+  if (resolvedConfig.mode !== 'LITE') {
+    if (p1SetsWon > setsToWin || p2SetsWon > setsToWin) {
+      throw new BadRequestException('Số game thắng đang vượt quá cấu hình pickleball side-out.');
+    }
 
-  if (p1SetsWon >= setsToWin && p2SetsWon >= setsToWin) {
-    throw new BadRequestException('Hai bên không thể cùng đạt ngưỡng thắng trận pickleball side-out.');
+    if (p1SetsWon >= setsToWin && p2SetsWon >= setsToWin) {
+      throw new BadRequestException('Hai bên không thể cùng đạt ngưỡng thắng trận pickleball side-out.');
+    }
   }
 
   return {

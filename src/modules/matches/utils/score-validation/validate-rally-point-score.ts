@@ -85,17 +85,19 @@ export function validateRallyPointScoreDetails(context: ScoreValidationContext):
 
     if (winnerReachedAtSetIndex === null && (p1SetsWon >= setsToWin || p2SetsWon >= setsToWin)) {
       winnerReachedAtSetIndex = index;
-    } else if (winnerReachedAtSetIndex !== null) {
+    } else if (winnerReachedAtSetIndex !== null && resolvedConfig.mode !== 'LITE') {
       throw new BadRequestException(`Không được nhập thêm ${entry.key} sau khi trận đã chốt người thắng từ trước.`);
     }
   }
 
-  if (p1SetsWon > setsToWin || p2SetsWon > setsToWin) {
-    throw new BadRequestException('Số set/game thắng đang vượt quá cấu hình của trận.');
-  }
+  if (resolvedConfig.mode !== 'LITE') {
+    if (p1SetsWon > setsToWin || p2SetsWon > setsToWin) {
+      throw new BadRequestException('Số set/game thắng đang vượt quá cấu hình của trận.');
+    }
 
-  if (p1SetsWon >= setsToWin && p2SetsWon >= setsToWin) {
-    throw new BadRequestException('Hai bên không thể cùng đạt ngưỡng thắng trận.');
+    if (p1SetsWon >= setsToWin && p2SetsWon >= setsToWin) {
+      throw new BadRequestException('Hai bên không thể cùng đạt ngưỡng thắng trận.');
+    }
   }
 
   return {

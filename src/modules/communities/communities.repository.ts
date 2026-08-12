@@ -385,6 +385,45 @@ export class CommunitiesRepository {
       .where(condition);
   }
 
+  async findInvitesByUser(userId: string) {
+    const rows = await this.db
+      .select({
+        id: schema.communityMembers.id,
+        communityId: schema.communityMembers.communityId,
+        communityName: schema.communities.name,
+        communityAvatar: schema.communities.logoUrl,
+        communityLogoUrl: schema.communities.logoUrl,
+        communityBannerUrl: schema.communities.bannerUrl,
+        inviterName: schema.profiles.fullName,
+        inviterAvatar: schema.profiles.avatarUrl,
+        role: schema.communityMembers.role,
+        invitedAt: schema.communityMembers.joinedAt,
+      })
+      .from(schema.communityMembers)
+      .innerJoin(
+        schema.communities,
+        eq(schema.communityMembers.communityId, schema.communities.id),
+      )
+      .leftJoin(schema.users, eq(schema.communityMembers.invitedBy, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        and(
+          eq(schema.communityMembers.userId, userId),
+          eq(schema.communityMembers.status, 'INVITED'),
+          isNull(schema.communities.deletedAt),
+        ),
+      )
+      .orderBy(sql`${schema.communityMembers.joinedAt} DESC`);
+
+    return rows.map((row) => ({
+      ...row,
+      inviterName: row.inviterName || 'Ban quản trị',
+      inviterAvatar: row.inviterAvatar || null,
+      createdAt: row.invitedAt,
+      status: 'PENDING',
+    }));
+  }
+
   async addMember(communityId: string, userId: string, role: string, status: string = 'JOINED', joinAnswers?: Record<string, string>, invitedBy?: string) {
     const [member] = await this.db
       .insert(schema.communityMembers)
