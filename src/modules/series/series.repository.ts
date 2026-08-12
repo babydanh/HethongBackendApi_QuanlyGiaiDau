@@ -130,23 +130,45 @@ export class SeriesRepository {
       );
     }
 
-    const whereClause = and(...conditions);
+    const baseWhereClause = and(...conditions);
+    let whereClause = baseWhereClause;
+    if (query.cursor) {
+      try {
+        const cursorValue = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+        const cursorDate = new Date(cursorValue.createdAt);
+        whereClause = and(
+          whereClause,
+          sql`(${schema.tournamentSeries.createdAt} < ${cursorDate} OR (${schema.tournamentSeries.createdAt} = ${cursorDate} AND ${schema.tournamentSeries.id} < ${cursorValue.id}))`,
+        );
+      } catch {
+        // Ignore malformed cursors and return the first page.
+      }
+    }
     const limit = query.limit || 10;
     const page = query.page || 1;
+    const cursor = query.cursor;
     const offset = (page - 1) * limit;
 
     const [{ count: total }] = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(schema.tournamentSeries)
-      .where(whereClause);
+      .where(baseWhereClause);
 
-    const items = await this.db
+    let seriesQuery = this.db
       .select()
       .from(schema.tournamentSeries)
       .where(whereClause)
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(schema.tournamentSeries.createdAt));
+      .orderBy(desc(schema.tournamentSeries.createdAt), desc(schema.tournamentSeries.id))
+      .limit(limit + 1)
+      .$dynamic();
+    if (!cursor) seriesQuery = seriesQuery.offset(offset);
+    const rows = await seriesQuery;
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const lastItem = items.at(-1);
+    const nextCursor = hasMore && lastItem
+      ? Buffer.from(JSON.stringify({ createdAt: lastItem.createdAt.toISOString(), id: lastItem.id })).toString('base64url')
+      : null;
 
     return {
       data: items,
@@ -155,6 +177,8 @@ export class SeriesRepository {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+        nextCursor,
+        hasMore,
       }
     };
   }
@@ -277,7 +301,7 @@ export class SeriesRepository {
 
   // ─── Standings & Point Logs ───────────────────────────────────
 
-  async getStandings(legId: string, categoryId?: string, limit = 50, page = 1) {
+  async getStandings(legId: string, categoryId?: string, limit = 50, page = 1, cursor?: string) {
     const conditions = [eq(schema.seriesStandings.legId, legId)];
     if (categoryId) {
       conditions.push(eq(schema.seriesStandings.categoryId, categoryId));
@@ -291,7 +315,23 @@ export class SeriesRepository {
       .from(schema.seriesStandings)
       .where(whereClause);
 
-    const data = await this.db
+    let standingsWhere = whereClause;
+    let cursorValue: { totalPsrPoints: number; id: string } | null = null;
+    if (cursor) {
+      try {
+        cursorValue = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { totalPsrPoints: number; id: string };
+      } catch {
+        cursorValue = null;
+      }
+    }
+    if (cursorValue) {
+      standingsWhere = and(
+        whereClause,
+        sql`(${schema.seriesStandings.totalPsrPoints} < ${cursorValue.totalPsrPoints} OR (${schema.seriesStandings.totalPsrPoints} = ${cursorValue.totalPsrPoints} AND ${schema.seriesStandings.id} < ${cursorValue.id}))`,
+      );
+    }
+
+    const data = this.db
       .select({
         standing: schema.seriesStandings,
         user: {
@@ -306,18 +346,25 @@ export class SeriesRepository {
       .innerJoin(schema.users, eq(schema.seriesStandings.userId, schema.users.id))
       .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .innerJoin(schema.categories, eq(schema.seriesStandings.categoryId, schema.categories.id))
-      .where(whereClause)
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(schema.seriesStandings.totalPsrPoints));
+      .where(standingsWhere)
+      .orderBy(desc(schema.seriesStandings.totalPsrPoints), desc(schema.seriesStandings.id))
+      .limit(limit + 1)
+      .$dynamic();
+    const standingsRows = cursor ? data : data.offset(offset);
+    const allStandings = await standingsRows;
+    const hasMore = allStandings.length > limit;
+    const standings = hasMore ? allStandings.slice(0, limit) : allStandings;
+    const lastStanding = standings.at(-1)?.standing;
 
     return {
-      data,
+      data: standings,
       meta: {
         total,
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+        nextCursor: hasMore && lastStanding ? Buffer.from(JSON.stringify({ totalPsrPoints: lastStanding.totalPsrPoints, id: lastStanding.id })).toString('base64url') : null,
+        hasMore,
       }
     };
   }

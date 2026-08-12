@@ -186,12 +186,12 @@ export class SeriesService {
 
   // ─── Standings ────────────────────────────────────────────────
 
-  async getStandings(seriesId: string, query: { legId: string; categoryId?: string; limit?: number; page?: number }) {
+  async getStandings(seriesId: string, query: { legId: string; categoryId?: string; limit?: number; page?: number; cursor?: string }) {
     const series = await this.seriesRepository.findById(seriesId);
     if (!series) {
       throw new NotFoundException('Không tìm thấy chuỗi giải đấu.');
     }
-    return this.seriesRepository.getStandings(query.legId, query.categoryId, query.limit, query.page);
+    return this.seriesRepository.getStandings(query.legId, query.categoryId, query.limit, query.page, query.cursor);
   }
 
   // ─── PSR Computation ──────────────────────────────────────────

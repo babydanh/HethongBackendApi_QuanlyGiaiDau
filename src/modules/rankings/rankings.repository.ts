@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, desc, and, isNull, or, SQL, sql, gt, aliasedTable, inArray } from 'drizzle-orm';
+import { eq, desc, and, isNull, or, SQL, sql, gt, aliasedTable, inArray, AnyColumn } from 'drizzle-orm';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 
 @Injectable()
@@ -17,8 +17,19 @@ export class RankingsRepository {
   }
 
   async getLeaderboard(query: QueryRankingDto) {
-    const { page = 1, limit = 50, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode, genderRestriction } = query;
+    const { page = 1, limit = 50, cursor, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode, genderRestriction } = query;
     const offset = (page - 1) * limit;
+    let cursorValue: { eloPoints: number; id: string } | null = null;
+    if (cursor) {
+      try {
+        cursorValue = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { eloPoints: number; id: string };
+      } catch {
+        cursorValue = null;
+      }
+    }
+    const applyCursor = (eloColumn: AnyColumn, idColumn: AnyColumn) => cursorValue
+      ? sql`(${eloColumn} < ${cursorValue.eloPoints} OR (${eloColumn} = ${cursorValue.eloPoints} AND ${idColumn} < ${cursorValue.id}))`
+      : undefined;
 
     const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
 
@@ -58,7 +69,7 @@ export class RankingsRepository {
 
       const whereClause = and(...conditions);
 
-      const data = await this.db
+      const data = this.db
         .select({
           id: schema.pairRanks.id,
           categoryId: schema.pairRanks.categoryId,
@@ -86,16 +97,23 @@ export class RankingsRepository {
         .innerJoin(user2, eq(schema.pairRanks.user2Id, user2.id))
         .leftJoin(profile1, eq(user1.id, profile1.userId))
         .leftJoin(profile2, eq(user2.id, profile2.userId))
-        .where(whereClause)
-        .orderBy(desc(schema.pairRanks.eloPoints))
-        .limit(limit)
-        .offset(offset);
+        .where(and(whereClause, applyCursor(schema.pairRanks.eloPoints, schema.pairRanks.id)))
+        .orderBy(desc(schema.pairRanks.eloPoints), desc(schema.pairRanks.id))
+        .limit(limit + 1)
+        .$dynamic();
+      const pairRows = cursor ? data : data.offset(offset);
+      const pairData = await pairRows;
+      const pairHasMore = pairData.length > limit;
+      const pairItems = pairHasMore ? pairData.slice(0, limit) : pairData;
+      const pairLast = pairItems.at(-1);
 
       return {
-        data,
+        data: pairItems,
         meta: {
           page,
           limit,
+          nextCursor: pairHasMore && pairLast ? Buffer.from(JSON.stringify({ eloPoints: pairLast.eloPoints, id: pairLast.id })).toString('base64url') : null,
+          hasMore: pairHasMore,
         },
       };
     }
@@ -126,7 +144,7 @@ export class RankingsRepository {
 
       const whereClause = and(...conditions);
 
-      const data = await this.db
+      const data = this.db
         .select({
           id: schema.communityRankings.id,
           userId: schema.communityRankings.userId,
@@ -152,16 +170,23 @@ export class RankingsRepository {
           eq(schema.communityRankings.userId, schema.communityMembers.userId),
           eq(schema.communityRankings.communityId, schema.communityMembers.communityId),
         ))
-        .where(whereClause)
-        .orderBy(desc(schema.communityRankings.eloPoints))
-        .limit(limit)
-        .offset(offset);
+        .where(and(whereClause, applyCursor(schema.communityRankings.eloPoints, schema.communityRankings.id)))
+        .orderBy(desc(schema.communityRankings.eloPoints), desc(schema.communityRankings.id))
+        .limit(limit + 1)
+        .$dynamic();
+      const communityRows = cursor ? data : data.offset(offset);
+      const communityData = await communityRows;
+      const communityHasMore = communityData.length > limit;
+      const communityItems = communityHasMore ? communityData.slice(0, limit) : communityData;
+      const communityLast = communityItems.at(-1);
 
       return {
-        data,
+        data: communityItems,
         meta: {
           page,
           limit,
+          nextCursor: communityHasMore && communityLast ? Buffer.from(JSON.stringify({ eloPoints: communityLast.eloPoints, id: communityLast.id })).toString('base64url') : null,
+          hasMore: communityHasMore,
         },
       };
     } else {
@@ -184,7 +209,7 @@ export class RankingsRepository {
 
       const whereClause = and(...conditions);
 
-      const data = await this.db
+      const data = this.db
         .select({
           id: schema.userRanks.id,
           userId: schema.userRanks.userId,
@@ -210,16 +235,23 @@ export class RankingsRepository {
         .innerJoin(schema.users, eq(schema.userRanks.userId, schema.users.id))
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
         .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
-        .where(whereClause)
-        .orderBy(desc(schema.userRanks.eloPoints))
-        .limit(limit)
-        .offset(offset);
+        .where(and(whereClause, applyCursor(schema.userRanks.eloPoints, schema.userRanks.id)))
+        .orderBy(desc(schema.userRanks.eloPoints), desc(schema.userRanks.id))
+        .limit(limit + 1)
+        .$dynamic();
+      const publicRows = cursor ? data : data.offset(offset);
+      const publicData = await publicRows;
+      const publicHasMore = publicData.length > limit;
+      const publicItems = publicHasMore ? publicData.slice(0, limit) : publicData;
+      const publicLast = publicItems.at(-1);
 
       return {
-        data,
+        data: publicItems,
         meta: {
           page,
           limit,
+          nextCursor: publicHasMore && publicLast ? Buffer.from(JSON.stringify({ eloPoints: publicLast.eloPoints, id: publicLast.id })).toString('base64url') : null,
+          hasMore: publicHasMore,
         },
       };
     }
@@ -294,9 +326,10 @@ export class RankingsRepository {
       communityId?: string;
       page?: number;
       limit?: number;
+      cursor?: string;
     },
   ) {
-    const { categoryId, scope = 'PUBLIC', communityId, page = 1, limit = 20 } = query;
+    const { categoryId, scope = 'PUBLIC', communityId, page = 1, limit = 20, cursor } = query;
     const offset = (page - 1) * limit;
 
     const conditions: SQL[] = [eq(schema.eloHistoryLogs.userId, userId)];
@@ -318,7 +351,24 @@ export class RankingsRepository {
 
     const whereClause = and(...conditions);
 
-    const data = await this.db
+    let historyWhere = whereClause;
+    let historyCursor: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try {
+        historyCursor = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+      } catch {
+        historyCursor = null;
+      }
+    }
+    if (historyCursor) {
+      const cursorDate = new Date(historyCursor.createdAt);
+      historyWhere = and(
+        whereClause,
+        sql`(${schema.eloHistoryLogs.createdAt} < ${cursorDate} OR (${schema.eloHistoryLogs.createdAt} = ${cursorDate} AND ${schema.eloHistoryLogs.id} < ${historyCursor.id}))`,
+      );
+    }
+
+    const data = this.db
       .select({
         id: schema.eloHistoryLogs.id,
         userId: schema.eloHistoryLogs.userId,
@@ -342,16 +392,23 @@ export class RankingsRepository {
       .leftJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
       .leftJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
       .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-      .where(whereClause)
-      .orderBy(desc(schema.eloHistoryLogs.createdAt))
-      .limit(limit)
-      .offset(offset);
+      .where(historyWhere)
+      .orderBy(desc(schema.eloHistoryLogs.createdAt), desc(schema.eloHistoryLogs.id))
+      .limit(limit + 1)
+      .$dynamic();
+    const historyRows = cursor ? data : data.offset(offset);
+    const historyData = await historyRows;
+    const historyHasMore = historyData.length > limit;
+    const historyItems = historyHasMore ? historyData.slice(0, limit) : historyData;
+    const historyLast = historyItems.at(-1);
 
     return {
-      data,
+      data: historyItems,
       meta: {
         page,
         limit,
+        nextCursor: historyHasMore && historyLast ? Buffer.from(JSON.stringify({ createdAt: historyLast.createdAt.toISOString(), id: historyLast.id })).toString('base64url') : null,
+        hasMore: historyHasMore,
       }
     };
   }
