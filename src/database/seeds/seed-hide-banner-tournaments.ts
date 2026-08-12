@@ -65,7 +65,7 @@ async function main() {
     const [b1] = await db
       .insert(schema.tournaments)
       .values({
-        name: '🏸 VNSPORT Badminton Championship (Banner Ẩn Chữ 1)',
+        name: '🏸 Sporto Badminton Championship (Banner Ẩn Chữ 1)',
         description: 'Giải đấu Cầu lông mở rộng thử nghiệm tính năng Ẩn Chữ Đè Trên Banner.',
         categoryId: badmintonCatId,
         createdBy: adminUser.id,
@@ -140,7 +140,7 @@ async function main() {
     const [t1] = await db
       .insert(schema.tournaments)
       .values({
-        name: '🏓 VNSPORT Table Tennis Open (Banner Ẩn Chữ 3)',
+        name: '🏓 Sporto Table Tennis Open (Banner Ẩn Chữ 3)',
         description: 'Giải đấu Bóng bàn mở rộng thử nghiệm tính năng Ẩn Chữ Đè Trên Banner.',
         categoryId: tableTennisCatId,
         createdBy: adminUser.id,

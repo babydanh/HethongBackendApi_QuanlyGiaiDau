@@ -1299,7 +1299,7 @@ export class TournamentsRepository {
           .limit(1);
 
         if (!partnerUser) {
-          throw new BadRequestException('Không tìm thấy tài khoản VNDC Sport của đồng đội. Vui lòng kiểm tra lại Email hoặc SĐT.');
+          throw new BadRequestException('Không tìm thấy tài khoản Sporto của đồng đội. Vui lòng kiểm tra lại Email hoặc SĐT.');
         }
 
         if (partnerUser.id === userId) {

@@ -21,6 +21,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/enums';
 import { SendSupportMessageDto } from './dto/send-support-message.dto';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
+import { QueryChatMessagesDto } from './dto/query-chat-messages.dto';
 
 @ApiTags('chat')
 @ApiBearerAuth()
@@ -70,9 +71,10 @@ export class ChatController {
   @ApiOperation({ summary: 'Lấy lịch sử tin nhắn của một phòng' })
   async getMessages(
     @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: QueryChatMessagesDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.chatService.getMessages(user.sub, id);
+    return this.chatService.getMessages(user.sub, id, query.limit, query.cursor);
   }
 
   @Get('support/me')

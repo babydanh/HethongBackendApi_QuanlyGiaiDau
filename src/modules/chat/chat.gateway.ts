@@ -111,19 +111,19 @@ export class ChatGateway {
     @MessageBody() payload: SendChatMessageDto,
     @ConnectedSocket() client: Socket,
   ) {
-    // Nhờ có WsJwtGuard, ta lấy được thông tin người gửi
-    const user = client.data.user; 
-    
-    const messagePayload = {
-      senderId: user.sub,
-      senderName: user.email, // Tạm thời dùng email, sau này query tên
-      content: payload.content,
-      timestamp: new Date().toISOString()
-    };
+    return this.persistAndBroadcastMessage(payload, client);
+  }
 
-    // Phát tin nhắn này cho toàn bộ user đang ở trong roomId
-    this.broadcastMessage(payload.roomId, messagePayload);
-
+  private async persistAndBroadcastMessage(payload: SendChatMessageDto, client: Socket) {
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub || !payload?.content?.trim()) return { event: 'chat:error', data: 'Invalid message' };
+    const room = await this.chatRepository.findRoomById(payload.roomId);
+    const canAccess = await this.chatRepository.canAccessRoom(payload.roomId, user.sub);
+    if (!room || !canAccess) return { event: 'chat:error', data: 'Forbidden' };
+    const persisted = await this.chatRepository.saveMessage(user.sub, { roomId: payload.roomId, messageText: payload.content.trim() });
+    const messagePayload = { ...persisted, content: persisted.messageText, timestamp: persisted.createdAt.toISOString() };
+    if (room.type === 'CLUB') this.broadcastClubMessage(payload.roomId, messagePayload);
+    else this.broadcastMessage(payload.roomId, messagePayload);
     return { event: 'messageSent', data: messagePayload };
   }
 

@@ -2,7 +2,8 @@ import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, sql, asc, inArray } from 'drizzle-orm';
+import { eq, and, sql, asc, desc, inArray, lt, or, type SQL } from 'drizzle-orm';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 
@@ -289,7 +290,7 @@ export class ChatRepository {
       .where(eq(schema.users.id, senderId))
       .limit(1);
 
-    const displayName = prof?.fullName?.trim() || prof?.email?.split('@')[0] || 'VNDC Player';
+    const displayName = prof?.fullName?.trim() || prof?.email?.split('@')[0] || 'Sporto Player';
 
     return {
       ...record,
@@ -308,7 +309,7 @@ export class ChatRepository {
         attachmentsUrls: schema.chatMessages.attachmentsUrls,
         isRead: schema.chatMessages.isRead,
         createdAt: schema.chatMessages.createdAt,
-        senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'VNDC Player')`,
+        senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Sporto Player')`,
         senderAvatar: schema.profiles.avatarUrl,
       })
       .from(schema.chatMessages)
@@ -319,6 +320,27 @@ export class ChatRepository {
       .limit(limit);
 
     return result;
+  }
+
+  async getMessagesPage(roomId: string, limit: number, cursor?: string) {
+    const conditions: SQL[] = [eq(schema.chatMessages.roomId, roomId)];
+    const decoded = cursor ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor) : null;
+    if (decoded?.createdAt && decoded.id) {
+      conditions.push(or(lt(schema.chatMessages.createdAt, new Date(decoded.createdAt)), and(eq(schema.chatMessages.createdAt, new Date(decoded.createdAt)), lt(schema.chatMessages.id, decoded.id))) as SQL);
+    }
+    const rows = await this.db.select({
+      id: schema.chatMessages.id, roomId: schema.chatMessages.roomId, senderId: schema.chatMessages.senderId,
+      messageText: schema.chatMessages.messageText, attachmentsUrls: schema.chatMessages.attachmentsUrls,
+      isRead: schema.chatMessages.isRead, createdAt: schema.chatMessages.createdAt,
+      senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Sporto Player')`,
+      senderAvatar: schema.profiles.avatarUrl,
+    }).from(schema.chatMessages).innerJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId)).where(and(...conditions))
+      .orderBy(desc(schema.chatMessages.createdAt), desc(schema.chatMessages.id)).limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const data = hasMore ? rows.slice(0, limit) : rows;
+    const last = data[data.length - 1];
+    return { data: data.reverse(), meta: { limit, hasMore, nextCursor: hasMore && last ? CursorPaginationHelper.encodeCursor({ id: last.id, createdAt: last.createdAt }) : null } };
   }
 
   async findSupportRoomForUser(userId: string) {
@@ -448,5 +470,4 @@ export class ChatRepository {
       );
   }
 }
-
 

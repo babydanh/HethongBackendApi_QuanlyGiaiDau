@@ -1570,7 +1570,7 @@ export class TournamentsService {
       partnerUser = await this.tournamentsRepository.findUserByEmailOrPhone(registerTournamentDto.partnerEmailOrPhone);
       if (!partnerUser) {
         throw new BadRequestException(
-          `Không tìm thấy tài khoản VNSport với email/SĐT "${registerTournamentDto.partnerEmailOrPhone}". Đồng đội cần đăng ký tài khoản trước khi tham gia.`
+          `Không tìm thấy tài khoản Sporto với email/SĐT "${registerTournamentDto.partnerEmailOrPhone}". Đồng đội cần đăng ký tài khoản trước khi tham gia.`
         );
       }
       userIds.push(partnerUser.id);
@@ -2636,14 +2636,14 @@ export class TournamentsService {
 
     const foundUser = await this.tournamentsRepository.findUserByEmailOrPhone(userEmailOrPhone);
     if (!foundUser) {
-      throw new NotFoundException('Không tìm thấy tài khoản VNDC Sport cho người chơi thứ nhất');
+      throw new NotFoundException('Không tìm thấy tài khoản Sporto cho người chơi thứ nhất');
     }
 
     let foundPartnerId: string | undefined = undefined;
     if (partnerEmailOrPhone) {
       const foundPartner = await this.tournamentsRepository.findUserByEmailOrPhone(partnerEmailOrPhone);
       if (!foundPartner) {
-        throw new NotFoundException('Không tìm thấy tài khoản VNDC Sport cho đồng đội (người thứ 2)');
+        throw new NotFoundException('Không tìm thấy tài khoản Sporto cho đồng đội (người thứ 2)');
       }
       if (foundPartner.id === foundUser.id) {
         throw new BadRequestException('Tài khoản đồng đội phải khác tài khoản người chơi thứ nhất');

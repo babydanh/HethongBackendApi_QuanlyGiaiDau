@@ -39,8 +39,8 @@ export class AppVersionService {
     const defaultLatest = '1.0.6';
     const defaultMin = '1.0.0';
     const defaultStoreUrl = isIos
-      ? 'https://apps.apple.com/vn/app/vnsport/id6795829694'
-      : 'https://play.google.com/store/apps/details?id=vn.vnsport.quanlygiaidau';
+      ? 'https://apps.apple.com/vn/app/Sporto/id6795829694'
+      : 'https://play.google.com/store/apps/details?id=vn.Sporto.quanlygiaidau';
 
     return {
       platform,

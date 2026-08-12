@@ -643,12 +643,12 @@ export class AuthService {
     // Add job to BullMQ queue
     await this.emailQueue.add('send-verification', {
       to: user.email,
-      subject: 'Xác thực Email tài khoản VNDC Sport (Có hiệu lực 120s)',
+      subject: 'Xác thực Email tài khoản Sporto (Có hiệu lực 120s)',
       html: `
         <div style="font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
           <h2 style="color: #2563eb; margin-bottom: 20px;">Xác thực Email tài khoản</h2>
           <p>Chào <strong>${user.profile?.fullName || 'bạn'}</strong>,</p>
-          <p>Cảm ơn bạn đã tham gia hệ thống quản lý giải đấu VNDC Sport. Vui lòng nhấp vào nút hoặc đường dẫn bên dưới để xác minh địa chỉ Email của bạn:</p>
+          <p>Cảm ơn bạn đã tham gia hệ thống quản lý giải đấu Sporto. Vui lòng nhấp vào nút hoặc đường dẫn bên dưới để xác minh địa chỉ Email của bạn:</p>
           <div style="margin: 30px 0; text-align: center;">
             <a href="${activationLink}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Xác thực Email</a>
           </div>
@@ -820,7 +820,7 @@ export class AuthService {
     const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/reset-password?token=${token}`;
     await this.emailQueue.add('send-password-reset', {
       to: email,
-      subject: 'Đặt lại mật khẩu - VNDC Sport',
+      subject: 'Đặt lại mật khẩu - Sporto',
       html: `<div style="font-family:sans-serif;padding:20px;max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;">
         <h2 style="color:#2563eb;">Đặt lại mật khẩu</h2>
         <p>Chào bạn,</p>

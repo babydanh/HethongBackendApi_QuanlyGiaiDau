@@ -35,7 +35,7 @@ export class AiService {
         baseURL,
         defaultHeaders: {
           'HTTP-Referer': 'https://vndcsport.com', // Optional, for OpenRouter rankings
-          'X-Title': 'VNDC Sport', // Optional, for OpenRouter rankings
+          'X-Title': 'Sporto', // Optional, for OpenRouter rankings
         },
       });
     }
@@ -164,7 +164,7 @@ export class AiService {
    * System prompt fallback khi không đọc được file
    */
   private getFallbackSystemPrompt(): string {
-    return `Bạn là Trợ lý ảo AI của nền tảng quản lý giải đấu thể thao VNDC Sport.
+    return `Bạn là Trợ lý ảo AI của nền tảng quản lý giải đấu thể thao Sporto.
 Bạn hỗ trợ người dùng về tạo giải đấu, quản lý giải, đăng ký thi đấu, ELO, thanh toán, và các thao tác trên hệ thống.
 Trả lời bằng tiếng Việt, lịch sự, chính xác, có cấu trúc.`;
   }
