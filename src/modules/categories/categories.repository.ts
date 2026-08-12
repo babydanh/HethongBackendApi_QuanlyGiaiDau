@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
 import { eq, ilike, or } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
@@ -22,7 +22,15 @@ export class CategoriesRepository {
       );
     }
 
-    return await this.db.select().from(schema.categories).where(whereClause);
+    const list = await this.db.select().from(schema.categories).where(whereClause);
+    return list.map((cat) => {
+      const config = (cat.categoryConfig as Record<string, unknown>) || {};
+      const isActive = config.isActive !== false;
+      return {
+        ...cat,
+        isActive,
+      };
+    });
   }
 
   async findCategoryById(id: string) {
@@ -31,7 +39,13 @@ export class CategoriesRepository {
       .from(schema.categories)
       .where(eq(schema.categories.id, id))
       .limit(1);
-    return categories[0];
+    if (!categories[0]) return null;
+    const cat = categories[0];
+    const config = (cat.categoryConfig as Record<string, unknown>) || {};
+    return {
+      ...cat,
+      isActive: config.isActive !== false,
+    };
   }
 
   async findCategoryBySlug(slug: string) {
@@ -40,7 +54,13 @@ export class CategoriesRepository {
       .from(schema.categories)
       .where(eq(schema.categories.slug, slug))
       .limit(1);
-    return categories[0];
+    if (!categories[0]) return null;
+    const cat = categories[0];
+    const config = (cat.categoryConfig as Record<string, unknown>) || {};
+    return {
+      ...cat,
+      isActive: config.isActive !== false,
+    };
   }
 
   async createCategory(data: typeof schema.categories.$inferInsert) {
@@ -53,14 +73,30 @@ export class CategoriesRepository {
 
   async updateCategory(
     id: string,
-    data: Partial<typeof schema.categories.$inferInsert>,
+    data: Partial<typeof schema.categories.$inferInsert> & { isActive?: boolean },
   ) {
+    const existing = await this.findCategoryById(id);
+    const existingConfig = (existing?.categoryConfig as Record<string, unknown>) || {};
+    const updatedConfig = {
+      ...existingConfig,
+      ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+    };
+
+    const { isActive, ...updateData } = data as Record<string, unknown>;
+
     const [category] = await this.db
       .update(schema.categories)
-      .set(data)
+      .set({
+        ...updateData,
+        categoryConfig: updatedConfig,
+      })
       .where(eq(schema.categories.id, id))
       .returning();
-    return category;
+    
+    return {
+      ...category,
+      isActive: updatedConfig.isActive !== false,
+    };
   }
 
   async deleteCategory(id: string) {
