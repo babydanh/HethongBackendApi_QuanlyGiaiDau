@@ -53,28 +53,8 @@ export class MatchesRepository {
     
     // Enforce soft delete filters
     conditions.push(isNull(schema.matches.deletedAt));
+
     if (publicOnly) {
-      conditions.push(
-        sql`(
-          exists (
-            select 1 from ${schema.tournaments} t
-            where t.id = ${schema.matches.tournamentId}
-            and t.deleted_at is null
-            and t.visibility = 'PUBLIC'
-            and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
-          )
-          or exists (
-            select 1 from ${schema.tournamentGroups} g
-            join ${schema.tournamentStages} s on g.stage_id = s.id
-            join ${schema.tournaments} t on s.tournament_id = t.id
-            where g.id = ${schema.matches.groupId}
-            and t.deleted_at is null
-            and t.visibility = 'PUBLIC'
-            and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
-          )
-        )`
-      );
-    } else {
       conditions.push(
         sql`(
           exists (
@@ -126,7 +106,7 @@ export class MatchesRepository {
         .where(eq(schema.tournamentRosters.userId, userId));
       const pIds = rosters.map(r => r.participantId);
       if (pIds.length === 0) {
-        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+        return { data: [], meta: { total: 0, page, limit, totalPages: 0, nextCursor: null, hasMore: false } };
       }
       conditions.push(
         or(
@@ -152,81 +132,78 @@ export class MatchesRepository {
       }
     }
 
-    // Luôn lọc qua stages để áp dụng: tournamentId, divisionId, matchType, genderRestriction, isRanked
-    const stageConditions: SQL[] = [isNull(schema.tournamentStages.deletedAt)];
-    if (tId) stageConditions.push(eq(schema.tournamentStages.tournamentId, tId));
-    if (divisionId) stageConditions.push(eq(schema.tournamentStages.tournamentDivisionId, divisionId));
+    // Direct filters on tournament/division
+    if (tId) {
+      conditions.push(eq(schema.matches.tournamentId, tId));
+    }
 
-    const stagesQuery = this.db
-      .select({ 
-        id: schema.tournamentStages.id, 
-        type: schema.tournamentStages.type,
-        tournamentId: schema.tournamentStages.tournamentId,
-        tournamentName: schema.tournaments.name,
-        tMatchType: schema.tournaments.matchType,
-        tGender: schema.tournaments.genderRestriction,
-        dMatchType: schema.tournamentDivisions.matchType,
-        dGender: schema.tournamentDivisions.genderRestriction,
-        bracketType: sql`${schema.tournaments.tournamentConfig}->>'bracketType'`,
-      })
-      .from(schema.tournamentStages)
-      .leftJoin(schema.tournamentDivisions, eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id))
-      .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-      .where(and(
-        ...stageConditions,
-        ...(bracketType ? [
-          sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`
-        ] : []),
-        ...(genderRestriction ? [
-          or(
-            eq(schema.tournamentDivisions.genderRestriction, genderRestriction),
-            isNull(schema.tournamentDivisions.genderRestriction),
-            and(
-              or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.genderRestriction)),
-              or(
-                eq(schema.tournaments.genderRestriction, genderRestriction),
-                isNull(schema.tournaments.genderRestriction)
+    // Stage filters (only if specific filters like matchType, genderRestriction, bracketType, isRanked are supplied)
+    const hasStageFilters = Boolean(matchType || genderRestriction || bracketType || isRanked !== undefined);
+    if (hasStageFilters) {
+      const stageConditions: SQL[] = [isNull(schema.tournamentStages.deletedAt)];
+      if (tId) stageConditions.push(eq(schema.tournamentStages.tournamentId, tId));
+      if (divisionId) stageConditions.push(eq(schema.tournamentStages.tournamentDivisionId, divisionId));
+
+      const stagesQuery = this.db
+        .select({ 
+          id: schema.tournamentStages.id, 
+          tournamentId: schema.tournamentStages.tournamentId,
+        })
+        .from(schema.tournamentStages)
+        .leftJoin(schema.tournamentDivisions, eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id))
+        .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+        .where(and(
+          ...stageConditions,
+          ...(bracketType ? [
+            sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`
+          ] : []),
+          ...(genderRestriction ? [
+            or(
+              eq(schema.tournamentDivisions.genderRestriction, genderRestriction),
+              isNull(schema.tournamentDivisions.genderRestriction),
+              and(
+                or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.genderRestriction)),
+                or(
+                  eq(schema.tournaments.genderRestriction, genderRestriction),
+                  isNull(schema.tournaments.genderRestriction)
+                )
               )
             )
-          )
-        ] : []),
-        ...(matchType ? [
-          or(
-            eq(schema.tournamentDivisions.matchType, matchType),
-            and(
-              or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.matchType)),
-              eq(schema.tournaments.matchType, matchType)
+          ] : []),
+          ...(matchType ? [
+            or(
+              eq(schema.tournamentDivisions.matchType, matchType),
+              and(
+                or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.matchType)),
+                eq(schema.tournaments.matchType, matchType)
+              )
             )
-          )
-        ] : []),
-        ...(isRanked !== undefined ? [eq(schema.tournaments.isRanked, isRanked)] : []),
-      ));
+          ] : []),
+          ...(isRanked !== undefined ? [eq(schema.tournaments.isRanked, isRanked)] : []),
+        ));
 
-    const stages = await stagesQuery;
-    const stageIds = stages.map(s => s.id);
-    const tournamentIds = Array.from(new Set(stages.map(s => s.tournamentId).filter(Boolean)));
-    
-    if (stageIds.length === 0) {
-      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+      const stages = await stagesQuery;
+      const stageIds = stages.map(s => s.id);
+      const tournamentIds = Array.from(new Set(stages.map(s => s.tournamentId).filter(Boolean)));
+      
+      if (stageIds.length === 0 && tournamentIds.length === 0) {
+        return { data: [], meta: { total: 0, page, limit, totalPages: 0, nextCursor: null, hasMore: false } };
+      }
+
+      const groups = stageIds.length > 0 ? await this.db
+        .select({ id: schema.tournamentGroups.id })
+        .from(schema.tournamentGroups)
+        .where(inArray(schema.tournamentGroups.stageId, stageIds)) : [];
+      const groupIds = groups.map(g => g.id);
+
+      const matchScope: SQL[] = [];
+      if (groupIds.length > 0) matchScope.push(inArray(schema.matches.groupId, groupIds));
+      if (tournamentIds.length > 0) matchScope.push(inArray(schema.matches.tournamentId, tournamentIds));
+      
+      if (matchScope.length > 0) {
+        conditions.push(or(...matchScope) as SQL);
+      }
     }
-
-    const groups = await this.db
-      .select({ id: schema.tournamentGroups.id })
-      .from(schema.tournamentGroups)
-      .where(inArray(schema.tournamentGroups.stageId, stageIds));
-    const groupIds = groups.map(g => g.id);
-
-    if (groupIds.length === 0 && tournamentIds.length === 0) {
-      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
-    }
-
-    // Knockout/advancement rows can legitimately have no groupId. They still
-    // belong to the selected tournament through matches.tournamentId.
-    const matchScope = [
-      ...(groupIds.length > 0 ? [inArray(schema.matches.groupId, groupIds)] : []),
-      ...(tournamentIds.length > 0 ? [inArray(schema.matches.tournamentId, tournamentIds)] : []),
-    ];
-    conditions.push(or(...matchScope) as SQL);
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
