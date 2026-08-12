@@ -45,7 +45,6 @@ export class MatchesRepository {
     const { page = 1, limit = 10, cursor, groupId, status, userId, bracketType, genderRestriction, city, isRanked, matchType } = query;
     const publicOnly = query.publicOnly ?? query.isPublicOnly;
     const catId = query.categoryId || query.category_id;
-    const offset = cursor ? 0 : (page - 1) * limit;
     const take = limit + 1; // Fetch 1 extra to determine hasMore
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
@@ -277,9 +276,6 @@ export class MatchesRepository {
       .orderBy(desc(schema.matches.updatedAt), desc(schema.matches.id))
       .limit(take)
       .$dynamic();
-    if (!cursor) {
-      matchesQuery = matchesQuery.offset(offset);
-    }
     const rawData = await matchesQuery;
 
     const hasMore = rawData.length > limit;

@@ -18,8 +18,7 @@ export class UsersRepository {
   ) {}
 
   async findAll(query: QueryUserDto) {
-    const { page, limit, search, order, cursor } = query;
-    const offset = (page! - 1) * limit!;
+    const { limit, search, order, cursor } = query;
 
     let whereClause = and(
       isNull(schema.users.deletedAt),
@@ -81,7 +80,6 @@ export class UsersRepository {
       .orderBy(sortConfig, order === 'desc' ? desc(schema.users.id) : asc(schema.users.id))
       .limit(limit! + 1)
       .$dynamic();
-    if (!cursor) userQuery = userQuery.offset(offset);
     const userRows = await userQuery;
     const hasMore = userRows.length > limit!;
     const data = hasMore ? userRows.slice(0, limit!) : userRows;
@@ -117,7 +115,7 @@ export class UsersRepository {
       data: mappedData,
       meta: {
         total,
-        page,
+        page: 1,
         limit,
         totalPages: Math.ceil(total / limit!),
         nextCursor: hasMore && lastUser ? Buffer.from(JSON.stringify({ createdAt: lastUser.createdAt.toISOString(), id: lastUser.id })).toString('base64url') : null,
@@ -577,7 +575,6 @@ export class UsersRepository {
       );
     }
     const whereClause = and(...conditions);
-    const offset = (query.page - 1) * query.limit;
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.reports)
@@ -589,8 +586,7 @@ export class UsersRepository {
       .orderBy(desc(schema.reports.createdAt), desc(schema.reports.id))
       .limit(query.limit + 1)
       .$dynamic();
-    const pagedQuery = query.cursor ? reportsQuery : reportsQuery.offset(offset);
-    const rawData = await pagedQuery;
+    const rawData = await reportsQuery;
     const hasMore = rawData.length > query.limit;
     const data = hasMore ? rawData.slice(0, query.limit) : rawData;
 

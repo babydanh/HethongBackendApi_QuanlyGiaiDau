@@ -147,7 +147,6 @@ export class SeriesRepository {
     const limit = query.limit || 10;
     const page = query.page || 1;
     const cursor = query.cursor;
-    const offset = (page - 1) * limit;
 
     const [{ count: total }] = await this.db
       .select({ count: sql<number>`count(*)` })
@@ -161,7 +160,6 @@ export class SeriesRepository {
       .orderBy(desc(schema.tournamentSeries.createdAt), desc(schema.tournamentSeries.id))
       .limit(limit + 1)
       .$dynamic();
-    if (!cursor) seriesQuery = seriesQuery.offset(offset);
     const rows = await seriesQuery;
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
@@ -308,7 +306,6 @@ export class SeriesRepository {
     }
 
     const whereClause = and(...conditions);
-    const offset = (page - 1) * limit;
 
     const [{ count: total }] = await this.db
       .select({ count: sql<number>`count(*)` })
@@ -350,8 +347,7 @@ export class SeriesRepository {
       .orderBy(desc(schema.seriesStandings.totalPsrPoints), desc(schema.seriesStandings.id))
       .limit(limit + 1)
       .$dynamic();
-    const standingsRows = cursor ? data : data.offset(offset);
-    const allStandings = await standingsRows;
+    const allStandings = await data;
     const hasMore = allStandings.length > limit;
     const standings = hasMore ? allStandings.slice(0, limit) : allStandings;
     const lastStanding = standings.at(-1)?.standing;

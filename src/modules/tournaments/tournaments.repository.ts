@@ -141,7 +141,6 @@ export class TournamentsRepository {
     },
   ) {
     const { page = 1, limit = 10, cursor, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType, genderRestriction, isRanked } = query;
-    const offset = (page - 1) * limit;
     const defaultTournamentType = options?.defaultTournamentType;
     const defaultVisibility = options?.defaultVisibility;
 
@@ -283,8 +282,7 @@ export class TournamentsRepository {
       .orderBy(sql`${schema.tournaments.createdAt} DESC`, sql`${schema.tournaments.id} DESC`)
       .limit(limit + 1)
       .$dynamic();
-    const pagedRows = cursor ? rows : rows.offset(offset);
-    const resolvedRows = await pagedRows;
+    const resolvedRows = await rows;
     const hasMore = resolvedRows.length > limit;
     const rowData = hasMore ? resolvedRows.slice(0, limit) : resolvedRows;
 

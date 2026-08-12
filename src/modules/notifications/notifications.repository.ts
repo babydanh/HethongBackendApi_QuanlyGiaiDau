@@ -29,7 +29,6 @@ export class NotificationsRepository {
 
   async getNotificationsByUser(userId: string, query: QueryNotificationsDto) {
     const { page = 1, limit = 10, cursor, isRead } = query;
-    const offset = (page - 1) * limit;
     const conditions: SQL[] = [eq(schema.notifications.receiverId, userId)];
 
     if (isRead !== undefined) {
@@ -65,8 +64,7 @@ export class NotificationsRepository {
       .orderBy(desc(schema.notifications.createdAt), desc(schema.notifications.id))
       .limit(limit + 1)
       .$dynamic();
-    const pagedQuery = cursor ? notificationsQuery : notificationsQuery.offset(offset);
-    const rawData = await pagedQuery;
+    const rawData = await notificationsQuery;
     const hasMore = rawData.length > limit;
     const data = hasMore ? rawData.slice(0, limit) : rawData;
 
