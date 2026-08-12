@@ -288,7 +288,7 @@ export class AdminService {
     }));
   }
 
-  async getAuditLogs(page: number = 1, limit: number = 10, search?: string, userId?: string) {
+  async getAuditLogs(page: number = 1, limit: number = 10, search?: string, userId?: string, cursor?: string) {
     const offset = (page - 1) * limit;
     const conditions: SQL[] = [];
 
@@ -304,14 +304,30 @@ export class AdminService {
       conditions.push(eq(schema.auditLogs.userId, userId));
     }
 
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const baseWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    let whereClause = baseWhereClause;
+    let auditCursor: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try {
+        auditCursor = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+      } catch {
+        auditCursor = null;
+      }
+    }
+    if (auditCursor) {
+      const cursorDate = new Date(auditCursor.createdAt);
+      whereClause = and(
+        baseWhereClause,
+        sql`(${schema.auditLogs.createdAt} < ${cursorDate} OR (${schema.auditLogs.createdAt} = ${cursorDate} AND ${schema.auditLogs.id} < ${auditCursor.id}))`,
+      );
+    }
 
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.auditLogs)
-      .where(whereClause);
+      .where(baseWhereClause);
 
-    const data = await this.db
+    let auditQuery = this.db
       .select({
         id: schema.auditLogs.id,
         userId: schema.auditLogs.userId,
@@ -332,9 +348,16 @@ export class AdminService {
       .leftJoin(schema.users, eq(schema.auditLogs.userId, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(whereClause)
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(schema.auditLogs.createdAt));
+      .orderBy(desc(schema.auditLogs.createdAt), desc(schema.auditLogs.id))
+      .limit(limit + 1)
+      .$dynamic();
+    if (!cursor) auditQuery = auditQuery.offset(offset);
+    const auditRows = await auditQuery;
+    const hasMore = auditRows.length > limit;
+    const data = hasMore ? auditRows.slice(0, limit) : auditRows;
+    const lastAudit = auditRows.length > 0
+      ? auditRows[auditRows.length - 1] as { createdAt: Date; id: string }
+      : undefined;
 
     return {
       data,
@@ -343,6 +366,8 @@ export class AdminService {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore && lastAudit ? Buffer.from(JSON.stringify({ createdAt: lastAudit.createdAt.toISOString(), id: lastAudit.id })).toString('base64url') : null,
+        hasMore,
       },
     };
   }
