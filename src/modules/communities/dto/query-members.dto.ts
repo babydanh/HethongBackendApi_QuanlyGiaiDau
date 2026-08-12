@@ -1,8 +1,10 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsString } from 'class-validator';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
-export class QueryMembersDto {
+export class QueryMembersDto extends CursorPaginationDto {
   @ApiPropertyOptional({ example: 1, description: 'Trang hiện tại' })
   @IsOptional()
   @Transform(({ value }) => Number(value))
