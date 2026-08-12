@@ -29,6 +29,12 @@ export class ChatService {
       );
     }
 
+    if (data.type === RoomType.CLUB) {
+      throw new ForbiddenException(
+        'Phòng CLUB chỉ được tạo tự động qua chức năng chat cộng đồng.',
+      );
+    }
+
     if (!data.memberIds.includes(userId)) {
       data.memberIds.push(userId);
     }
@@ -41,28 +47,94 @@ export class ChatService {
     return this.chatRepository.createRoomWithMembers(data);
   }
 
+  /**
+   * P2D.1 — Lấy (hoặc lazy-create) phòng chat CLUB của cộng đồng.
+   * Guard: user phải là member JOINED của cộng đồng.
+   */
+  async getOrCreateClubRoom(communityId: string, userId: string) {
+    await this.assertClubMember(communityId, userId);
+
+    const room = await this.chatRepository.getOrCreateClubRoom(communityId);
+    const members = await this.chatRepository.getClubRoomMembers(communityId);
+
+    return { ...room, members };
+  }
+
+  /**
+   * P2D.1 — Guard kênh chat CLUB: user phải là member JOINED của cộng đồng.
+   */
+  async assertClubMember(communityId: string, userId: string) {
+    const member = await this.chatRepository.findCommunityMember(
+      communityId,
+      userId,
+    );
+    if (!member) {
+      throw new ForbiddenException('You are not a member of this community');
+    }
+    if (member.status !== 'JOINED') {
+      throw new ForbiddenException(
+        'Bạn cần là thành viên chính thức của cộng đồng để tham gia kênh chat.',
+      );
+    }
+    return member;
+  }
+
   async sendMessage(userId: string, data: CreateMessageDto) {
-    const isMember = await this.chatRepository.isMemberOfRoom(data.roomId, userId);
-    if (!isMember) {
-      throw new ForbiddenException('You are not a member of this chat room');
+    const room = await this.chatRepository.findRoomById(data.roomId);
+    if (!room) {
+      throw new NotFoundException('Không tìm thấy phòng chat.');
+    }
+
+    // P2D.1: room CLUB guard qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
+    const roomType = room.type as RoomType;
+    if (roomType === RoomType.CLUB && room.communityId) {
+      await this.assertClubMember(room.communityId, userId);
+    } else {
+      const isMember = await this.chatRepository.isMemberOfRoom(
+        data.roomId,
+        userId,
+      );
+      if (!isMember) {
+        throw new ForbiddenException('You are not a member of this chat room');
+      }
     }
 
     const message = await this.chatRepository.saveMessage(userId, data);
-    
-    const room = await this.chatRepository.findRoomById(data.roomId);
-    if (room?.type === RoomType.SUPPORT) {
+
+    if (roomType === RoomType.SUPPORT) {
       this.chatGateway.broadcastSupportMessage(data.roomId, message);
+    } else if (roomType === RoomType.CLUB && room.communityId) {
+      // P2D.1: payload kèm tags của sender tại thời điểm gửi (denormalized, client không cần join lại).
+      const senderTags = await this.chatRepository.getMemberTags(
+        room.communityId,
+        userId,
+      );
+      this.chatGateway.broadcastClubMessage(data.roomId, {
+        ...message,
+        senderTags,
+      });
     } else {
       this.chatGateway.broadcastMessage(data.roomId, message);
     }
-    
+
     return message;
   }
 
   async getMessages(userId: string, roomId: string) {
-    const isMember = await this.chatRepository.isMemberOfRoom(roomId, userId);
-    if (!isMember) {
-      throw new ForbiddenException('You are not a member of this chat room');
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room) {
+      throw new NotFoundException('Không tìm thấy phòng chat.');
+    }
+
+    // P2D.1: room CLUB guard qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
+    const roomType = room.type as RoomType;
+    if (roomType === RoomType.CLUB && room.communityId) {
+      await this.assertClubMember(room.communityId, userId);
+    } else {
+      const isMember = await this.chatRepository.isMemberOfRoom(roomId, userId);
+      if (!isMember) {
+        throw new ForbiddenException('You are not a member of this chat room');
+      }
     }
 
     return this.chatRepository.getMessagesByRoom(roomId);

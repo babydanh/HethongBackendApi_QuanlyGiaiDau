@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -131,6 +131,140 @@ export class ChatRepository {
       )
       .limit(1);
     return !!record;
+  }
+
+  /**
+   * P2D.1 — Member của cộng đồng (dùng cho guard kênh chat CLUB).
+   */
+  async findCommunityMember(communityId: string, userId: string) {
+    const [member] = await this.db
+      .select()
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+    return member;
+  }
+
+  /**
+   * P2D.1 — Kiểm tra quyền truy cập phòng: room CLUB kiểm tra qua community_members
+   * (status JOINED, membership động), các loại phòng khác qua chat_room_members như cũ.
+   */
+  async canAccessRoom(roomId: string, userId: string) {
+    const room = await this.findRoomById(roomId);
+    if (!room) return false;
+    if (room.type === 'CLUB' && room.communityId) {
+      const member = await this.findCommunityMember(room.communityId, userId);
+      return member?.status === 'JOINED';
+    }
+    return this.isMemberOfRoom(roomId, userId);
+  }
+
+  /**
+   * P2D.1 — Lazy-create room CLUB theo cộng đồng (unique theo communityId + type=CLUB).
+   * Denormalize clubName/clubAvatar (snapshot lúc tạo room). Không transaction bao ngoài:
+   * insert đơn là atomic, unique index bảo vệ race (23505 → đọc lại room đã có).
+   */
+  async getOrCreateClubRoom(communityId: string) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.chatRooms)
+      .where(
+        and(
+          eq(schema.chatRooms.communityId, communityId),
+          eq(schema.chatRooms.type, 'CLUB'),
+        ),
+      )
+      .limit(1);
+    if (existing) return existing;
+
+    const [community] = await this.db
+      .select({
+        id: schema.communities.id,
+        name: schema.communities.name,
+        logoUrl: schema.communities.logoUrl,
+      })
+      .from(schema.communities)
+      .where(eq(schema.communities.id, communityId))
+      .limit(1);
+    if (!community) {
+      throw new NotFoundException('Community not found');
+    }
+
+    try {
+      const [room] = await this.db
+        .insert(schema.chatRooms)
+        .values({
+          name: community.name,
+          type: 'CLUB',
+          communityId: community.id,
+          clubName: community.name,
+          clubAvatar: community.logoUrl,
+        })
+        .returning();
+      return room;
+    } catch (err) {
+      // Race: 2 request tạo cùng lúc → unique violation (23505) → đọc lại room đã tồn tại.
+      if ((err as { code?: string })?.code === '23505') {
+        const [room] = await this.db
+          .select()
+          .from(schema.chatRooms)
+          .where(
+            and(
+              eq(schema.chatRooms.communityId, communityId),
+              eq(schema.chatRooms.type, 'CLUB'),
+            ),
+          )
+          .limit(1);
+        if (room) return room;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * P2D.1 — Danh sách member JOINED của cộng đồng cho kênh chat CLUB.
+   */
+  async getClubRoomMembers(communityId: string) {
+    return this.db
+      .select({
+        id: schema.users.id,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+        role: schema.communityMembers.role,
+        tags: schema.communityMembers.tags,
+      })
+      .from(schema.communityMembers)
+      .innerJoin(schema.users, eq(schema.communityMembers.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.status, 'JOINED'),
+        ),
+      )
+      .orderBy(asc(schema.communityMembers.joinedAt));
+  }
+
+  /**
+   * P2D.1 — Tags của member trong cộng đồng (gắn vào payload message CLUB).
+   */
+  async getMemberTags(communityId: string, userId: string) {
+    const [member] = await this.db
+      .select({ tags: schema.communityMembers.tags })
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+    return member?.tags ?? [];
   }
 
   async saveMessage(senderId: string, data: CreateMessageDto) {

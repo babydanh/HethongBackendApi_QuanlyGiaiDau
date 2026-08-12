@@ -43,8 +43,9 @@ export class ChatGateway {
     const isSupportStaff = roles.some(
       (role) => role === UserRole.ADMIN || role === UserRole.MODERATOR,
     );
+    // P2D.1: room CLUB kiểm tra qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
     const isMember = user?.sub
-      ? await this.chatRepository.isMemberOfRoom(roomId, user.sub)
+      ? await this.chatRepository.canAccessRoom(roomId, user.sub)
       : false;
     const roomRecord = !isMember && isSupportStaff
       ? await this.chatRepository.findRoomById(roomId)
@@ -128,6 +129,11 @@ export class ChatGateway {
 
   broadcastMessage(roomId: string, message: ChatMessagePayload) {
     this.server.to(`chat:${roomId}`).emit('chat:message', message);
+  }
+
+  /** P2D.1 — Sự kiện riêng cho kênh chat CLUB (payload kèm senderTags). */
+  broadcastClubMessage(roomId: string, message: ChatMessagePayload) {
+    this.server.to(`chat:${roomId}`).emit('chat:club:message', message);
   }
 
   @SubscribeMessage('supportTyping')

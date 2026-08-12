@@ -6,9 +6,11 @@ import {
   boolean,
   timestamp,
   check,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
+import { communities } from './communities.schema';
 
 export const friendships = pgTable(
   'friendships',
@@ -36,14 +38,28 @@ export const friendships = pgTable(
   }),
 );
 
-export const chatRooms = pgTable('chat_rooms', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: varchar('name', { length: 255 }),
-  type: varchar('type', { length: 50 }).default('DIRECT').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const chatRooms = pgTable(
+  'chat_rooms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: varchar('name', { length: 255 }),
+    type: varchar('type', { length: 50 }).default('DIRECT').notNull(),
+    // P2D.1: Club Chat — communityId nullable, unique khi type=CLUB; clubName/clubAvatar denormalized (snapshot lúc tạo room).
+    communityId: uuid('community_id').references(() => communities.id, {
+      onDelete: 'cascade',
+    }),
+    clubName: varchar('club_name', { length: 255 }),
+    clubAvatar: text('club_avatar'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    clubRoomUnique: uniqueIndex('uq_chat_rooms_club_community')
+      .on(table.communityId)
+      .where(sql`${table.type} = 'CLUB'`),
+  }),
+);
 
 export const chatRoomMembers = pgTable('chat_room_members', {
   id: uuid('id').primaryKey().defaultRandom(),

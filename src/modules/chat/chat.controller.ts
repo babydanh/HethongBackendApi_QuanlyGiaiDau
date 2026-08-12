@@ -1,6 +1,17 @@
-import { Controller, Get, Post, Body, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  ParseUUIDPipe,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
 import { ChatService } from './chat.service';
-import { CreateRoomDto } from './dto/create-room.dto';
+import { CreateRoomDto, RoomType } from './dto/create-room.dto';
+import { GetClubRoomQueryDto } from './dto/get-club-room-query.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -18,8 +29,21 @@ export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Get('rooms')
-  @ApiOperation({ summary: 'Lấy danh sách các phòng chat của user' })
-  async getMyRooms(@CurrentUser() user: JwtPayload) {
+  @ApiOperation({
+    summary:
+      'Lấy danh sách các phòng chat của user; với type=CLUB&communityId trả (hoặc lazy-create) phòng chat CLUB của cộng đồng',
+  })
+  async getMyRooms(
+    @Query() query: GetClubRoomQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    // P2D.1: kênh chat CLUB — guard member JOINED + lazy-create room nếu chưa tồn tại.
+    if (query.type === RoomType.CLUB) {
+      if (!query.communityId) {
+        throw new BadRequestException('communityId là bắt buộc khi type=CLUB');
+      }
+      return this.chatService.getOrCreateClubRoom(query.communityId, user.sub);
+    }
     return this.chatService.getUserRooms(user.sub);
   }
 

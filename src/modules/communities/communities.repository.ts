@@ -1076,6 +1076,90 @@ export class CommunitiesRepository {
     return item;
   }
 
+  /**
+   * P2C.3 — Streak thắng/thua hiện tại cho batch userIds (một lần query, không N+1).
+   * Chỉ tính trên trận COMPLETED của giải thuộc community (matches → tournaments),
+   * winner_id khác null. Trả [{ userId, won, streak }] — `won` = kết quả trận gần nhất,
+   * `streak` = số trận liên tiếp cùng kết quả tính từ trận gần nhất (reset khi đổi kết quả).
+   */
+  async getMatchResultStreaks(
+    communityId: string,
+    userIds: string[],
+  ): Promise<Array<{ userId: string; won: boolean; streak: number }>> {
+    if (userIds.length === 0) return [];
+
+    const rows = (await this.db.execute(sql`
+      WITH user_matches AS (
+        SELECT
+          mp.user_id AS "userId",
+          (m.winner_id = mp.participant_id) AS won,
+          m.completed_at AS "completedAt",
+          m.id AS "matchId"
+        FROM match_players mp
+        INNER JOIN matches m ON m.id = mp.match_id
+        INNER JOIN tournaments t ON t.id = m.tournament_id
+        WHERE t.community_id = ${communityId}
+          AND m.status = 'COMPLETED'
+          AND m.deleted_at IS NULL
+          AND m.winner_id IS NOT NULL
+          AND mp.user_id = ANY(${userIds}::uuid[])
+      ),
+      ordered AS (
+        SELECT "userId", won,
+          ROW_NUMBER() OVER (
+            PARTITION BY "userId" ORDER BY "completedAt" DESC, "matchId" DESC
+          ) AS rn
+        FROM user_matches
+      ),
+      groups AS (
+        SELECT "userId", won, rn,
+          rn - ROW_NUMBER() OVER (PARTITION BY "userId", won ORDER BY rn) AS grp
+        FROM ordered
+      )
+      SELECT DISTINCT ON ("userId")
+        "userId",
+        won,
+        COUNT(*) OVER (PARTITION BY "userId", grp)::int AS streak
+      FROM groups
+      ORDER BY "userId", rn
+    `)) as unknown as Array<{ userId: string; won: boolean; streak: number }>;
+
+    return rows.map((row) => ({
+      userId: String(row.userId),
+      won: Boolean(row.won),
+      streak: Number(row.streak),
+    }));
+  }
+
+  /**
+   * P2C.3 — Tổng ELO tăng trong 7 ngày gần nhất cho batch userIds (chỉ changed_points > 0),
+   * scope theo community qua matches → tournaments (elo_history_logs.tournament_id có thể NULL
+   * với một số đường ghi trực tiếp — xem rankings.service.ts). Trả [{ userId, gain }].
+   */
+  async getWeeklyEloGains(
+    communityId: string,
+    userIds: string[],
+  ): Promise<Array<{ userId: string; gain: number }>> {
+    if (userIds.length === 0) return [];
+
+    const rows = (await this.db.execute(sql`
+      SELECT elh.user_id AS "userId", SUM(elh.changed_points)::int AS gain
+      FROM elo_history_logs elh
+      INNER JOIN matches m ON m.id = elh.match_id
+      INNER JOIN tournaments t ON t.id = m.tournament_id
+      WHERE t.community_id = ${communityId}
+        AND elh.user_id = ANY(${userIds}::uuid[])
+        AND elh.changed_points > 0
+        AND elh.created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY elh.user_id
+    `)) as unknown as Array<{ userId: string; gain: number }>;
+
+    return rows.map((row) => ({
+      userId: String(row.userId),
+      gain: Number(row.gain),
+    }));
+  }
+
   async countActiveByCreator(creatorId: string): Promise<number> {
     const [result] = await this.db
       .select({ count: count() })

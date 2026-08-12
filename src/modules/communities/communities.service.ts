@@ -184,7 +184,19 @@ export class CommunitiesService {
 
   async getMembers(id: string, query?: { page?: number; limit?: number; status?: string }) {
     await this.findById(id);
-    return await this.communitiesRepository.getMembers(id, query?.status, query?.page, query?.limit);
+    const result = await this.communitiesRepository.getMembers(id, query?.status, query?.page, query?.limit);
+    // P2C.3 — gắn streak tính động (WIN/LOSS/ELO_UP) cho từng member trong trang.
+    const streaks = await this.computeStreaks(
+      id,
+      result.data.map((row) => row.user.id),
+    );
+    return {
+      ...result,
+      data: result.data.map((row) => ({
+        ...row,
+        streak: streaks[row.user.id] ?? null,
+      })),
+    };
   }
 
   async addMember(
@@ -585,6 +597,63 @@ export class CommunitiesService {
     );
 
     return removedBan;
+  }
+
+  /**
+   * P2C.3 — Tính streak động từ dữ liệu trận đấu thật (KHÔNG lưu DB).
+   * Trả map userId → { type: 'WIN'|'LOSS'|'ELO_UP', count, label }.
+   * Ưu tiên: streak thắng/thua ≥ 2 (tính từ trận gần nhất, reset khi đổi kết quả);
+   * nếu chưa có streak đủ dài thì dùng tổng ELO tăng 7 ngày gần nhất (ELO_UP).
+   * Batch theo memberIds — không N+1 (P2C.6).
+   */
+  async computeStreaks(
+    communityId: string,
+    memberIds: string[],
+  ): Promise<
+    Record<
+      string,
+      { type: 'WIN' | 'LOSS' | 'ELO_UP'; count: number; label: string }
+    >
+  > {
+    if (memberIds.length === 0) return {};
+
+    const [matchStreaks, weeklyEloGains] = await Promise.all([
+      this.communitiesRepository.getMatchResultStreaks(communityId, memberIds),
+      this.communitiesRepository.getWeeklyEloGains(communityId, memberIds),
+    ]);
+
+    const streaks: Record<
+      string,
+      { type: 'WIN' | 'LOSS' | 'ELO_UP'; count: number; label: string }
+    > = {};
+
+    for (const row of matchStreaks) {
+      if (row.streak >= 2) {
+        streaks[row.userId] = row.won
+          ? {
+              type: 'WIN',
+              count: row.streak,
+              label: `Thắng ${row.streak} trận liên tiếp`,
+            }
+          : {
+              type: 'LOSS',
+              count: row.streak,
+              label: `Thua ${row.streak} trận liên tiếp`,
+            };
+      }
+    }
+
+    for (const row of weeklyEloGains) {
+      if (row.gain > 0 && !streaks[row.userId]) {
+        streaks[row.userId] = {
+          type: 'ELO_UP',
+          count: row.gain,
+          label: `+${row.gain} ELO trong tuần`,
+        };
+      }
+    }
+
+    return streaks;
   }
 
   /**
