@@ -270,13 +270,17 @@ export class MatchesRepository {
       .from(schema.matches)
       .where(whereClause);
 
-    const rawData = await this.db
+    let matchesQuery = this.db
       .select()
       .from(schema.matches)
       .where(whereClause)
       .orderBy(desc(schema.matches.updatedAt), desc(schema.matches.id))
       .limit(take)
-      .offset(offset);
+      .$dynamic();
+    if (!cursor) {
+      matchesQuery = matchesQuery.offset(offset);
+    }
+    const rawData = await matchesQuery;
 
     const hasMore = rawData.length > limit;
     const data = hasMore ? rawData.slice(0, limit) : rawData;
