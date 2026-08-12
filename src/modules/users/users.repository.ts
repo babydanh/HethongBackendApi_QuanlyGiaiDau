@@ -18,7 +18,7 @@ export class UsersRepository {
   ) {}
 
   async findAll(query: QueryUserDto) {
-    const { limit, search, order, cursor } = query;
+    const { page = 1, limit, search, order, cursor } = query;
 
     let whereClause = and(
       isNull(schema.users.deletedAt),
@@ -51,7 +51,10 @@ export class UsersRepository {
     let userWhere = whereClause;
     if (cursorValue) {
       const cursorDate = new Date(cursorValue.createdAt);
-      userWhere = and(whereClause, sql`(${schema.users.createdAt} < ${cursorDate} OR (${schema.users.createdAt} = ${cursorDate} AND ${schema.users.id} < ${cursorValue.id}))`)!;
+      const cursorPredicate = order === 'asc'
+        ? sql`(${schema.users.createdAt} > ${cursorDate} OR (${schema.users.createdAt} = ${cursorDate} AND ${schema.users.id} > ${cursorValue.id}))`
+        : sql`(${schema.users.createdAt} < ${cursorDate} OR (${schema.users.createdAt} = ${cursorDate} AND ${schema.users.id} < ${cursorValue.id}))`;
+      userWhere = and(whereClause, cursorPredicate)!;
     }
 
     let userQuery = this.db
@@ -115,7 +118,7 @@ export class UsersRepository {
       data: mappedData,
       meta: {
         total,
-        page: 1,
+        page,
         limit,
         totalPages: Math.ceil(total / limit!),
         nextCursor: hasMore && lastUser ? Buffer.from(JSON.stringify({ createdAt: lastUser.createdAt.toISOString(), id: lastUser.id })).toString('base64url') : null,

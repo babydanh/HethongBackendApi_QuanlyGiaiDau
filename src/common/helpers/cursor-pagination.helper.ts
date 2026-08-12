@@ -4,7 +4,7 @@ export class CursorPaginationHelper {
    * @param payload Bất kỳ object nào (VD: { id: string, createdAt: Date })
    * @returns Chuỗi base64
    */
-  static encodeCursor(payload: Record<string, any>): string {
+  static encodeCursor(payload: Record<string, unknown>): string {
     const stringified = JSON.stringify(payload);
     return Buffer.from(stringified).toString('base64');
   }
@@ -14,7 +14,7 @@ export class CursorPaginationHelper {
    * @param cursor Chuỗi base64
    * @returns Object hoặc null nếu lỗi
    */
-  static decodeCursor<T = Record<string, any>>(cursor: string): T | null {
+  static decodeCursor<T = Record<string, unknown>>(cursor: string): T | null {
     if (!cursor) return null;
     try {
       const stringified = Buffer.from(cursor, 'base64').toString('utf-8');

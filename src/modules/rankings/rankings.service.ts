@@ -124,6 +124,7 @@ export class RankingsService {
       communityId?: string;
       page?: number;
       limit?: number;
+      cursor?: string;
     },
   ) {
     return this.rankingsRepository.getEloHistory(userId, query);
