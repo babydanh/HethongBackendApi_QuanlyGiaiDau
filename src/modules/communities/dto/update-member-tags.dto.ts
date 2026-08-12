@@ -1,6 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsString, Length, Matches } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsString,
+  Length,
+  Matches,
+} from 'class-validator';
 
 /**
  * P2C.2 — Gán/Xoá tag BQT cho thành viên cộng đồng.

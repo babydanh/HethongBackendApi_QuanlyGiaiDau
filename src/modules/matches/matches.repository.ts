@@ -55,7 +55,19 @@ export class MatchesRepository {
     // Enforce soft delete filters
     conditions.push(isNull(schema.matches.deletedAt));
 
-    if (catId && catId !== 'all' && catId !== 'undefined' && catId.trim() !== '') {
+    const isAllCategory = (val: string) => {
+      const normalized = val.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-_]+/g, ' ');
+      return (
+        normalized === '' ||
+        normalized === 'all' ||
+        normalized === 'undefined' ||
+        normalized === 'null' ||
+        normalized === 'tat ca' ||
+        normalized === '0'
+      );
+    };
+
+    if (catId && !isAllCategory(catId)) {
       conditions.push(
         sql`exists (
           select 1 from ${schema.tournaments} t
@@ -113,11 +125,35 @@ export class MatchesRepository {
       conditions.push(eq(schema.matches.groupId, groupId));
     }
     if (status) {
-      const statuses = status.split(',').map((s: string) => s.trim()).filter(Boolean);
-      if (statuses.length === 1) {
-        conditions.push(eq(schema.matches.status, statuses[0]));
-      } else if (statuses.length > 1) {
-        conditions.push(inArray(schema.matches.status, statuses));
+      const rawStatuses = status
+        .split(',')
+        .map((s: string) => s.trim().toUpperCase())
+        .filter(Boolean);
+
+      const expandedStatuses = new Set<string>();
+      for (const s of rawStatuses) {
+        expandedStatuses.add(s);
+        if (s === 'COMPLETED' || s === 'FINISHED' || s === 'DONE' || s === 'ENDED') {
+          expandedStatuses.add('COMPLETED');
+          expandedStatuses.add('FINISHED');
+          expandedStatuses.add('DONE');
+          expandedStatuses.add('ENDED');
+        } else if (s === 'ONGOING' || s === 'LIVE' || s === 'PLAYING') {
+          expandedStatuses.add('ONGOING');
+          expandedStatuses.add('LIVE');
+          expandedStatuses.add('PLAYING');
+        } else if (s === 'SCHEDULED' || s === 'UPCOMING' || s === 'PENDING') {
+          expandedStatuses.add('SCHEDULED');
+          expandedStatuses.add('UPCOMING');
+          expandedStatuses.add('PENDING');
+        }
+      }
+
+      const statusList = Array.from(expandedStatuses);
+      if (statusList.length === 1) {
+        conditions.push(sql`upper(${schema.matches.status}) = ${statusList[0]}`);
+      } else if (statusList.length > 1) {
+        conditions.push(sql`upper(${schema.matches.status}) in ${statusList}`);
       }
     }
 
