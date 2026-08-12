@@ -35,14 +35,16 @@ export class AdminTicketsController {
   @ApiQuery({ name: 'status', required: false, enum: ['PENDING', 'APPROVED', 'REJECTED'] })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   async list(
     @Query('status') status?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 10;
-    return this.adminService.listVerificationTickets(status, pageNum, limitNum);
+    return this.adminService.listVerificationTickets(status, pageNum, limitNum, cursor);
   }
 
   @Patch(':id/approve')

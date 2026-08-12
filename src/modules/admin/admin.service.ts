@@ -371,20 +371,36 @@ export class AdminService {
     return ticket;
   }
 
-  async listVerificationTickets(status?: string, page = 1, limit = 10) {
+  async listVerificationTickets(status?: string, page = 1, limit = 10, cursor?: string) {
     const conditions: SQL[] = [];
     if (status) {
       conditions.push(eq(schema.verificationTickets.status, status));
     }
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const baseWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    let whereClause = baseWhereClause;
+    let ticketCursor: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try {
+        ticketCursor = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+      } catch {
+        ticketCursor = null;
+      }
+    }
+    if (ticketCursor) {
+      const cursorDate = new Date(ticketCursor.createdAt);
+      whereClause = and(
+        baseWhereClause,
+        sql`(${schema.verificationTickets.createdAt} < ${cursorDate} OR (${schema.verificationTickets.createdAt} = ${cursorDate} AND ${schema.verificationTickets.id} < ${ticketCursor.id}))`,
+      );
+    }
     const offset = (page - 1) * limit;
 
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.verificationTickets)
-      .where(whereClause);
+      .where(baseWhereClause);
 
-    const data = await this.db
+    let ticketsQuery = this.db
       .select({
         ticket: schema.verificationTickets,
         user: {
@@ -397,9 +413,16 @@ export class AdminService {
       .innerJoin(schema.users, eq(schema.verificationTickets.userId, schema.users.id))
       .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(whereClause)
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(schema.verificationTickets.createdAt));
+      .orderBy(desc(schema.verificationTickets.createdAt), desc(schema.verificationTickets.id))
+      .limit(limit + 1)
+      .$dynamic();
+    if (!cursor) ticketsQuery = ticketsQuery.offset(offset);
+    const ticketRows = await ticketsQuery;
+    const hasMore = ticketRows.length > limit;
+    const data = hasMore ? ticketRows.slice(0, limit) : ticketRows;
+    const lastTicket = ticketRows.length > 0
+      ? ticketRows[ticketRows.length - 1] as { ticket: { createdAt: Date; id: string } }
+      : undefined;
 
     return {
       data,
@@ -408,6 +431,8 @@ export class AdminService {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore && lastTicket ? Buffer.from(JSON.stringify({ createdAt: lastTicket.ticket.createdAt.toISOString(), id: lastTicket.ticket.id })).toString('base64url') : null,
+        hasMore,
       },
     };
   }
@@ -759,7 +784,23 @@ export class AdminService {
         )!,
       );
     }
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const baseWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    let whereClause = baseWhereClause;
+    let reportCursor: { createdAt: string; id: string } | null = null;
+    if (query.cursor) {
+      try {
+        reportCursor = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+      } catch {
+        reportCursor = null;
+      }
+    }
+    if (reportCursor) {
+      const cursorDate = new Date(reportCursor.createdAt);
+      whereClause = and(
+        baseWhereClause,
+        sql`(${schema.reports.createdAt} < ${cursorDate} OR (${schema.reports.createdAt} = ${cursorDate} AND ${schema.reports.id} < ${reportCursor.id}))`,
+      );
+    }
 
     const [totalRecord] = await this.db
       .select({ count: count() })
@@ -771,9 +812,9 @@ export class AdminService {
       .leftJoin(targetTournament, and(eq(schema.reports.targetType, 'TOURNAMENT'), eq(schema.reports.targetId, targetTournament.id)))
       .leftJoin(targetMatch, and(eq(schema.reports.targetType, 'MATCH'), eq(schema.reports.targetId, targetMatch.id)))
       .leftJoin(targetCommunity, and(eq(schema.reports.targetType, 'COMMUNITY'), eq(schema.reports.targetId, targetCommunity.id)))
-      .where(whereClause);
+      .where(baseWhereClause);
 
-    const data = await this.db
+    let reportsQuery = this.db
       .select({
         id: schema.reports.id,
         targetType: schema.reports.targetType,
@@ -834,9 +875,16 @@ export class AdminService {
       .leftJoin(assignedUser, eq(schema.reports.assignedTo, assignedUser.id))
       .leftJoin(assignedProfile, eq(assignedUser.id, assignedProfile.userId))
       .where(whereClause)
-      .limit(query.limit)
-      .offset(offset)
-      .orderBy(desc(schema.reports.createdAt));
+      .orderBy(desc(schema.reports.createdAt), desc(schema.reports.id))
+      .limit(query.limit + 1)
+      .$dynamic();
+    if (!query.cursor) reportsQuery = reportsQuery.offset(offset);
+    const reportRows = await reportsQuery;
+    const hasMore = reportRows.length > query.limit;
+    const data = hasMore ? reportRows.slice(0, query.limit) : reportRows;
+    const lastReport = reportRows.length > 0
+      ? reportRows[reportRows.length - 1] as { createdAt: Date; id: string }
+      : undefined;
 
     const total = Number((totalRecord as { count?: number | string } | undefined)?.count ?? 0);
 
@@ -847,6 +895,8 @@ export class AdminService {
         page: query.page,
         limit: query.limit,
         totalPages: Math.ceil(total / query.limit),
+        nextCursor: hasMore && lastReport ? Buffer.from(JSON.stringify({ createdAt: lastReport.createdAt.toISOString(), id: lastReport.id })).toString('base64url') : null,
+        hasMore,
       },
     };
   }
@@ -1569,7 +1619,7 @@ export class AdminService {
     return updatedTournament;
   }
 
-  async listTournaments(page = 1, limit = 10, search?: string, status?: string) {
+  async listTournaments(page = 1, limit = 10, search?: string, status?: string, cursor?: string) {
     const offset = (page - 1) * limit;
     const conditions: SQL[] = [isNull(schema.tournaments.deletedAt)];
 
@@ -1592,14 +1642,30 @@ export class AdminService {
       }
     }
 
-    const whereClause = and(...conditions);
+    const baseWhereClause = and(...conditions);
+    let whereClause = baseWhereClause;
+    let tournamentCursor: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try {
+        tournamentCursor = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+      } catch {
+        tournamentCursor = null;
+      }
+    }
+    if (tournamentCursor) {
+      const cursorDate = new Date(tournamentCursor.createdAt);
+      whereClause = and(
+        baseWhereClause,
+        sql`(${schema.tournaments.createdAt} < ${cursorDate} OR (${schema.tournaments.createdAt} = ${cursorDate} AND ${schema.tournaments.id} < ${tournamentCursor.id}))`,
+      );
+    }
 
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.tournaments)
-      .where(whereClause);
+      .where(baseWhereClause);
 
-    const data = await this.db
+    let tournamentsQuery = this.db
       .select({
         id: schema.tournaments.id,
         name: schema.tournaments.name,
@@ -1619,9 +1685,16 @@ export class AdminService {
       .leftJoin(schema.users, eq(schema.tournaments.createdBy, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(whereClause)
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(schema.tournaments.createdAt));
+      .orderBy(desc(schema.tournaments.createdAt), desc(schema.tournaments.id))
+      .limit(limit + 1)
+      .$dynamic();
+    if (!cursor) tournamentsQuery = tournamentsQuery.offset(offset);
+    const tournamentRows = await tournamentsQuery;
+    const hasMore = tournamentRows.length > limit;
+    const data = hasMore ? tournamentRows.slice(0, limit) : tournamentRows;
+    const lastTournament = tournamentRows.length > 0
+      ? tournamentRows[tournamentRows.length - 1] as { createdAt: Date; id: string }
+      : undefined;
 
     return {
       data,
@@ -1630,6 +1703,8 @@ export class AdminService {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore && lastTournament ? Buffer.from(JSON.stringify({ createdAt: lastTournament.createdAt.toISOString(), id: lastTournament.id })).toString('base64url') : null,
+        hasMore,
       },
     };
   }

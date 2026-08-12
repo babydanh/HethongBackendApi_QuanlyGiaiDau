@@ -13,6 +13,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 import {
   REPORT_CATEGORIES,
   REPORT_TARGET_TYPES,
@@ -102,7 +103,7 @@ export class ReportWorkflowNoteDto {
   category?: ReportCategory;
 }
 
-export class QueryReportsDto {
+export class QueryReportsDto extends CursorPaginationDto {
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @Type(() => Number)
   @IsInt()
