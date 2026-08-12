@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 import {
   REPORT_CATEGORIES,
   REPORT_TARGET_TYPES,
@@ -19,7 +20,7 @@ export const REPORT_STATUSES = [
 
 export type ReportStatus = (typeof REPORT_STATUSES)[number];
 
-export class QueryMyReportsDto {
+export class QueryMyReportsDto extends CursorPaginationDto {
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @Type(() => Number)
   @IsInt()
