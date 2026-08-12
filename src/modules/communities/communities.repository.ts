@@ -1,10 +1,11 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, and, sql, ilike, SQL, isNull, count, desc, inArray, gte } from 'drizzle-orm';
+import { eq, and, sql, ilike, SQL, isNull, count, desc, lt, or, inArray, gte } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { AuditService } from '../audit/audit.service';
 import { QueryCommunityDto } from './dto/query-community.dto';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 
 @Injectable()
 export class CommunitiesRepository {
@@ -54,7 +55,27 @@ export class CommunitiesRepository {
       );
     }
 
+    const baseWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const decodedCursor = query.cursor
+      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(query.cursor)
+      : null;
+    if (decodedCursor) {
+      conditions.push(
+        or(
+          lt(schema.communities.createdAt, new Date(decodedCursor.createdAt)),
+          and(
+            eq(schema.communities.createdAt, new Date(decodedCursor.createdAt)),
+            lt(schema.communities.id, decodedCursor.id),
+          ),
+        ) as SQL,
+      );
+    }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totalRecord] = await this.db
+      .select({ count: count() })
+      .from(schema.communities)
+      .where(baseWhereClause);
 
     let dbQuery = this.db
       .select()
@@ -62,17 +83,23 @@ export class CommunitiesRepository {
       .where(whereClause)
       .$dynamic();
 
-    if (query.limit) {
-      dbQuery = dbQuery.limit(query.limit);
-      if (query.page) {
-        dbQuery = dbQuery.offset((query.page - 1) * query.limit);
-      }
+    const limit = query.limit ?? 10;
+    dbQuery = dbQuery
+      .orderBy(desc(schema.communities.createdAt), desc(schema.communities.id))
+      .limit(limit + 1);
+    if (!query.cursor && query.page) {
+      dbQuery = dbQuery.offset((query.page - 1) * limit);
     }
 
-    const communitiesList = await dbQuery;
+    const rawCommunities = await dbQuery;
+    const hasMore = rawCommunities.length > limit;
+    const communitiesList = hasMore ? rawCommunities.slice(0, limit) : rawCommunities;
 
     if (communitiesList.length === 0) {
-      return [];
+      return {
+        data: [],
+        meta: { total: totalRecord.count, page: query.page ?? 1, limit, totalPages: Math.ceil(totalRecord.count / limit), nextCursor: null, hasMore: false },
+      };
     }
 
     const communityIds = communitiesList.map((c) => c.id);
@@ -87,7 +114,7 @@ export class CommunitiesRepository {
       .innerJoin(schema.categories, eq(schema.communitySports.categoryId, schema.categories.id))
       .where(sql`${schema.communitySports.communityId} IN ${communityIds}`);
 
-    const categoriesMap: Record<string, any[]> = {};
+    const categoriesMap: Record<string, unknown[]> = {};
     sportsLinks.forEach((link) => {
       if (!categoriesMap[link.communityId]) {
         categoriesMap[link.communityId] = [];
@@ -139,14 +166,28 @@ export class CommunitiesRepository {
     });
 
     // Map them together
-    return communitiesList.map((community) => ({
+    const data = communitiesList.map((community) => ({
       ...community,
       categories: categoriesMap[community.id] || [],
       _count: {
         members: membersCountMap[community.id] || 0,
         tournaments: tournamentsCountMap[community.id] || 0,
       },
-    })) as any;
+    }));
+    const lastCommunity = communitiesList[communitiesList.length - 1];
+    return {
+      data,
+      meta: {
+        total: totalRecord.count,
+        page: query.page ?? 1,
+        limit,
+        totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore
+          ? CursorPaginationHelper.encodeCursor({ id: lastCommunity.id, createdAt: lastCommunity.createdAt })
+          : null,
+        hasMore,
+      },
+    };
   }
 
   async findMyCommunities(userId: string) {
@@ -468,6 +509,20 @@ export class CommunitiesRepository {
       createdAt: row.invitedAt,
       status: 'PENDING',
     }));
+    const lastCommunity = communitiesList[communitiesList.length - 1];
+    return {
+      data,
+      meta: {
+        total: totalRecord.count,
+        page: query.page ?? 1,
+        limit,
+        totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore
+          ? CursorPaginationHelper.encodeCursor({ id: lastCommunity.id, createdAt: lastCommunity.createdAt })
+          : null,
+        hasMore,
+      },
+    };
   }
 
   async addMember(communityId: string, userId: string, role: string, status: string = 'JOINED', joinAnswers?: Record<string, string>, invitedBy?: string) {
