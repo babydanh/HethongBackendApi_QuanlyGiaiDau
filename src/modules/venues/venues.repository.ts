@@ -2,7 +2,7 @@
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, ilike, sql, SQL, or, count } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, sql, SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
@@ -17,7 +17,7 @@ export class VenuesRepository {
   ) {}
 
   async findAll(query: QueryVenueDto) {
-    const { page = 1, limit = 10, search } = query;
+    const { page = 1, limit = 10, cursor, search } = query;
     const offset = (page - 1) * limit;
 
     let conditions: SQL | undefined = undefined;
@@ -28,17 +28,44 @@ export class VenuesRepository {
       );
     }
 
+    const baseConditions = and(conditions, sql`${schema.tournamentVenues.deletedAt} IS NULL`);
+    let whereClause = baseConditions;
+    let cursorValue: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try {
+        cursorValue = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+      } catch {
+        cursorValue = null;
+      }
+    }
+    if (cursorValue) {
+      const cursorDate = new Date(cursorValue.createdAt);
+      whereClause = and(
+        baseConditions,
+        sql`(${schema.tournamentVenues.createdAt} < ${cursorDate} OR (${schema.tournamentVenues.createdAt} = ${cursorDate} AND ${schema.tournamentVenues.id} < ${cursorValue.id}))`,
+      );
+    }
+
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.tournamentVenues)
-      .where(conditions);
+      .where(baseConditions);
 
-    const venues = await this.db
+    let venuesQuery = this.db
       .select()
       .from(schema.tournamentVenues)
-      .where(conditions)
-      .limit(limit)
-      .offset(offset);
+      .where(whereClause)
+      .orderBy(desc(schema.tournamentVenues.createdAt), desc(schema.tournamentVenues.id))
+      .limit(limit + 1)
+      .$dynamic();
+    if (!cursor) venuesQuery = venuesQuery.offset(offset);
+    const rows = await venuesQuery;
+    const hasMore = rows.length > limit;
+    const venues = (hasMore ? rows.slice(0, limit) : rows);
+    const lastVenue = venues.at(-1);
+    const nextCursor = hasMore && lastVenue
+      ? Buffer.from(JSON.stringify({ createdAt: lastVenue.createdAt.toISOString(), id: lastVenue.id })).toString('base64url')
+      : null;
 
     return {
       data: venues,
@@ -47,6 +74,8 @@ export class VenuesRepository {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor,
+        hasMore,
       },
     };
   }
