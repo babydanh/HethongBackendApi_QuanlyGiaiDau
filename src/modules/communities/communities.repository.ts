@@ -509,20 +509,6 @@ export class CommunitiesRepository {
       createdAt: row.invitedAt,
       status: 'PENDING',
     }));
-    const lastCommunity = communitiesList[communitiesList.length - 1];
-    return {
-      data,
-      meta: {
-        total: totalRecord.count,
-        page: query.page ?? 1,
-        limit,
-        totalPages: Math.ceil(totalRecord.count / limit),
-        nextCursor: hasMore
-          ? CursorPaginationHelper.encodeCursor({ id: lastCommunity.id, createdAt: lastCommunity.createdAt })
-          : null,
-        hasMore,
-      },
-    };
   }
 
   async addMember(communityId: string, userId: string, role: string, status: string = 'JOINED', joinAnswers?: Record<string, string>, invitedBy?: string) {
