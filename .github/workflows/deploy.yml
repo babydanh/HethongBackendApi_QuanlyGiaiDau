@@ -73,6 +73,11 @@ jobs:
             # 1. Đi tới thư mục chứa docker-compose.yml trên VPS
             cd /usr/local/lsws/sporto.asia
 
+            # Keep the VPS runtime environment aligned with the public domain.
+            # docker-compose reads this persisted .env file, not the repository's
+            # .env.production file baked into the image.
+            sed -i 's#giaidau\.vnvar\.com#sporto.asia#g' .env
+
             # 2. Đăng nhập GHCR trên VPS
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
