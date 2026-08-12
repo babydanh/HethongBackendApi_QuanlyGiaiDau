@@ -19,6 +19,7 @@ import { UpdateDivisionDto } from './dto/update-division.dto';
 import { RosterMember, BracketMatch, BracketGroup, BracketStage } from './interfaces/tournament-config.interface';
 import { SeriesService } from '../series/series.service';
 import { ExclusionRuleException } from '../series/exceptions/exclusion-rule.exception';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
@@ -139,7 +140,7 @@ export class TournamentsRepository {
       defaultVisibility?: 'PUBLIC' | 'PRIVATE' | null;
     },
   ) {
-    const { page = 1, limit = 10, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType, genderRestriction, isRanked } = query;
+    const { page = 1, limit = 10, cursor, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType, genderRestriction, isRanked } = query;
     const offset = (page - 1) * limit;
     const defaultTournamentType = options?.defaultTournamentType;
     const defaultVisibility = options?.defaultVisibility;
@@ -239,12 +240,27 @@ export class TournamentsRepository {
       conditions.push(sql`date(coalesce(${schema.tournaments.registrationStartDate}, ${schema.tournaments.startDate})) <= ${endDate}::date`);
     }
 
+    const baseWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const [decodedCursor] = cursor
+      ? [CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor)]
+      : [null];
+    if (decodedCursor) {
+      conditions.push(
+        or(
+          lt(schema.tournaments.createdAt, new Date(decodedCursor.createdAt)),
+          and(
+            eq(schema.tournaments.createdAt, new Date(decodedCursor.createdAt)),
+            lt(schema.tournaments.id, decodedCursor.id),
+          ),
+        ) as SQL,
+      );
+    }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.tournaments)
-      .where(whereClause);
+      .where(baseWhereClause);
 
     const rows = await this.db
       .select({
@@ -264,12 +280,16 @@ export class TournamentsRepository {
       .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
       .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
       .where(whereClause)
-      .orderBy(sql`${schema.tournaments.createdAt} DESC`)
-      .limit(limit)
-      .offset(offset);
+      .orderBy(sql`${schema.tournaments.createdAt} DESC`, sql`${schema.tournaments.id} DESC`)
+      .limit(limit + 1)
+      .$dynamic();
+    const pagedRows = cursor ? rows : rows.offset(offset);
+    const resolvedRows = await pagedRows;
+    const hasMore = resolvedRows.length > limit;
+    const rowData = hasMore ? resolvedRows.slice(0, limit) : resolvedRows;
 
     const data = await Promise.all(
-      rows.map(async (row) => {
+      rowData.map(async (row) => {
         const [participantCount] = await this.db
           .select({ count: count() })
           .from(schema.tournamentParticipants)
@@ -348,6 +368,13 @@ export class TournamentsRepository {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore && data.length > 0
+          ? CursorPaginationHelper.encodeCursor({
+              id: data[data.length - 1].id,
+              createdAt: data[data.length - 1].createdAt,
+            })
+          : null,
+        hasMore,
       },
     };
   }
