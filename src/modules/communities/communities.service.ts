@@ -30,6 +30,7 @@ import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpe
 
 type CommunityMemberRole = 'OWNER' | 'MODERATOR' | 'MEMBER';
 type CommunityMemberStatus = 'JOINED' | 'PENDING' | 'INVITED' | 'REJECTED' | 'BANNED';
+type SanitizeHtmlFn = (html: string, options?: Record<string, unknown>) => string;
 
 @Injectable()
 export class CommunitiesService {
@@ -80,6 +81,9 @@ export class CommunitiesService {
     const { lat, lng, categoryIds, ...rest } = dto;
     const data = {
       ...rest,
+      ...(rest.description !== undefined
+        ? { description: await this.sanitizeDescription(rest.description) }
+        : {}),
       creatorId: userId,
       status: 'ACTIVE',
     };
@@ -99,6 +103,9 @@ export class CommunitiesService {
     ]);
 
     const { lat, lng, categoryIds, ...rest } = dto;
+    if (rest.description !== undefined) {
+      rest.description = await this.sanitizeDescription(rest.description);
+    }
     return await this.communitiesRepository.update(
       id,
       rest,
@@ -590,6 +597,56 @@ export class CommunitiesService {
   }
 
   // --- HELPER ---
+
+  /**
+   * Sanitize HTML cho `description` trước khi lưu (chống XSS — AboutTab WEB
+   * render qua dangerouslySetInnerHTML).
+   *
+   * NOTE (P1.8): dependency CHƯA được thêm — cần chạy
+   *   pnpm add sanitize-html
+   *   pnpm add -D @types/sanitize-html
+   * rồi commit package + lockfile. Mô-đun được nạp động nên build/runtime
+   * không vỡ khi chưa cài; khi package có mặt, allowlist dưới đây được áp dụng.
+   */
+  private async sanitizeDescription(
+    description?: string,
+  ): Promise<string | undefined> {
+    if (description === undefined || description === null) return description;
+
+    const sanitizeHtml = await this.loadSanitizeHtml();
+    if (!sanitizeHtml) {
+      this.logger.warn(
+        'sanitize-html chưa được cài (pnpm add sanitize-html) — bỏ qua sanitize description.',
+      );
+      return description;
+    }
+
+    return sanitizeHtml(description, {
+      allowedTags: [
+        'b', 'i', 'u', 'em', 'strong', 'p', 'br',
+        'ul', 'ol', 'li', 'h2', 'h3', 'a', 'img', 'span',
+      ],
+      allowedAttributes: {
+        a: ['href'],
+        img: ['src', 'alt'],
+        span: ['class'],
+      },
+      allowedSchemes: ['http', 'https', 'mailto'],
+    });
+  }
+
+  /** Nạp động sanitize-html (tránh lỗi compile khi dependency chưa được thêm). */
+  private async loadSanitizeHtml(): Promise<SanitizeHtmlFn | null> {
+    try {
+      const moduleName = 'sanitize-html';
+      const mod = await import(moduleName);
+      const fn =
+        typeof mod === 'function' ? mod : (mod as { default?: unknown }).default;
+      return typeof fn === 'function' ? (fn as SanitizeHtmlFn) : null;
+    } catch {
+      return null;
+    }
+  }
 
   private async checkPermissions(
     communityId: string,
