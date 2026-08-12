@@ -95,7 +95,7 @@ export class MatchesRepository {
             select 1 from ${schema.tournaments} t
             where t.id = ${schema.matches.tournamentId}
             and t.deleted_at is null
-            and t.visibility = 'PUBLIC'
+            and (t.visibility = 'PUBLIC' or t.visibility is null)
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
           or exists (
@@ -104,7 +104,7 @@ export class MatchesRepository {
             join ${schema.tournaments} t on s.tournament_id = t.id
             where g.id = ${schema.matches.groupId}
             and t.deleted_at is null
-            and t.visibility = 'PUBLIC'
+            and (t.visibility = 'PUBLIC' or t.visibility is null)
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
         )`
@@ -153,7 +153,7 @@ export class MatchesRepository {
       if (statusList.length === 1) {
         conditions.push(sql`upper(${schema.matches.status}) = ${statusList[0]}`);
       } else if (statusList.length > 1) {
-        conditions.push(sql`upper(${schema.matches.status}) in ${statusList}`);
+        conditions.push(sql`upper(${schema.matches.status}) = ANY(${statusList})`);
       }
     }
 
