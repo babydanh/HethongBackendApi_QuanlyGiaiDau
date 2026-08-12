@@ -11,8 +11,9 @@ import {
   Min,
   Max,
 } from 'class-validator';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
-export class QueryCommunityDto {
+export class QueryCommunityDto extends CursorPaginationDto {
   @ApiPropertyOptional({ example: 1, description: 'Trang hiện tại' })
   @IsOptional()
   @Transform(({ value }) => Number(value))
