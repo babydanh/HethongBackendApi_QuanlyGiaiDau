@@ -23,11 +23,11 @@ export class LivestreamService {
   }
 
   private getRtmpBaseUrl() {
-    return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://giaidau.vnvar.com:1935/live';
+    return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://sporto.asia:1935/live';
   }
 
   private getHlsBaseUrl() {
-    return this.configService.get<string>('LIVESTREAM_HLS_PUBLIC_BASE_URL') || 'https://giaidau.vnvar.com/hls';
+    return this.configService.get<string>('LIVESTREAM_HLS_PUBLIC_BASE_URL') || 'https://sporto.asia/hls';
   }
 
   private buildPlaybackUrl(streamKey: string) {
@@ -44,7 +44,10 @@ export class LivestreamService {
 
     try {
       const parsed = new URL(url);
-      if (parsed.hostname === 'giaidau.vnvar.com' && parsed.port === '8888') {
+      if (
+        (parsed.hostname === 'giaidau.vnvar.com' || parsed.hostname === 'sporto.asia') &&
+        parsed.port === '8888'
+      ) {
         // Old rows stored MediaMTX's plain HTTP port. Rebuild from the key so
         // playback goes through the public HTTPS reverse proxy, regardless of
         // whether the old path was /live or /hls.
