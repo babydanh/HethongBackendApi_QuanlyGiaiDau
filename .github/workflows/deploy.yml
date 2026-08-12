@@ -71,7 +71,7 @@ jobs:
           command_timeout: 15m
           script: |
             # 1. Đi tới thư mục chứa docker-compose.yml trên VPS
-            cd /root/projects/qlgiaidau
+            cd /usr/local/lsws/sporto.asia
 
             # 2. Đăng nhập GHCR trên VPS
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
