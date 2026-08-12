@@ -180,14 +180,16 @@ export class AdminModerationController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
   async listTournaments(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
     @Query('status') status?: string,
+    @Query('cursor') cursor?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 10;
-    return this.adminService.listTournaments(pageNum, limitNum, search, status);
+    return this.adminService.listTournaments(pageNum, limitNum, search, status, cursor);
   }
 }
