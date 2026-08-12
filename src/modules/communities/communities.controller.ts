@@ -45,9 +45,8 @@ export class CommunitiesController {
   @ApiOperation({ summary: 'Lấy danh sách các cộng đồng' })
   @ApiResponse({ status: 200, description: 'Danh sách cộng đồng' })
   async findAll(@Query() query: QueryCommunityDto) {
-    if (!query.all && !query.status) {
-      query.status = 'ACTIVE';
-    }
+    // Public endpoint: luôn chỉ trả ACTIVE, bỏ qua status client gửi để tránh lộ PENDING
+    query.status = 'ACTIVE';
     return await this.communitiesService.findAll(query);
   }
 
@@ -56,6 +55,13 @@ export class CommunitiesController {
   @ApiOperation({ summary: 'Lấy danh sách cộng đồng của tôi' })
   async findMyCommunities(@CurrentUser() user: { id: string }) {
     return await this.communitiesService.findMyCommunities(user.id);
+  }
+
+  @Get('my/invites')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách lời mời tham gia cộng đồng của tôi' })
+  async findMyInvites(@CurrentUser() user: { id: string }) {
+    return await this.communitiesService.getMyInvites(user.id);
   }
 
   @Get('favorites')

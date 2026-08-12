@@ -79,17 +79,19 @@ export function validateTennisScoreDetails(context: ScoreValidationContext): Sco
 
     if (winnerReachedAtSetIndex === null && (p1SetsWon >= setsToWin || p2SetsWon >= setsToWin)) {
       winnerReachedAtSetIndex = index;
-    } else if (winnerReachedAtSetIndex !== null) {
+    } else if (winnerReachedAtSetIndex !== null && resolvedConfig.mode !== 'LITE') {
       throw new BadRequestException(`Không được nhập thêm ${entry.key} sau khi trận đã chốt người thắng từ trước.`);
     }
   }
 
-  if (p1SetsWon > setsToWin || p2SetsWon > setsToWin) {
-    throw new BadRequestException('Số set thắng đang vượt quá cấu hình tennis hiện tại.');
-  }
+  if (resolvedConfig.mode !== 'LITE') {
+    if (p1SetsWon > setsToWin || p2SetsWon > setsToWin) {
+      throw new BadRequestException('Số set thắng đang vượt quá cấu hình tennis hiện tại.');
+    }
 
-  if (p1SetsWon >= setsToWin && p2SetsWon >= setsToWin) {
-    throw new BadRequestException('Hai bên không thể cùng đạt ngưỡng thắng trận tennis.');
+    if (p1SetsWon >= setsToWin && p2SetsWon >= setsToWin) {
+      throw new BadRequestException('Hai bên không thể cùng đạt ngưỡng thắng trận tennis.');
+    }
   }
 
   return {

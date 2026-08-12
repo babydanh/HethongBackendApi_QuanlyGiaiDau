@@ -19,7 +19,7 @@ export function validateScoreDetails(
     throw new BadRequestException('Không tìm thấy set/game hợp lệ trong scoreDetails.');
   }
 
-  if (normalizedEntries.length > resolvedConfig.bestOf) {
+  if (resolvedConfig.mode !== 'LITE' && normalizedEntries.length > resolvedConfig.bestOf) {
     throw new BadRequestException(`Số set/game nhập vào (${normalizedEntries.length}) vượt quá thể thức BO${resolvedConfig.bestOf}.`);
   }
 
