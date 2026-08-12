@@ -452,9 +452,13 @@ export class MatchesService {
       } else {
         // Resolve config hierarchy (Stage -> Round -> Match)
         const resolvedConfig = this.resolveMatchConfig(existing);
-        resolvedConfig.mode = (existing.tournament?.tournamentConfig as any)?.mode
-          || (existing.tournament?.sportRules as any)?.mode
-          || (existing.matchConfig as any)?.mode;
+        const tournamentConfig = existing.tournament?.tournamentConfig as Record<string, unknown> | undefined;
+        const sportRules = existing.tournament?.sportRules as Record<string, unknown> | undefined;
+        const matchConfig = existing.matchConfig as Record<string, unknown> | undefined;
+
+        resolvedConfig.mode = (tournamentConfig?.mode as string | undefined)
+          || (sportRules?.mode as string | undefined)
+          || (matchConfig?.mode as string | undefined);
         const validation = validateScoreDetails(scoreDetails, resolvedConfig);
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
