@@ -717,7 +717,7 @@ async function main() {
 
   // 3. Users
   console.log('=> Creating / verifying users...');
-  const adminId = await getOrCreateUser('vndcsport@gmail.com', 'Admin@123', 'VNDC Sport Admin', ['admin', 'organizer', 'player'], roleMap);
+  const adminId = await getOrCreateUser('vndcsport@gmail.com', 'Admin@123', 'Sporto Admin', ['admin', 'organizer', 'player'], roleMap);
   console.log(`   Admin vndcsport@gmail.com / Admin@123`);
 
   const org1Id = await getOrCreateUser('macter.970@gmail.com', 'Test@123', 'macter.970', ['organizer', 'player'], roleMap);
@@ -737,7 +737,7 @@ async function main() {
     const vid = uuidv4();
     [venue] = await db
       .insert(schema.tournamentVenues)
-      .values({ id: vid, name: 'VNDC Sport Club', locationAddress: '154 Tran Nao, Quan 2, TP. Ho Chi Minh' })
+      .values({ id: vid, name: 'Sporto Club', locationAddress: '154 Tran Nao, Quan 2, TP. Ho Chi Minh' })
       .returning();
     console.log('=> Created venue');
   } else {

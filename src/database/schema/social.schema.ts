@@ -83,10 +83,11 @@ export const chatMessages = pgTable('chat_messages', {
     onDelete: 'set null',
   }),
   messageText: text('message_text'),
-  attachmentsUrls: text('attachments_urls')
-    .array()
-    .default(sql`'{}'::text[]`)
-    .notNull(),
+    attachmentsUrls: text('attachments_urls')
+      .array()
+      .default(sql`'{}'::text[]`)
+      .notNull(),
+    clientMessageId: varchar('client_message_id', { length: 128 }),
   isRead: boolean('is_read').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()

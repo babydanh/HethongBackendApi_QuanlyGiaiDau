@@ -43,7 +43,7 @@ export class MailService {
     }
 
     try {
-      const from = this.configService.get<string>('SMTP_FROM') || '"VNDC Sport" <no-reply@vndcsport.com>';
+      const from = this.configService.get<string>('SMTP_FROM') || '"Sporto" <no-reply@vndcsport.com>';
       await this.transporter.sendMail({
         from,
         to,

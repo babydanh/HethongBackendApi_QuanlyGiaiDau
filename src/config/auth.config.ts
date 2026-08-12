@@ -24,5 +24,5 @@ export default registerAs('auth', () => ({
   facebookCallbackUrl:
     process.env.FACEBOOK_CALLBACK_URL ||
     'http://localhost:3000/api/v1/auth/facebook/callback',
-  appleClientId: process.env.APPLE_CLIENT_ID || 'com.vnsport.app',
+  appleClientId: process.env.APPLE_CLIENT_ID || 'com.Sporto.app',
 }));

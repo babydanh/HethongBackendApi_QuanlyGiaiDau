@@ -120,7 +120,7 @@ export class ChatService {
     return message;
   }
 
-  async getMessages(userId: string, roomId: string) {
+  async getMessages(userId: string, roomId: string, limit = 30, cursor?: string) {
     const room = await this.chatRepository.findRoomById(roomId);
     if (!room) {
       throw new NotFoundException('Không tìm thấy phòng chat.');
@@ -137,7 +137,7 @@ export class ChatService {
       }
     }
 
-    return this.chatRepository.getMessagesByRoom(roomId);
+    return this.chatRepository.getMessagesPage(roomId, limit, cursor);
   }
 
   async getMySupportConversation(userId: string) {

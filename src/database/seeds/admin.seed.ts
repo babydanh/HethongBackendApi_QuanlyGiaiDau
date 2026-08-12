@@ -118,7 +118,7 @@ async function run() {
     if (!organizerProfile) {
       await db.insert(profiles).values({
         userId: organizerUser.id,
-        fullName: 'BTC VNDC Sport',
+        fullName: 'BTC Sporto',
       });
     }
 

@@ -31,7 +31,6 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AuditModule } from './modules/audit/audit.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { RegionsModule } from './modules/regions/regions.module';
-import { ChallengesModule } from './modules/communities/challenges.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { SeriesModule } from './modules/series/series.module';
 import { RedisModule } from './providers/redis/redis.module';
@@ -85,7 +84,6 @@ import { AppVersionModule } from './modules/app-version/app-version.module';
     AuditModule,
     UploadModule,
     RegionsModule,
-    ChallengesModule,
     AdminModule,
     SeriesModule,
     AiModule,
