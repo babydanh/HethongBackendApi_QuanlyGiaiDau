@@ -116,6 +116,22 @@ async function main() {
         supportedMatchTypes: ['SINGLES', 'DOUBLES'],
         description: 'Môn thể thao dùng vợt gỗ và quả bóng bàn nhỏ',
       },
+    },
+    {
+      name: 'Bóng đá',
+      slug: 'football',
+      description: 'Môn thể thao vua bóng đá 11 người / 7 người / 5 người',
+      categoryConfig: {
+        ruleKind: 'FOOTBALL',
+        allowedRuleKinds: ['FOOTBALL'],
+        defaultSportRules: {
+          halfDurationMinutes: 45,
+          extraTimeHalfMinutes: 15,
+          penaltyShootout: true,
+        },
+        supportedMatchTypes: ['SINGLES', 'DOUBLES'],
+        description: 'Môn thể thao vua bóng đá',
+      },
     }
   ];
 
