@@ -33,10 +33,16 @@ export class CommunitiesRepository {
       conditions.push(eq(schema.communities.provinceCode, query.provinceCode));
     }
     if (query.categoryId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query.categoryId);
       const subquery = this.db
         .select({ communityId: schema.communitySports.communityId })
         .from(schema.communitySports)
-        .where(eq(schema.communitySports.categoryId, query.categoryId));
+        .innerJoin(schema.categories, eq(schema.communitySports.categoryId, schema.categories.id))
+        .where(
+          isUuid
+            ? eq(schema.communitySports.categoryId, query.categoryId)
+            : eq(schema.categories.slug, query.categoryId),
+        );
       conditions.push(sql`${schema.communities.id} IN ${subquery}`);
     }
 
