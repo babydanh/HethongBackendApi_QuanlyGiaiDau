@@ -18,7 +18,7 @@ export class UsersRepository {
   ) {}
 
   async findAll(query: QueryUserDto) {
-    const { page, limit, search, order } = query;
+    const { page, limit, search, order, cursor } = query;
     const offset = (page! - 1) * limit!;
 
     let whereClause = and(
@@ -41,7 +41,21 @@ export class UsersRepository {
         ? desc(schema.users.createdAt)
         : asc(schema.users.createdAt);
 
-    const data = await this.db
+    let cursorValue: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try {
+        cursorValue = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt: string; id: string };
+      } catch {
+        cursorValue = null;
+      }
+    }
+    let userWhere = whereClause;
+    if (cursorValue) {
+      const cursorDate = new Date(cursorValue.createdAt);
+      userWhere = and(whereClause, sql`(${schema.users.createdAt} < ${cursorDate} OR (${schema.users.createdAt} = ${cursorDate} AND ${schema.users.id} < ${cursorValue.id}))`)!;
+    }
+
+    let userQuery = this.db
       .select({
         id: schema.users.id,
         email: schema.users.email,
@@ -63,10 +77,15 @@ export class UsersRepository {
           eq(schema.userBans.isActive, true),
         ),
       )
-      .where(whereClause)
-      .limit(limit!)
-      .offset(offset)
-      .orderBy(sortConfig);
+      .where(userWhere)
+      .orderBy(sortConfig, order === 'desc' ? desc(schema.users.id) : asc(schema.users.id))
+      .limit(limit! + 1)
+      .$dynamic();
+    if (!cursor) userQuery = userQuery.offset(offset);
+    const userRows = await userQuery;
+    const hasMore = userRows.length > limit!;
+    const data = hasMore ? userRows.slice(0, limit!) : userRows;
+    const lastUser = userRows.length > 0 ? userRows[userRows.length - 1] : undefined;
 
     // Simple count (in real app we should do a proper count query)
     const countResult = await this.db
@@ -101,6 +120,8 @@ export class UsersRepository {
         page,
         limit,
         totalPages: Math.ceil(total / limit!),
+        nextCursor: hasMore && lastUser ? Buffer.from(JSON.stringify({ createdAt: lastUser.createdAt.toISOString(), id: lastUser.id })).toString('base64url') : null,
+        hasMore,
       },
     };
   }
