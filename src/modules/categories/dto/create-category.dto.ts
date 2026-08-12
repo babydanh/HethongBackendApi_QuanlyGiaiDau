@@ -4,6 +4,7 @@ import {
   IsString,
   MaxLength,
   IsOptional,
+  IsBoolean,
   IsObject,
   Matches,
 } from 'class-validator';
@@ -34,6 +35,14 @@ export class CreateCategoryDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Trạng thái hoạt động (bật/tắt)',
+  })
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 
   @ApiPropertyOptional({
     example: { hasSets: true, maxSets: 3 },

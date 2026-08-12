@@ -5,6 +5,7 @@ export enum RoomType {
   DIRECT = 'DIRECT',
   GROUP = 'GROUP',
   SUPPORT = 'SUPPORT',
+  CLUB = 'CLUB',
 }
 
 export class CreateRoomDto {
