@@ -262,7 +262,7 @@ export class TournamentsRepository {
       .from(schema.tournaments)
       .where(baseWhereClause);
 
-    const rows = await this.db
+    const rows = this.db
       .select({
         tournament: schema.tournaments,
         category: {
