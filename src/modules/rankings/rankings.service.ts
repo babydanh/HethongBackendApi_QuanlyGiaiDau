@@ -79,7 +79,7 @@ export class RankingsService {
   }
 
   async getLeaderboard(query: QueryRankingDto) {
-    const cacheKey = `leaderboard:cat:${query.categoryId}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:comm:${query.communityId || 'ALL'}:page:${query.page || 1}:limit:${query.limit || 20}`;
+    const cacheKey = `leaderboard:cat:${query.categoryId}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:comm:${query.communityId || 'ALL'}:cursor:${query.cursor || 'FIRST'}:limit:${query.limit || 20}`;
     try {
       const cached = await this.redisService.get(cacheKey);
       if (cached) {

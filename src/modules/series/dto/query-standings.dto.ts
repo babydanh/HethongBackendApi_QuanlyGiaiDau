@@ -1,8 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsUUID, IsOptional, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
-export class QueryStandingsDto {
+export class QueryStandingsDto extends CursorPaginationDto {
   @ApiProperty({ example: 'uuid-leg', description: 'ID chặng đấu bắt buộc' })
   @IsUUID()
   legId: string;

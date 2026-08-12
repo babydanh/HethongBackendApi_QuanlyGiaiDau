@@ -1,8 +1,9 @@
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { IsOptional, IsInt, Min, IsUUID, IsString, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
-export class QueryRankingDto {
+export class QueryRankingDto extends CursorPaginationDto {
   @ApiPropertyOptional({ example: 1, description: 'Trang hiện tại' })
   @IsOptional()
   @Type(() => Number)
