@@ -27,7 +27,8 @@ export class CategoriesService {
   // --- CATEGORIES ---
 
   async findAllCategories(query: QueryCategoryDto) {
-    const cacheKey = `${CACHE_KEY_ALL}:${JSON.stringify(query)}`;
+    const hasQuery = query && Object.keys(query).length > 0;
+    const cacheKey = hasQuery ? `${CACHE_KEY_ALL}:${JSON.stringify(query)}` : CACHE_KEY_ALL;
     const cached = await this.redisService.get(cacheKey);
     if (cached) return JSON.parse(cached);
 
@@ -56,6 +57,7 @@ export class CategoriesService {
     }
     const result = await this.categoriesRepository.createCategory(dto);
     await this.redisService.del(CACHE_KEY_ALL);
+    await this.redisService.del(`${CACHE_KEY_ALL}:{}`);
     return result;
   }
 
@@ -70,6 +72,7 @@ export class CategoriesService {
     const result = await this.categoriesRepository.updateCategory(id, dto);
     await this.redisService.del(CACHE_KEY_ONE(id));
     await this.redisService.del(CACHE_KEY_ALL);
+    await this.redisService.del(`${CACHE_KEY_ALL}:{}`);
     return result;
   }
 
@@ -78,6 +81,7 @@ export class CategoriesService {
     const result = await this.categoriesRepository.deleteCategory(id);
     await this.redisService.del(CACHE_KEY_ONE(id));
     await this.redisService.del(CACHE_KEY_ALL);
+    await this.redisService.del(`${CACHE_KEY_ALL}:{}`);
     return result;
   }
 
