@@ -12,6 +12,12 @@ import { corsOptions } from './config/cors.config';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Enable trust proxy for Nginx / OpenLiteSpeed reverse proxies
+  const expressApp = app.getHttpAdapter().getInstance();
+  if (typeof expressApp?.set === 'function') {
+    expressApp.set('trust proxy', true);
+  }
+
   // Global Prefix
   app.setGlobalPrefix('api/v1');
 

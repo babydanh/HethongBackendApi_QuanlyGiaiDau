@@ -82,7 +82,8 @@ export class CategoriesRepository {
       ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
     };
 
-    const { isActive, ...updateData } = data as Record<string, unknown>;
+    const updateData = { ...(data as Record<string, unknown>) };
+    delete updateData.isActive;
 
     const [category] = await this.db
       .update(schema.categories)

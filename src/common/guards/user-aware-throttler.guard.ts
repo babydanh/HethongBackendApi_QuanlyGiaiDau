@@ -24,7 +24,7 @@ export class UserAwareThrottlerGuard extends ThrottlerGuard {
       if (tokenUserId) return Promise.resolve(`user:${tokenUserId}`);
     }
 
-    const forwardedFor = req.headers?.['x-forwarded-for'];
+    const forwardedFor = req.headers?.['x-forwarded-for'] || req.headers?.['x-real-ip'];
     const clientIp = Array.isArray(forwardedFor)
       ? forwardedFor[0]
       : typeof forwardedFor === 'string'
