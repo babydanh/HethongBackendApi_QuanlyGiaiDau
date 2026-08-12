@@ -55,16 +55,23 @@ export class MatchesRepository {
     // Enforce soft delete filters
     conditions.push(isNull(schema.matches.deletedAt));
 
-    if (catId) {
+    if (catId && catId !== 'all' && catId !== 'undefined' && catId.trim() !== '') {
       conditions.push(
         sql`exists (
           select 1 from ${schema.tournaments} t
+          left join ${schema.categories} c on t.category_id = c.id
           where (t.id = ${schema.matches.tournamentId} or t.id = (
             select s.tournament_id from ${schema.tournamentGroups} g
             join ${schema.tournamentStages} s on g.stage_id = s.id
             where g.id = ${schema.matches.groupId}
           ))
-          and (t.category_id = ${catId} or ${catId} = 'all')
+          and (
+            t.category_id::text = ${catId}
+            or c.id::text = ${catId}
+            or c.slug = ${catId}
+            or c.slug = replace(${catId}, '_', '-')
+            or lower(c.name) = lower(${catId})
+          )
         )`
       );
     }
