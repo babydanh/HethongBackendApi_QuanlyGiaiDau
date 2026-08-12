@@ -26,4 +26,5 @@ export interface ResolvedSportRulesConfig {
   tiebreakAt: number;
   maxPoints: number;
   tiebreakPoints: number | null;
+  mode?: string;
 }
