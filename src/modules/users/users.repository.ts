@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, sql, type SQL } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, lt, sql, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -9,6 +9,7 @@ import type {
   ReportTargetType,
 } from './dto/create-report.dto';
 import type { QueryMyReportsDto } from './dto/query-my-reports.dto';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 
 @Injectable()
 export class UsersRepository {
@@ -539,19 +540,38 @@ export class UsersRepository {
       conditions.push(eq(schema.reports.category, query.category));
     }
 
+    const baseWhereClause = and(...conditions);
+    const decodedCursor = query.cursor
+      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(query.cursor)
+      : null;
+    if (decodedCursor) {
+      conditions.push(
+        or(
+          lt(schema.reports.createdAt, new Date(decodedCursor.createdAt)),
+          and(
+            eq(schema.reports.createdAt, new Date(decodedCursor.createdAt)),
+            lt(schema.reports.id, decodedCursor.id),
+          ),
+        ) as SQL,
+      );
+    }
     const whereClause = and(...conditions);
     const offset = (query.page - 1) * query.limit;
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.reports)
-      .where(whereClause);
-    const data = await this.db
+      .where(baseWhereClause);
+    const reportsQuery = this.db
       .select()
       .from(schema.reports)
       .where(whereClause)
-      .orderBy(desc(schema.reports.createdAt))
-      .limit(query.limit)
-      .offset(offset);
+      .orderBy(desc(schema.reports.createdAt), desc(schema.reports.id))
+      .limit(query.limit + 1)
+      .$dynamic();
+    const pagedQuery = query.cursor ? reportsQuery : reportsQuery.offset(offset);
+    const rawData = await pagedQuery;
+    const hasMore = rawData.length > query.limit;
+    const data = hasMore ? rawData.slice(0, query.limit) : rawData;
 
     return {
       data,
@@ -560,6 +580,10 @@ export class UsersRepository {
         page: query.page,
         limit: query.limit,
         totalPages: Math.ceil(totalRecord.count / query.limit),
+        nextCursor: hasMore && data.length > 0
+          ? CursorPaginationHelper.encodeCursor({ id: data[data.length - 1].id, createdAt: data[data.length - 1].createdAt })
+          : null,
+        hasMore,
       },
     };
   }
