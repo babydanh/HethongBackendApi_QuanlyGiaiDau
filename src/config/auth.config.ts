@@ -9,7 +9,9 @@ export default registerAs('auth', () => ({
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
   googleCallbackUrl:
     process.env.GOOGLE_CALLBACK_URL ||
-    'http://localhost:3000/api/v1/auth/google/callback',
+    (process.env.FRONTEND_URL
+      ? `${process.env.FRONTEND_URL.replace(/\/$/, '')}/api/v1/auth/google/callback`
+      : 'https://sporto.asia/api/v1/auth/google/callback'),
   googleAndroidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID || '',
   googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID || '',
   googleMobileClientIds: [
