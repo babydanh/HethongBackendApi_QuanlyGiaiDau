@@ -3,8 +3,9 @@ import { randomUUID } from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, or, count, SQL, inArray, notInArray, isNull, sql, gte, lte, ne } from 'drizzle-orm';
+import { eq, and, or, count, SQL, inArray, notInArray, isNull, sql, gte, lte, ne, lt, desc } from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { AuditService } from '../audit/audit.service';
@@ -41,9 +42,10 @@ export class MatchesRepository {
   ) {}
 
   async findAll(query: QueryMatchDto) {
-    const { page = 1, limit = 10, groupId, status, userId, bracketType, genderRestriction, city, isRanked, matchType } = query;
+    const { page = 1, limit = 10, cursor, groupId, status, userId, bracketType, genderRestriction, city, isRanked, matchType } = query;
     const publicOnly = query.publicOnly ?? query.isPublicOnly;
-    const offset = (page - 1) * limit;
+    const offset = cursor ? 0 : (page - 1) * limit;
+    const take = limit + 1; // Fetch 1 extra to determine hasMore
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
 
@@ -134,6 +136,22 @@ export class MatchesRepository {
       );
     }
 
+    let decodedCursor: { id: string; updatedAt: string } | null = null;
+    if (cursor) {
+      decodedCursor = CursorPaginationHelper.decodeCursor<{ id: string; updatedAt: string }>(cursor);
+      if (decodedCursor) {
+        conditions.push(
+          or(
+            lt(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
+            and(
+              eq(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
+              lt(schema.matches.id, decodedCursor.id)
+            )
+          ) as SQL
+        );
+      }
+    }
+
     // Luôn lọc qua stages để áp dụng: tournamentId, divisionId, matchType, genderRestriction, isRanked
     const stageConditions: SQL[] = [isNull(schema.tournamentStages.deletedAt)];
     if (tId) stageConditions.push(eq(schema.tournamentStages.tournamentId, tId));
@@ -217,12 +235,21 @@ export class MatchesRepository {
       .from(schema.matches)
       .where(whereClause);
 
-    const data = await this.db
+    const rawData = await this.db
       .select()
       .from(schema.matches)
       .where(whereClause)
-      .limit(limit)
+      .orderBy(desc(schema.matches.updatedAt), desc(schema.matches.id))
+      .limit(take)
       .offset(offset);
+
+    const hasMore = rawData.length > limit;
+    const data = hasMore ? rawData.slice(0, limit) : rawData;
+
+    const lastItem = data[data.length - 1];
+    const nextCursor = (hasMore && lastItem)
+      ? CursorPaginationHelper.encodeCursor({ id: lastItem.id, updatedAt: lastItem.updatedAt })
+      : null;
 
     if (data.length === 0) {
       return {
@@ -232,6 +259,8 @@ export class MatchesRepository {
           page,
           limit,
           totalPages: Math.ceil(totalRecord.count / limit),
+          nextCursor: null,
+          hasMore: false,
         },
       };
     }
@@ -344,7 +373,7 @@ export class MatchesRepository {
       }
     }
 
-    const enrichedData = data.map(match => {
+    const mappedData = data.map(match => {
       const p1 = match.participant1Id ? participantsMap.get(match.participant1Id) : null;
       const p2 = match.participant2Id ? participantsMap.get(match.participant2Id) : null;
       const groupStage = match.groupId ? groupsMap.get(match.groupId) : null;
@@ -377,12 +406,14 @@ export class MatchesRepository {
     });
 
     return {
-      data: enrichedData,
+      data: mappedData,
       meta: {
         total: totalRecord.count,
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor,
+        hasMore,
       },
     };
   }
