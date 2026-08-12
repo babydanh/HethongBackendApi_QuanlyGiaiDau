@@ -87,9 +87,6 @@ export class CommunitiesRepository {
     dbQuery = dbQuery
       .orderBy(desc(schema.communities.createdAt), desc(schema.communities.id))
       .limit(limit + 1);
-    if (!query.cursor && query.page) {
-      dbQuery = dbQuery.offset((query.page - 1) * limit);
-    }
 
     const rawCommunities = await dbQuery;
     const hasMore = rawCommunities.length > limit;
@@ -478,8 +475,7 @@ export class CommunitiesRepository {
       )
       .limit(limit + 1)
       .$dynamic();
-    const pagedQuery = cursor ? membersQuery : membersQuery.offset((page - 1) * limit);
-    const rawData = await pagedQuery;
+    const rawData = await membersQuery;
     const hasMore = rawData.length > limit;
     const data = hasMore ? rawData.slice(0, limit) : rawData;
 

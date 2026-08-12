@@ -289,7 +289,6 @@ export class AdminService {
   }
 
   async getAuditLogs(page: number = 1, limit: number = 10, search?: string, userId?: string, cursor?: string) {
-    const offset = (page - 1) * limit;
     const conditions: SQL[] = [];
 
     if (search) {
@@ -351,7 +350,6 @@ export class AdminService {
       .orderBy(desc(schema.auditLogs.createdAt), desc(schema.auditLogs.id))
       .limit(limit + 1)
       .$dynamic();
-    if (!cursor) auditQuery = auditQuery.offset(offset);
     const auditRows = await auditQuery;
     const hasMore = auditRows.length > limit;
     const data = hasMore ? auditRows.slice(0, limit) : auditRows;
@@ -418,7 +416,6 @@ export class AdminService {
         sql`(${schema.verificationTickets.createdAt} < ${cursorDate} OR (${schema.verificationTickets.createdAt} = ${cursorDate} AND ${schema.verificationTickets.id} < ${ticketCursor.id}))`,
       );
     }
-    const offset = (page - 1) * limit;
 
     const [totalRecord] = await this.db
       .select({ count: count() })
@@ -441,7 +438,6 @@ export class AdminService {
       .orderBy(desc(schema.verificationTickets.createdAt), desc(schema.verificationTickets.id))
       .limit(limit + 1)
       .$dynamic();
-    if (!cursor) ticketsQuery = ticketsQuery.offset(offset);
     const ticketRows = await ticketsQuery;
     const hasMore = ticketRows.length > limit;
     const data = hasMore ? ticketRows.slice(0, limit) : ticketRows;
@@ -770,7 +766,6 @@ export class AdminService {
   }
 
   async listReports(query: QueryReportsDto) {
-    const offset = (query.page - 1) * query.limit;
     const reporterUser = aliasedTable(schema.users, 'reporter_user');
     const reporterProfile = aliasedTable(schema.profiles, 'reporter_profile');
     const targetUser = aliasedTable(schema.users, 'target_user');
@@ -903,7 +898,6 @@ export class AdminService {
       .orderBy(desc(schema.reports.createdAt), desc(schema.reports.id))
       .limit(query.limit + 1)
       .$dynamic();
-    if (!query.cursor) reportsQuery = reportsQuery.offset(offset);
     const reportRows = await reportsQuery;
     const hasMore = reportRows.length > query.limit;
     const data = hasMore ? reportRows.slice(0, query.limit) : reportRows;
@@ -1645,7 +1639,6 @@ export class AdminService {
   }
 
   async listTournaments(page = 1, limit = 10, search?: string, status?: string, cursor?: string) {
-    const offset = (page - 1) * limit;
     const conditions: SQL[] = [isNull(schema.tournaments.deletedAt)];
 
     if (search) {
@@ -1713,7 +1706,6 @@ export class AdminService {
       .orderBy(desc(schema.tournaments.createdAt), desc(schema.tournaments.id))
       .limit(limit + 1)
       .$dynamic();
-    if (!cursor) tournamentsQuery = tournamentsQuery.offset(offset);
     const tournamentRows = await tournamentsQuery;
     const hasMore = tournamentRows.length > limit;
     const data = hasMore ? tournamentRows.slice(0, limit) : tournamentRows;

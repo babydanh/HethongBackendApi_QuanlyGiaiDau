@@ -18,7 +18,6 @@ export class RankingsRepository {
 
   async getLeaderboard(query: QueryRankingDto) {
     const { page = 1, limit = 50, cursor, categoryId, matchType, communityId, scope = 'PUBLIC', provinceCode, genderRestriction } = query;
-    const offset = (page - 1) * limit;
     let cursorValue: { eloPoints: number; id: string } | null = null;
     if (cursor) {
       try {
@@ -101,8 +100,7 @@ export class RankingsRepository {
         .orderBy(desc(schema.pairRanks.eloPoints), desc(schema.pairRanks.id))
         .limit(limit + 1)
         .$dynamic();
-      const pairRows = cursor ? data : data.offset(offset);
-      const pairData = await pairRows;
+      const pairData = await data;
       const pairHasMore = pairData.length > limit;
       const pairItems = pairHasMore ? pairData.slice(0, limit) : pairData;
       const pairLast = pairItems.at(-1);
@@ -174,8 +172,7 @@ export class RankingsRepository {
         .orderBy(desc(schema.communityRankings.eloPoints), desc(schema.communityRankings.id))
         .limit(limit + 1)
         .$dynamic();
-      const communityRows = cursor ? data : data.offset(offset);
-      const communityData = await communityRows;
+      const communityData = await data;
       const communityHasMore = communityData.length > limit;
       const communityItems = communityHasMore ? communityData.slice(0, limit) : communityData;
       const communityLast = communityItems.at(-1);
@@ -239,8 +236,7 @@ export class RankingsRepository {
         .orderBy(desc(schema.userRanks.eloPoints), desc(schema.userRanks.id))
         .limit(limit + 1)
         .$dynamic();
-      const publicRows = cursor ? data : data.offset(offset);
-      const publicData = await publicRows;
+      const publicData = await data;
       const publicHasMore = publicData.length > limit;
       const publicItems = publicHasMore ? publicData.slice(0, limit) : publicData;
       const publicLast = publicItems.at(-1);
@@ -330,7 +326,6 @@ export class RankingsRepository {
     },
   ) {
     const { categoryId, scope = 'PUBLIC', communityId, page = 1, limit = 20, cursor } = query;
-    const offset = (page - 1) * limit;
 
     const conditions: SQL[] = [eq(schema.eloHistoryLogs.userId, userId)];
     if (categoryId) {
@@ -396,8 +391,7 @@ export class RankingsRepository {
       .orderBy(desc(schema.eloHistoryLogs.createdAt), desc(schema.eloHistoryLogs.id))
       .limit(limit + 1)
       .$dynamic();
-    const historyRows = cursor ? data : data.offset(offset);
-    const historyData = await historyRows;
+    const historyData = await data;
     const historyHasMore = historyData.length > limit;
     const historyItems = historyHasMore ? historyData.slice(0, limit) : historyData;
     const historyLast = historyItems.at(-1);

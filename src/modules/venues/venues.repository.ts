@@ -18,7 +18,6 @@ export class VenuesRepository {
 
   async findAll(query: QueryVenueDto) {
     const { page = 1, limit = 10, cursor, search } = query;
-    const offset = (page - 1) * limit;
 
     let conditions: SQL | undefined = undefined;
     if (search) {
@@ -58,7 +57,6 @@ export class VenuesRepository {
       .orderBy(desc(schema.tournamentVenues.createdAt), desc(schema.tournamentVenues.id))
       .limit(limit + 1)
       .$dynamic();
-    if (!cursor) venuesQuery = venuesQuery.offset(offset);
     const rows = await venuesQuery;
     const hasMore = rows.length > limit;
     const venues = (hasMore ? rows.slice(0, limit) : rows);
