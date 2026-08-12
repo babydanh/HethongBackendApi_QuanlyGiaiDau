@@ -61,6 +61,22 @@ export class QueryMatchDto extends CursorPaginationDto {
   division_id?: string;
 
   @ApiPropertyOptional({
+    example: 'uuid-category',
+    description: 'Lọc theo danh mục môn thể thao (Category ID)',
+  })
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
+
+  @ApiPropertyOptional({
+    example: 'uuid-category',
+    description: 'Lọc theo danh mục môn thể thao (Category ID) (snake_case)',
+  })
+  @IsOptional()
+  @IsString()
+  category_id?: string;
+
+  @ApiPropertyOptional({
     example: 'uuid-user',
     description: 'Lọc theo User ID tham gia trận đấu',
   })

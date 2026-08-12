@@ -5,8 +5,10 @@ import {
   ForbiddenException,
   ConflictException,
   BadRequestException,
+  HttpStatus,
 } from '@nestjs/common';
 import { CommunitiesRepository } from './communities.repository';
+import { BaseException } from '../../common/exceptions/base.exception';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { QueryCommunityDto } from './dto/query-community.dto';
@@ -55,6 +57,47 @@ export class CommunitiesService {
   async getMyInvites(userId: string) {
     this.logger.log(`Lấy danh sách lời mời cộng đồng của user ${userId}`);
     return await this.communitiesRepository.findInvitesByUser(userId);
+  }
+
+  // --- DASHBOARD ---
+
+  async getDashboard(communityId: string) {
+    await this.findById(communityId);
+
+    const [recentMatches, featuredTournament, topPlayers, activity, upcomingMatches] =
+      await Promise.all([
+        this.communitiesRepository.getRecentMatches(communityId, 3),
+        this.communitiesRepository.getFeaturedTournament(communityId),
+        this.communitiesRepository.getTopRanked(communityId, 3),
+        this.communitiesRepository.getActivityFeed(communityId, 5),
+        this.communitiesRepository.getUpcomingMatches(communityId, 3),
+      ]);
+
+    return { recentMatches, featuredTournament, topPlayers, activity, upcomingMatches };
+  }
+
+  // --- MY MEMBERSHIP ---
+
+  async getMyMembership(userId: string, communityId: string) {
+    const member = await this.communitiesRepository.findMyMembership(
+      userId,
+      communityId,
+    );
+    if (!member) {
+      throw new BaseException(
+        'Bạn chưa tham gia cộng đồng này.',
+        'NOT_MEMBER',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    return {
+      role: member.role,
+      status: member.status,
+      memberId: member.id,
+      joinedAt: member.joinedAt,
+      joinAnswers: member.joinAnswers ?? null,
+    };
   }
 
   async findById(id: string, user?: { id: string; roles: string[] }) {
@@ -139,9 +182,9 @@ export class CommunitiesService {
 
   // --- MEMBERS ---
 
-  async getMembers(id: string) {
+  async getMembers(id: string, query?: { page?: number; limit?: number; status?: string }) {
     await this.findById(id);
-    return await this.communitiesRepository.getMembers(id);
+    return await this.communitiesRepository.getMembers(id, query?.status, query?.page, query?.limit);
   }
 
   async addMember(
@@ -410,7 +453,7 @@ export class CommunitiesService {
 
   async getJoinRequests(userId: string, id: string, roles: string[]) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
-    return await this.communitiesRepository.getMembers(id, 'PENDING');
+    return await this.communitiesRepository.getMembers(id, 'PENDING', 1, 200);
   }
 
   async inviteMember(userId: string, id: string, targetUserId: string, role: CommunityMemberRole, roles: string[]) {
@@ -542,6 +585,55 @@ export class CommunitiesService {
     );
 
     return removedBan;
+  }
+
+  /**
+   * P2C.2 — Gán/Xoá tag BQT cho thành viên (OWNER/MODERATOR).
+   * Body `{ tags: string[] }` replace toàn bộ; mảng rỗng = xoá hết tag.
+   * Chỉ áp dụng cho member status JOINED. Audit log được ghi trong repository (cùng transaction).
+   */
+  async updateMemberTags(
+    requesterId: string,
+    communityId: string,
+    targetUserId: string,
+    tags: string[],
+    roles: string[],
+  ) {
+    this.logger.log(
+      `Gán tag cho thành viên ${targetUserId} trong cộng đồng ${communityId} (bởi ${requesterId})`,
+    );
+    await this.checkPermissions(communityId, requesterId, roles, [
+      'OWNER',
+      'MODERATOR',
+    ]);
+
+    const existing = await this.communitiesRepository.findMember(
+      communityId,
+      targetUserId,
+    );
+    if (!existing) {
+      throw new NotFoundException('Target user is not a member');
+    }
+
+    if (existing.status !== 'JOINED') {
+      throw new BadRequestException(
+        'Chỉ thành viên đã tham gia cộng đồng mới được gán tag.',
+      );
+    }
+
+    const normalizedTags = tags.map((tag) => tag.trim());
+
+    const updatedMember = await this.communitiesRepository.updateMemberTags(
+      communityId,
+      targetUserId,
+      normalizedTags,
+      requesterId,
+    );
+    if (!updatedMember) {
+      throw new NotFoundException('Target user is not a member');
+    }
+
+    return updatedMember;
   }
 
   async respondToInvite(userId: string, id: string, action: 'ACCEPT' | 'DECLINE') {
