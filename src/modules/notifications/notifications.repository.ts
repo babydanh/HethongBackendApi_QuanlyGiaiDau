@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, lt, or, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 
 @Injectable()
 export class NotificationsRepository {
@@ -27,7 +28,7 @@ export class NotificationsRepository {
   }
 
   async getNotificationsByUser(userId: string, query: QueryNotificationsDto) {
-    const { page = 1, limit = 10, isRead } = query;
+    const { page = 1, limit = 10, cursor, isRead } = query;
     const offset = (page - 1) * limit;
     const conditions: SQL[] = [eq(schema.notifications.receiverId, userId)];
 
@@ -35,20 +36,39 @@ export class NotificationsRepository {
       conditions.push(eq(schema.notifications.isRead, isRead));
     }
 
+    const baseWhereClause = and(...conditions);
+    const decodedCursor = cursor
+      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor)
+      : null;
+    if (decodedCursor) {
+      conditions.push(
+        or(
+          lt(schema.notifications.createdAt, new Date(decodedCursor.createdAt)),
+          and(
+            eq(schema.notifications.createdAt, new Date(decodedCursor.createdAt)),
+            lt(schema.notifications.id, decodedCursor.id),
+          ),
+        ) as SQL,
+      );
+    }
     const whereClause = and(...conditions);
 
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.notifications)
-      .where(whereClause);
+      .where(baseWhereClause);
 
-    const data = await this.db
+    const notificationsQuery = this.db
       .select()
       .from(schema.notifications)
       .where(whereClause)
-      .orderBy(desc(schema.notifications.createdAt))
-      .limit(limit)
-      .offset(offset);
+      .orderBy(desc(schema.notifications.createdAt), desc(schema.notifications.id))
+      .limit(limit + 1)
+      .$dynamic();
+    const pagedQuery = cursor ? notificationsQuery : notificationsQuery.offset(offset);
+    const rawData = await pagedQuery;
+    const hasMore = rawData.length > limit;
+    const data = hasMore ? rawData.slice(0, limit) : rawData;
 
     return {
       data,
@@ -57,6 +77,10 @@ export class NotificationsRepository {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore && data.length > 0
+          ? CursorPaginationHelper.encodeCursor({ id: data[data.length - 1].id, createdAt: data[data.length - 1].createdAt })
+          : null,
+        hasMore,
       },
     };
   }

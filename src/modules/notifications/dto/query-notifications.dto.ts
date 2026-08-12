@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
 const toBoolean = ({ value }: { value: unknown }): boolean | undefined => {
   if (value === undefined || value === null || value === '') {
@@ -24,7 +25,7 @@ const toBoolean = ({ value }: { value: unknown }): boolean | undefined => {
   return value as boolean;
 };
 
-export class QueryNotificationsDto {
+export class QueryNotificationsDto extends CursorPaginationDto {
   @ApiPropertyOptional({ example: 1, description: 'Trang hiện tại' })
   @IsOptional()
   @Transform(({ value }) => Number(value))
