@@ -428,19 +428,37 @@ export class CommunitiesRepository {
     return member || null;
   }
 
-  async getMembers(communityId: string, status?: string, page = 1, limit = 50) {
+  async getMembers(communityId: string, query?: { status?: string; page?: number; limit?: number; cursor?: string }) {
+    const page = query?.page ?? 1;
+    const limit = query?.limit ?? 50;
+    const cursor = query?.cursor;
     const conditions: SQL[] = [eq(schema.communityMembers.communityId, communityId)];
-    if (status) {
-      conditions.push(eq(schema.communityMembers.status, status));
+    if (query?.status) {
+      conditions.push(eq(schema.communityMembers.status, query.status));
+    }
+    const baseWhereClause = and(...conditions);
+    const decodedCursor = cursor
+      ? CursorPaginationHelper.decodeCursor<{ id: string; joinedAt: string }>(cursor)
+      : null;
+    if (decodedCursor) {
+      conditions.push(
+        or(
+          lt(schema.communityMembers.joinedAt, new Date(decodedCursor.joinedAt)),
+          and(
+            eq(schema.communityMembers.joinedAt, new Date(decodedCursor.joinedAt)),
+            lt(schema.communityMembers.id, decodedCursor.id),
+          ),
+        ) as SQL,
+      );
     }
     const whereClause = conditions.length > 1 ? and(...conditions) : conditions[0];
 
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.communityMembers)
-      .where(whereClause);
+      .where(baseWhereClause);
 
-    const data = await this.db
+    const membersQuery = this.db
       .select({
         member: schema.communityMembers,
         user: {
@@ -458,8 +476,12 @@ export class CommunitiesRepository {
         desc(schema.communityMembers.joinedAt),
         desc(schema.communityMembers.id),
       )
-      .limit(limit)
-      .offset((page - 1) * limit);
+      .limit(limit + 1)
+      .$dynamic();
+    const pagedQuery = cursor ? membersQuery : membersQuery.offset((page - 1) * limit);
+    const rawData = await pagedQuery;
+    const hasMore = rawData.length > limit;
+    const data = hasMore ? rawData.slice(0, limit) : rawData;
 
     return {
       data,
@@ -468,6 +490,10 @@ export class CommunitiesRepository {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
+        nextCursor: hasMore && data.length > 0
+          ? CursorPaginationHelper.encodeCursor({ id: data[data.length - 1].member.id, joinedAt: data[data.length - 1].member.joinedAt })
+          : null,
+        hasMore,
       },
     };
   }

@@ -182,9 +182,9 @@ export class CommunitiesService {
 
   // --- MEMBERS ---
 
-  async getMembers(id: string, query?: { page?: number; limit?: number; status?: string }) {
+  async getMembers(id: string, query?: { page?: number; limit?: number; cursor?: string; status?: string }) {
     await this.findById(id);
-    const result = await this.communitiesRepository.getMembers(id, query?.status, query?.page, query?.limit);
+    const result = await this.communitiesRepository.getMembers(id, query);
     // P2C.3 — gắn streak tính động (WIN/LOSS/ELO_UP) cho từng member trong trang.
     const streaks = await this.computeStreaks(
       id,
@@ -465,7 +465,7 @@ export class CommunitiesService {
 
   async getJoinRequests(userId: string, id: string, roles: string[]) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
-    return await this.communitiesRepository.getMembers(id, 'PENDING', 1, 200);
+    return await this.communitiesRepository.getMembers(id, { status: 'PENDING', page: 1, limit: 200 });
   }
 
   async inviteMember(userId: string, id: string, targetUserId: string, role: CommunityMemberRole, roles: string[]) {
