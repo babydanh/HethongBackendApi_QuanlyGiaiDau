@@ -153,7 +153,7 @@ export class MatchesRepository {
       if (statusList.length === 1) {
         conditions.push(sql`upper(${schema.matches.status}) = ${statusList[0]}`);
       } else if (statusList.length > 1) {
-        conditions.push(sql`upper(${schema.matches.status}) = ANY(${statusList})`);
+        conditions.push(inArray(sql`upper(${schema.matches.status})`, statusList));
       }
     }
 
