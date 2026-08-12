@@ -9,6 +9,7 @@ import {
   integer,
   unique
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 const geography = customType<{ data: string }>({
   dataType() {
@@ -85,6 +86,11 @@ export const communityMembers = pgTable('community_members', {
   status: varchar('status', { length: 50 }).default('JOINED').notNull(),
   invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
   joinAnswers: jsonb('join_answers').$type<Record<string, string>>(),
+  // P2C.1: tag BQT gán cho member (text[] đơn giản, hiển thị trực tiếp; streak tính động KHÔNG lưu).
+  tags: text('tags')
+    .array()
+    .default(sql`'{}'::text[]`)
+    .notNull(),
   approvedBy: uuid('approved_by').references(() => users.id, { onDelete: 'set null' }),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   joinedAt: timestamp('joined_at', { withTimezone: true })

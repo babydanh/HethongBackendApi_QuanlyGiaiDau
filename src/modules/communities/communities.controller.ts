@@ -19,9 +19,11 @@ import { CommunitiesService } from './communities.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 import { QueryCommunityDto } from './dto/query-community.dto';
+import { QueryMembersDto } from './dto/query-members.dto';
 import { ReviewCommunityDto } from './dto/review-community.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
+import { UpdateMemberTagsDto } from './dto/update-member-tags.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
 import { ReviewJoinDto } from './dto/review-join.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
@@ -90,6 +92,27 @@ export class CommunitiesController {
 
   @Public()
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Get(':id/dashboard')
+  @ApiOperation({ summary: 'Lấy dữ liệu tổng quan (dashboard) của cộng đồng' })
+  @ApiResponse({ status: 200, description: 'Dashboard tổng quan cộng đồng' })
+  async getDashboard(@Param('id', ParseUUIDPipe) id: string) {
+    return await this.communitiesService.getDashboard(id);
+  }
+
+  @Get(':id/my-membership')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy membership của user hiện tại trong cộng đồng' })
+  @ApiResponse({ status: 200, description: 'Membership của user hiện tại' })
+  @ApiResponse({ status: 404, description: 'User chưa tham gia cộng đồng (NOT_MEMBER)' })
+  async getMyMembership(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return await this.communitiesService.getMyMembership(user.id, id);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết 1 cộng đồng' })
   async findOne(
@@ -153,8 +176,11 @@ export class CommunitiesController {
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/members')
   @ApiOperation({ summary: 'Lấy danh sách thành viên cộng đồng' })
-  async getMembers(@Param('id', ParseUUIDPipe) id: string) {
-    return await this.communitiesService.getMembers(id);
+  async getMembers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: QueryMembersDto,
+  ) {
+    return await this.communitiesService.getMembers(id, query);
   }
 
   @Post(':id/members')
@@ -187,6 +213,27 @@ export class CommunitiesController {
       id,
       userId,
       updateMemberDto,
+      user.roles,
+    );
+  }
+
+  @Patch(':id/members/:userId/tags')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Gán/Xoá tag thành viên (OWNER/MODERATOR)' })
+  @ApiResponse({ status: 200, description: 'Member mới kèm tags' })
+  @ApiResponse({ status: 400, description: 'Tag không hợp lệ (tối đa 5, 1-24 ký tự, không ký tự đặc biệt)' })
+  @ApiResponse({ status: 403, description: 'Không có quyền (cần OWNER/MODERATOR)' })
+  async updateMemberTags(
+    @CurrentUser() user: { id: string; roles: string[] },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() updateMemberTagsDto: UpdateMemberTagsDto,
+  ) {
+    return await this.communitiesService.updateMemberTags(
+      user.id,
+      id,
+      userId,
+      updateMemberTagsDto.tags,
       user.roles,
     );
   }

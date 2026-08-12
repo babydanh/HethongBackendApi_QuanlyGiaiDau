@@ -44,6 +44,7 @@ export class MatchesRepository {
   async findAll(query: QueryMatchDto) {
     const { page = 1, limit = 10, cursor, groupId, status, userId, bracketType, genderRestriction, city, isRanked, matchType } = query;
     const publicOnly = query.publicOnly ?? query.isPublicOnly;
+    const catId = query.categoryId || query.category_id;
     const offset = cursor ? 0 : (page - 1) * limit;
     const take = limit + 1; // Fetch 1 extra to determine hasMore
     const tId = query.tournamentId || query.tournament_id;
@@ -53,6 +54,20 @@ export class MatchesRepository {
     
     // Enforce soft delete filters
     conditions.push(isNull(schema.matches.deletedAt));
+
+    if (catId) {
+      conditions.push(
+        sql`exists (
+          select 1 from ${schema.tournaments} t
+          where (t.id = ${schema.matches.tournamentId} or t.id = (
+            select s.tournament_id from ${schema.tournamentGroups} g
+            join ${schema.tournamentStages} s on g.stage_id = s.id
+            where g.id = ${schema.matches.groupId}
+          ))
+          and (t.category_id = ${catId} or ${catId} = 'all')
+        )`
+      );
+    }
 
     if (publicOnly) {
       conditions.push(

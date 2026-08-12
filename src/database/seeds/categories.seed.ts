@@ -285,6 +285,70 @@ async function main() {
       .onConflictDoNothing();
   }
 
+  // 5. Seed Football
+  console.log('Seeding Football...');
+  const [football] = await db
+    .insert(schema.categories)
+    .values({
+      name: 'Bóng đá',
+      slug: 'football',
+      description: 'Môn thể thao bóng đá sân 5/7/11',
+      categoryConfig: {
+        ruleKind: 'FOOTBALL',
+        allowedRuleKinds: ['FOOTBALL'],
+        defaultSportRules: {
+          setsToWin: 1,
+          pointsPerSet: 1,
+          mustWinByTwo: false,
+          maxPointsPerSet: 99,
+          switchSidesBetweenSets: true,
+        },
+        supportedMatchTypes: ['SINGLES'], // Singles used to represent Team vs Team generically
+        description: 'Môn thể thao bóng đá sân 5/7/11',
+      },
+    })
+    .onConflictDoUpdate({
+      target: schema.categories.slug,
+      set: {
+        categoryConfig: {
+          ruleKind: 'FOOTBALL',
+          allowedRuleKinds: ['FOOTBALL'],
+          defaultSportRules: {
+            setsToWin: 1,
+            pointsPerSet: 1,
+            mustWinByTwo: false,
+            maxPointsPerSet: 99,
+            switchSidesBetweenSets: true,
+          },
+          supportedMatchTypes: ['SINGLES'],
+          description: 'Môn thể thao bóng đá sân 5/7/11',
+        },
+        description: 'Môn thể thao bóng đá sân 5/7/11',
+      },
+    })
+    .returning();
+
+  if (football) {
+    await db
+      .insert(schema.eloTiers)
+      .values([
+        { categoryId: football.id, name: 'Phong trào', minElo: 0, maxElo: 1500 },
+        {
+          categoryId: football.id,
+          name: 'Bán chuyên',
+          minElo: 1500,
+          maxElo: 2000,
+        },
+        {
+          categoryId: football.id,
+          name: 'Chuyên nghiệp',
+          minElo: 2000,
+          maxElo: 3000,
+        },
+      ])
+      .onConflictDoNothing();
+  }
+
   console.log('Seeding complete!');
   await sql.end();
 }
