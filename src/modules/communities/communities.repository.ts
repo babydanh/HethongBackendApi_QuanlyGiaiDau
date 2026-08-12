@@ -435,13 +435,20 @@ export class CommunitiesRepository {
     }
     const baseWhereClause = and(...conditions);
     const decodedCursor = cursor
-      ? CursorPaginationHelper.decodeCursor<{ id: string; joinedAt: string }>(cursor)
+      ? CursorPaginationHelper.decodeCursor<{ id: string; joinedAt: string; rolePriority?: number }>(cursor)
       : null;
     if (decodedCursor) {
+      const rolePriority = sql<number>`CASE WHEN ${schema.communityMembers.role} IN ('OWNER', 'MODERATOR') THEN 0 ELSE 1 END`;
+      const cursorRolePriority = decodedCursor.rolePriority ?? 1;
       conditions.push(
         or(
-          lt(schema.communityMembers.joinedAt, new Date(decodedCursor.joinedAt)),
+          lt(rolePriority, cursorRolePriority),
           and(
+            eq(rolePriority, cursorRolePriority),
+            lt(schema.communityMembers.joinedAt, new Date(decodedCursor.joinedAt)),
+          ),
+          and(
+            eq(rolePriority, cursorRolePriority),
             eq(schema.communityMembers.joinedAt, new Date(decodedCursor.joinedAt)),
             lt(schema.communityMembers.id, decodedCursor.id),
           ),
@@ -487,7 +494,11 @@ export class CommunitiesRepository {
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
         nextCursor: hasMore && data.length > 0
-          ? CursorPaginationHelper.encodeCursor({ id: data[data.length - 1].member.id, joinedAt: data[data.length - 1].member.joinedAt })
+          ? CursorPaginationHelper.encodeCursor({
+            id: data[data.length - 1].member.id,
+            joinedAt: data[data.length - 1].member.joinedAt,
+            rolePriority: ['OWNER', 'MODERATOR'].includes(data[data.length - 1].member.role) ? 0 : 1,
+          })
           : null,
         hasMore,
       },

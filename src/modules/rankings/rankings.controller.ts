@@ -37,15 +37,15 @@ export class RankingsController {
     @Query('categoryId') categoryId?: string,
     @Query('scope') scope?: 'PUBLIC' | 'COMMUNITY',
     @Query('communityId') communityId?: string,
-    @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('cursor') cursor?: string,
   ) {
     return this.rankingsService.getEloHistory(userId, {
       categoryId,
       scope,
       communityId,
-      page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 20,
+      cursor,
     });
   }
 
