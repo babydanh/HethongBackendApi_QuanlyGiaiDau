@@ -838,7 +838,7 @@ export class MatchesRepository {
 
   async completeMatch(
     id: string,
-    winnerId: string,
+    winnerId: string | null,
     matchDetails: {
       nextMatchId?: string | null;
       loserNextMatchId?: string | null;
@@ -959,7 +959,7 @@ export class MatchesRepository {
   private async completeMatchInTx(
     tx: any,
     id: string,
-    winnerId: string,
+    winnerId: string | null,
     details: {
       p1SetsWon: number;
       p2SetsWon: number;
@@ -1072,8 +1072,8 @@ export class MatchesRepository {
         .onConflictDoNothing({ target: schema.matchEloOutbox.matchId });
     }
 
-    // 2. Auto-advance Winner
-    if (existing.nextMatchId) {
+    // 2. Auto-advance Winner (skip khi hòa — winnerId null — để Phase3 luân lưu xử lý)
+    if (winnerId && existing.nextMatchId) {
       const [nextMatch] = await tx
         .select()
         .from(schema.matches)

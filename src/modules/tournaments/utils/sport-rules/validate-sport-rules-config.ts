@@ -113,6 +113,8 @@ const FORMAT_KEYS: Record<SportRuleKind, Set<string>> = {
     'tiebreakMode',
     'noAd',
   ]),
+  // FOOTBALL: tỷ số bàn thắng — format keys web `payload.ts` FOOTBALL case.
+  FOOTBALL: new Set(['halvesCount', 'halfDuration', 'allowDraw', 'bestOf', 'pointsPerGame']),
 };
 
 const SCORING_MODEL_BY_KIND: Record<SportRuleKind, SportScoringModel> = {
@@ -121,6 +123,7 @@ const SCORING_MODEL_BY_KIND: Record<SportRuleKind, SportScoringModel> = {
   PICKLEBALL_RALLY: 'RALLY_POINT_SET',
   PICKLEBALL_SIDE_OUT: 'PICKLEBALL_SIDE_OUT',
   TENNIS: 'TENNIS_SET',
+  FOOTBALL: 'RALLY_POINT_SET',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -212,6 +215,9 @@ function inferSportRuleKindFromCategory(source: CategoryRuleSource): SportRuleKi
   }
   if (combined.includes('tennis') || combined.includes('quần vợt')) {
     return 'TENNIS';
+  }
+  if (combined.includes('football') || combined.includes('bóng đá') || combined.includes('soccer')) {
+    return 'FOOTBALL';
   }
 
   return 'BADMINTON';
@@ -382,6 +388,9 @@ function validateScoringSemantics(
       if (tiebreakPoints != null && ![7, 10].includes(tiebreakPoints)) {
         throw new BadRequestException(`${sourceLabel}: tennis chỉ hỗ trợ tie-break 7 hoặc 10 điểm.`);
       }
+      break;
+    case 'FOOTBALL':
+      // Bóng đá nhập tỷ số bàn thắng tự do (LITE) — không ràng buộc pointsPerSet/cách 2/best-of.
       break;
   }
 }

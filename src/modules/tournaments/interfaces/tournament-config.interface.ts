@@ -51,7 +51,8 @@ export type CategoryRuleKind =
   | 'TABLE_TENNIS'
   | 'PICKLEBALL_RALLY'
   | 'PICKLEBALL_SIDE_OUT'
-  | 'TENNIS';
+  | 'TENNIS'
+  | 'FOOTBALL';
 
 export interface CategoryConfig {
   ruleKind?: CategoryRuleKind;

@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { ResolvedSportRulesConfig } from '../../../tournaments/utils/sport-rules/sport-rules.types';
 import type { ScoreValidationSummary } from './score-validation.types';
 import { extractNormalizedScoreEntries } from './score-validation.utils';
+import { validateFootballScoreDetails } from './validate-football-score';
 import { validatePickleballSideOutScoreDetails } from './validate-pickleball-side-out-score';
 import { validateRallyPointScoreDetails } from './validate-rally-point-score';
 import { validateTennisScoreDetails } from './validate-tennis-score';
@@ -48,6 +49,11 @@ export function validateScoreDetails(
     resolvedConfig,
     normalizedEntries: normalizedEntriesForValidation,
   };
+
+  // Bóng đá: tỷ số bàn thắng tự do + cho phép hòa — dùng validator riêng (không rally-point).
+  if (resolvedConfig.kind === 'FOOTBALL') {
+    return validateFootballScoreDetails(context);
+  }
 
   switch (resolvedConfig.scoringModel) {
     case 'TENNIS_SET':
