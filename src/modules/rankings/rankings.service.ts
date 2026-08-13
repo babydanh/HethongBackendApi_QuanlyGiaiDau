@@ -1297,10 +1297,10 @@ export class RankingsService {
       for (const t of tiers) {
         if (elo >= t.minElo) targetTier = t;
       }
-      await tx
-        .update(schema.communityRankings)
-        .set({ tierId: targetTier ? targetTier.id : null })
-        .where(eq(schema.communityRankings.id, rank.id));
+      // Community tier is derived at read time from the shared elo_tiers
+      // ranges. Keep this path for parity with global rank recalculation, but
+      // do not persist a duplicate tier foreign key on community rankings.
+      void targetTier;
     }
   }
 
