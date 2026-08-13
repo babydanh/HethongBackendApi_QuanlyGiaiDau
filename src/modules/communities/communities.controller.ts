@@ -24,6 +24,7 @@ import { ReviewCommunityDto } from './dto/review-community.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { UpdateMemberTagsDto } from './dto/update-member-tags.dto';
+import { CreateTagPresetDto } from './dto/create-tag-preset.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
 import { ReviewJoinDto } from './dto/review-join.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
@@ -236,6 +237,32 @@ export class CommunitiesController {
       updateMemberTagsDto.tags,
       user.roles,
     );
+  }
+
+  @Get(':id/tag-presets')
+  @ApiBearerAuth()
+  async getTagPresets(@Param('id', ParseUUIDPipe) id: string) {
+    return this.communitiesService.getTagPresets(id);
+  }
+
+  @Post(':id/tag-presets')
+  @ApiBearerAuth()
+  async createTagPreset(
+    @CurrentUser() user: { id: string; roles: string[] },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateTagPresetDto,
+  ) {
+    return this.communitiesService.createTagPreset(user.id, id, dto.name, dto.color, user.roles);
+  }
+
+  @Delete(':id/tag-presets/:presetId')
+  @ApiBearerAuth()
+  async deleteTagPreset(
+    @CurrentUser() user: { id: string; roles: string[] },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('presetId', ParseUUIDPipe) presetId: string,
+  ) {
+    return this.communitiesService.deleteTagPreset(user.id, id, presetId, user.roles);
   }
 
   @Delete(':id/members/:userId')

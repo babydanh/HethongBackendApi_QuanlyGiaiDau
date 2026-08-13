@@ -843,6 +843,40 @@ export class CommunitiesService {
     return updatedMember;
   }
 
+  async getTagPresets(communityId: string) {
+    await this.findById(communityId);
+    return this.communitiesRepository.listTagPresets(communityId);
+  }
+
+  async createTagPreset(requesterId: string, communityId: string, name: string, color: string, roles: string[]) {
+    await this.checkPermissions(communityId, requesterId, roles, ['OWNER', 'MODERATOR']);
+    const normalizedName = name.trim();
+    if (await this.communitiesRepository.findTagPresetByName(communityId, normalizedName)) {
+      throw new ConflictException('Tên tag này đã tồn tại trong câu lạc bộ.');
+    }
+    try {
+      return await this.communitiesRepository.createTagPreset(
+        communityId,
+        requesterId,
+        normalizedName,
+        color.toUpperCase(),
+      );
+    } catch (error) {
+      // Keep the unique community/name constraint user-facing and avoid leaking SQL errors.
+      if ((error as { code?: string })?.code === '23505') {
+        throw new ConflictException('Tên tag này đã tồn tại trong câu lạc bộ.');
+      }
+      throw error;
+    }
+  }
+
+  async deleteTagPreset(requesterId: string, communityId: string, presetId: string, roles: string[]) {
+    await this.checkPermissions(communityId, requesterId, roles, ['OWNER', 'MODERATOR']);
+    const deleted = await this.communitiesRepository.deleteTagPreset(communityId, presetId);
+    if (!deleted) throw new NotFoundException('Không tìm thấy tag preset');
+    return deleted;
+  }
+
   async respondToInvite(
     userId: string,
     id: string,

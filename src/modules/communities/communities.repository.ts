@@ -1444,4 +1444,35 @@ export class CommunitiesRepository {
       );
     return result.count;
   }
+
+  async listTagPresets(communityId: string) {
+    return this.db.select().from(schema.communityTagPresets)
+      .where(eq(schema.communityTagPresets.communityId, communityId))
+      .orderBy(schema.communityTagPresets.createdAt);
+  }
+
+  async createTagPreset(communityId: string, createdBy: string, name: string, color: string) {
+    const [created] = await this.db.insert(schema.communityTagPresets)
+      .values({ communityId, createdBy, name, color })
+      .returning();
+    return created;
+  }
+
+  async findTagPresetByName(communityId: string, name: string) {
+    const [existing] = await this.db.select({ id: schema.communityTagPresets.id })
+      .from(schema.communityTagPresets)
+      .where(and(
+        eq(schema.communityTagPresets.communityId, communityId),
+        sql`lower(${schema.communityTagPresets.name}) = lower(${name})`,
+      ))
+      .limit(1);
+    return existing;
+  }
+
+  async deleteTagPreset(communityId: string, presetId: string) {
+    const [deleted] = await this.db.delete(schema.communityTagPresets)
+      .where(and(eq(schema.communityTagPresets.id, presetId), eq(schema.communityTagPresets.communityId, communityId)))
+      .returning();
+    return deleted;
+  }
 }
