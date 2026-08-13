@@ -23,7 +23,7 @@ export class CategoriesRepository {
     }
 
     const list = await this.db.select().from(schema.categories).where(whereClause);
-    return list.map((cat) => {
+    const results = list.map((cat) => {
       const config = (cat.categoryConfig as Record<string, unknown>) || {};
       const isActive = config.isActive !== false;
       return {
@@ -31,6 +31,11 @@ export class CategoriesRepository {
         isActive,
       };
     });
+
+    if (query.includeInactive === true || String(query.includeInactive) === 'true') {
+      return results;
+    }
+    return results.filter((cat) => cat.isActive);
   }
 
   async findCategoryById(id: string) {

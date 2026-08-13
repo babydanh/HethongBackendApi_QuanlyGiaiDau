@@ -8,4 +8,10 @@ export class QueryCategoryDto {
   @IsString()
   @IsOptional()
   search?: string;
+
+  @ApiPropertyOptional({
+    description: 'Bao gồm cả các môn đã ẩn (Mặc định: false)',
+  })
+  @IsOptional()
+  includeInactive?: boolean | string;
 }
