@@ -362,6 +362,7 @@ export class MatchesRepository {
       tournamentName?: string; 
       categoryId?: string; 
       categoryName?: string;
+      venueName?: string | null;
       matchType?: string;
       genderRestriction?: string;
     }>();
@@ -375,6 +376,7 @@ export class MatchesRepository {
           stageRoundConfig: schema.tournamentStages.roundConfig,
           groupRoundConfig: schema.tournamentGroups.roundConfig,
           tournamentName: schema.tournaments.name,
+          venueName: schema.tournamentVenues.name,
           categoryId: schema.tournaments.categoryId,
           categoryName: schema.categories.name,
           matchType: schema.tournaments.matchType,
@@ -390,6 +392,7 @@ export class MatchesRepository {
           eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
         )
         .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+        .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
         .where(inArray(schema.tournamentGroups.id, Array.from(groupIdsForMatches)));
       for (const g of groupsData) {
         groupsMap.set(g.groupId, {
@@ -430,6 +433,7 @@ export class MatchesRepository {
         } : null,
         tournament: groupStage ? {
           name: groupStage.tournamentName,
+          venueName: groupStage.venueName,
           categoryId: groupStage.categoryId,
           matchType: groupStage.matchType,
           genderRestriction: groupStage.genderRestriction,
