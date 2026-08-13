@@ -4,6 +4,7 @@ export const SPORT_RULE_KINDS = [
   'PICKLEBALL_RALLY',
   'PICKLEBALL_SIDE_OUT',
   'TENNIS',
+  'FOOTBALL',
 ] as const;
 
 export type SportRuleKind = (typeof SPORT_RULE_KINDS)[number];

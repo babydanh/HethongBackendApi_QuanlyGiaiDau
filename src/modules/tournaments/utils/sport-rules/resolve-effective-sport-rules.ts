@@ -63,6 +63,16 @@ const SPORT_DEFAULTS: Record<SportRuleKind, SportDefaults> = {
     tiebreakAt: 6,
     tiebreakPoints: 7,
   },
+  FOOTBALL: {
+    kind: 'FOOTBALL',
+    scoringModel: 'RALLY_POINT_SET',
+    setsToWin: 1,
+    pointsPerSet: 1,
+    mustWinByTwo: false,
+    maxPoints: 99,
+    tiebreakAt: 0,
+    tiebreakPoints: null,
+  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -110,6 +120,9 @@ function inferKindFromCategoryName(categorySlug?: string | null, categoryName?: 
   }
   if (combined.includes('tennis') || combined.includes('quan vot')) {
     return 'TENNIS';
+  }
+  if (combined.includes('football') || combined.includes('bong da') || combined.includes('soccer')) {
+    return 'FOOTBALL';
   }
 
   return null;

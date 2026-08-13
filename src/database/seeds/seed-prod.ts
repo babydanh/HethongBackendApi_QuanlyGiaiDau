@@ -125,6 +125,15 @@ async function main() {
         ruleKind: 'FOOTBALL',
         allowedRuleKinds: ['FOOTBALL'],
         defaultSportRules: {
+          // Thống nhất với categories.seed.ts: có key scoring để resolve không về BADMINTON.
+          setsToWin: 1,
+          pointsPerSet: 1,
+          mustWinByTwo: false,
+          maxPointsPerSet: 99,
+          switchSidesBetweenSets: true,
+          winPoints: 3,
+          drawPoints: 1,
+          lossPoints: 0,
           halfDurationMinutes: 45,
           extraTimeHalfMinutes: 15,
           penaltyShootout: true,

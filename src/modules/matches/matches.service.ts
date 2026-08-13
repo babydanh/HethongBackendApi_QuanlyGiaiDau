@@ -58,7 +58,7 @@ export class MatchesService {
   private async finalizeCompletedMatch(
     existing: Awaited<ReturnType<MatchesRepository['findById']>>,
     matchId: string,
-    winnerId: string,
+    winnerId: string | null,
     auditUserId: string | null,
     overrideOutcome?: {
       p1SetsWon: number;
@@ -643,6 +643,13 @@ export class MatchesService {
           winnerId = existing.participant1Id;
         } else if (existing.p2SetsWon >= setsToWin) {
           winnerId = existing.participant2Id;
+        }
+
+        // Bóng đá: cho phép TRẬN HÒA ở vòng bảng (winnerId null) — standings ghi draws.
+        const isFootball = resolvedConfig.kind === 'FOOTBALL';
+        const isDraw = existing.p1SetsWon === existing.p2SetsWon;
+        if (isFootball && isDraw) {
+          return this.finalizeCompletedMatch(existing, id, null, user.sub);
         }
       }
 
