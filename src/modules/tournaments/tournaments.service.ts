@@ -249,11 +249,10 @@ export class TournamentsService {
     // Mặc định lọc các giải đấu PUBLIC để ẩn giải đấu PRIVATE khỏi trang chủ
     const result = await this.tournamentsRepository.findAll({
       ...query,
-      tournamentType: 'PUBLIC',
       visibility: 'PUBLIC',
       createdBy: undefined,
     }, {
-      defaultTournamentType: 'PUBLIC',
+      defaultTournamentType: null,
       defaultVisibility: 'PUBLIC',
     });
     result.data = result.data
