@@ -45,10 +45,22 @@ export class AppKeyGuard implements CanActivate {
     }
 
     const providedKey = request.headers['x-app-key'] as string;
-    if (!providedKey || providedKey !== expectedKey) {
-      throw new ForbiddenException('Unauthorized Application (Invalid App Key)');
+    if (providedKey && providedKey === expectedKey) {
+      return true;
     }
 
-    return true;
+    // Allow requests originating from official Web domain (FRONTEND_URL or local dev)
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://sporto.asia';
+    const origin = request.headers['origin'] as string;
+    const referer = request.headers['referer'] as string;
+
+    if (
+      (origin && (origin === frontendUrl || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'))) ||
+      (referer && (referer.startsWith(frontendUrl) || referer.startsWith('http://localhost') || referer.startsWith('http://127.0.0.1')))
+    ) {
+      return true;
+    }
+
+    throw new ForbiddenException('Unauthorized Application (Invalid App Key)');
   }
 }
