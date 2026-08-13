@@ -1,9 +1,9 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, lt, sql, type SQL } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, gte, lt, sql, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
-import { QueryUserDto } from './dto/query-user.dto';
+import { AdminUserStatusFilter, QueryUserDto } from './dto/query-user.dto';
 import type {
   ReportCategory,
   ReportTargetType,
@@ -153,7 +153,7 @@ export class UsersRepository {
   }
 
   async findAll(query: QueryUserDto) {
-    const { page = 1, limit, search, order, cursor, role } = query;
+    const { page = 1, limit, search, order, cursor, role, status, from, to } = query;
 
     let whereClause = and(
       isNull(schema.users.deletedAt),
@@ -165,6 +165,25 @@ export class UsersRepository {
         inner join ${schema.roles} rr on ur.role_id = rr.id
         where ur.user_id = ${schema.users.id} and rr.name = ${role}
       )`)!;
+    }
+    const activeSanctionPredicate = sql`exists (
+      select 1 from ${schema.userBans} current_ban
+      where current_ban.user_id = ${schema.users.id}
+        and current_ban.is_active = true
+        and (current_ban.expires_at is null or current_ban.expires_at > now())
+    )`;
+    if (status === AdminUserStatusFilter.BANNED) {
+      whereClause = and(whereClause, activeSanctionPredicate)!;
+    } else if (status === AdminUserStatusFilter.ACTIVE) {
+      whereClause = and(whereClause, sql`not ${activeSanctionPredicate}`)!;
+    }
+    if (from) {
+      whereClause = and(whereClause, gte(schema.users.createdAt, new Date(`${from}T00:00:00.000Z`)))!;
+    }
+    if (to) {
+      const inclusiveEnd = new Date(`${to}T00:00:00.000Z`);
+      inclusiveEnd.setUTCDate(inclusiveEnd.getUTCDate() + 1);
+      whereClause = and(whereClause, lt(schema.users.createdAt, inclusiveEnd))!;
     }
     if (search) {
       whereClause = and(

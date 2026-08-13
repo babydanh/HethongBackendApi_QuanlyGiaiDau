@@ -1,8 +1,13 @@
-import { IsOptional, IsInt, Min, IsString, IsEnum } from 'class-validator';
+import { IsOptional, IsInt, Min, IsString, IsEnum, IsDateString, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 import { UserRole } from '../../../common/constants/enums';
+
+export enum AdminUserStatusFilter {
+  ACTIVE = 'ACTIVE',
+  BANNED = 'BANNED',
+}
 
 export class QueryUserDto extends CursorPaginationDto {
   @ApiPropertyOptional({ default: 1 })
@@ -38,4 +43,21 @@ export class QueryUserDto extends CursorPaginationDto {
   @IsEnum(UserRole)
   @IsOptional()
   role?: UserRole;
+
+  @ApiPropertyOptional({ enum: AdminUserStatusFilter })
+  @IsEnum(AdminUserStatusFilter)
+  @IsOptional()
+  status?: AdminUserStatusFilter;
+
+  @ApiPropertyOptional({ description: 'Inclusive creation-date lower bound (YYYY-MM-DD)' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  @IsDateString({ strict: true })
+  @IsOptional()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Inclusive creation-date upper bound (YYYY-MM-DD)' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  @IsDateString({ strict: true })
+  @IsOptional()
+  to?: string;
 }

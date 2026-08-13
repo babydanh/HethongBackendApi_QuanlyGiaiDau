@@ -1199,9 +1199,9 @@ export class TournamentsRepository {
 
         if (!lockedTournament) throw new BadRequestException('Giải đấu không tồn tại.');
 
-        // Lite mode: count distinct roster users; SINGLES max=maxParticipants, DOUBLES max=maxParticipants*2
+        // Lite tournament: count distinct roster users; SINGLES max=maxParticipants, DOUBLES max=maxParticipants*2
         const tCfg = (lockedTournament.tournamentConfig || {}) as Record<string, unknown>;
-        if (tCfg.mode === 'LITE') {
+        if (tCfg.isLite === true) {
           const isDoubles = lockedTournament.matchType === 'DOUBLES' || lockedTournament.matchType === 'MIXED_DOUBLES';
           const maxSlots: number = isDoubles ? lockedTournament.maxParticipants! * 2 : lockedTournament.maxParticipants!;
 
@@ -5134,7 +5134,7 @@ export class TournamentsRepository {
     if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
     const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (tCfg.mode !== 'LITE') {
+    if (tCfg.isLite !== true) {
       throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
     }
     if (tournament.matchType !== 'DOUBLES' && tournament.matchType !== 'MIXED_DOUBLES') {
