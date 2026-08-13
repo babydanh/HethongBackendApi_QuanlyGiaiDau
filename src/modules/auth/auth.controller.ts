@@ -19,6 +19,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
 import { Public } from '../../common/decorators/public.decorator';
+import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from './interfaces/jwt-payload.interface';
 import { JwtRefreshAuthGuard } from '../../common/guards/jwt-refresh-auth.guard';
@@ -184,6 +185,7 @@ export class AuthController {
   }
 
   @Public()
+  @SkipAppKey()
   @Get('google/callback')
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Google OAuth callback' })

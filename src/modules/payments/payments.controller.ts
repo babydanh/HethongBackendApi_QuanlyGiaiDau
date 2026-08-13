@@ -10,6 +10,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -94,6 +95,7 @@ export class PaymentsController {
   }
 
   @Public()
+  @SkipAppKey()
   @Post('webhook')
   @ApiOperation({ summary: 'Webhook nhận callback từ Cổng thanh toán' })
   async handleWebhook(@Body() webhookDto: WebhookDto) {
@@ -101,6 +103,7 @@ export class PaymentsController {
   }
 
   @Public()
+  @SkipAppKey()
   @Post('mock-verify')
   @ApiOperation({ summary: 'Mock verify payment (for demo)' })
   async mockVerify(@Body() body: { paymentId: string }) {
