@@ -1361,7 +1361,7 @@ export class CommunitiesRepository {
           AND m.status = 'COMPLETED'
           AND m.deleted_at IS NULL
           AND m.winner_id IS NOT NULL
-          AND mp.user_id = ANY(${userIds}::uuid[])
+          AND mp.user_id IN ${sql`(${sql.join(userIds.map((id) => sql`${id}::uuid`), sql`, `)})`}
       ),
       ordered AS (
         SELECT "userId", won,
@@ -1407,7 +1407,7 @@ export class CommunitiesRepository {
       INNER JOIN matches m ON m.id = elh.match_id
       INNER JOIN tournaments t ON t.id = m.tournament_id
       WHERE t.community_id = ${communityId}
-        AND elh.user_id = ANY(${userIds}::uuid[])
+        AND elh.user_id IN ${sql`(${sql.join(userIds.map((id) => sql`${id}::uuid`), sql`, `)})`}
         AND elh.changed_points > 0
         AND elh.created_at >= NOW() - INTERVAL '7 days'
       GROUP BY elh.user_id
