@@ -10,11 +10,13 @@ import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { BullModule } from '@nestjs/bullmq';
 import { UsersModule } from '../users/users.module';
+import { AccountSanctionModule } from '../../common/services/account-sanction.module';
 
 @Module({
   imports: [
     PassportModule,
     UsersModule,
+    AccountSanctionModule,
     BullModule.registerQueue({
       name: 'email-delivery',
     }),

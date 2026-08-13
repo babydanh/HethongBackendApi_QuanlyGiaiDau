@@ -19,6 +19,8 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { CsrfGuard } from './common/guards/csrf.guard';
 import { VerifiedGuard } from './common/guards/verified.guard';
 import { AppKeyGuard } from './common/guards/app-key.guard';
+import { AccountBanGuard } from './common/guards/account-ban.guard';
+import { AccountSanctionModule } from './common/services/account-sanction.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { CommunitiesModule } from './modules/communities/communities.module';
 import { VenuesModule } from './modules/venues/venues.module';
@@ -47,6 +49,7 @@ import { AppVersionModule } from './modules/app-version/app-version.module';
       load: [databaseConfig, authConfig, aiConfig],
       validationSchema: envValidationSchema,
     }),
+    AccountSanctionModule,
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -105,6 +108,10 @@ import { AppVersionModule } from './modules/app-version/app-version.module';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: AccountBanGuard,
     },
     {
       provide: APP_GUARD,

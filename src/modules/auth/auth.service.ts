@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  ForbiddenException,
   ConflictException,
   Inject,
   Logger,
@@ -26,6 +27,7 @@ import { OAuthProfileDto } from './dto/oauth-profile.dto';
 import { InvalidCredentialsException } from './exceptions/invalid-credentials.exception';
 import { UserRole } from '../../common/constants/enums';
 import { ERROR_MESSAGES } from '../../common/constants/error-messages';
+import { AccountSanctionService } from '../../common/services/account-sanction.service';
 
 @Injectable()
 export class AuthService {
@@ -39,6 +41,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly usersRepository: UsersRepository,
     @InjectQueue('email-delivery') private readonly emailQueue: Queue,
+    private readonly accountSanctionService: AccountSanctionService,
   ) {
     this.googleClient = new OAuth2Client(
       this.configService.get<string>('auth.googleClientId'),
@@ -93,6 +96,8 @@ export class AuthService {
     if (!isPasswordValid) {
       throw new InvalidCredentialsException();
     }
+
+    await this.assertAccountCanAccess(user.id);
 
     const roles = await this.authRepository.findUserRoles(user.id);
 
@@ -150,6 +155,7 @@ export class AuthService {
             .limit(1);
 
           if (latestSession) {
+            await this.assertAccountCanAccess(oldSession.userId);
             const roles = await this.authRepository.findUserRoles(oldSession.userId);
             const [userRecord] = await this.db
               .select({ email: schema.users.email, isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
@@ -199,6 +205,8 @@ export class AuthService {
 
       const roles = await this.authRepository.findUserRoles(payload.sub);
 
+      await this.assertAccountCanAccess(payload.sub);
+
       const [userRecord] = await this.db
         .select({ isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
         .from(schema.users)
@@ -241,6 +249,7 @@ export class AuthService {
     );
 
     if (existingProvider) {
+      await this.assertAccountCanAccess(existingProvider.userId);
       // Cập nhật lại fullName và avatarUrl mới nhất từ OAuth sang Profile
       const updateData: Partial<typeof schema.profiles.$inferInsert> = {};
       if (oauthProfile.displayName) updateData.fullName = oauthProfile.displayName;
@@ -383,7 +392,9 @@ export class AuthService {
       refreshToken: oauthProfile.refreshToken,
     });
 
-    // 5. Generate tokens
+    // 5. Generate tokens. The existing-provider branch was checked above;
+    // this also covers an existing password account linked by OAuth.
+    await this.assertAccountCanAccess(user.id);
     const roles = await this.authRepository.findUserRoles(user.id);
     return this.generateTokens(
       user.id,
@@ -394,6 +405,12 @@ export class AuthService {
       user.isEmailVerified,
       user.isMock,
     );
+  }
+
+  private async assertAccountCanAccess(userId: string): Promise<void> {
+    if (await this.accountSanctionService.hasActiveAccessBan(userId)) {
+      throw new ForbiddenException('Tài khoản của bạn đang bị hạn chế truy cập.');
+    }
   }
 
   private async generateTokens(

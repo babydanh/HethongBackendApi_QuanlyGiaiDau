@@ -72,13 +72,28 @@ export class TournamentsService {
    * chủ giải (createdBy) hoặc đồng tổ chức (CO_ORGANIZER trong tournamentStaff).
    */
   private async isManager(
-    tournament: { id: string; createdBy: string | null },
+    tournament: { id: string; createdBy: string | null; communityId?: string | null },
     userId: string,
     systemRoles: string[] = [],
   ): Promise<boolean> {
-    if (systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER')) return true;
+    if (systemRoles.includes('ADMIN')) return true;
     if (tournament.createdBy === userId) return true;
-    return this.tournamentsRepository.isCoOrganizer(tournament.id, userId);
+    if (await this.tournamentsRepository.isCoOrganizer(tournament.id, userId)) return true;
+    if (!tournament.communityId) return false;
+    const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
+    return member?.status === 'JOINED' && ['OWNER', 'MODERATOR'].includes(member.role);
+  }
+
+  private isSystemTournamentCreator(systemRoles: string[] = []): boolean {
+    return systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER');
+  }
+
+  private async assertCommunityTournamentCreator(communityId: string, userId: string, systemRoles: string[] = []) {
+    if (systemRoles.includes('ADMIN')) return;
+    const member = await this.tournamentsRepository.findCommunityMember(communityId, userId);
+    if (!member || member.status !== 'JOINED' || !['OWNER', 'MODERATOR'].includes(member.role)) {
+      throw new ForbiddenException('Chỉ Chủ CLB hoặc Quản trị viên CLB mới có thể tạo giải thuộc CLB.');
+    }
   }
 
   private async sendNotificationBatch(notifications: Array<Promise<unknown>>) {
@@ -389,8 +404,12 @@ export class TournamentsService {
       }
     }
 
+    if (createTournamentDto.communityId && createTournamentDto.tournamentType !== 'CLUB') {
+      throw new BadRequestException('Giải gắn với CLB phải có loại CLUB.');
+    }
+
     // 3. CLUB vs PUBLIC validation rules & authorization
-    const isSystemAuthorized = systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER') || systemRoles.includes('PLAYER');
+    const isSystemAuthorized = this.isSystemTournamentCreator(systemRoles);
 
     if (createTournamentDto.tournamentType === 'CLUB') {
       if (!createTournamentDto.communityId) {
@@ -404,14 +423,14 @@ export class TournamentsService {
       }
 
       // Authorization for club tournament creation: System Admin/Organizer OR community Owner/Admin/Moderator
-      if (!isSystemAuthorized) {
+      if (!systemRoles.includes('ADMIN')) {
         const member = await this.tournamentsRepository.findCommunityMember(
           createTournamentDto.communityId,
           userId,
         );
         if (
           !member ||
-          !['OWNER', 'ADMIN', 'MODERATOR'].includes(member.role) ||
+          !['OWNER', 'MODERATOR'].includes(member.role) ||
           member.status !== 'JOINED'
         ) {
           throw new ForbiddenException(
@@ -544,10 +563,9 @@ export class TournamentsService {
     };
 
     // 7. Check authorization: must be community member (JOINED)
-    const isSystemAuthorized = systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER');
-    if (!isSystemAuthorized) {
+    if (!systemRoles.includes('ADMIN')) {
       const member = await this.tournamentsRepository.findCommunityMember(dto.communityId, userId);
-      if (!member || member.status !== 'JOINED') {
+      if (!member || member.status !== 'JOINED' || !['OWNER', 'MODERATOR'].includes(member.role)) {
         throw new ForbiddenException('Bạn phải là thành viên của câu lạc bộ để tạo giải đấu.');
       }
     }
@@ -557,7 +575,7 @@ export class TournamentsService {
     Object.assign(fullDto, {
       name: dto.name,
       tournamentType: 'CLUB',
-      visibility: 'PUBLIC',
+      visibility: 'PRIVATE',
       communityId: dto.communityId,
       categoryId: category.id,
       matchType,
@@ -778,6 +796,19 @@ export class TournamentsService {
 
     if (!canUpdate) {
       throw new ForbiddenException('Bạn không có quyền cập nhật giải đấu này');
+    }
+
+    const isAdmin = systemRoles.includes('ADMIN');
+    if (updateTournamentDto.status !== undefined && !isAdmin) {
+      throw new ForbiddenException('Trạng thái giải chỉ được thay đổi qua các thao tác nghiệp vụ hoặc bởi Quản trị viên.');
+    }
+    if (
+      updateTournamentDto.visibility === 'PUBLIC' &&
+      existing.visibility !== 'PUBLIC' &&
+      existing.status !== 'DRAFT' &&
+      !isAdmin
+    ) {
+      throw new BadRequestException('Muốn công khai giải nội bộ, hãy đưa giải về bản nháp và công bố để chờ Quản trị viên xét duyệt.');
     }
 
     await this.assertEntryFeeAllowed(updateTournamentDto.entryFee);
@@ -2133,7 +2164,10 @@ export class TournamentsService {
     // Tất cả giải đấu do Ban tổ chức/Người dùng tạo (không phải Admin) đều phải chuyển sang PENDING_APPROVAL để Admin phê duyệt
     const isAdmin = systemRoles.includes('ADMIN');
     const notYetOpen = existing.registrationStartDate && new Date(existing.registrationStartDate) > new Date();
-    const targetStatus = !isAdmin
+    const requiresAdminApproval = !isAdmin && (
+      existing.visibility === 'PUBLIC' || !existing.communityId
+    );
+    const targetStatus = requiresAdminApproval
       ? 'PENDING_APPROVAL'
       : notYetOpen
         ? 'UPCOMING'
@@ -2350,7 +2384,10 @@ export class TournamentsService {
     };
   }
 
-  async createParent(userId: string, data: CreateParentTournamentDto) {
+  async createParent(userId: string, data: CreateParentTournamentDto, systemRoles: string[] = []) {
+    if (!this.isSystemTournamentCreator(systemRoles)) {
+      throw new ForbiddenException('Chỉ tài khoản Organizer hoặc Admin mới có thể tạo giải ngoài CLB.');
+    }
     return this.tournamentsRepository.createParent(userId, data);
   }
 
@@ -2968,9 +3005,7 @@ export class TournamentsService {
         throw new NotFoundException('Giải đấu không tồn tại');
       }
 
-      const isOwner = tournament.createdBy === userId;
-      const isSystemAuthorized = systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER');
-      if (!isOwner && !isSystemAuthorized) {
+      if (!(await this.isManager(tournament, userId, systemRoles))) {
         throw new ForbiddenException('Bạn không có quyền tạo bảng thi đấu cho giải này');
       }
 
@@ -3085,6 +3120,10 @@ export class TournamentsService {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
 
+    if (!(await this.isManager(tournament, userId, systemRoles))) {
+      throw new ForbiddenException('Bạn không có quyền cập nhật bảng thi đấu này');
+    }
+
     await this.assertEntryFeeAllowed(updateDivisionDto.entryFee);
 
     const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
@@ -3141,9 +3180,8 @@ export class TournamentsService {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
 
-    const isOwner = tournament.createdBy === userId;
-    const isSystemAuthorized = systemRoles.includes('ADMIN') || systemRoles.includes('ORGANIZER');
-    if (!isOwner && !isSystemAuthorized) {
+    const canManage = await this.isManager(tournament, userId, systemRoles);
+    if (!canManage) {
       throw new ForbiddenException('Bạn không có quyền cập nhật cấu hình hình thức này');
     }
 
@@ -3201,6 +3239,9 @@ export class TournamentsService {
       });
     }
 
+    if (!(await this.isManager(tournament, userId, systemRoles))) {
+      throw new ForbiddenException('Bạn không có quyền cập nhật cấu hình hình thức này');
+    }
     return this.tournamentsRepository.updateDivisionConfig(divisionId, updateDivisionDto, userId);
   }
 
@@ -3214,6 +3255,13 @@ export class TournamentsService {
       throw new ForbiddenException('Bạn không có quyền xóa bảng thi đấu này');
     }
 
+    const division = await this.tournamentsRepository.findDivisionById(divisionId);
+    if (!division) throw new NotFoundException('Bảng thi đấu không tồn tại');
+    const tournament = await this.tournamentsRepository.findById(division.tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+    if (!(await this.isManager(tournament, userId, systemRoles))) {
+      throw new ForbiddenException('Bạn không có quyền xóa bảng thi đấu này');
+    }
     return this.tournamentsRepository.deleteDivision(divisionId, userId);
   }
 

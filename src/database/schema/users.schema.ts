@@ -8,6 +8,7 @@ import {
   date,
   integer,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { provinces } from './regions.schema';
 import { tournaments } from './tournaments.schema';
@@ -77,7 +78,12 @@ export const userToRoles = pgTable('user_to_roles', {
   assignedBy: uuid('assigned_by').references(() => users.id, {
     onDelete: 'set null',
   }),
-});
+}, (table) => ({
+  userRoleUnique: uniqueIndex('user_to_roles_user_id_role_id_unique').on(
+    table.userId,
+    table.roleId,
+  ),
+}));
 
 export const profiles = pgTable('profiles', {
   id: uuid('id').primaryKey().defaultRandom(),
