@@ -282,4 +282,64 @@ describe('validateScoreDetails', () => {
       ),
     ).toThrow(BadRequestException);
   });
+
+  it('FOOTBALL accepts win score 2-1', () => {
+    const result = validateScoreDetails(
+      { set1: '2-1' },
+      buildResolvedConfig({
+        kind: 'FOOTBALL',
+        bestOf: 1,
+        setsToWin: 1,
+        pointsPerSet: 1,
+        maxPoints: 99,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 1,
+      p2SetsWon: 0,
+      setsToWin: 1,
+      totalSets: 1,
+    });
+  });
+
+  it('FOOTBALL accepts draw 0-0 (no forced winner)', () => {
+    const result = validateScoreDetails(
+      { set1: '0-0' },
+      buildResolvedConfig({
+        kind: 'FOOTBALL',
+        bestOf: 1,
+        setsToWin: 1,
+        pointsPerSet: 1,
+        maxPoints: 99,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 0,
+      p2SetsWon: 0,
+      setsToWin: 1,
+      totalSets: 1,
+    });
+  });
+
+  it('FOOTBALL accepts draw 2-2', () => {
+    const result = validateScoreDetails(
+      { set1: '2-2' },
+      buildResolvedConfig({
+        kind: 'FOOTBALL',
+        bestOf: 1,
+        setsToWin: 1,
+        pointsPerSet: 1,
+        maxPoints: 99,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 0,
+      p2SetsWon: 0,
+      setsToWin: 1,
+      totalSets: 1,
+    });
+  });
 });

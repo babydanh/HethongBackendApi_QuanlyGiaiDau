@@ -483,11 +483,18 @@ export class MatchesService {
         throw new BadRequestException('WinnerId không thuộc một trong hai participant của trận.');
       }
 
-      if (winnerId === existing.participant1Id && p1SetsWon <= p2SetsWon) {
+      // Bóng đá knockout hòa → phân định bằng luân lưu: winner từ scoreDetails.shootout,
+      // tỷ số chính vẫn hòa (2-2) nên bỏ qua check "winner phải có set cao hơn".
+      const shootout = (scoreDetails as Record<string, unknown> | null)?.shootout as
+        | Record<string, unknown>
+        | undefined;
+      const isShootoutDecided = shootout?.winnerId === winnerId;
+
+      if (!isShootoutDecided && winnerId === existing.participant1Id && p1SetsWon <= p2SetsWon) {
         throw new BadRequestException('Đội 1 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.');
       }
 
-      if (winnerId === existing.participant2Id && p2SetsWon <= p1SetsWon) {
+      if (!isShootoutDecided && winnerId === existing.participant2Id && p2SetsWon <= p1SetsWon) {
         throw new BadRequestException('Đội 2 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.');
       }
     }

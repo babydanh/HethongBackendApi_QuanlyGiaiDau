@@ -25,6 +25,18 @@ export interface TournamentConfig {
   maxCombinedElo?: number | null;
   maxTeammateGap?: number | null;
   registrationMode?: 'OPEN' | 'APPROVAL' | 'INVITE_ONLY';
+  // Team sport (bóng đá)
+  teamSize?: 5 | 7 | 11;
+  teamSizeOptions?: Array<5 | 7 | 11>;
+  minTeamSize?: number;
+  maxTeamSize?: number;
+  allowReserve?: boolean;
+  maxReserve?: number;
+  // Knockout nâng cao (Champion League style)
+  twoLegged?: boolean;
+  awayGoalsRule?: boolean;
+  penaltyShootout?: boolean;
+  allowDraw?: boolean;
 }
 
 export interface Prize {

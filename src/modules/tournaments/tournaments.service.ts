@@ -3192,17 +3192,20 @@ export class TournamentsService {
 
     await this.assertEntryFeeAllowed(updateDivisionDto.entryFee);
 
-    // Không cho đổi hình thức thi đấu khi đang mở đăng ký
-    if (
-      updateDivisionDto.matchType &&
-      (tournament.status === 'REGISTRATION_OPEN' || tournament.status === 'REGISTRATION_CLOSED')
-    ) {
-      throw new BadRequestException('Không thể thay đổi hình thức thi đấu khi giải đấu đang mở đăng ký');
-    }
-
     const currentDivision = await this.tournamentsRepository.findDivisionById(divisionId);
     if (!currentDivision) {
       throw new NotFoundException('Bảng đấu không tồn tại');
+    }
+
+    // Keep the registration lock scoped to an actual format change. The web
+    // configuration save sends the current matchType together with scoring
+    // rules; merely repeating that value must not block a preset/rules update.
+    if (
+      updateDivisionDto.matchType &&
+      updateDivisionDto.matchType !== currentDivision.matchType &&
+      (tournament.status === 'REGISTRATION_OPEN' || tournament.status === 'REGISTRATION_CLOSED')
+    ) {
+      throw new BadRequestException('Không thể thay đổi hình thức thi đấu khi giải đấu đang mở đăng ký');
     }
 
     const category = await this.tournamentsRepository.findCategory(tournament.categoryId);

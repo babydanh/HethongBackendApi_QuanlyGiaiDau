@@ -1369,6 +1369,9 @@ export class TournamentsRepository {
       const isWaitlisted = resolvedDivision?.isWaitlisted === true;
       const effectiveMatchType = selectedDivision?.matchType ?? tournament.matchType;
       const isDoubles = this.isDoublesMatchType(effectiveMatchType);
+      // Team sport (bóng đá): config có teamSize → đội nhiều người, không qua PENDING_PARTNER.
+      const tConfigForTeam = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+      const isTeamSport = tConfigForTeam.teamSize != null || tConfigForTeam.minTeamSize != null;
       const payableEntryFeeAmount = parseFloat(selectedDivision?.entryFee ?? tournament.entryFee ?? '0');
 
       const registrationDeadlines = [
@@ -1385,7 +1388,11 @@ export class TournamentsRepository {
         throw new BadRequestException('Hạn đăng ký của nội dung thi đấu này đã kết thúc.');
       }
 
-      const teamInviteToken = isDoubles ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase() : null;
+      // Team sport: luôn tạo link mời mở (token), không giới hạn 1h partner.
+      // Đôi: token mời đồng đội như cũ (PENDING_PARTNER, hết hạn theo deadline).
+      const teamInviteToken = (isDoubles || isTeamSport)
+        ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase()
+        : null;
       const inviteBaseExpiresAt = new Date(now.getTime() + 60 * 60 * 1000);
       const partnerInviteExpiresAt = isDoubles
         ? registrationDeadline
@@ -1437,6 +1444,30 @@ export class TournamentsRepository {
         role: 'MAIN',
       });
 
+      // 10b. Team sport: thêm các thành viên (memberIds) như roster MAIN.
+      if (isTeamSport && Array.isArray(data.memberIds) && data.memberIds.length > 0) {
+        const uniqueMemberIds = [...new Set(data.memberIds.filter((mid) => mid !== userId))];
+        for (const mid of uniqueMemberIds) {
+          // Chống trùng + không để user đã ở roster khác của giải
+          const [existing] = await tx
+            .select()
+            .from(schema.tournamentRosters)
+            .where(
+              and(
+                eq(schema.tournamentRosters.participantId, participant.id),
+                eq(schema.tournamentRosters.userId, mid),
+              ),
+            )
+            .limit(1);
+          if (existing) continue;
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: mid,
+            role: 'MAIN',
+          });
+        }
+      }
+
       // Payment intent is created later by the checkout flow.
       const paymentUrl: string | null = null;
 
@@ -1447,7 +1478,7 @@ export class TournamentsRepository {
         participant,
         entryFee: payableEntryFeeAmount,
         paymentUrl,
-        teamInviteLink: isDoubles
+        teamInviteLink: (isDoubles || isTeamSport)
           ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
           : null,
         isWaitlisted,
@@ -1692,20 +1723,26 @@ export class TournamentsRepository {
         throw new BadRequestException('Mã mời đồng đội hoặc đội thi đấu không hợp lệ.');
       }
 
-      if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
-        await tx
-          .update(schema.tournamentParticipants)
-          .set({ teamStatus: 'EXPIRED', teamInviteToken: null, partnerInviteExpiresAt: null })
-          .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Mã mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.');
-      }
+      // Team sport (bóng đá): link mời MỞ — không giới hạn partner/1h, không cần PENDING_PARTNER.
+      const teamConfig = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+      const isTeamSport = teamConfig.teamSize != null || teamConfig.minTeamSize != null;
 
-      if (participant.teamStatus !== 'PENDING_PARTNER') {
-        throw new BadRequestException('Đội thi đấu này đã đủ thành viên hoặc không ở trạng thái chờ.');
-      }
+      if (!isTeamSport) {
+        if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
+          await tx
+            .update(schema.tournamentParticipants)
+            .set({ teamStatus: 'EXPIRED', teamInviteToken: null, partnerInviteExpiresAt: null })
+            .where(eq(schema.tournamentParticipants.id, participantId));
+          throw new BadRequestException('Mã mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.');
+        }
 
-      if (participant.partnerUserId && participant.partnerUserId !== userId) {
-        throw new BadRequestException('Chỉ đúng tài khoản đồng đội đã được mời mới có thể tham gia đội này.');
+        if (participant.teamStatus !== 'PENDING_PARTNER') {
+          throw new BadRequestException('Đội thi đấu này đã đủ thành viên hoặc không ở trạng thái chờ.');
+        }
+
+        if (participant.partnerUserId && participant.partnerUserId !== userId) {
+          throw new BadRequestException('Chỉ đúng tài khoản đồng đội đã được mời mới có thể tham gia đội này.');
+        }
       }
 
       // 3. Kiểm tra user chưa đăng ký giải này
@@ -1775,7 +1812,8 @@ export class TournamentsRepository {
       const teamLeaderGender = this.normalizeGender(leaderProfile?.gender);
       const teamPartnerGender = this.normalizeGender(partnerProfile?.gender);
 
-      if (division) {
+      // Team sport (bóng đá): bỏ ép giới tính kiểu đôi — đội gồm nhiều người.
+      if (!isTeamSport && division) {
         if (
           (teamLeaderGender !== 'MALE' && teamLeaderGender !== 'FEMALE') ||
           (teamPartnerGender !== 'MALE' && teamPartnerGender !== 'FEMALE')
@@ -1796,7 +1834,7 @@ export class TournamentsRepository {
         ) {
           throw new BadRequestException('Đồng đội không phù hợp với hình thức thi đấu đã đăng ký.');
         }
-      } else if (tournament.genderRestriction) {
+      } else if (!isTeamSport && tournament.genderRestriction) {
         if (!teamPartnerGender) {
           throw new BadRequestException('Vui lòng cập nhật giới tính trong hồ sơ để tham gia.');
         }
@@ -1819,7 +1857,21 @@ export class TournamentsRepository {
         }
       }
 
-      // 5. Thêm roster cho Partner
+      // Team sport: giới hạn số thành viên theo maxTeamSize (MAIN + RESERVE)
+      if (isTeamSport) {
+        const maxTeamSize = teamConfig.maxTeamSize as number | undefined;
+        if (maxTeamSize) {
+          const [countRes] = await tx
+            .select({ total: sql<number>`count(*)::int` })
+            .from(schema.tournamentRosters)
+            .where(eq(schema.tournamentRosters.participantId, participantId));
+          if (Number(countRes?.total ?? 0) >= maxTeamSize) {
+            throw new BadRequestException('Đội đã đủ số thành viên tối đa.');
+          }
+        }
+      }
+
+      // 5. Thêm roster cho Partner (team sport: role MAIN, người join qua link)
       await tx
         .insert(schema.tournamentRosters)
         .values({

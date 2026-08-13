@@ -598,6 +598,36 @@ export class TournamentsController {
     return this.tournamentsService.joinTeam(id, user.sub, participantId, teamInviteToken);
   }
 
+  @Post('participants/:participantId/members')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Đội trưởng mời thành viên vào đội (team sport) theo userId' })
+  async addTeamMember(
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body('memberUserId') memberUserId: string,
+    @Body('role') role: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addTeamMember(
+      participantId,
+      user.sub,
+      memberUserId,
+      role === 'RESERVE' ? 'RESERVE' : 'MAIN',
+    );
+  }
+
+  @Delete('participants/:participantId/members/:memberUserId')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Đội trưởng xoá thành viên khỏi đội (team sport)' })
+  async removeTeamMember(
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Param('memberUserId', ParseUUIDPipe) memberUserId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.removeTeamMember(participantId, user.sub, memberUserId);
+  }
+
   @Post('participants/:participantId/accept-partner')
   @Verified()
   @ApiBearerAuth()

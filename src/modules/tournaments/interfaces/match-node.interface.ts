@@ -16,4 +16,7 @@ export interface MatchNode {
   totalSetsPlayed: number;
   tournamentId: string;
   stageId: string;
+  // Two-legged knockout
+  leg?: number | null;
+  tieId?: string | null;
 }
