@@ -551,6 +551,9 @@ export class TournamentsService {
     const registrationMode = dto.registrationMode || 'OPEN';
     const tournamentConfig = {
       mode: 'LITE',
+      // Cờ loại giải: giải lite thật (nhanh) — KHÁC với mode scoring LITE.
+      // mode chỉ còn mang nghĩa cách tính điểm (LITE/STRICT).
+      isLite: true,
       sportPreset: litePreset.sportPreset,
       registrationMode,
       liteJoinPolicy: 'COMMUNITY_MEMBERS',
@@ -627,7 +630,7 @@ export class TournamentsService {
 
     // Reject non-Lite invite codes
     const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (tCfg.mode !== 'LITE') {
+    if (tCfg.isLite !== true) {
       throw new BadRequestException('Mã mời không phải của giải đấu Lite.');
     }
 
@@ -719,7 +722,7 @@ export class TournamentsService {
 
     // Reject non-Lite invite codes
     const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (tCfg.mode !== 'LITE') {
+    if (tCfg.isLite !== true) {
       throw new BadRequestException('Mã mời không phải của giải đấu Lite.');
     }
 
@@ -1327,8 +1330,7 @@ export class TournamentsService {
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
     const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    const mode = typeof config.mode === 'string' ? config.mode : '';
-    if (mode.toUpperCase() !== 'LITE') {
+    if (config.isLite !== true) {
       throw new BadRequestException('Chỉ giải Lite mới dùng được luồng quản lý này.');
     }
 
@@ -1905,7 +1907,7 @@ export class TournamentsService {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
     const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (config.mode === 'LITE') {
+    if (config.isLite === true) {
       return this.tournamentsRepository.findLiteParticipantsWithRosters(id);
     }
     return this.tournamentsRepository.findPublicParticipants(id, tournament.categoryId, divisionId);
@@ -2428,7 +2430,7 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-    const isLite = (tournament.tournamentConfig as any)?.mode === 'LITE' || (tournament as any).configMode === 'LITE';
+    const isLite = (tournament.tournamentConfig as any)?.isLite === true;
     if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể tạo dữ liệu ảo khi giải đấu ở trạng thái Nháp hoặc Mở đăng ký.');
     }
@@ -2451,7 +2453,7 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-    const isLite = (tournament.tournamentConfig as any)?.mode === 'LITE' || (tournament as any).configMode === 'LITE';
+    const isLite = (tournament.tournamentConfig as any)?.isLite === true;
     if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể xóa dữ liệu ảo ở trạng thái Nháp hoặc Đang mở đăng ký.');
     }
@@ -2474,7 +2476,7 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-    const isLite = (tournament.tournamentConfig as any)?.mode === 'LITE' || (tournament as any).configMode === 'LITE';
+    const isLite = (tournament.tournamentConfig as any)?.isLite === true;
     if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể xoá dữ liệu giả lập ở trạng thái Nháp hoặc Đang mở đăng ký.');
     }
@@ -3572,7 +3574,7 @@ export class TournamentsService {
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
     const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (config.mode !== 'LITE') {
+    if (config.isLite !== true) {
       throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
     }
 
