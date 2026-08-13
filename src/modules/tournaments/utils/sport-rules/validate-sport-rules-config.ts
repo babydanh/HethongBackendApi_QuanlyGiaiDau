@@ -18,6 +18,7 @@ interface ValidateSportRuleConfigOptions {
 const COMMON_ROOT_KEYS = new Set([
   'version',
   'kind',
+  'mode',
   'scoringModel',
   'scoring_model',
   'format',
