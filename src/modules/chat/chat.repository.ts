@@ -159,10 +159,20 @@ export class ChatRepository {
     const room = await this.findRoomById(roomId);
     if (!room) return false;
     if (room.type === 'CLUB' && room.communityId) {
+      if (!(await this.isClubChatEnabled(room.communityId))) return false;
       const member = await this.findCommunityMember(room.communityId, userId);
       return member?.status === 'JOINED';
     }
     return this.isMemberOfRoom(roomId, userId);
+  }
+
+  async isClubChatEnabled(communityId: string) {
+    const [settings] = await this.db
+      .select({ chatEnabled: schema.communitySocialSettings.chatEnabled })
+      .from(schema.communitySocialSettings)
+      .where(eq(schema.communitySocialSettings.communityId, communityId))
+      .limit(1);
+    return settings?.chatEnabled ?? true;
   }
 
   /**
@@ -343,6 +353,38 @@ export class ChatRepository {
     return { data: data.reverse(), meta: { limit, hasMore, nextCursor: hasMore && last ? CursorPaginationHelper.encodeCursor({ id: last.id, createdAt: last.createdAt }) : null } };
   }
 
+  async countUnreadForUser(roomId: string, userId: string, lastReadAt?: Date | null) {
+    const conditions: SQL[] = [
+      eq(schema.chatMessages.roomId, roomId),
+      sql`${schema.chatMessages.senderId} <> ${userId}`,
+    ];
+    if (lastReadAt) conditions.push(sql`${schema.chatMessages.createdAt} > ${lastReadAt}`);
+    const [result] = await this.db.select({ count: sql<number>`count(*)` })
+      .from(schema.chatMessages)
+      .where(and(...conditions));
+    return Number(result?.count ?? 0);
+  }
+
+  async getReadState(roomId: string, userId: string) {
+    const [state] = await this.db.select().from(schema.chatReadStates)
+      .where(and(eq(schema.chatReadStates.roomId, roomId), eq(schema.chatReadStates.userId, userId))).limit(1);
+    return state ?? null;
+  }
+
+  async markRead(roomId: string, userId: string) {
+    const now = new Date();
+    const [state] = await this.db.insert(schema.chatReadStates)
+      .values({ roomId, userId, lastReadAt: now })
+      .onConflictDoUpdate({ target: [schema.chatReadStates.roomId, schema.chatReadStates.userId], set: { lastReadAt: now } })
+      .returning();
+    return state;
+  }
+
+  async countUnreadUsingState(roomId: string, userId: string) {
+    const state = await this.getReadState(roomId, userId);
+    return this.countUnreadForUser(roomId, userId, state?.lastReadAt ?? null);
+  }
+
   async findSupportRoomForUser(userId: string) {
     const [room] = await this.db
       .select({
@@ -470,4 +512,3 @@ export class ChatRepository {
       );
   }
 }
-

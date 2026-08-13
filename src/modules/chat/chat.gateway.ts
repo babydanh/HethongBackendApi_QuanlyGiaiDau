@@ -19,6 +19,7 @@ interface SupportTypingPayload {
   roomId: string;
   isTyping: boolean;
 }
+interface ClubTypingPayload { roomId: string; isTyping: boolean; }
 
 @WebSocketGateway({
   cors: corsOptions,
@@ -180,6 +181,15 @@ export class ChatGateway {
       event: 'support:typing:ack',
       data: { roomId: payload.roomId, isTyping: payload.isTyping },
     };
+  }
+
+  @SubscribeMessage('typing')
+  async handleClubTyping(@MessageBody() payload: ClubTypingPayload, @ConnectedSocket() client: Socket) {
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub || !payload?.roomId || typeof payload.isTyping !== 'boolean') return { event: 'chat:error', data: 'Invalid typing payload' };
+    if (!(await this.chatRepository.canAccessRoom(payload.roomId, user.sub))) return { event: 'chat:error', data: 'Forbidden' };
+    client.to(`chat:${payload.roomId}`).emit('chat:typing', { roomId: payload.roomId, userId: user.sub, isTyping: payload.isTyping });
+    return { event: 'typing:ack', data: payload };
   }
 
   broadcastSupportMessage(roomId: string, message: ChatMessagePayload) {

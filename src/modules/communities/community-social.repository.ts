@@ -65,10 +65,18 @@ export class CommunitySocialRepository {
     return null;
   }
 
-  async listPosts(communityId: string, limit: number, cursor?: string) {
+  async listPosts(communityId: string, limit: number, cursor?: string, viewerId?: string) {
     const conditions: SQL[] = [
       eq(schema.communityPosts.communityId, communityId),
-      eq(schema.communityPosts.status, 'PUBLISHED'),
+      viewerId
+        ? or(
+            eq(schema.communityPosts.status, 'PUBLISHED'),
+            and(
+              eq(schema.communityPosts.status, 'PENDING'),
+              eq(schema.communityPosts.authorId, viewerId),
+            ),
+          ) as SQL
+        : eq(schema.communityPosts.status, 'PUBLISHED'),
       isNull(schema.communityPosts.deletedAt),
     ];
     const decoded = cursor
@@ -91,6 +99,15 @@ export class CommunitySocialRepository {
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
         },
+        viewerReaction: viewerId
+          ? sql<string | null>`(
+              SELECT ${schema.communityPostReactions.reactionType}
+              FROM ${schema.communityPostReactions}
+              WHERE ${schema.communityPostReactions.postId} = ${schema.communityPosts.id}
+                AND ${schema.communityPostReactions.userId} = ${viewerId}
+              LIMIT 1
+            )`
+          : sql<string | null>`NULL`,
       })
       .from(schema.communityPosts)
       .leftJoin(schema.users, eq(schema.communityPosts.authorId, schema.users.id))
@@ -103,6 +120,7 @@ export class CommunitySocialRepository {
     const data = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
       ...row.post,
       author: row.author?.id ? row.author : null,
+      viewerReaction: row.viewerReaction,
     }));
     const last = data[data.length - 1];
     return {
@@ -150,6 +168,42 @@ export class CommunitySocialRepository {
       .set({ commentCount: sql`${schema.communityPosts.commentCount} + 1`, updatedAt: new Date() })
       .where(eq(schema.communityPosts.id, postId));
     return comment;
+  }
+
+  async updateComment(commentId: string, body: string) {
+    const [comment] = await this.db.update(schema.communityPostComments)
+      .set({ body: body.trim(), updatedAt: new Date() })
+      .where(and(eq(schema.communityPostComments.id, commentId), isNull(schema.communityPostComments.deletedAt)))
+      .returning();
+    return comment;
+  }
+
+  async softDeleteComment(commentId: string) {
+    const [comment] = await this.db.update(schema.communityPostComments)
+      .set({ deletedAt: new Date(), status: 'HIDDEN', updatedAt: new Date() })
+      .where(and(eq(schema.communityPostComments.id, commentId), isNull(schema.communityPostComments.deletedAt)))
+      .returning();
+    return comment;
+  }
+
+  async moderateComment(commentId: string, status: 'PUBLISHED' | 'HIDDEN' | 'REJECTED', reason?: string) {
+    const [comment] = await this.db.update(schema.communityPostComments)
+      .set({ status, moderationReason: reason?.trim() || null, updatedAt: new Date() })
+      .where(eq(schema.communityPostComments.id, commentId))
+      .returning();
+    return comment;
+  }
+
+  async listPendingPosts(communityId: string, limit = 50) {
+    const rows = await this.db.select({
+      post: schema.communityPosts,
+      author: { id: schema.users.id, fullName: schema.profiles.fullName, avatarUrl: schema.profiles.avatarUrl },
+    }).from(schema.communityPosts)
+      .leftJoin(schema.users, eq(schema.communityPosts.authorId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.communityPosts.authorId, schema.profiles.userId))
+      .where(and(eq(schema.communityPosts.communityId, communityId), eq(schema.communityPosts.status, 'PENDING'), isNull(schema.communityPosts.deletedAt)))
+      .orderBy(desc(schema.communityPosts.createdAt)).limit(limit);
+    return rows.map((row) => ({ ...row.post, author: row.author?.id ? row.author : null }));
   }
 
   async listComments(postId: string, limit: number, cursor?: string) {

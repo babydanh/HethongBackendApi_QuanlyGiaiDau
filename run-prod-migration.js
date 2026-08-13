@@ -56,9 +56,11 @@ async function runStatement(statement) {
     if (IGNORABLE_CODES.has(err.code)) {
       console.log(`  ⚠ Skipped (already exists): ${trimmed.substring(0, 80)}...`);
     } else {
-      // Print error but continue — let other statements run
       console.error(`  ✗ Error [${err.code}]: ${err.message}`);
       console.error(`    Statement: ${trimmed.substring(0, 120)}`);
+      // Never mark a partially-applied migration as successful. Failing the
+      // deploy keeps the migration retryable after the schema issue is fixed.
+      throw err;
     }
   }
 }
