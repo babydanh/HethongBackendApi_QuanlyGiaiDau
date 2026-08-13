@@ -112,6 +112,10 @@ export class BracketGeneratorService {
       const powerOf2 = Math.pow(2, Math.ceil(Math.log2(numParticipants)));
       const totalRounds = Math.log2(powerOf2);
 
+      // Two-legged knockout (bóng đá Champion League): mỗi cặp = 2 trận (leg1 + leg2)
+      const tConfig = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+      const twoLegged = tConfig.twoLegged === true;
+
       // Sinh danh sách ID cho tất cả các trận
       const matchNodesByRound = new Map<number, MatchNode[]>();
 
@@ -121,36 +125,45 @@ export class BracketGeneratorService {
         const roundMatches: MatchNode[] = [];
 
         for (let i = 0; i < matchesInRound; i++) {
-          roundMatches.push({
-            id: randomUUID(),
-            groupId: group.id,
-            roundNumber: r,
-            matchOrder: i + 1,
-            bracketBranch: 'MAIN',
-            status: 'SCHEDULED',
-            isBye: false,
-            nextMatchId: null,
-            loserNextMatchId: null,
-            participant1Id: null,
-            participant2Id: null,
-            winnerId: null,
-            p1SetsWon: 0,
-            p2SetsWon: 0,
-            totalSetsPlayed: 0,
-            tournamentId,
-            stageId: stage.id,
-          });
+          // Two-legged: sinh 2 trận (leg1 home, leg2 away) cùng tieId
+          const legs = twoLegged ? [1, 2] : [1];
+          const tieId = twoLegged ? randomUUID() : null;
+
+          for (const leg of legs) {
+            roundMatches.push({
+              id: randomUUID(),
+              groupId: group.id,
+              roundNumber: r,
+              matchOrder: roundMatches.length + 1,
+              bracketBranch: 'MAIN',
+              status: 'SCHEDULED',
+              isBye: false,
+              nextMatchId: null,
+              loserNextMatchId: null,
+              participant1Id: null,
+              participant2Id: null,
+              winnerId: null,
+              p1SetsWon: 0,
+              p2SetsWon: 0,
+              totalSetsPlayed: 0,
+              tournamentId,
+              stageId: stage.id,
+              leg,
+              tieId,
+            });
+          }
         }
         matchNodesByRound.set(r, roundMatches);
       }
 
-      // Gắn next_match_id
+      // Gắn next_match_id — 2 leg cùng cặp trỏ cùng trận vòng sau
+      const tiesPerRound = twoLegged ? 2 : 1;
       for (let r = 1; r < totalRounds; r++) {
         const currentRoundMatches = matchNodesByRound.get(r)!;
         const nextRoundMatches = matchNodesByRound.get(r + 1)!;
 
         for (let i = 0; i < currentRoundMatches.length; i++) {
-          const nextMatchIndex = Math.floor(i / 2);
+          const nextMatchIndex = Math.floor(i / tiesPerRound);
           currentRoundMatches[i].nextMatchId =
             nextRoundMatches[nextMatchIndex].id;
         }
@@ -206,6 +219,24 @@ export class BracketGeneratorService {
           round1Matches[i].winnerId = null;
           round1Matches[i].isBye = true;
           // No advanceWinner call — null winner would propagate incorrectly
+        }
+      }
+
+      // Two-legged: leg2 phải có cùng cặp đối thủ với leg1 (đổi vai home/away).
+      // Round1 mỗi cặp = 2 trận liên tiếp (i, i+1). Gán lại p1/p2 cho leg2 ngược vai.
+      if (twoLegged) {
+        for (let i = 0; i < round1Matches.length; i += 2) {
+          const leg1 = round1Matches[i];
+          const leg2 = round1Matches[i + 1];
+          if (!leg1 || !leg2) continue;
+          leg2.participant1Id = leg1.participant2Id;
+          leg2.participant2Id = leg1.participant1Id;
+          // BYE: nếu leg1 là bye, leg2 cũng bye → không advance lần 2
+          if (leg1.isBye) {
+            leg2.status = 'COMPLETED';
+            leg2.winnerId = leg1.winnerId;
+            leg2.isBye = true;
+          }
         }
       }
 

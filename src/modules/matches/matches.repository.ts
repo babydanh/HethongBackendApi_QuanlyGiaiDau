@@ -1072,8 +1072,57 @@ export class MatchesRepository {
         .onConflictDoNothing({ target: schema.matchEloOutbox.matchId });
     }
 
-    // 2. Auto-advance Winner (skip khi hòa — winnerId null — để Phase3 luân lưu xử lý)
-    if (winnerId && existing.nextMatchId) {
+    // 2. Two-legged knockout (bóng đá): chỉ advance khi CẢ2 leg COMPLETED.
+    //    Tính aggregate = tổng bàn thắng 2 lượt; hòa tổng → luân lưu (penaltyShootout).
+    let effectiveWinnerId = winnerId;
+    if (existing.tieId && existing.leg) {
+      const [otherLeg] = await tx
+        .select()
+        .from(schema.matches)
+        .where(
+          and(
+            eq(schema.matches.tieId, existing.tieId),
+            ne(schema.matches.id, id),
+            isNull(schema.matches.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      const otherDone = otherLeg && otherLeg.status === 'COMPLETED';
+      const thisDone = existing.status === 'COMPLETED';
+      if (otherDone && thisDone && existing.nextMatchId) {
+        // Aggregate: leg1 p1 vs p2, leg2 p1 vs p2 (vai home/away đã đổi ở generator)
+        const leg1 = existing.leg === 1 ? existing : otherLeg!;
+        const leg2 = existing.leg === 2 ? existing : otherLeg!;
+        const totalP1 = (leg1.p1SetsWon || 0) + (leg2.p1SetsWon || 0);
+        const totalP2 = (leg1.p2SetsWon || 0) + (leg2.p2SetsWon || 0);
+
+        if (totalP1 > totalP2) {
+          effectiveWinnerId = leg1.participant1Id ?? leg2.participant1Id;
+        } else if (totalP2 > totalP1) {
+          effectiveWinnerId = leg1.participant2Id ?? leg2.participant2Id;
+        } else {
+          // Hòa aggregate → luân lưu: lấy từ scoreDetails.shootout của leg cuối
+          const shootout = (existing.scoreDetails as Record<string, unknown> | null)?.shootout as
+            | Record<string, unknown>
+            | undefined;
+          const shootoutWinnerId = shootout?.winnerId as string | undefined;
+          if (shootoutWinnerId) {
+            effectiveWinnerId = shootoutWinnerId;
+          }
+          // Nếu không có luân lưu → không advance (chờ BTC xử lý)
+        }
+      }
+    } else if (!effectiveWinnerId && existing.tieId && existing.nextMatchId) {
+      // Knockout hòa + penaltyShootout: dùng shootout từ scoreDetails
+      const shootout = (existing.scoreDetails as Record<string, unknown> | null)?.shootout as
+        | Record<string, unknown>
+        | undefined;
+      effectiveWinnerId = (shootout?.winnerId as string | undefined) ?? null;
+    }
+
+    // 2b. Auto-advance Winner (skip khi hòa chưa phân định — winnerId null)
+    if (effectiveWinnerId && existing.nextMatchId) {
       const [nextMatch] = await tx
         .select()
         .from(schema.matches)
@@ -1087,7 +1136,7 @@ export class MatchesRepository {
           sourceMatchOrder: existing.matchOrder,
           targetBranch: nextMatch.bracketBranch,
         });
-        const updateField = { [targetSlot]: winnerId };
+        const updateField = { [targetSlot]: effectiveWinnerId };
 
         await tx
           .update(schema.matches)

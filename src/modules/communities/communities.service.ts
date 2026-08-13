@@ -76,19 +76,25 @@ export class CommunitiesService {
     const community = await this.findById(idOrSlug);
     const realId = community.id;
 
-    const [
-      recentMatches,
-      featuredTournament,
-      topPlayers,
-      activity,
-      upcomingMatches,
-    ] = await Promise.all([
+    const results = await Promise.allSettled([
       this.communitiesRepository.getRecentMatches(realId, 3),
       this.communitiesRepository.getFeaturedTournament(realId),
       this.communitiesRepository.getTopRanked(realId, 3),
       this.communitiesRepository.getActivityFeed(realId, 5),
       this.communitiesRepository.getUpcomingMatches(realId, 3),
     ]);
+
+    const recentMatches = results[0].status === 'fulfilled' ? results[0].value : [];
+    const featuredTournament = results[1].status === 'fulfilled' ? results[1].value : null;
+    const topPlayers = results[2].status === 'fulfilled' ? results[2].value : [];
+    const activity = results[3].status === 'fulfilled' ? results[3].value : [];
+    const upcomingMatches = results[4].status === 'fulfilled' ? results[4].value : [];
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.warn(`Dashboard block ${index} unavailable for community ${realId}`);
+      }
+    });
 
     return {
       recentMatches,

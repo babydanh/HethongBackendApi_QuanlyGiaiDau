@@ -72,6 +72,9 @@ export const matches = pgTable(
       .default('MAIN')
       .notNull(),
     isBye: boolean('is_bye').default(false).notNull(),
+    // Two-legged knockout: leg (1|2) + tieId nhóm 2 trận cùng cặp
+    leg: integer('leg'),
+    tieId: varchar('tie_id', { length: 64 }),
     // Self references for bracket tree
     nextMatchId: uuid('next_match_id'), // fk added later
     loserNextMatchId: uuid('loser_next_match_id'), // fk added later

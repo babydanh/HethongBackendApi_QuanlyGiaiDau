@@ -209,10 +209,16 @@ export const tournamentRosters = pgTable('tournament_rosters', {
     .references(() => users.id, { onDelete: 'restrict' })
     .notNull(),
   role: varchar('role', { length: 50 }).default('MAIN').notNull(),
+  // Team sport: status mời — INVITED (chưa accept) / ACTIVE / REMOVED
+  status: varchar('status', { length: 20 }).default('ACTIVE').notNull(),
   joinedAt: timestamp('joined_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  idxRostersParticipantUserUnique: uniqueIndex(
+    'tournament_rosters_participant_user_unique_idx',
+  ).on(table.participantId, table.userId),
+}));
 
 export const tournamentReferees = pgTable('tournament_referees', {
   id: uuid('id').primaryKey().defaultRandom(),
