@@ -13,6 +13,7 @@ import {
   or,
   inArray,
   gte,
+  lte,
 } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
@@ -1118,7 +1119,11 @@ export class CommunitiesRepository {
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .leftJoin(
         schema.eloTiers,
-        eq(schema.communityRankings.tierId, schema.eloTiers.id),
+        and(
+          eq(schema.communityRankings.categoryId, schema.eloTiers.categoryId),
+          lte(schema.eloTiers.minElo, schema.communityRankings.eloPoints),
+          gte(schema.eloTiers.maxElo, schema.communityRankings.eloPoints),
+        ),
       )
       .where(
         and(
