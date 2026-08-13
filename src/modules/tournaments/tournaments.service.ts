@@ -2430,7 +2430,8 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-    const isLite = (tournament.tournamentConfig as any)?.isLite === true;
+    const isLite =
+      (tournament.tournamentConfig as Record<string, unknown> | null | undefined)?.isLite === true;
     if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể tạo dữ liệu ảo khi giải đấu ở trạng thái Nháp hoặc Mở đăng ký.');
     }
@@ -2453,7 +2454,8 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-    const isLite = (tournament.tournamentConfig as any)?.isLite === true;
+    const isLite =
+      (tournament.tournamentConfig as Record<string, unknown> | null | undefined)?.isLite === true;
     if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể xóa dữ liệu ảo ở trạng thái Nháp hoặc Đang mở đăng ký.');
     }
@@ -2476,7 +2478,8 @@ export class TournamentsService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-    const isLite = (tournament.tournamentConfig as any)?.isLite === true;
+    const isLite =
+      (tournament.tournamentConfig as Record<string, unknown> | null | undefined)?.isLite === true;
     if (tournament.status !== 'DRAFT' && !isLite && tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
       throw new BadRequestException('Chỉ có thể xoá dữ liệu giả lập ở trạng thái Nháp hoặc Đang mở đăng ký.');
     }
