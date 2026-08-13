@@ -33,6 +33,11 @@ export class AppKeyGuard implements CanActivate {
       return true;
     }
 
+    // Always bypass OPTIONS request for CORS preflight
+    if (request.method === 'OPTIONS') {
+      return true;
+    }
+
     const expectedKey = this.configService.get<string>('APP_API_KEY');
     if (!expectedKey) {
       // If no key configured, we allow it (or we could deny, but safer to allow in dev)
