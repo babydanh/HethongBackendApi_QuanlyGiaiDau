@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -11,6 +11,9 @@ import { UpdateCommunitySocialSettingsDto } from './dto/update-community-social-
 import { ReportCommunityContentDto } from './dto/report-community-content.dto';
 import { UpdateCommunityPreferencesDto } from './dto/update-community-preferences.dto';
 import { ModerateCommunityPostDto } from './dto/moderate-community-post.dto';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
+import { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
+import { ModerateCommunityCommentDto } from './dto/moderate-community-comment.dto';
 
 @ApiTags('community-social')
 @Controller('communities/:communityId')
@@ -31,6 +34,7 @@ export class CommunitySocialController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('posts')
   @ApiOperation({ summary: 'Lấy feed bài viết theo cursor, thứ tự mới nhất trước' })
   listPosts(
@@ -55,14 +59,39 @@ export class CommunitySocialController {
 
   @Get('posts/:postId/comments')
   @Public()
-  listComments(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('postId', ParseUUIDPipe) postId: string, @Query('limit') limit?: number, @Query('cursor') cursor?: string) {
-    return this.socialService.listComments(communityId, postId, Math.min(Math.max(Number(limit) || 20, 1), 50), cursor);
+  @UseGuards(OptionalJwtAuthGuard)
+  listComments(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('postId', ParseUUIDPipe) postId: string, @Query('limit') limit?: number, @Query('cursor') cursor?: string, @CurrentUser() user?: { id: string; roles?: string[] }) {
+    return this.socialService.listComments(communityId, postId, Math.min(Math.max(Number(limit) || 20, 1), 50), cursor, user);
   }
 
   @Post('posts/:postId/comments')
   @ApiBearerAuth()
   createComment(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('postId', ParseUUIDPipe) postId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Body() dto: CreateCommunityCommentDto) {
     return this.socialService.createComment(communityId, postId, user, dto);
+  }
+
+  @Patch('comments/:commentId')
+  @ApiBearerAuth()
+  updateComment(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('commentId', ParseUUIDPipe) commentId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Body() dto: UpdateCommunityCommentDto) {
+    return this.socialService.updateComment(communityId, commentId, user, dto);
+  }
+
+  @Post('comments/:commentId/delete')
+  @ApiBearerAuth()
+  deleteComment(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('commentId', ParseUUIDPipe) commentId: string, @CurrentUser() user: { id: string; roles?: string[] }) {
+    return this.socialService.deleteComment(communityId, commentId, user);
+  }
+
+  @Patch('comments/:commentId/moderation')
+  @ApiBearerAuth()
+  moderateComment(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('commentId', ParseUUIDPipe) commentId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Body() dto: ModerateCommunityCommentDto) {
+    return this.socialService.moderateComment(communityId, commentId, user, dto.status, dto.reason);
+  }
+
+  @Get('moderation/posts')
+  @ApiBearerAuth()
+  listPendingPosts(@Param('communityId', ParseUUIDPipe) communityId: string, @CurrentUser() user: { id: string; roles?: string[] }) {
+    return this.socialService.listPendingPosts(communityId, user);
   }
 
   @Post('posts/:postId/reaction')

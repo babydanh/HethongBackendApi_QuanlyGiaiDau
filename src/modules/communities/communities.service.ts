@@ -28,11 +28,22 @@ import {
   buildCommunityUnbannedNotification,
 } from '../notifications/notification-builder';
 import { StorageService } from '../../providers/storage/storage.service';
-import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
+import {
+  isStoredImageUrl,
+  extractStoredImagePublicId,
+} from '../../common/helpers/cloudinary.helper';
 
 type CommunityMemberRole = 'OWNER' | 'MODERATOR' | 'MEMBER';
-type CommunityMemberStatus = 'JOINED' | 'PENDING' | 'INVITED' | 'REJECTED' | 'BANNED';
-type SanitizeHtmlFn = (html: string, options?: Record<string, unknown>) => string;
+type CommunityMemberStatus =
+  | 'JOINED'
+  | 'PENDING'
+  | 'INVITED'
+  | 'REJECTED'
+  | 'BANNED';
+type SanitizeHtmlFn = (
+  html: string,
+  options?: Record<string, unknown>,
+) => string;
 
 @Injectable()
 export class CommunitiesService {
@@ -64,16 +75,27 @@ export class CommunitiesService {
   async getDashboard(communityId: string) {
     await this.findById(communityId);
 
-    const [recentMatches, featuredTournament, topPlayers, activity, upcomingMatches] =
-      await Promise.all([
-        this.communitiesRepository.getRecentMatches(communityId, 3),
-        this.communitiesRepository.getFeaturedTournament(communityId),
-        this.communitiesRepository.getTopRanked(communityId, 3),
-        this.communitiesRepository.getActivityFeed(communityId, 5),
-        this.communitiesRepository.getUpcomingMatches(communityId, 3),
-      ]);
+    const [
+      recentMatches,
+      featuredTournament,
+      topPlayers,
+      activity,
+      upcomingMatches,
+    ] = await Promise.all([
+      this.communitiesRepository.getRecentMatches(communityId, 3),
+      this.communitiesRepository.getFeaturedTournament(communityId),
+      this.communitiesRepository.getTopRanked(communityId, 3),
+      this.communitiesRepository.getActivityFeed(communityId, 5),
+      this.communitiesRepository.getUpcomingMatches(communityId, 3),
+    ]);
 
-    return { recentMatches, featuredTournament, topPlayers, activity, upcomingMatches };
+    return {
+      recentMatches,
+      featuredTournament,
+      topPlayers,
+      activity,
+      upcomingMatches,
+    };
   }
 
   // --- MY MEMBERSHIP ---
@@ -107,7 +129,9 @@ export class CommunitiesService {
     }
     // Nếu community bị khoá (REJECTED), chỉ ADMIN/MODERATOR mới xem được
     if (community.status === 'REJECTED') {
-      const isAdmin = user?.roles?.some(r => r === UserRole.ADMIN || r === UserRole.MODERATOR);
+      const isAdmin = user?.roles?.some(
+        (r) => r === UserRole.ADMIN || r === UserRole.MODERATOR,
+      );
       if (!isAdmin) {
         throw new ForbiddenException('Cộng đồng này đã bị vô hiệu hoá.');
       }
@@ -116,9 +140,12 @@ export class CommunitiesService {
   }
 
   async create(userId: string, dto: CreateCommunityDto) {
-    const activeCount = await this.communitiesRepository.countActiveByCreator(userId);
+    const activeCount =
+      await this.communitiesRepository.countActiveByCreator(userId);
     if (activeCount >= 5) {
-      throw new BadRequestException('Mỗi người dùng chỉ được phép tạo tối đa 5 cộng đồng.');
+      throw new BadRequestException(
+        'Mỗi người dùng chỉ được phép tạo tối đa 5 cộng đồng.',
+      );
     }
 
     const { lat, lng, categoryIds, ...rest } = dto;
@@ -158,14 +185,20 @@ export class CommunitiesService {
     );
   }
 
-  async review(adminId: string, id: string, dto: ReviewCommunityDto, roles: string[] = [UserRole.ADMIN]) {
+  async review(
+    adminId: string,
+    id: string,
+    dto: ReviewCommunityDto,
+    roles: string[] = [UserRole.ADMIN],
+  ) {
     await this.findById(id, { id: adminId, roles });
     const targetStatus = dto.status === 'APPROVED' ? 'ACTIVE' : 'REJECTED';
     const updateData = {
       status: targetStatus,
       approvedBy: adminId,
       reviewedAt: new Date(),
-      rejectedReason: dto.status === 'APPROVED' ? null : (dto.rejectedReason || null),
+      rejectedReason:
+        dto.status === 'APPROVED' ? null : dto.rejectedReason || null,
     };
     return await this.communitiesRepository.update(id, updateData);
   }
@@ -182,9 +215,22 @@ export class CommunitiesService {
 
   // --- MEMBERS ---
 
-  async getMembers(id: string, query?: { page?: number; limit?: number; cursor?: string; status?: string }) {
+  async getMembers(
+    id: string,
+    query?: {
+      page?: number;
+      limit?: number;
+      cursor?: string;
+      status?: string;
+      search?: string;
+      mentionable?: boolean;
+    },
+  ) {
     await this.findById(id);
-    const result = await this.communitiesRepository.getMembers(id, query);
+    const memberQuery = query?.mentionable
+      ? { ...query, status: 'JOINED', limit: Math.min(query.limit ?? 20, 20) }
+      : query;
+    const result = await this.communitiesRepository.getMembers(id, memberQuery);
     // P2C.3 — gắn streak tính động (WIN/LOSS/ELO_UP) cho từng member trong trang.
     const streaks = await this.computeStreaks(
       id,
@@ -229,7 +275,9 @@ export class CommunitiesService {
     }
 
     if (requesterMember?.role === 'MODERATOR' && dto.role !== 'MEMBER') {
-      throw new ForbiddenException('Quản trị viên chỉ có thể thêm thành viên thường.');
+      throw new ForbiddenException(
+        'Quản trị viên chỉ có thể thêm thành viên thường.',
+      );
     }
 
     return await this.communitiesRepository.addMember(
@@ -257,7 +305,9 @@ export class CommunitiesService {
     }
 
     if (existing.status !== 'JOINED') {
-      throw new BadRequestException('Chỉ thành viên đã tham gia mới được thay đổi vai trò.');
+      throw new BadRequestException(
+        'Chỉ thành viên đã tham gia mới được thay đổi vai trò.',
+      );
     }
 
     if (dto.role === 'OWNER') {
@@ -265,11 +315,12 @@ export class CommunitiesService {
         throw new ConflictException('You are already the OWNER');
       }
 
-      const ownershipTransferred = await this.communitiesRepository.transferOwnership(
-        communityId,
-        requesterId,
-        targetUserId,
-      );
+      const ownershipTransferred =
+        await this.communitiesRepository.transferOwnership(
+          communityId,
+          requesterId,
+          targetUserId,
+        );
 
       const community = await this.findById(communityId);
       await this.notificationsService.sendNotification(
@@ -297,10 +348,9 @@ export class CommunitiesService {
     const community = await this.findById(communityId);
     const roleLabel = this.getCommunityRoleLabel(dto.role);
     const previousRole = existing.role as CommunityMemberRole;
-    const notificationBuilder =
-      this.isRolePromotion(previousRole, dto.role)
-        ? buildCommunityRolePromotedNotification
-        : buildCommunityRoleDemotedNotification;
+    const notificationBuilder = this.isRolePromotion(previousRole, dto.role)
+      ? buildCommunityRolePromotedNotification
+      : buildCommunityRoleDemotedNotification;
 
     await this.notificationsService.sendNotification(
       notificationBuilder({
@@ -338,11 +388,19 @@ export class CommunitiesService {
     }
 
     if (existing.status === 'PENDING') {
-      throw new BadRequestException('Hãy xử lý đơn tham gia bằng luồng duyệt đơn, không xóa trực tiếp.');
+      throw new BadRequestException(
+        'Hãy xử lý đơn tham gia bằng luồng duyệt đơn, không xóa trực tiếp.',
+      );
     }
 
-    if (requesterId === targetUserId && existing.role === 'OWNER' && existing.status === 'JOINED') {
-      throw new ForbiddenException('Chủ sở hữu không thể tự rời cộng đồng. Hãy chuyển quyền trước.');
+    if (
+      requesterId === targetUserId &&
+      existing.role === 'OWNER' &&
+      existing.status === 'JOINED'
+    ) {
+      throw new ForbiddenException(
+        'Chủ sở hữu không thể tự rời cộng đồng. Hãy chuyển quyền trước.',
+      );
     }
 
     if (existing.role === 'OWNER' && requesterId !== targetUserId) {
@@ -359,7 +417,9 @@ export class CommunitiesService {
       requesterMember?.role === 'MODERATOR' &&
       existing.role !== 'MEMBER'
     ) {
-      throw new ForbiddenException('Quản trị viên chỉ có thể mời ra thành viên thường.');
+      throw new ForbiddenException(
+        'Quản trị viên chỉ có thể mời ra thành viên thường.',
+      );
     }
 
     const removedMember = await this.communitiesRepository.removeMember(
@@ -394,14 +454,21 @@ export class CommunitiesService {
 
   // --- JOIN & FOLLOW ---
 
-  async joinCommunity(userId: string, id: string, answers?: Record<string, string>) {
+  async joinCommunity(
+    userId: string,
+    id: string,
+    answers?: Record<string, string>,
+  ) {
     const community = await this.findById(id);
     const existing = await this.communitiesRepository.findMember(id, userId);
-    
+
     if (existing) {
-      if (existing.status === 'BANNED') throw new ForbiddenException('You are banned from this community');
+      if (existing.status === 'BANNED')
+        throw new ForbiddenException('You are banned from this community');
       if (existing.status === 'JOINED' || existing.status === 'PENDING') {
-        throw new ConflictException('You are already a member or have a pending request');
+        throw new ConflictException(
+          'You are already a member or have a pending request',
+        );
       }
       // Delete old rejected record to insert a clean new request
       await this.communitiesRepository.removeMember(id, userId);
@@ -412,7 +479,13 @@ export class CommunitiesService {
     }
 
     const status = community.joinMode === 'OPEN' ? 'JOINED' : 'PENDING';
-    return await this.communitiesRepository.addMember(id, userId, 'MEMBER', status, answers);
+    return await this.communitiesRepository.addMember(
+      id,
+      userId,
+      'MEMBER',
+      status,
+      answers,
+    );
   }
 
   async reviewJoinRequest(
@@ -420,17 +493,22 @@ export class CommunitiesService {
     id: string,
     memberId: string,
     action: 'APPROVE' | 'REJECT',
-    roles: string[]
+    roles: string[],
   ) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
-    
+
     const member = await this.communitiesRepository.findMember(id, memberId);
     if (!member || member.status !== 'PENDING') {
       throw new NotFoundException('Pending request not found');
     }
 
     const newStatus = action === 'APPROVE' ? 'JOINED' : 'REJECTED';
-    return await this.communitiesRepository.updateMemberStatus(id, memberId, newStatus, userId);
+    return await this.communitiesRepository.updateMemberStatus(
+      id,
+      memberId,
+      newStatus,
+      userId,
+    );
   }
 
   async followCommunity(userId: string, id: string) {
@@ -456,7 +534,11 @@ export class CommunitiesService {
   }
 
   async unfavoriteCommunity(userId: string, id: string) {
-    return await this.communitiesRepository.removeFollow(id, userId, 'FAVORITE');
+    return await this.communitiesRepository.removeFollow(
+      id,
+      userId,
+      'FAVORITE',
+    );
   }
 
   async getFavorites(userId: string) {
@@ -465,21 +547,42 @@ export class CommunitiesService {
 
   async getJoinRequests(userId: string, id: string, roles: string[]) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
-    return await this.communitiesRepository.getMembers(id, { status: 'PENDING', page: 1, limit: 200 });
+    return await this.communitiesRepository.getMembers(id, {
+      status: 'PENDING',
+      page: 1,
+      limit: 200,
+    });
   }
 
-  async inviteMember(userId: string, id: string, targetUserId: string, role: CommunityMemberRole, roles: string[]) {
+  async inviteMember(
+    userId: string,
+    id: string,
+    targetUserId: string,
+    role: CommunityMemberRole,
+    roles: string[],
+  ) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
-    const existing = await this.communitiesRepository.findMember(id, targetUserId);
-    if (existing) throw new ConflictException('User is already a member or pending');
+    const existing = await this.communitiesRepository.findMember(
+      id,
+      targetUserId,
+    );
+    if (existing)
+      throw new ConflictException('User is already a member or pending');
 
     if (role === 'OWNER') {
-      throw new BadRequestException('Không thể gửi lời mời với vai trò chủ sở hữu.');
+      throw new BadRequestException(
+        'Không thể gửi lời mời với vai trò chủ sở hữu.',
+      );
     }
 
-    const requesterMember = await this.communitiesRepository.findMember(id, userId);
+    const requesterMember = await this.communitiesRepository.findMember(
+      id,
+      userId,
+    );
     if (requesterMember?.role === 'MODERATOR' && role !== 'MEMBER') {
-      throw new ForbiddenException('Quản trị viên chỉ có thể mời thành viên thường.');
+      throw new ForbiddenException(
+        'Quản trị viên chỉ có thể mời thành viên thường.',
+      );
     }
 
     const invitedMember = await this.communitiesRepository.addMember(
@@ -511,9 +614,15 @@ export class CommunitiesService {
     targetUserId: string,
     roles: string[],
   ) {
-    await this.checkPermissions(communityId, requesterId, roles, ['OWNER', 'MODERATOR']);
+    await this.checkPermissions(communityId, requesterId, roles, [
+      'OWNER',
+      'MODERATOR',
+    ]);
 
-    const existing = await this.communitiesRepository.findMember(communityId, targetUserId);
+    const existing = await this.communitiesRepository.findMember(
+      communityId,
+      targetUserId,
+    );
     if (!existing) {
       throw new NotFoundException('User is not a member');
     }
@@ -523,7 +632,9 @@ export class CommunitiesService {
     }
 
     if (existing.status !== 'JOINED') {
-      throw new BadRequestException('Chỉ có thể cấm thành viên chính thức của cộng đồng.');
+      throw new BadRequestException(
+        'Chỉ có thể cấm thành viên chính thức của cộng đồng.',
+      );
     }
 
     if (requesterId === targetUserId) {
@@ -534,12 +645,14 @@ export class CommunitiesService {
       throw new ForbiddenException('Không thể cấm chủ sở hữu cộng đồng.');
     }
 
-    const requesterMember = await this.communitiesRepository.findMember(communityId, requesterId);
-    if (
-      requesterMember?.role === 'MODERATOR' &&
-      existing.role !== 'MEMBER'
-    ) {
-      throw new ForbiddenException('Quản trị viên chỉ có thể cấm thành viên thường.');
+    const requesterMember = await this.communitiesRepository.findMember(
+      communityId,
+      requesterId,
+    );
+    if (requesterMember?.role === 'MODERATOR' && existing.role !== 'MEMBER') {
+      throw new ForbiddenException(
+        'Quản trị viên chỉ có thể cấm thành viên thường.',
+      );
     }
 
     const bannedMember = await this.communitiesRepository.updateMemberStatus(
@@ -567,19 +680,27 @@ export class CommunitiesService {
     targetUserId: string,
     roles: string[],
   ) {
-    await this.checkPermissions(communityId, requesterId, roles, ['OWNER', 'MODERATOR']);
+    await this.checkPermissions(communityId, requesterId, roles, [
+      'OWNER',
+      'MODERATOR',
+    ]);
 
-    const existing = await this.communitiesRepository.findMember(communityId, targetUserId);
+    const existing = await this.communitiesRepository.findMember(
+      communityId,
+      targetUserId,
+    );
     if (!existing || existing.status !== 'BANNED') {
       throw new NotFoundException('Không tìm thấy thành viên đang bị cấm.');
     }
 
-    const requesterMember = await this.communitiesRepository.findMember(communityId, requesterId);
-    if (
-      requesterMember?.role === 'MODERATOR' &&
-      existing.role !== 'MEMBER'
-    ) {
-      throw new ForbiddenException('Quản trị viên chỉ có thể gỡ cấm thành viên thường.');
+    const requesterMember = await this.communitiesRepository.findMember(
+      communityId,
+      requesterId,
+    );
+    if (requesterMember?.role === 'MODERATOR' && existing.role !== 'MEMBER') {
+      throw new ForbiddenException(
+        'Quản trị viên chỉ có thể gỡ cấm thành viên thường.',
+      );
     }
 
     const removedBan = await this.communitiesRepository.removeMember(
@@ -690,7 +811,16 @@ export class CommunitiesService {
       );
     }
 
-    const normalizedTags = tags.map((tag) => tag.trim());
+    const seenTagKeys = new Set<string>();
+    const normalizedTags = tags.reduce<string[]>((uniqueTags, tag) => {
+      const trimmedTag = tag.trim();
+      const normalizedKey = trimmedTag.toLocaleLowerCase('vi-VN');
+      if (!seenTagKeys.has(normalizedKey)) {
+        seenTagKeys.add(normalizedKey);
+        uniqueTags.push(trimmedTag);
+      }
+      return uniqueTags;
+    }, []);
 
     const updatedMember = await this.communitiesRepository.updateMemberTags(
       communityId,
@@ -705,14 +835,22 @@ export class CommunitiesService {
     return updatedMember;
   }
 
-  async respondToInvite(userId: string, id: string, action: 'ACCEPT' | 'DECLINE') {
+  async respondToInvite(
+    userId: string,
+    id: string,
+    action: 'ACCEPT' | 'DECLINE',
+  ) {
     const member = await this.communitiesRepository.findMember(id, userId);
     if (!member || member.status !== 'INVITED') {
       throw new NotFoundException('No pending invitation found');
     }
 
     if (action === 'ACCEPT') {
-      return await this.communitiesRepository.updateMemberStatus(id, userId, 'JOINED');
+      return await this.communitiesRepository.updateMemberStatus(
+        id,
+        userId,
+        'JOINED',
+      );
     } else {
       return await this.communitiesRepository.removeMember(id, userId);
     }
@@ -723,16 +861,35 @@ export class CommunitiesService {
     return await this.communitiesRepository.getGallery(id);
   }
 
-  async addGalleryItem(userId: string, id: string, imageUrl: string, caption?: string, roles: string[] = []) {
+  async addGalleryItem(
+    userId: string,
+    id: string,
+    imageUrl: string,
+    caption?: string,
+    roles: string[] = [],
+  ) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
-    return await this.communitiesRepository.addGalleryItem(id, userId, imageUrl, caption);
+    return await this.communitiesRepository.addGalleryItem(
+      id,
+      userId,
+      imageUrl,
+      caption,
+    );
   }
 
-  async removeGalleryItem(userId: string, id: string, imageId: string, roles: string[]) {
+  async removeGalleryItem(
+    userId: string,
+    id: string,
+    imageId: string,
+    roles: string[],
+  ) {
     await this.checkPermissions(id, userId, roles, ['OWNER', 'MODERATOR']);
 
     // Fetch the gallery item to get the image URL before deleting from DB
-    const item = await this.communitiesRepository.findGalleryItemById(id, imageId);
+    const item = await this.communitiesRepository.findGalleryItemById(
+      id,
+      imageId,
+    );
     if (item && isStoredImageUrl(item.imageUrl)) {
       try {
         const publicId = extractStoredImagePublicId(item.imageUrl);
@@ -784,8 +941,21 @@ export class CommunitiesService {
 
     return sanitizeHtml(description, {
       allowedTags: [
-        'b', 'i', 'u', 'em', 'strong', 'p', 'br',
-        'ul', 'ol', 'li', 'h2', 'h3', 'a', 'img', 'span',
+        'b',
+        'i',
+        'u',
+        'em',
+        'strong',
+        'p',
+        'br',
+        'ul',
+        'ol',
+        'li',
+        'h2',
+        'h3',
+        'a',
+        'img',
+        'span',
       ],
       allowedAttributes: {
         a: ['href'],
@@ -802,7 +972,9 @@ export class CommunitiesService {
       const moduleName = 'sanitize-html';
       const mod = await import(moduleName);
       const fn =
-        typeof mod === 'function' ? mod : (mod as { default?: unknown }).default;
+        typeof mod === 'function'
+          ? mod
+          : (mod as { default?: unknown }).default;
       return typeof fn === 'function' ? (fn as SanitizeHtmlFn) : null;
     } catch {
       return null;
@@ -827,7 +999,9 @@ export class CommunitiesService {
     }
 
     if (member.status !== 'JOINED') {
-      throw new ForbiddenException('Bạn cần là thành viên chính thức của cộng đồng để thực hiện thao tác này.');
+      throw new ForbiddenException(
+        'Bạn cần là thành viên chính thức của cộng đồng để thực hiện thao tác này.',
+      );
     }
 
     if (!allowedCommunityRoles.includes(member.role)) {

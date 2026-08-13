@@ -1,11 +1,42 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, and, sql, ilike, SQL, isNull, count, desc, lt, or, inArray, gte } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  sql,
+  ilike,
+  SQL,
+  isNull,
+  count,
+  desc,
+  lt,
+  or,
+  inArray,
+  gte,
+} from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { AuditService } from '../audit/audit.service';
 import { QueryCommunityDto } from './dto/query-community.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
+
+const VIETNAMESE_DIACRITIC_CHARACTERS =
+  'ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴàáạảãâầấậẩẫăằắặẳẵÈÉẸẺẼÊỀẾỆỂỄèéẹẻẽêềếệểễÌÍỊỈĨìíịỉĩÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠòóọỏõôồốộổỗơờớợởỡÙÚỤỦŨƯỪỨỰỬỮùúụủũưừứựửữỲÝỴỶỸỳýỵỷỹĐđ';
+const VIETNAMESE_ASCII_CHARACTERS = [
+  'A'.repeat(17),
+  'a'.repeat(17),
+  'E'.repeat(11),
+  'e'.repeat(11),
+  'I'.repeat(5),
+  'i'.repeat(5),
+  'O'.repeat(17),
+  'o'.repeat(17),
+  'U'.repeat(11),
+  'u'.repeat(11),
+  'Y'.repeat(5),
+  'y'.repeat(5),
+  'Dd',
+].join('');
 
 @Injectable()
 export class CommunitiesRepository {
@@ -28,17 +59,25 @@ export class CommunitiesRepository {
       conditions.push(ilike(schema.communities.name, `%${query.search}%`));
     }
     if (query.region) {
-      conditions.push(ilike(schema.communities.locationAddress, `%${query.region}%`));
+      conditions.push(
+        ilike(schema.communities.locationAddress, `%${query.region}%`),
+      );
     }
     if (query.provinceCode) {
       conditions.push(eq(schema.communities.provinceCode, query.provinceCode));
     }
     if (query.categoryId) {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query.categoryId);
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          query.categoryId,
+        );
       const subquery = this.db
         .select({ communityId: schema.communitySports.communityId })
         .from(schema.communitySports)
-        .innerJoin(schema.categories, eq(schema.communitySports.categoryId, schema.categories.id))
+        .innerJoin(
+          schema.categories,
+          eq(schema.communitySports.categoryId, schema.categories.id),
+        )
         .where(
           isUuid
             ? eq(schema.communitySports.categoryId, query.categoryId)
@@ -55,9 +94,12 @@ export class CommunitiesRepository {
       );
     }
 
-    const baseWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const baseWhereClause =
+      conditions.length > 0 ? and(...conditions) : undefined;
     const decodedCursor = query.cursor
-      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(query.cursor)
+      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(
+          query.cursor,
+        )
       : null;
     if (decodedCursor) {
       conditions.push(
@@ -90,12 +132,21 @@ export class CommunitiesRepository {
 
     const rawCommunities = await dbQuery;
     const hasMore = rawCommunities.length > limit;
-    const communitiesList = hasMore ? rawCommunities.slice(0, limit) : rawCommunities;
+    const communitiesList = hasMore
+      ? rawCommunities.slice(0, limit)
+      : rawCommunities;
 
     if (communitiesList.length === 0) {
       return {
         data: [],
-        meta: { total: totalRecord.count, page: query.page ?? 1, limit, totalPages: Math.ceil(totalRecord.count / limit), nextCursor: null, hasMore: false },
+        meta: {
+          total: totalRecord.count,
+          page: query.page ?? 1,
+          limit,
+          totalPages: Math.ceil(totalRecord.count / limit),
+          nextCursor: null,
+          hasMore: false,
+        },
       };
     }
 
@@ -108,7 +159,10 @@ export class CommunitiesRepository {
         category: schema.categories,
       })
       .from(schema.communitySports)
-      .innerJoin(schema.categories, eq(schema.communitySports.categoryId, schema.categories.id))
+      .innerJoin(
+        schema.categories,
+        eq(schema.communitySports.categoryId, schema.categories.id),
+      )
       .where(sql`${schema.communitySports.communityId} IN ${communityIds}`);
 
     const categoriesMap: Record<string, unknown[]> = {};
@@ -129,8 +183,8 @@ export class CommunitiesRepository {
       .where(
         and(
           sql`${schema.communityMembers.communityId} IN ${communityIds}`,
-          eq(schema.communityMembers.status, 'JOINED')
-        )
+          eq(schema.communityMembers.status, 'JOINED'),
+        ),
       )
       .groupBy(schema.communityMembers.communityId);
 
@@ -150,8 +204,8 @@ export class CommunitiesRepository {
         and(
           sql`${schema.tournaments.communityId} IN ${communityIds}`,
           isNull(schema.tournaments.deletedAt),
-          sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`
-        )
+          sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`,
+        ),
       )
       .groupBy(schema.tournaments.communityId);
 
@@ -180,7 +234,10 @@ export class CommunitiesRepository {
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
         nextCursor: hasMore
-          ? CursorPaginationHelper.encodeCursor({ id: lastCommunity.id, createdAt: lastCommunity.createdAt })
+          ? CursorPaginationHelper.encodeCursor({
+              id: lastCommunity.id,
+              createdAt: lastCommunity.createdAt,
+            })
           : null,
         hasMore,
       },
@@ -285,7 +342,10 @@ export class CommunitiesRepository {
         category: schema.categories,
       })
       .from(schema.communitySports)
-      .innerJoin(schema.categories, eq(schema.communitySports.categoryId, schema.categories.id))
+      .innerJoin(
+        schema.categories,
+        eq(schema.communitySports.categoryId, schema.categories.id),
+      )
       .where(eq(schema.communitySports.communityId, id));
 
     return {
@@ -348,7 +408,10 @@ export class CommunitiesRepository {
     categoryIds?: string[],
   ) {
     return await this.db.transaction(async (tx) => {
-      const updateData: Record<string, unknown> = { ...data, updatedAt: new Date() };
+      const updateData: Record<string, unknown> = {
+        ...data,
+        updatedAt: new Date(),
+      };
 
       if (lat !== undefined && lng !== undefined) {
         updateData.locationGeolocation = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`;
@@ -425,17 +488,53 @@ export class CommunitiesRepository {
     return member || null;
   }
 
-  async getMembers(communityId: string, query?: { status?: string; page?: number; limit?: number; cursor?: string }) {
+  async getMembers(
+    communityId: string,
+    query?: {
+      status?: string;
+      page?: number;
+      limit?: number;
+      cursor?: string;
+      search?: string;
+      mentionable?: boolean;
+    },
+  ) {
     const page = query?.page ?? 1;
     const limit = query?.limit ?? 50;
     const cursor = query?.cursor;
-    const conditions: SQL[] = [eq(schema.communityMembers.communityId, communityId)];
+    const conditions: SQL[] = [
+      eq(schema.communityMembers.communityId, communityId),
+    ];
     if (query?.status) {
       conditions.push(eq(schema.communityMembers.status, query.status));
     }
+    if (query?.mentionable) {
+      conditions.push(isNull(schema.users.deletedAt));
+    }
+    const search = query?.search?.trim();
+    if (search) {
+      const normalizedSearch = search
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/đ/gu, 'd')
+        .replace(/Đ/gu, 'D')
+        .toLocaleLowerCase('vi-VN')
+        .replace(/[\\%_]/g, '\\$&');
+      conditions.push(sql`
+        lower(translate(
+          ${schema.profiles.fullName},
+          ${VIETNAMESE_DIACRITIC_CHARACTERS},
+          ${VIETNAMESE_ASCII_CHARACTERS}
+        )) LIKE ${`%${normalizedSearch}%`}
+      `);
+    }
     const baseWhereClause = and(...conditions);
     const decodedCursor = cursor
-      ? CursorPaginationHelper.decodeCursor<{ id: string; joinedAt: string; rolePriority?: number }>(cursor)
+      ? CursorPaginationHelper.decodeCursor<{
+          id: string;
+          joinedAt: string;
+          rolePriority?: number;
+        }>(cursor)
       : null;
     if (decodedCursor) {
       const rolePriority = sql<number>`CASE WHEN ${schema.communityMembers.role} IN ('OWNER', 'MODERATOR') THEN 0 ELSE 1 END`;
@@ -445,21 +544,33 @@ export class CommunitiesRepository {
           lt(rolePriority, cursorRolePriority),
           and(
             eq(rolePriority, cursorRolePriority),
-            lt(schema.communityMembers.joinedAt, new Date(decodedCursor.joinedAt)),
+            lt(
+              schema.communityMembers.joinedAt,
+              new Date(decodedCursor.joinedAt),
+            ),
           ),
           and(
             eq(rolePriority, cursorRolePriority),
-            eq(schema.communityMembers.joinedAt, new Date(decodedCursor.joinedAt)),
+            eq(
+              schema.communityMembers.joinedAt,
+              new Date(decodedCursor.joinedAt),
+            ),
             lt(schema.communityMembers.id, decodedCursor.id),
           ),
         ) as SQL,
       );
     }
-    const whereClause = conditions.length > 1 ? and(...conditions) : conditions[0];
+    const whereClause =
+      conditions.length > 1 ? and(...conditions) : conditions[0];
 
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.communityMembers)
+      .innerJoin(
+        schema.users,
+        eq(schema.communityMembers.userId, schema.users.id),
+      )
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(baseWhereClause);
 
     const membersQuery = this.db
@@ -469,10 +580,13 @@ export class CommunitiesRepository {
           id: schema.users.id,
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
-        }
+        },
       })
       .from(schema.communityMembers)
-      .innerJoin(schema.users, eq(schema.communityMembers.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.communityMembers.userId, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(whereClause)
       .orderBy(
@@ -493,13 +607,18 @@ export class CommunitiesRepository {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
-        nextCursor: hasMore && data.length > 0
-          ? CursorPaginationHelper.encodeCursor({
-            id: data[data.length - 1].member.id,
-            joinedAt: data[data.length - 1].member.joinedAt,
-            rolePriority: ['OWNER', 'MODERATOR'].includes(data[data.length - 1].member.role) ? 0 : 1,
-          })
-          : null,
+        nextCursor:
+          hasMore && data.length > 0
+            ? CursorPaginationHelper.encodeCursor({
+                id: data[data.length - 1].member.id,
+                joinedAt: data[data.length - 1].member.joinedAt,
+                rolePriority: ['OWNER', 'MODERATOR'].includes(
+                  data[data.length - 1].member.role,
+                )
+                  ? 0
+                  : 1,
+              })
+            : null,
         hasMore,
       },
     };
@@ -524,7 +643,10 @@ export class CommunitiesRepository {
         schema.communities,
         eq(schema.communityMembers.communityId, schema.communities.id),
       )
-      .leftJoin(schema.users, eq(schema.communityMembers.invitedBy, schema.users.id))
+      .leftJoin(
+        schema.users,
+        eq(schema.communityMembers.invitedBy, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(
         and(
@@ -544,7 +666,14 @@ export class CommunitiesRepository {
     }));
   }
 
-  async addMember(communityId: string, userId: string, role: string, status: string = 'JOINED', joinAnswers?: Record<string, string>, invitedBy?: string) {
+  async addMember(
+    communityId: string,
+    userId: string,
+    role: string,
+    status: string = 'JOINED',
+    joinAnswers?: Record<string, string>,
+    invitedBy?: string,
+  ) {
     const [member] = await this.db
       .insert(schema.communityMembers)
       .values({
@@ -559,12 +688,17 @@ export class CommunitiesRepository {
     return member;
   }
 
-  async updateMemberStatus(communityId: string, userId: string, status: string, approvedBy?: string) {
+  async updateMemberStatus(
+    communityId: string,
+    userId: string,
+    status: string,
+    approvedBy?: string,
+  ) {
     const [member] = await this.db
       .update(schema.communityMembers)
-      .set({ 
+      .set({
         status,
-        ...(approvedBy ? { approvedBy, approvedAt: new Date() } : {})
+        ...(approvedBy ? { approvedBy, approvedAt: new Date() } : {}),
       })
       .where(
         and(
@@ -640,7 +774,11 @@ export class CommunitiesRepository {
     });
   }
 
-  async transferOwnership(communityId: string, currentOwnerId: string, newOwnerId: string) {
+  async transferOwnership(
+    communityId: string,
+    currentOwnerId: string,
+    newOwnerId: string,
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Demote current owner to MODERATOR in community_members
       await tx
@@ -649,8 +787,8 @@ export class CommunitiesRepository {
         .where(
           and(
             eq(schema.communityMembers.communityId, communityId),
-            eq(schema.communityMembers.userId, currentOwnerId)
-          )
+            eq(schema.communityMembers.userId, currentOwnerId),
+          ),
         );
 
       // 2. Promote target user to OWNER in community_members
@@ -660,8 +798,8 @@ export class CommunitiesRepository {
         .where(
           and(
             eq(schema.communityMembers.communityId, communityId),
-            eq(schema.communityMembers.userId, newOwnerId)
-          )
+            eq(schema.communityMembers.userId, newOwnerId),
+          ),
         );
 
       // 3. Update creatorId in communities table
@@ -678,15 +816,14 @@ export class CommunitiesRepository {
         .where(
           and(
             eq(schema.communityMembers.communityId, communityId),
-            eq(schema.communityMembers.userId, newOwnerId)
-          )
+            eq(schema.communityMembers.userId, newOwnerId),
+          ),
         )
         .limit(1);
 
       return newOwnerMember;
     });
   }
-
 
   async removeMember(communityId: string, userId: string) {
     const [member] = await this.db
@@ -703,7 +840,11 @@ export class CommunitiesRepository {
 
   // --- FOLLOWS / FAVORITES ---
 
-  async addFollow(communityId: string, userId: string, type: 'FOLLOW' | 'FAVORITE') {
+  async addFollow(
+    communityId: string,
+    userId: string,
+    type: 'FOLLOW' | 'FAVORITE',
+  ) {
     const [record] = await this.db
       .insert(schema.communityFollows)
       .values({ communityId, userId, type })
@@ -712,15 +853,19 @@ export class CommunitiesRepository {
     return record;
   }
 
-  async removeFollow(communityId: string, userId: string, type: 'FOLLOW' | 'FAVORITE') {
+  async removeFollow(
+    communityId: string,
+    userId: string,
+    type: 'FOLLOW' | 'FAVORITE',
+  ) {
     const [record] = await this.db
       .delete(schema.communityFollows)
       .where(
         and(
           eq(schema.communityFollows.communityId, communityId),
           eq(schema.communityFollows.userId, userId),
-          eq(schema.communityFollows.type, type)
-        )
+          eq(schema.communityFollows.type, type),
+        ),
       )
       .returning();
     return record;
@@ -730,12 +875,15 @@ export class CommunitiesRepository {
     return await this.db
       .select({ community: schema.communities })
       .from(schema.communityFollows)
-      .innerJoin(schema.communities, eq(schema.communityFollows.communityId, schema.communities.id))
+      .innerJoin(
+        schema.communities,
+        eq(schema.communityFollows.communityId, schema.communities.id),
+      )
       .where(
         and(
           eq(schema.communityFollows.userId, userId),
-          eq(schema.communityFollows.type, 'FAVORITE')
-        )
+          eq(schema.communityFollows.type, 'FAVORITE'),
+        ),
       );
   }
 
@@ -755,14 +903,19 @@ export class CommunitiesRepository {
       .where(
         and(
           eq(schema.communityGallery.id, imageId),
-          eq(schema.communityGallery.communityId, communityId)
-        )
+          eq(schema.communityGallery.communityId, communityId),
+        ),
       )
       .limit(1);
     return item || null;
   }
 
-  async addGalleryItem(communityId: string, uploaderId: string, imageUrl: string, caption?: string) {
+  async addGalleryItem(
+    communityId: string,
+    uploaderId: string,
+    imageUrl: string,
+    caption?: string,
+  ) {
     const [item] = await this.db
       .insert(schema.communityGallery)
       .values({
@@ -781,7 +934,7 @@ export class CommunitiesRepository {
       eq(schema.tournaments.communityId, communityId),
       eq(schema.tournaments.visibility, 'PUBLIC'),
       isNull(schema.tournaments.deletedAt),
-      sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`
+      sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`,
     ) as SQL;
     if (status && status !== 'ALL') {
       condition = and(condition, eq(schema.tournaments.status, status)) as SQL;
@@ -802,15 +955,20 @@ export class CommunitiesRepository {
           id: schema.users.id,
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
-        }
+        },
       })
       .from(schema.communityRankings)
-      .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.communityRankings.userId, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .where(and(
-        eq(schema.communityRankings.communityId, communityId),
-        sql`${schema.communityRankings.matchesPlayed} > 0`,
-      ))
+      .where(
+        and(
+          eq(schema.communityRankings.communityId, communityId),
+          sql`${schema.communityRankings.matchesPlayed} > 0`,
+        ),
+      )
       .orderBy(sql`${schema.communityRankings.eloPoints} DESC`)
       .limit(limit);
   }
@@ -953,9 +1111,15 @@ export class CommunitiesRepository {
         winStreak: schema.communityRankings.winStreak,
       })
       .from(schema.communityRankings)
-      .innerJoin(schema.users, eq(schema.communityRankings.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.communityRankings.userId, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .leftJoin(schema.eloTiers, eq(schema.communityRankings.tierId, schema.eloTiers.id))
+      .leftJoin(
+        schema.eloTiers,
+        eq(schema.communityRankings.tierId, schema.eloTiers.id),
+      )
       .where(
         and(
           eq(schema.communityRankings.communityId, communityId),
@@ -977,7 +1141,10 @@ export class CommunitiesRepository {
           at: schema.communityMembers.joinedAt,
         })
         .from(schema.communityMembers)
-        .innerJoin(schema.users, eq(schema.communityMembers.userId, schema.users.id))
+        .innerJoin(
+          schema.users,
+          eq(schema.communityMembers.userId, schema.users.id),
+        )
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
         .where(
           and(
@@ -994,7 +1161,10 @@ export class CommunitiesRepository {
           at: schema.communityGallery.createdAt,
         })
         .from(schema.communityGallery)
-        .leftJoin(schema.users, eq(schema.communityGallery.uploaderId, schema.users.id))
+        .leftJoin(
+          schema.users,
+          eq(schema.communityGallery.uploaderId, schema.users.id),
+        )
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
         .where(eq(schema.communityGallery.communityId, communityId))
         .orderBy(desc(schema.communityGallery.createdAt))
@@ -1006,7 +1176,10 @@ export class CommunitiesRepository {
           at: schema.tournaments.createdAt,
         })
         .from(schema.tournaments)
-        .innerJoin(schema.users, eq(schema.tournaments.createdBy, schema.users.id))
+        .innerJoin(
+          schema.users,
+          eq(schema.tournaments.createdBy, schema.users.id),
+        )
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
         .where(
           and(
@@ -1110,7 +1283,10 @@ export class CommunitiesRepository {
           sql`${schema.matches.winnerId} IS NOT NULL`,
         ),
       )
-      .orderBy(desc(schema.matches.roundNumber), desc(schema.matches.matchOrder))
+      .orderBy(
+        desc(schema.matches.roundNumber),
+        desc(schema.matches.matchOrder),
+      )
       .limit(1);
 
     if (!finalMatch?.winnerId) {
@@ -1130,7 +1306,10 @@ export class CommunitiesRepository {
     const [rosterMember] = await this.db
       .select({ fullName: schema.profiles.fullName })
       .from(schema.tournamentRosters)
-      .innerJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.tournamentRosters.userId, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(
         and(
@@ -1149,8 +1328,8 @@ export class CommunitiesRepository {
       .where(
         and(
           eq(schema.communityGallery.id, imageId),
-          eq(schema.communityGallery.communityId, communityId)
-        )
+          eq(schema.communityGallery.communityId, communityId),
+        ),
       )
       .returning();
     return item;
@@ -1248,9 +1427,8 @@ export class CommunitiesRepository {
         and(
           eq(schema.communities.creatorId, creatorId),
           isNull(schema.communities.deletedAt),
-        )
+        ),
       );
     return result.count;
   }
 }
-

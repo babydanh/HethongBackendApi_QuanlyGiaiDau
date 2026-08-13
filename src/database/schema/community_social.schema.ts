@@ -60,6 +60,7 @@ export const communityPostComments = pgTable('community_post_comments', {
   parentId: uuid('parent_id'),
   body: text('body').notNull(),
   status: varchar('status', { length: 30 }).default('PUBLISHED').notNull(),
+  moderationReason: text('moderation_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),

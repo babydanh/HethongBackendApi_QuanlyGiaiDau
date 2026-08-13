@@ -64,6 +64,9 @@ export class ChatService {
    * P2D.1 — Guard kênh chat CLUB: user phải là member JOINED của cộng đồng.
    */
   async assertClubMember(communityId: string, userId: string) {
+    if (!(await this.chatRepository.isClubChatEnabled(communityId))) {
+      throw new ForbiddenException('KÃªnh chat cá»§a cá»™ng Ä‘á»“ng hiá»‡n Ä‘ang táº¯t.');
+    }
     const member = await this.chatRepository.findCommunityMember(
       communityId,
       userId,
@@ -80,6 +83,11 @@ export class ChatService {
   }
 
   async sendMessage(userId: string, data: CreateMessageDto) {
+    const messageText = data.messageText?.trim();
+    const attachmentsUrls = (data.attachmentsUrls ?? []).filter((url) => url.trim().length > 0);
+    if (!messageText && attachmentsUrls.length === 0) {
+      throw new BadRequestException('Tin nhắn cần có nội dung hoặc ít nhất một tệp đính kèm.');
+    }
     const room = await this.chatRepository.findRoomById(data.roomId);
     if (!room) {
       throw new NotFoundException('Không tìm thấy phòng chat.');
@@ -99,7 +107,11 @@ export class ChatService {
       }
     }
 
-    const message = await this.chatRepository.saveMessage(userId, data);
+    const message = await this.chatRepository.saveMessage(userId, {
+      ...data,
+      messageText,
+      attachmentsUrls,
+    });
 
     if (roomType === RoomType.SUPPORT) {
       this.chatGateway.broadcastSupportMessage(data.roomId, message);
@@ -138,6 +150,16 @@ export class ChatService {
     }
 
     return this.chatRepository.getMessagesPage(roomId, limit, cursor);
+  }
+
+  async markRoomRead(userId: string, roomId: string) {
+    await this.getMessages(userId, roomId, 1);
+    return this.chatRepository.markRead(roomId, userId);
+  }
+
+  async getUnreadCount(userId: string, roomId: string) {
+    await this.getMessages(userId, roomId, 1);
+    return { count: await this.chatRepository.countUnreadUsingState(roomId, userId) };
   }
 
   async getMySupportConversation(userId: string) {

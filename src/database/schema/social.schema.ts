@@ -93,3 +93,12 @@ export const chatMessages = pgTable('chat_messages', {
     .defaultNow()
     .notNull(),
 });
+
+export const chatReadStates = pgTable('chat_read_states', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  roomId: uuid('room_id').references(() => chatRooms.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  lastReadAt: timestamp('last_read_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  roomUserUnique: uniqueIndex('uq_chat_read_states_room_user').on(table.roomId, table.userId),
+}));

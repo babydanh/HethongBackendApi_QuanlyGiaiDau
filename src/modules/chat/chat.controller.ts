@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Param,
   Query,
@@ -75,6 +76,16 @@ export class ChatController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.chatService.getMessages(user.sub, id, query.limit, query.cursor);
+  }
+
+  @Put('rooms/:id/read')
+  async markRoomRead(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+    return this.chatService.markRoomRead(user.sub, id);
+  }
+
+  @Get('rooms/:id/unread')
+  async getUnreadCount(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+    return this.chatService.getUnreadCount(user.sub, id);
   }
 
   @Get('support/me')
