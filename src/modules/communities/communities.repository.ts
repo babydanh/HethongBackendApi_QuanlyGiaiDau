@@ -1347,6 +1347,10 @@ export class CommunitiesRepository {
   ): Promise<Array<{ userId: string; won: boolean; streak: number }>> {
     if (userIds.length === 0) return [];
 
+    const userIdsArray = sql`ARRAY[${sql.join(
+      userIds.map((userId) => sql`${userId}::uuid`),
+      sql`, `,
+    )}]::uuid[]`;
     const rows = (await this.db.execute(sql`
       WITH user_matches AS (
         SELECT
@@ -1361,7 +1365,7 @@ export class CommunitiesRepository {
           AND m.status = 'COMPLETED'
           AND m.deleted_at IS NULL
           AND m.winner_id IS NOT NULL
-          AND mp.user_id IN ${sql`(${sql.join(userIds.map((id) => sql`${id}::uuid`), sql`, `)})`}
+          AND mp.user_id = ANY(${userIdsArray})
       ),
       ordered AS (
         SELECT "userId", won,
@@ -1401,13 +1405,17 @@ export class CommunitiesRepository {
   ): Promise<Array<{ userId: string; gain: number }>> {
     if (userIds.length === 0) return [];
 
+    const userIdsArray = sql`ARRAY[${sql.join(
+      userIds.map((userId) => sql`${userId}::uuid`),
+      sql`, `,
+    )}]::uuid[]`;
     const rows = (await this.db.execute(sql`
       SELECT elh.user_id AS "userId", SUM(elh.changed_points)::int AS gain
       FROM elo_history_logs elh
       INNER JOIN matches m ON m.id = elh.match_id
       INNER JOIN tournaments t ON t.id = m.tournament_id
       WHERE t.community_id = ${communityId}
-        AND elh.user_id IN ${sql`(${sql.join(userIds.map((id) => sql`${id}::uuid`), sql`, `)})`}
+        AND elh.user_id = ANY(${userIdsArray})
         AND elh.changed_points > 0
         AND elh.created_at >= NOW() - INTERVAL '7 days'
       GROUP BY elh.user_id

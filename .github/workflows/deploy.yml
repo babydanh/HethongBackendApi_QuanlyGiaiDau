@@ -88,7 +88,7 @@ jobs:
             docker compose run --rm migrate
 
             # 5. Khởi động lại service backend với image mới
-            docker compose up -d --no-deps backend
+            docker compose up -d --force-recreate --no-deps backend
 
             # 6. Dọn dẹp các Docker Image cũ
             docker image prune -f
