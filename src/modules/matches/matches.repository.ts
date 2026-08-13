@@ -302,11 +302,22 @@ export class MatchesRepository {
 
     const participantIds = new Set<string>();
     const groupIdsForMatches = new Set<string>();
+    const tournamentIdsForMatches = new Set<string>();
     for (const match of data) {
       if (match.participant1Id) participantIds.add(match.participant1Id);
       if (match.participant2Id) participantIds.add(match.participant2Id);
       if (match.groupId) groupIdsForMatches.add(match.groupId);
+      if (match.tournamentId) tournamentIdsForMatches.add(match.tournamentId);
     }
+
+    const tournamentVenues = tournamentIdsForMatches.size > 0
+      ? await this.db
+        .select({ tournamentId: schema.tournaments.id, venueName: schema.tournamentVenues.name })
+        .from(schema.tournaments)
+        .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
+        .where(inArray(schema.tournaments.id, Array.from(tournamentIdsForMatches)))
+      : [];
+    const tournamentVenueMap = new Map(tournamentVenues.map((venue) => [venue.tournamentId, venue.venueName]));
 
     const participantsMap = new Map<string, { id: string; teamName: string; seed: number | null; members: { userId: string; fullName: string | null }[] }>();
     if (participantIds.size > 0) {
@@ -376,7 +387,14 @@ export class MatchesRepository {
           stageRoundConfig: schema.tournamentStages.roundConfig,
           groupRoundConfig: schema.tournamentGroups.roundConfig,
           tournamentName: schema.tournaments.name,
-          venueName: schema.tournamentVenues.name,
+          // A division venue overrides the tournament-level venue. This is the
+          // venue selected in organizer settings for the current content.
+          venueName: sql<string | null>`coalesce(
+            (select division_venue.name from tournament_venues division_venue
+             where division_venue.id = tournament_divisions.venue_id
+               and division_venue.deleted_at is null),
+            ${schema.tournamentVenues.name}
+          )`,
           categoryId: schema.tournaments.categoryId,
           categoryName: schema.categories.name,
           matchType: schema.tournaments.matchType,
@@ -405,6 +423,7 @@ export class MatchesRepository {
           tournamentName: g.tournamentName,
           categoryId: g.categoryId || undefined,
           categoryName: g.categoryName || undefined,
+          venueName: g.venueName || null,
           matchType: g.divisionMatchType || g.matchType || undefined,
           genderRestriction: g.divisionGenderRestriction || g.genderRestriction || undefined,
         });
@@ -431,16 +450,16 @@ export class MatchesRepository {
             roundConfig: groupStage.stageRoundConfig,
           }
         } : null,
-        tournament: groupStage ? {
-          name: groupStage.tournamentName,
-          venueName: groupStage.venueName,
-          categoryId: groupStage.categoryId,
-          matchType: groupStage.matchType,
-          genderRestriction: groupStage.genderRestriction,
+        tournament: {
+          name: groupStage?.tournamentName || null,
+          venueName: groupStage?.venueName || tournamentVenueMap.get(match.tournamentId) || null,
+          categoryId: groupStage?.categoryId,
+          matchType: groupStage?.matchType,
+          genderRestriction: groupStage?.genderRestriction,
           category: {
-            name: groupStage.categoryName,
+            name: groupStage?.categoryName,
           }
-        } : null,
+        },
       };
     });
 

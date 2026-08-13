@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   Min,
 } from 'class-validator';
 
@@ -36,6 +37,7 @@ export class CreateDivisionDto {
   @ApiProperty({ example: 'Đôi Nam', description: 'Tên hình thức thi đấu' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(255)
   name: string;
 
   @ApiProperty({ enum: MatchType, example: MatchType.DOUBLES })

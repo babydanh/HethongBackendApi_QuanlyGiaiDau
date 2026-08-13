@@ -3598,6 +3598,45 @@ export class TournamentsRepository {
       .where(eq(schema.tournamentRosters.participantId, participantId));
   }
 
+  /** Team sport: đội trưởng thêm 1 thành viên vào đội (role MAIN/RESERVE). */
+  async addRoster(participantId: string, userId: string, role: 'MAIN' | 'RESERVE') {
+    const [existing] = await this.db
+      .select()
+      .from(schema.tournamentRosters)
+      .where(
+        and(
+          eq(schema.tournamentRosters.participantId, participantId),
+          eq(schema.tournamentRosters.userId, userId),
+        ),
+      )
+      .limit(1);
+    if (existing) {
+      throw new BadRequestException('Thành viên này đã có trong đội.');
+    }
+    const [row] = await this.db
+      .insert(schema.tournamentRosters)
+      .values({ participantId, userId, role })
+      .returning();
+    return row;
+  }
+
+  /** Team sport: đội trưởng xoá thành viên khỏi đội. */
+  async removeRoster(participantId: string, userId: string) {
+    const deleted = await this.db
+      .delete(schema.tournamentRosters)
+      .where(
+        and(
+          eq(schema.tournamentRosters.participantId, participantId),
+          eq(schema.tournamentRosters.userId, userId),
+        ),
+      )
+      .returning();
+    if (deleted.length === 0) {
+      throw new BadRequestException('Không tìm thấy thành viên này trong đội.');
+    }
+    return deleted[0];
+  }
+
   async findUserByEmailOrPhone(emailOrPhone: string) {
     const [user] = await this.db
       .select({ id: schema.users.id })

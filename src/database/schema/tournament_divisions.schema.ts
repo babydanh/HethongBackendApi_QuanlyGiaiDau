@@ -8,8 +8,6 @@ import {
   boolean,
   jsonb,
   text,
-  check,
-  unique,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tournaments } from './tournaments.schema';
@@ -47,11 +45,4 @@ export const tournamentDivisions = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    divisionUnique: unique('tournament_division_unique_idx').on(
-      table.tournamentId,
-      table.matchType,
-      table.genderRestriction,
-    ),
-  }),
 );

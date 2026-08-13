@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { DivisionBracketType, GenderRestriction, MatchType } from './create-division.dto';
@@ -16,6 +17,7 @@ export class UpdateDivisionDto {
   @ApiPropertyOptional({ example: 'Đôi Nam' })
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   name?: string;
 
   @ApiPropertyOptional({ enum: MatchType })
