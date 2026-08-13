@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { UsersRepository } from './users.repository';
@@ -17,6 +18,7 @@ import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { QueryMyReportsDto } from './dto/query-my-reports.dto';
 import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
+import { UserRole } from '../../common/constants/enums';
 
 @Injectable()
 export class UsersService {
@@ -50,6 +52,46 @@ export class UsersService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { passwordHash, ...userWithoutPassword } = user;
     return userWithoutPassword;
+  }
+
+  async updateSystemRoles(
+    actorId: string,
+    targetUserId: string,
+    roles: UserRole[],
+  ) {
+    if (actorId === targetUserId) {
+      throw new BadRequestException(
+        'Bạn không thể tự thay đổi quyền hệ thống của mình từ trang quản trị.',
+      );
+    }
+
+    const effectiveRoles = Array.from(new Set([
+      UserRole.PLAYER,
+      ...roles,
+    ]));
+
+    try {
+      const updatedRoles = await this.usersRepository.replaceSystemRoles(
+        targetUserId,
+        effectiveRoles,
+        actorId,
+      );
+      if (!updatedRoles) {
+        throw new NotFoundException(ERROR_MESSAGES.USER_NOT_FOUND);
+      }
+      return { userId: targetUserId, roles: updatedRoles };
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'SYSTEM_ROLE_NOT_FOUND') {
+        throw new BadRequestException('Một hoặc nhiều quyền hệ thống chưa được khởi tạo.');
+      }
+      if (error instanceof Error && error.message === 'LAST_ADMIN') {
+        throw new BadRequestException('Không thể gỡ quyền của quản trị viên hệ thống cuối cùng.');
+      }
+      if (error instanceof Error && error.message === 'ACTOR_NOT_ADMIN') {
+        throw new ForbiddenException('Quyền quản trị của bạn không còn hiệu lực. Vui lòng đăng nhập lại.');
+      }
+      throw error;
+    }
   }
 
   async getProfile(userId: string) {

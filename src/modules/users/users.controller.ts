@@ -14,6 +14,7 @@ import {
   ParseFilePipe,
   MaxFileSizeValidator,
   FileTypeValidator,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -33,6 +34,7 @@ import { Verified } from '../../common/decorators/verified.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { UserRole } from '../../common/constants/enums';
+import { UpdateSystemRolesDto } from './dto/update-system-roles.dto';
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -95,6 +97,19 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Return a single user' })
   async findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
+  }
+
+  @Patch(':id/system-roles')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Thay thế quyền hệ thống của người dùng (Admin)' })
+  @ApiResponse({ status: 200, description: 'Quyền hệ thống đã được cập nhật' })
+  @ApiResponse({ status: 400, description: 'Không thể tự hạ quyền hoặc gỡ Admin cuối cùng' })
+  async updateSystemRoles(
+    @CurrentUser() admin: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSystemRolesDto,
+  ) {
+    return this.usersService.updateSystemRoles(admin.id, id, dto.roles);
   }
 
   @Patch('profile')

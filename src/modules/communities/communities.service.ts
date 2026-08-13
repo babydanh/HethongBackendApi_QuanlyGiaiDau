@@ -72,8 +72,9 @@ export class CommunitiesService {
 
   // --- DASHBOARD ---
 
-  async getDashboard(communityId: string) {
-    await this.findById(communityId);
+  async getDashboard(idOrSlug: string) {
+    const community = await this.findById(idOrSlug);
+    const realId = community.id;
 
     const [
       recentMatches,
@@ -82,11 +83,11 @@ export class CommunitiesService {
       activity,
       upcomingMatches,
     ] = await Promise.all([
-      this.communitiesRepository.getRecentMatches(communityId, 3),
-      this.communitiesRepository.getFeaturedTournament(communityId),
-      this.communitiesRepository.getTopRanked(communityId, 3),
-      this.communitiesRepository.getActivityFeed(communityId, 5),
-      this.communitiesRepository.getUpcomingMatches(communityId, 3),
+      this.communitiesRepository.getRecentMatches(realId, 3),
+      this.communitiesRepository.getFeaturedTournament(realId),
+      this.communitiesRepository.getTopRanked(realId, 3),
+      this.communitiesRepository.getActivityFeed(realId, 5),
+      this.communitiesRepository.getUpcomingMatches(realId, 3),
     ]);
 
     return {
@@ -100,10 +101,11 @@ export class CommunitiesService {
 
   // --- MY MEMBERSHIP ---
 
-  async getMyMembership(userId: string, communityId: string) {
+  async getMyMembership(userId: string, idOrSlug: string) {
+    const community = await this.findById(idOrSlug);
     const member = await this.communitiesRepository.findMyMembership(
       userId,
-      communityId,
+      community.id,
     );
     if (!member) {
       throw new BaseException(

@@ -32,6 +32,11 @@ async function run() {
           slug: 'organizer',
           description: 'Tournament Organizer',
         },
+        {
+          name: 'REFEREE',
+          slug: 'referee',
+          description: 'Match Referee',
+        },
         { name: 'PLAYER', slug: 'player', description: 'Player' },
       ])
       .onConflictDoNothing();

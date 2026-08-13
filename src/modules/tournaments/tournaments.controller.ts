@@ -117,7 +117,11 @@ export class TournamentsController {
     @Body() createParentTournamentDto: CreateParentTournamentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.createParent(user.sub, createParentTournamentDto);
+    return this.tournamentsService.createParent(
+      user.sub,
+      createParentTournamentDto,
+      this.getSystemRoles(user),
+    );
   }
 
   @Get('parent/my')

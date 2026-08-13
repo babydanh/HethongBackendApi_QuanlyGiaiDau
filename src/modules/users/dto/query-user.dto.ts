@@ -1,7 +1,8 @@
-import { IsOptional, IsInt, Min, IsString } from 'class-validator';
+import { IsOptional, IsInt, Min, IsString, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
+import { UserRole } from '../../../common/constants/enums';
 
 export class QueryUserDto extends CursorPaginationDto {
   @ApiPropertyOptional({ default: 1 })
@@ -32,4 +33,9 @@ export class QueryUserDto extends CursorPaginationDto {
   @IsString()
   @IsOptional()
   order?: 'asc' | 'desc' = 'desc';
+
+  @ApiPropertyOptional({ enum: UserRole })
+  @IsEnum(UserRole)
+  @IsOptional()
+  role?: UserRole;
 }

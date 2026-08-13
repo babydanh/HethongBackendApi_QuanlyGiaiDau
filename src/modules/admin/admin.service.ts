@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -6,7 +6,9 @@ import { eq, and, desc, sql, or, ilike, count, SQL, asc, gte, lte, inArray, isNu
 import { EloEngineService } from '../rankings/elo-engine.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AccountSanctionService } from '../../common/services/account-sanction.service';
 import { QueryReportsDto } from './dto/admin.dto';
+import { UserRole } from '../../common/constants/enums';
 import type { ReportStatus } from '../users/dto/query-my-reports.dto';
 import type { ReportCategory } from '../users/dto/create-report.dto';
 import {
@@ -30,6 +32,7 @@ export class AdminService {
     private readonly eloEngine: EloEngineService,
     private readonly rankingsService: RankingsService,
     private readonly notificationsService: NotificationsService,
+    private readonly accountSanctionService: AccountSanctionService,
   ) {}
 
   private extractTournamentPreviousStatus(
@@ -578,37 +581,121 @@ export class AdminService {
   // ─── Moderation & Bans ────────────────────────────────────────
 
   async banUser(userId: string, adminId: string, reason: string, banType: 'WARN' | 'SOFT_BAN' | 'HARD_BAN', expiresAt?: string) {
-    const expiry = expiresAt ? new Date(expiresAt) : null;
-    const [banRecord] = await this.db
-      .insert(schema.userBans)
-      .values({
-        userId,
-        bannedBy: adminId,
-        reason,
-        banType,
-        expiresAt: expiry,
-        isActive: true,
-      })
-      .returning();
-
-    // If Hard Ban, suspend any community/club owned by the user
-    if (banType === 'HARD_BAN') {
-      await this.db
-        .update(schema.communities)
-        .set({
-          status: 'SUSPENDED',
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.communities.creatorId, userId));
+    if (userId === adminId) {
+      throw new BadRequestException('Bạn không thể tự phạt hoặc khóa tài khoản của mình.');
     }
 
-    await this.db.insert(schema.auditLogs).values({
-      userId: adminId,
-      action: `USER_BAN_${banType}`,
-      tableName: 'user_bans',
-      recordId: banRecord.id,
-      newValues: banRecord,
+    const expiry = expiresAt ? new Date(expiresAt) : null;
+    const banRecord = await this.db.transaction(async (tx) => {
+      // Serialize role-sensitive punishments across API instances so no two
+      // moderators can concurrently disable the last active platform admin.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('system-role-admin-assignment'))`);
+      // Roles in an access JWT may be stale until expiry. Verify the acting
+      // admin in the database before executing any sensitive punishment.
+      const actorAdminRoles = await tx
+        .select({ userId: schema.userToRoles.userId })
+        .from(schema.userToRoles)
+        .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+        .innerJoin(schema.users, eq(schema.userToRoles.userId, schema.users.id))
+        .where(and(
+          eq(schema.userToRoles.userId, adminId),
+          eq(schema.roles.name, UserRole.ADMIN),
+          isNull(schema.users.deletedAt),
+        ))
+        .for('update');
+      if (actorAdminRoles.length === 0) {
+        throw new ForbiddenException('Quyền quản trị của bạn không còn hiệu lực. Vui lòng đăng nhập lại.');
+      }
+
+      const [target] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)))
+        .for('update')
+        .limit(1);
+      if (!target) {
+        throw new NotFoundException('Không tìm thấy người dùng.');
+      }
+
+      const targetAdminRoles = await tx
+        .select({ userId: schema.userToRoles.userId })
+        .from(schema.userToRoles)
+        .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+        .where(and(
+          eq(schema.userToRoles.userId, userId),
+          eq(schema.roles.name, UserRole.ADMIN),
+        ))
+        .for('update');
+      // WARN is informational: it must not prevent warning another last
+      // administrator. Only access-denying sanctions need this invariant.
+      if (banType !== 'WARN' && targetAdminRoles.length > 0) {
+        const activeAdmins = await tx
+          .select({ userId: schema.userToRoles.userId })
+          .from(schema.userToRoles)
+          .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+          .innerJoin(schema.users, eq(schema.userToRoles.userId, schema.users.id))
+          .where(and(
+            eq(schema.roles.name, UserRole.ADMIN),
+            isNull(schema.users.deletedAt),
+            sql`not exists (
+              select 1 from ${schema.userBans} active_ban
+              where active_ban.user_id = ${schema.userToRoles.userId}
+                and active_ban.is_active = true
+                and active_ban.ban_type in ('SOFT_BAN', 'HARD_BAN')
+                and (active_ban.expires_at is null or active_ban.expires_at > now())
+            )`,
+          ))
+          .for('update');
+        const activeAdminUserIds = new Set(activeAdmins.map((admin) => admin.userId));
+        if (activeAdminUserIds.has(userId) && activeAdminUserIds.size <= 1) {
+          throw new BadRequestException('Không thể phạt hoặc khóa quản trị viên hệ thống cuối cùng.');
+        }
+      }
+
+      const [createdBan] = await tx
+        .insert(schema.userBans)
+        .values({
+          userId,
+          bannedBy: adminId,
+          reason,
+          banType,
+          expiresAt: expiry,
+          isActive: true,
+        })
+        .returning();
+
+      if (banType === 'HARD_BAN') {
+        await tx
+          .update(schema.communities)
+          .set({ status: 'SUSPENDED', updatedAt: new Date() })
+          .where(eq(schema.communities.creatorId, userId));
+      }
+
+      // WARN is informational. Soft/hard bans invalidate all refresh tokens
+      // immediately; access JWTs remain valid only until normal expiry.
+      if (banType === 'SOFT_BAN' || banType === 'HARD_BAN') {
+        await tx
+          .update(schema.sessions)
+          .set({ isRevoked: true, revokedAt: new Date() })
+          .where(and(
+            eq(schema.sessions.userId, userId),
+            eq(schema.sessions.isRevoked, false),
+          ));
+      }
+
+      await tx.insert(schema.auditLogs).values({
+        userId: adminId,
+        action: `USER_BAN_${banType}`,
+        tableName: 'user_bans',
+        recordId: createdBan.id,
+        newValues: createdBan,
+      });
+      return createdBan;
     });
+
+    if (banType === 'SOFT_BAN' || banType === 'HARD_BAN') {
+      await this.accountSanctionService.markAccessBanned(userId, expiry);
+    }
 
     await this.notificationsService.sendNotification(
       buildUserBannedNotification({
@@ -622,11 +709,17 @@ export class AdminService {
   }
 
   async unbanUser(userId: string, adminId: string) {
+    if (userId === adminId) {
+      throw new BadRequestException('Bạn không thể tự gỡ xử lý tài khoản của mình.');
+    }
+
     const bans = await this.db
       .update(schema.userBans)
       .set({ isActive: false })
       .where(and(eq(schema.userBans.userId, userId), eq(schema.userBans.isActive, true)))
       .returning();
+
+    await this.accountSanctionService.invalidateAccessBan(userId);
 
     // Re-activate community/club if soft/hard bans are cleared
     await this.db

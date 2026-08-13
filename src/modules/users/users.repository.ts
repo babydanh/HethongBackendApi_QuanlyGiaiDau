@@ -10,28 +10,169 @@ import type {
 } from './dto/create-report.dto';
 import type { QueryMyReportsDto } from './dto/query-my-reports.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
+import { AuditService } from '../audit/audit.service';
+import { UserRole } from '../../common/constants/enums';
 
 @Injectable()
 export class UsersRepository {
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
+    private readonly auditService: AuditService,
   ) {}
 
+  /**
+   * Atomically replaces global system roles. Community/tournament-scoped roles
+   * live in their own tables and are intentionally not read or changed here.
+   */
+  async replaceSystemRoles(
+    targetUserId: string,
+    roleNames: UserRole[],
+    actorId: string,
+  ): Promise<string[] | null> {
+    return this.db.transaction(async (tx) => {
+      // Serializes every ADMIN demotion across instances. Row locks alone do
+      // not protect an empty/single-row result set from a concurrent demotion.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('system-role-admin-assignment'))`);
+
+      // JWT roles can be stale until access-token expiry. Re-check the actor
+      // inside the transaction so a just-demoted admin cannot chain another
+      // system-role mutation with an old token.
+      const actorAdminAssignments = await tx
+        .select({ userId: schema.userToRoles.userId })
+        .from(schema.userToRoles)
+        .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+        .innerJoin(schema.users, eq(schema.userToRoles.userId, schema.users.id))
+        .where(and(
+          eq(schema.userToRoles.userId, actorId),
+          eq(schema.roles.name, UserRole.ADMIN),
+          isNull(schema.users.deletedAt),
+        ))
+        .for('update');
+      if (actorAdminAssignments.length === 0) {
+        throw new Error('ACTOR_NOT_ADMIN');
+      }
+
+      const [target] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.id, targetUserId), isNull(schema.users.deletedAt)))
+        .for('update')
+        .limit(1);
+      if (!target) return null;
+
+      const requestedRoles = await tx
+        .select({ id: schema.roles.id, name: schema.roles.name })
+        .from(schema.roles)
+        .where(inArray(schema.roles.name, roleNames))
+        .for('update');
+      if (requestedRoles.length !== roleNames.length) {
+        throw new Error('SYSTEM_ROLE_NOT_FOUND');
+      }
+
+      const currentAssignments = await tx
+        .select({ roleId: schema.userToRoles.roleId, roleName: schema.roles.name })
+        .from(schema.userToRoles)
+        .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+        .where(eq(schema.userToRoles.userId, targetUserId))
+        .for('update');
+      const currentRoleNames = currentAssignments.map((assignment) => assignment.roleName);
+      const targetLosesAdmin =
+        currentRoleNames.includes(UserRole.ADMIN) && !roleNames.includes(UserRole.ADMIN);
+
+      if (targetLosesAdmin) {
+        const adminAssignments = await tx
+          .select({ userId: schema.userToRoles.userId })
+          .from(schema.userToRoles)
+          .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+          .innerJoin(schema.users, eq(schema.userToRoles.userId, schema.users.id))
+          .where(and(
+            eq(schema.roles.name, UserRole.ADMIN),
+            isNull(schema.users.deletedAt),
+            sql`not exists (
+              select 1 from ${schema.userBans} active_ban
+              where active_ban.user_id = ${schema.userToRoles.userId}
+                and active_ban.is_active = true
+                and active_ban.ban_type in ('SOFT_BAN', 'HARD_BAN')
+                and (active_ban.expires_at is null or active_ban.expires_at > now())
+            )`,
+          ))
+          .for('update');
+        const activeAdminUserIds = new Set(adminAssignments.map((assignment) => assignment.userId));
+        if (activeAdminUserIds.has(targetUserId) && activeAdminUserIds.size <= 1) {
+          throw new Error('LAST_ADMIN');
+        }
+      }
+
+      const requestedRoleIds = requestedRoles.map((role) => role.id);
+      const currentRoleIds = currentAssignments.map((assignment) => assignment.roleId);
+      const rolesToRemove = currentRoleIds.filter((roleId) => !requestedRoleIds.includes(roleId));
+      const rolesToAdd = requestedRoleIds.filter((roleId) => !currentRoleIds.includes(roleId));
+
+      if (rolesToRemove.length === 0 && rolesToAdd.length === 0) {
+        return currentRoleNames;
+      }
+
+      if (rolesToRemove.length > 0) {
+        await tx
+          .delete(schema.userToRoles)
+          .where(and(
+            eq(schema.userToRoles.userId, targetUserId),
+            inArray(schema.userToRoles.roleId, rolesToRemove),
+          ));
+      }
+      if (rolesToAdd.length > 0) {
+        await tx.insert(schema.userToRoles).values(
+          rolesToAdd.map((roleId) => ({
+            userId: targetUserId,
+            roleId,
+            assignedBy: actorId,
+          })),
+        ).onConflictDoNothing();
+      }
+
+      // Refresh tokens become unusable immediately. Existing access JWTs are
+      // stateless and can remain valid only until their normal expiry.
+      await tx
+        .update(schema.sessions)
+        .set({ isRevoked: true, revokedAt: new Date() })
+        .where(and(
+          eq(schema.sessions.userId, targetUserId),
+          eq(schema.sessions.isRevoked, false),
+        ));
+
+      await this.auditService.logUpdate(
+        tx,
+        actorId,
+        'user_to_roles',
+        targetUserId,
+        { roles: currentRoleNames },
+        { roles: roleNames },
+      );
+      return roleNames;
+    });
+  }
+
   async findAll(query: QueryUserDto) {
-    const { page = 1, limit, search, order, cursor } = query;
+    const { page = 1, limit, search, order, cursor, role } = query;
 
     let whereClause = and(
       isNull(schema.users.deletedAt),
       eq(schema.users.isMock, false),
     )!;
+    if (role) {
+      whereClause = and(whereClause, sql`exists (
+        select 1 from ${schema.userToRoles} ur
+        inner join ${schema.roles} rr on ur.role_id = rr.id
+        where ur.user_id = ${schema.users.id} and rr.name = ${role}
+      )`)!;
+    }
     if (search) {
       whereClause = and(
+        whereClause,
         or(
           ilike(schema.users.email, `%${search}%`),
           ilike(schema.profiles.fullName, `%${search}%`),
         ),
-        isNull(schema.users.deletedAt),
-        eq(schema.users.isMock, false),
       )!;
     }
 
@@ -66,19 +207,9 @@ export class UsersRepository {
         fullName: schema.profiles.fullName,
         avatarUrl: schema.profiles.avatarUrl,
         isVerified: schema.profiles.isVerified,
-        banType: schema.userBans.banType,
-        banReason: schema.userBans.reason,
-        banExpiresAt: schema.userBans.expiresAt,
       })
       .from(schema.users)
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .leftJoin(
-        schema.userBans,
-        and(
-          eq(schema.users.id, schema.userBans.userId),
-          eq(schema.userBans.isActive, true),
-        ),
-      )
       .where(userWhere)
       .orderBy(sortConfig, order === 'desc' ? desc(schema.users.id) : asc(schema.users.id))
       .limit(limit! + 1)
@@ -86,7 +217,7 @@ export class UsersRepository {
     const userRows = await userQuery;
     const hasMore = userRows.length > limit!;
     const data = hasMore ? userRows.slice(0, limit!) : userRows;
-    const lastUser = userRows.length > 0 ? userRows[userRows.length - 1] : undefined;
+    const lastUser = data[data.length - 1];
 
     // Simple count (in real app we should do a proper count query)
     const countResult = await this.db
@@ -97,20 +228,69 @@ export class UsersRepository {
 
     const total = countResult.length;
 
+    const roleRows = data.length > 0
+      ? await this.db
+        .select({ userId: schema.userToRoles.userId, roleName: schema.roles.name })
+        .from(schema.userToRoles)
+        .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+        .where(inArray(schema.userToRoles.userId, data.map((row) => row.id)))
+      : [];
+    const rolesByUserId = new Map<string, string[]>();
+    roleRows.forEach((row) => {
+      const rolesForUser = rolesByUserId.get(row.userId) ?? [];
+      if (!rolesForUser.includes(row.roleName)) {
+        rolesForUser.push(row.roleName);
+      }
+      rolesByUserId.set(row.userId, rolesForUser);
+    });
+
+    // Do not join sanctions into the cursor-paginated user query. A user may
+    // have multiple active WARN/history rows, which would duplicate that user
+    // and corrupt both page boundaries and the total. Fetch the emitted users'
+    // current sanctions separately and retain the most recent valid one.
+    const activeBanRows = data.length > 0
+      ? await this.db
+        .select({
+          userId: schema.userBans.userId,
+          banType: schema.userBans.banType,
+          reason: schema.userBans.reason,
+          expiresAt: schema.userBans.expiresAt,
+          createdAt: schema.userBans.createdAt,
+          id: schema.userBans.id,
+        })
+        .from(schema.userBans)
+        .where(and(
+          inArray(schema.userBans.userId, data.map((row) => row.id)),
+          eq(schema.userBans.isActive, true),
+          or(
+            isNull(schema.userBans.expiresAt),
+            gt(schema.userBans.expiresAt, sql`now()`),
+          ),
+        ))
+        .orderBy(desc(schema.userBans.createdAt), desc(schema.userBans.id))
+      : [];
+    const activeBanByUserId = new Map<string, typeof activeBanRows[number]>();
+    for (const ban of activeBanRows) {
+      if (!activeBanByUserId.has(ban.userId)) {
+        activeBanByUserId.set(ban.userId, ban);
+      }
+    }
+
     const mappedData = data.map((row) => ({
       id: row.id,
       email: row.email,
       isEmailVerified: row.isEmailVerified,
       createdAt: row.createdAt,
+      roles: rolesByUserId.get(row.id) ?? [],
       profile: {
         fullName: row.fullName || '',
         avatarUrl: row.avatarUrl || undefined,
         isVerified: row.isVerified || false,
       },
-      activeBan: row.banType ? {
-        banType: row.banType as 'WARN' | 'SOFT_BAN' | 'HARD_BAN',
-        reason: row.banReason || '',
-        expiresAt: row.banExpiresAt ? row.banExpiresAt.toISOString() : undefined,
+      activeBan: activeBanByUserId.get(row.id) ? {
+        banType: activeBanByUserId.get(row.id)!.banType as 'WARN' | 'SOFT_BAN' | 'HARD_BAN',
+        reason: activeBanByUserId.get(row.id)!.reason || '',
+        expiresAt: activeBanByUserId.get(row.id)!.expiresAt?.toISOString(),
       } : undefined,
     }));
 
