@@ -1839,6 +1839,71 @@ export class TournamentsService {
     return result;
   }
 
+  /**
+   * Team sport (bóng đá): đội trưởng mời 1 thành viên (userId) vào đội với role MAIN/RESERVE.
+   */
+  async addTeamMember(participantId: string, userId: string, memberUserId: string, role: 'MAIN' | 'RESERVE') {
+    if (!memberUserId) {
+      throw new BadRequestException('Thiếu ID thành viên cần mời.');
+    }
+
+    const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant) throw new NotFoundException('Đội thi đấu không tồn tại.');
+
+    const tournament = await this.tournamentsRepository.findById(participant.tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    // Chỉ đội trưởng (người tạo) mới được mời
+    if (participant.registeredBy !== userId) {
+      throw new ForbiddenException('Chỉ đội trưởng mới được mời thành viên.');
+    }
+
+    if (tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
+      throw new BadRequestException('Giải đấu không trong thời gian đăng ký.');
+    }
+
+    // Chặn mời chính mình
+    if (memberUserId === userId) {
+      throw new BadRequestException('Bạn đã là đội trưởng của đội.');
+    }
+
+    // Giới hạn maxTeamSize
+    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    const maxTeamSize = config.maxTeamSize as number | undefined;
+    if (maxTeamSize) {
+      const rosters = await this.tournamentsRepository.getParticipantRosters(participantId);
+      if (rosters.length >= maxTeamSize) {
+        throw new BadRequestException('Đội đã đạt số thành viên tối đa.');
+      }
+    }
+
+    // Chống trùng
+    const existing = await this.tournamentsRepository.getParticipantRosters(participantId);
+    if (existing.some((r) => r.userId === memberUserId)) {
+      throw new BadRequestException('Thành viên này đã ở trong đội.');
+    }
+
+    return this.tournamentsRepository.addRoster(participantId, memberUserId, role);
+  }
+
+  /**
+   * Team sport: đội trưởng xoá thành viên khỏi đội.
+   */
+  async removeTeamMember(participantId: string, userId: string, memberUserId: string) {
+    const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant) throw new NotFoundException('Đội thi đấu không tồn tại.');
+
+    // Chỉ đội trưởng xoá được (không xoá chính đội trưởng)
+    if (participant.registeredBy !== userId) {
+      throw new ForbiddenException('Chỉ đội trưởng mới được xoá thành viên.');
+    }
+    if (memberUserId === userId) {
+      throw new BadRequestException('Không thể tự xoá đội trưởng. Hãy rút đội.');
+    }
+
+    return this.tournamentsRepository.removeRoster(participantId, memberUserId);
+  }
+
   async withdraw(
     tournamentId: string,
     userId: string,
@@ -2245,6 +2310,21 @@ export class TournamentsService {
     );
     if (participants.length < 2) {
       throw new BadRequestException('Cần ít nhất 2 người tham gia để chốt và tạo sơ đồ thi đấu');
+    }
+
+    // Team sport (bóng đá): validate đội hình — mỗi đội phải đủ MAIN >= minTeamSize.
+    const lockConfig = (existing.tournamentConfig || {}) as Record<string, unknown>;
+    const lockMinTeamSize = lockConfig.minTeamSize as number | undefined;
+    if (lockMinTeamSize) {
+      for (const p of participants) {
+        const members = (p as unknown as { members?: Array<{ role?: string }> }).members || [];
+        const mainCount = members.filter((m) => (m.role || 'MAIN') === 'MAIN').length;
+        if (mainCount < lockMinTeamSize) {
+          throw new BadRequestException(
+            `Đội "${p.teamName}" chưa đủ đội hình (cần tối thiểu ${lockMinTeamSize} cầu thủ chính thức, hiện có ${mainCount}).`,
+          );
+        }
+      }
     }
 
     const totalPlayers = participants.reduce((sum, p) => sum + (p.members?.length || 0), 0);
@@ -3059,7 +3139,7 @@ export class TournamentsService {
 
       return await this.tournamentsRepository.createDivision(
         {
-          name: createDivisionDto.name,
+          name: createDivisionDto.name.trim(),
           matchType: createDivisionDto.matchType,
           genderRestriction: createDivisionDto.genderRestriction,
           maxParticipants: createDivisionDto.maxParticipants ?? tournament.maxParticipants ?? undefined,
@@ -3168,6 +3248,13 @@ export class TournamentsService {
         allowRoundStructure: true,
         allowRoundMetadata: true,
       });
+    }
+
+    if (updateDivisionDto.name !== undefined) {
+      updateDivisionDto.name = updateDivisionDto.name.trim();
+      if (!updateDivisionDto.name) {
+        throw new BadRequestException('Tên nội dung thi đấu không được để trống');
+      }
     }
 
     return this.tournamentsRepository.updateDivision(divisionId, updateDivisionDto, userId);
