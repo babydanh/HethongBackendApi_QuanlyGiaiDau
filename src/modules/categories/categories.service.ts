@@ -56,8 +56,7 @@ export class CategoriesService {
       throw new ConflictException('Category with this slug already exists');
     }
     const result = await this.categoriesRepository.createCategory(dto);
-    await this.redisService.del(CACHE_KEY_ALL);
-    await this.redisService.del(`${CACHE_KEY_ALL}:{}`);
+    await this.redisService.delByPattern(`${CACHE_KEY_ALL}*`);
     return result;
   }
 
@@ -71,8 +70,7 @@ export class CategoriesService {
     }
     const result = await this.categoriesRepository.updateCategory(id, dto);
     await this.redisService.del(CACHE_KEY_ONE(id));
-    await this.redisService.del(CACHE_KEY_ALL);
-    await this.redisService.del(`${CACHE_KEY_ALL}:{}`);
+    await this.redisService.delByPattern(`${CACHE_KEY_ALL}*`);
     return result;
   }
 
@@ -80,8 +78,7 @@ export class CategoriesService {
     await this.findCategoryById(id);
     const result = await this.categoriesRepository.deleteCategory(id);
     await this.redisService.del(CACHE_KEY_ONE(id));
-    await this.redisService.del(CACHE_KEY_ALL);
-    await this.redisService.del(`${CACHE_KEY_ALL}:{}`);
+    await this.redisService.delByPattern(`${CACHE_KEY_ALL}*`);
     return result;
   }
 
