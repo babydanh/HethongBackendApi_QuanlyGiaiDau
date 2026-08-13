@@ -18,3 +18,4 @@ export * from './series.schema';
 export * from './admin_tables.schema';
 export * from './otp_codes.schema';
 export * from './community_social.schema';
+export * from './community_tag_presets.schema';
