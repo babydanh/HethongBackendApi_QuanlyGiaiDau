@@ -485,10 +485,26 @@ export class MatchesService {
 
       // Bóng đá knockout hòa → phân định bằng luân lưu: winner từ scoreDetails.shootout,
       // tỷ số chính vẫn hòa (2-2) nên bỏ qua check "winner phải có set cao hơn".
-      const shootout = (scoreDetails as Record<string, unknown> | null)?.shootout as
+      const scorePayload = scoreDetails as Record<string, unknown> | null;
+      const footballPayload = scorePayload?.football as Record<string, unknown> | undefined;
+      const shootout = (scorePayload?.shootout ?? footballPayload?.shootout) as
         | Record<string, unknown>
         | undefined;
       const isShootoutDecided = shootout?.winnerId === winnerId;
+
+      if (shootout) {
+        const team1Goals = shootout.team1Goals;
+        const team2Goals = shootout.team2Goals;
+        if (!Number.isInteger(team1Goals) || !Number.isInteger(team2Goals) || (team1Goals as number) < 0 || (team2Goals as number) < 0 || team1Goals === team2Goals) {
+          throw new BadRequestException('Tá»· sá»‘ luÃ¢n lÆ°u pháº£i lÃ  sá»‘ nguyÃªn khÃ´ng Ã¢m vÃ  pháº£i cÃ³ Ä‘á»™i tháº¯ng.');
+        }
+        const shootoutWinner = (team1Goals as number) > (team2Goals as number)
+          ? existing.participant1Id
+          : existing.participant2Id;
+        if (!shootoutWinner || shootout.winnerId !== shootoutWinner) {
+          throw new BadRequestException('WinnerId pháº£i khÃ³p vá»›i tá»· sá»‘ luÃ¢n lÆ°u cao hÆ¡n.');
+        }
+      }
 
       if (!isShootoutDecided && winnerId === existing.participant1Id && p1SetsWon <= p2SetsWon) {
         throw new BadRequestException('Đội 1 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.');

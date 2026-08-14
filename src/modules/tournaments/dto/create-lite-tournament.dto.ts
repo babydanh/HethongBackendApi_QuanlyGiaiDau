@@ -25,7 +25,7 @@ export class CreateLiteTournamentDto {
 
   @ApiProperty({ example: 'badminton', description: 'Môn thi đấu (slug)', enum: ['badminton', 'tennis', 'pickleball', 'table_tennis'] })
   @IsString()
-  @IsIn(['badminton', 'tennis', 'pickleball', 'table_tennis'])
+  @IsIn(['badminton', 'tennis', 'pickleball', 'table_tennis', 'football'])
   sport: string;
 
   @ApiPropertyOptional({ example: 'singles', description: 'Hình thức: đánh đơn hoặc đôi', enum: ['singles', 'doubles'] })
@@ -46,6 +46,19 @@ export class CreateLiteTournamentDto {
   @Min(2)
   @Max(32)
   maxTeams?: number;
+
+  @ApiPropertyOptional({ example: 7, enum: [5, 7, 11] })
+  @IsNumber()
+  @IsOptional()
+  @IsIn([5, 7, 11])
+  teamSize?: 5 | 7 | 11;
+
+  @ApiPropertyOptional({ example: 5 })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(20)
+  maxReserve?: number;
 
   @ApiPropertyOptional({ example: 'Giải đấu giao lưu cuối tuần', description: 'Mô tả giải đấu' })
   @IsString()

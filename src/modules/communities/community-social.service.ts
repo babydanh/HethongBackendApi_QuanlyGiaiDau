@@ -7,9 +7,13 @@ import type { UpdateCommunitySocialSettingsDto } from './dto/update-community-so
 import type { ReportCommunityContentDto } from './dto/report-community-content.dto';
 import type { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
 import { NotificationsService } from '../notifications/notifications.service';
-import { NOTIFICATION_TYPES } from '../notifications/notification-types';
+import {
+  buildCommunityPostApprovedNotification,
+  buildCommunityPostCommentedNotification,
+  buildCommunityPostMentionedNotification,
+} from '../notifications/notification-builder';
 
-type SocialUser = { id: string; roles?: string[] };
+type SocialUser = { id: string; fullName?: string; roles?: string[] };
 
 @Injectable()
 export class CommunitySocialService {
@@ -42,7 +46,7 @@ export class CommunitySocialService {
     dto: CreateCommunityPostDto,
     idempotencyKey?: string,
   ) {
-    await this.ensureCommunity(communityId);
+    const community = await this.ensureCommunity(communityId);
     const member = await this.requireJoined(communityId, user.id);
     const body = dto.body?.trim() ?? '';
     const mediaUrls = dto.mediaUrls ?? [];
@@ -53,10 +57,10 @@ export class CommunitySocialService {
     const mentionIds = [...new Set(dto.mentions ?? [])];
     const canManage = member.role === 'OWNER' || member.role === 'MODERATOR' || user.roles?.includes('ADMIN');
     if (mentionIds.length > 0 && settings.memberTaggingPolicy === 'OFF') {
-      throw new ForbiddenException('Cá»™ng Ä‘á»“ng hiá»‡n Ä‘ang táº¯t gáº¯n tháº» thÃ nh viÃªn.');
+      throw new ForbiddenException('Cộng đồng hiện đang tắt gắn thẻ thành viên.');
     }
     if (mentionIds.length > 0 && settings.memberTaggingPolicy === 'ADMINS' && !canManage) {
-      throw new ForbiddenException('Chá»‰ ban quáº£n trá»‹ Ä‘Æ°á»£c gáº¯n tháº» thÃ nh viÃªn.');
+      throw new ForbiddenException('Chỉ ban quản trị được gắn thẻ thành viên.');
     }
     const validMentionIds = await this.socialRepository.getJoinedMentionIds(communityId, mentionIds);
     if (validMentionIds.length !== mentionIds.length) {
@@ -75,16 +79,33 @@ export class CommunitySocialService {
     if (!post) throw new BadRequestException('Không thể tạo bài viết.');
     for (const receiverId of validMentionIds) {
       if (receiverId === user.id) continue;
-      await this.notificationsService.sendNotification({
-        receiverId,
-        senderId: user.id,
-        type: NOTIFICATION_TYPES.COMMUNITY_POST_MENTIONED,
-        title: 'Bạn được nhắc tên trong bài viết CLB',
-        content: 'Bạn vừa được nhắc trong một bài viết của CLB.',
-        redirectUrl: `/communities/${communityId}`,
-      });
+      await this.notificationsService.sendNotification(
+        buildCommunityPostMentionedNotification({
+          communityId,
+          communityName: community.name,
+          senderName: user.fullName?.trim() || 'Thành viên',
+          receiverId,
+          senderId: user.id,
+          postId: post.id,
+        }),
+      );
     }
     return post;
+  }
+
+  async deletePost(communityId: string, postId: string, user: SocialUser) {
+    await this.ensureCommunity(communityId);
+    const post = await this.socialRepository.findPost(postId);
+    if (!post || post.communityId !== communityId) {
+      throw new NotFoundException('Không tìm thấy bài viết.');
+    }
+    // Cho phép tác giả bài viết HOẶC ban quản trị (OWNER / MODERATOR / ADMIN) xóa
+    if (post.authorId !== user.id) {
+      await this.requireManager(communityId, user);
+    } else {
+      await this.requireJoined(communityId, user.id);
+    }
+    return this.socialRepository.softDeletePost(postId);
   }
 
   async updateSettings(communityId: string, user: SocialUser, dto: UpdateCommunitySocialSettingsDto) {
@@ -128,14 +149,16 @@ export class CommunitySocialService {
     void member;
     const comment = await this.socialRepository.createComment(postId, user.id, dto.body, dto.parentId);
     if (comment && post.authorId && post.authorId !== user.id) {
-      await this.notificationsService.sendNotification({
-        receiverId: post.authorId,
-        senderId: user.id,
-        type: NOTIFICATION_TYPES.COMMUNITY_POST_COMMENTED,
-        title: 'Bài viết của bạn có bình luận mới',
-        content: 'Một thành viên vừa bình luận vào bài viết của bạn.',
-        redirectUrl: `/communities/${communityId}`,
-      });
+      await this.notificationsService.sendNotification(
+        buildCommunityPostCommentedNotification({
+          communityId,
+          communityName: community.name,
+          senderName: user.fullName?.trim() || 'Thành viên',
+          receiverId: post.authorId,
+          senderId: user.id,
+          postId: post.id,
+        }),
+      );
     }
     return comment;
   }
@@ -197,18 +220,20 @@ export class CommunitySocialService {
   }
 
   async moderatePost(communityId: string, postId: string, user: SocialUser, status: 'PUBLISHED' | 'REJECTED' | 'HIDDEN') {
+    const community = await this.ensureCommunity(communityId);
     await this.requireManager(communityId, user);
     const post = await this.socialRepository.findPost(postId);
     if (!post || post.communityId !== communityId) throw new NotFoundException('Không tìm thấy bài viết.');
     const updated = await this.socialRepository.updatePostStatus(postId, status);
     if (updated?.status === 'PUBLISHED' && post.authorId) {
-      await this.notificationsService.sendNotification({
-        receiverId: post.authorId,
-        type: NOTIFICATION_TYPES.COMMUNITY_POST_APPROVED,
-        title: 'Bài viết CLB đã được duyệt',
-        content: 'Bài viết của bạn hiện đã hiển thị trong bảng tin CLB.',
-        redirectUrl: `/communities/${communityId}`,
-      });
+      await this.notificationsService.sendNotification(
+        buildCommunityPostApprovedNotification({
+          communityId,
+          communityName: community.name,
+          receiverId: post.authorId,
+          postId: post.id,
+        }),
+      );
     }
     return updated;
   }

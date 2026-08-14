@@ -23,6 +23,13 @@ import {
 function sumSetPoints(
   scoreDetails: Record<string, unknown> | null | undefined,
 ): { p1: number; p2: number } {
+  const football = scoreDetails?.football;
+  if (football && typeof football === 'object' && !Array.isArray(football)) {
+    const value = football as Record<string, unknown>;
+    const p1 = Number(value.team1Goals);
+    const p2 = Number(value.team2Goals);
+    if (Number.isFinite(p1) && Number.isFinite(p2)) return { p1, p2 };
+  }
   let p1 = 0;
   let p2 = 0;
   if (scoreDetails?.sets && Array.isArray(scoreDetails.sets)) {
@@ -1119,16 +1126,30 @@ export class MatchesRepository {
         // Aggregate: leg1 p1 vs p2, leg2 p1 vs p2 (vai home/away đã đổi ở generator)
         const leg1 = updated.leg === 1 ? updated : otherLeg!;
         const leg2 = updated.leg === 2 ? updated : otherLeg!;
-        const totalP1 = (leg1.p1SetsWon || 0) + (leg2.p1SetsWon || 0);
-        const totalP2 = (leg1.p2SetsWon || 0) + (leg2.p2SetsWon || 0);
+        const participantIds = [leg1.participant1Id, leg1.participant2Id].filter((value): value is string => Boolean(value));
+        const scoreFor = (leg: typeof leg1, participantId: string): number => {
+          const football = leg.scoreDetails?.football;
+          if (football && typeof football === 'object' && !Array.isArray(football)) {
+            const value = football as Record<string, unknown>;
+            const team1Goals = Number(value.team1Goals);
+            const team2Goals = Number(value.team2Goals);
+            if (Number.isFinite(team1Goals) && Number.isFinite(team2Goals)) {
+              return participantId === leg.participant1Id ? team1Goals : team2Goals;
+            }
+          }
+          return participantId === leg.participant1Id ? (leg.p1SetsWon || 0) : (leg.p2SetsWon || 0);
+        };
+        const totalP1 = participantIds[0] ? scoreFor(leg1, participantIds[0]) + scoreFor(leg2, participantIds[0]) : 0;
+        const totalP2 = participantIds[1] ? scoreFor(leg1, participantIds[1]) + scoreFor(leg2, participantIds[1]) : 0;
 
         if (totalP1 > totalP2) {
-          effectiveWinnerId = leg1.participant1Id ?? leg2.participant1Id;
+          effectiveWinnerId = participantIds[0] ?? null;
         } else if (totalP2 > totalP1) {
-          effectiveWinnerId = leg1.participant2Id ?? leg2.participant2Id;
+          effectiveWinnerId = participantIds[1] ?? null;
         } else {
           // Hòa aggregate → luân lưu: lấy từ scoreDetails.shootout của leg cuối
-          const shootout = (updated.scoreDetails as Record<string, unknown> | null)?.shootout as
+          const updatedDetails = updated.scoreDetails as Record<string, unknown> | null;
+          const shootout = (updatedDetails?.shootout ?? (updatedDetails?.football as Record<string, unknown> | undefined)?.shootout) as
             | Record<string, unknown>
             | undefined;
           const shootoutWinnerId = shootout?.winnerId as string | undefined;
@@ -1140,7 +1161,8 @@ export class MatchesRepository {
       }
     } else if (!effectiveWinnerId && updated.tieId && updated.nextMatchId) {
       // Knockout hòa + penaltyShootout: dùng shootout từ scoreDetails
-      const shootout = (updated.scoreDetails as Record<string, unknown> | null)?.shootout as
+      const updatedDetails = updated.scoreDetails as Record<string, unknown> | null;
+      const shootout = (updatedDetails?.shootout ?? (updatedDetails?.football as Record<string, unknown> | undefined)?.shootout) as
         | Record<string, unknown>
         | undefined;
       effectiveWinnerId = (shootout?.winnerId as string | undefined) ?? null;
