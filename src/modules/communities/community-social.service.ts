@@ -284,6 +284,21 @@ export class CommunitySocialService {
     return updated;
   }
 
+  async closePoll(communityId: string, pollId: string, user: SocialUser) {
+    await this.ensureCommunity(communityId);
+    const member = await this.requireJoined(communityId, user.id);
+    const poll = await this.socialRepository.getPollDetails(pollId);
+    if (!poll || poll.communityId !== communityId) {
+      throw new NotFoundException('Không tìm thấy cuộc bình chọn.');
+    }
+    const canManage = poll.creatorId === user.id || member.role === 'OWNER' || member.role === 'MODERATOR' || user.roles?.includes('ADMIN');
+    if (!canManage) {
+      throw new ForbiddenException('Chỉ người tạo hoặc ban quản trị mới được kết thúc bình chọn sớm.');
+    }
+    const updated = await this.socialRepository.closePoll(pollId);
+    return updated;
+  }
+
   private async ensureCommunity(communityId: string) {
     const community = await this.communitiesRepository.findById(communityId);
     if (!community) throw new NotFoundException('Không tìm thấy cộng đồng.');

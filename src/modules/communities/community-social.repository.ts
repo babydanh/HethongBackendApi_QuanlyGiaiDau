@@ -559,6 +559,15 @@ export class CommunitySocialRepository {
     return created ? this.getPollDetails(pollId, creatorId) : null;
   }
 
+  async closePoll(pollId: string) {
+    const [updated] = await this.db
+      .update(schema.communityPolls)
+      .set({ isClosed: true, updatedAt: new Date() })
+      .where(eq(schema.communityPolls.id, pollId))
+      .returning();
+    return updated ? this.getPollDetails(pollId) : null;
+  }
+
   async softDeletePostsByTournamentId(tournamentId: string) {
     const deleted = await this.db.update(schema.communityPosts)
       .set({ deletedAt: new Date(), status: 'HIDDEN', updatedAt: new Date() })
