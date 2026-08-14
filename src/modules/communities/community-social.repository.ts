@@ -49,20 +49,35 @@ export class CommunitySocialRepository {
       .values(values)
       .onConflictDoNothing()
       .returning();
-    if (created) return created;
-    if (values.idempotencyKey) {
-      const [existing] = await this.db
-        .select()
-        .from(schema.communityPosts)
-        .where(and(
-          eq(schema.communityPosts.communityId, communityId),
-          eq(schema.communityPosts.authorId, authorId),
-          eq(schema.communityPosts.idempotencyKey, values.idempotencyKey),
-        ))
-        .limit(1);
-      return existing ?? null;
-    }
-    return null;
+    
+    const postRecord = created || (values.idempotencyKey ? (await this.db
+      .select()
+      .from(schema.communityPosts)
+      .where(and(
+        eq(schema.communityPosts.communityId, communityId),
+        eq(schema.communityPosts.authorId, authorId),
+        eq(schema.communityPosts.idempotencyKey, values.idempotencyKey),
+      ))
+      .limit(1))[0] : null);
+
+    if (!postRecord) return null;
+
+    // Lấy thông tin tác giả từ profiles để trả về đầy đủ cho frontend
+    const [authorProfile] = await this.db
+      .select({
+        id: schema.users.id,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(eq(schema.users.id, authorId))
+      .limit(1);
+
+    return {
+      ...postRecord,
+      author: authorProfile?.id ? authorProfile : { id: authorId, fullName: 'Thành viên CLB', avatarUrl: null },
+    };
   }
 
   async listPosts(communityId: string, limit: number, cursor?: string, viewerId?: string) {
