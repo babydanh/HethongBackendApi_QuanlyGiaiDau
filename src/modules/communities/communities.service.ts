@@ -148,6 +148,9 @@ export class CommunitiesService {
   }
 
   async create(userId: string, dto: CreateCommunityDto) {
+    if (!dto.categoryIds || dto.categoryIds.length !== 1) {
+      throw new BadRequestException('Mỗi câu lạc bộ chỉ được chọn đúng một môn thể thao.');
+    }
     const activeCount =
       await this.communitiesRepository.countActiveByCreator(userId);
     if (activeCount >= 5) {
@@ -157,6 +160,9 @@ export class CommunitiesService {
     }
 
     const { lat, lng, categoryIds, ...rest } = dto;
+    if (categoryIds !== undefined && categoryIds.length !== 1) {
+      throw new BadRequestException('Mỗi câu lạc bộ chỉ được chọn đúng một môn thể thao.');
+    }
     const data = {
       ...rest,
       ...(rest.description !== undefined
