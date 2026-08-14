@@ -50,8 +50,8 @@ export class CommunitySocialService {
     const member = await this.requireJoined(communityId, user.id);
     const body = dto.body?.trim() ?? '';
     const mediaUrls = dto.mediaUrls ?? [];
-    if (!body && mediaUrls.length === 0) {
-      throw new BadRequestException('Bài viết cần có nội dung hoặc ít nhất một ảnh.');
+    if (!body && mediaUrls.length === 0 && !dto.poll) {
+      throw new BadRequestException('Bài viết cần có nội dung, ảnh hoặc bình chọn.');
     }
     const settings = await this.socialRepository.getSettings(communityId);
     const mentionIds = [...new Set(dto.mentions ?? [])];
@@ -77,6 +77,17 @@ export class CommunitySocialService {
       : 'PUBLISHED';
     const post = await this.socialRepository.createPost(communityId, user.id, { ...dto, mentions: validMentionIds }, status, idempotencyKey);
     if (!post) throw new BadRequestException('Không thể tạo bài viết.');
+
+    let createdPoll: any = null;
+    if (dto.poll && post.id) {
+      createdPoll = await this.socialRepository.createPoll(
+        communityId,
+        user.id,
+        dto.poll,
+        post.id,
+      );
+    }
+
     for (const receiverId of validMentionIds) {
       if (receiverId === user.id) continue;
       await this.notificationsService.sendNotification(
@@ -90,7 +101,10 @@ export class CommunitySocialService {
         }),
       );
     }
-    return post;
+    return {
+      ...post,
+      poll: createdPoll,
+    };
   }
 
   async deletePost(communityId: string, postId: string, user: SocialUser) {
@@ -236,6 +250,37 @@ export class CommunitySocialService {
         }),
       );
     }
+    return updated;
+  }
+
+  async votePoll(communityId: string, pollId: string, optionId: string, user: SocialUser) {
+    await this.ensureCommunity(communityId);
+    await this.requireJoined(communityId, user.id);
+    const poll = await this.socialRepository.getPollDetails(pollId);
+    if (!poll || poll.communityId !== communityId) {
+      throw new NotFoundException('Không tìm thấy cuộc bình chọn.');
+    }
+    if (poll.isClosed || (poll.expiresAt && new Date(poll.expiresAt) < new Date())) {
+      throw new BadRequestException('Cuộc bình chọn đã kết thúc.');
+    }
+    const updated = await this.socialRepository.votePollOption(pollId, optionId, user.id);
+    return updated;
+  }
+
+  async addPollOption(communityId: string, pollId: string, optionText: string, user: SocialUser) {
+    await this.ensureCommunity(communityId);
+    await this.requireJoined(communityId, user.id);
+    const poll = await this.socialRepository.getPollDetails(pollId);
+    if (!poll || poll.communityId !== communityId) {
+      throw new NotFoundException('Không tìm thấy cuộc bình chọn.');
+    }
+    if (!poll.allowAddOptions) {
+      throw new ForbiddenException('Bình chọn này không cho phép người khác thêm đáp án.');
+    }
+    if (poll.isClosed || (poll.expiresAt && new Date(poll.expiresAt) < new Date())) {
+      throw new BadRequestException('Cuộc bình chọn đã kết thúc.');
+    }
+    const updated = await this.socialRepository.addPollOption(pollId, user.id, optionText);
     return updated;
   }
 

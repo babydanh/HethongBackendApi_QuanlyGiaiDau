@@ -129,4 +129,28 @@ export class CommunitySocialController {
   updatePreferences(@Param('communityId', ParseUUIDPipe) communityId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Body() dto: UpdateCommunityPreferencesDto) {
     return this.socialService.updatePreferences(communityId, user, dto);
   }
+
+  @Post('polls/:pollId/vote')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Bình chọn hoặc hủy bình chọn một lựa chọn trong poll' })
+  votePoll(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('pollId', ParseUUIDPipe) pollId: string,
+    @CurrentUser() user: { id: string; roles?: string[] },
+    @Body('optionId') optionId: string,
+  ) {
+    return this.socialService.votePoll(communityId, pollId, optionId, user);
+  }
+
+  @Post('polls/:pollId/options')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Thêm một lựa chọn mới vào poll' })
+  addPollOption(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('pollId', ParseUUIDPipe) pollId: string,
+    @CurrentUser() user: { id: string; roles?: string[] },
+    @Body('optionText') optionText: string,
+  ) {
+    return this.socialService.addPollOption(communityId, pollId, optionText, user);
+  }
 }
