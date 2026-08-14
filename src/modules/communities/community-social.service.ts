@@ -135,6 +135,7 @@ export class CommunitySocialService {
   }
 
   async createComment(communityId: string, postId: string, user: SocialUser, dto: CreateCommunityCommentDto) {
+    const community = await this.ensureCommunity(communityId);
     const member = await this.requireJoined(communityId, user.id);
     const post = await this.socialRepository.findPost(postId);
     if (!post || post.communityId !== communityId || post.status !== 'PUBLISHED') throw new NotFoundException('Không tìm thấy bài viết.');
