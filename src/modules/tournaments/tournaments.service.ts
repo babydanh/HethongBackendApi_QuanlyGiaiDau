@@ -470,8 +470,8 @@ export class TournamentsService {
 
     const record = await this.tournamentsRepository.create(userId, createTournamentDto);
 
-    // Auto-post to Community Feed if tournament belongs to a community and is not a sub-division
-    if (record.communityId && !record.parentId) {
+    // Auto-post to Community Feed ONLY IF tournament is a CLUB tournament (internal to community)
+    if (record.tournamentType === 'CLUB' && record.communityId && !record.parentId) {
       try {
         await this.communitySocialRepository.createTournamentPost(
           record.communityId,
