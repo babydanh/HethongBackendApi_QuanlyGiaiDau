@@ -150,6 +150,51 @@ export const buildCommunityUnbannedNotification = (params: {
   redirectUrl: getCommunityRedirect(params.communityId),
 });
 
+export const buildCommunityPostMentionedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  senderName: string;
+  receiverId: string;
+  senderId?: string;
+  postId?: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  senderId: params.senderId,
+  type: NOTIFICATION_TYPES.COMMUNITY_POST_MENTIONED,
+  title: 'Bạn được nhắc tên trong bài viết CLB',
+  content: `${params.senderName} vừa nhắc đến bạn trong một bài viết tại CLB ${params.communityName}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityPostCommentedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  senderName: string;
+  receiverId: string;
+  senderId?: string;
+  postId?: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  senderId: params.senderId,
+  type: NOTIFICATION_TYPES.COMMUNITY_POST_COMMENTED,
+  title: 'Bài viết của bạn có bình luận mới',
+  content: `${params.senderName} vừa bình luận vào bài viết của bạn tại CLB ${params.communityName}.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityPostApprovedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+  postId?: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.COMMUNITY_POST_APPROVED,
+  title: 'Bài viết CLB đã được duyệt',
+  content: `Bài viết của bạn tại CLB ${params.communityName} đã được duyệt và hiển thị trên bảng tin.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
 export const buildOrganizerNewRegistrationNotification = (params: {
   tournamentId: string;
   tournamentName: string;

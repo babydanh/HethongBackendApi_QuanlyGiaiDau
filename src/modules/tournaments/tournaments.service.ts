@@ -490,6 +490,8 @@ export class TournamentsService {
         return { sportPreset: 'TABLE_TENNIS_STANDARD', sportRules: { kind: 'TABLE_TENNIS', setsToWin: 3, pointsPerSet: 11, winByTwo: true } };
       case 'tennis':
         return { sportPreset: 'TENNIS_SUPER_TIEBREAK', sportRules: { kind: 'TENNIS', setsToWin: 1, pointsPerSet: 10, winByTwo: true } };
+      case 'football':
+        return { sportPreset: 'FOOTBALL_STANDARD', sportRules: { kind: 'FOOTBALL', halvesCount: 2, halfDuration: 45, allowDraw: true, bestOf: 1 } };
       default:
         throw new BadRequestException('Môn thể thao không hợp lệ. Vui lòng chọn một môn được hỗ trợ.');
     }
@@ -563,6 +565,9 @@ export class TournamentsService {
       hideAdvancedSettings: true,
       bracketType: finalBracketType,
       maxTeams,
+      ...(sport === 'football' && dto.teamSize
+        ? { teamSize: dto.teamSize, minTeamSize: dto.teamSize, maxReserve: dto.maxReserve ?? 0 }
+        : {}),
     };
 
     // 7. Check authorization: must be community member (JOINED)

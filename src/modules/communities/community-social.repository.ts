@@ -273,4 +273,12 @@ export class CommunitySocialRepository {
     const [post] = await this.db.update(schema.communityPosts).set({ status, updatedAt: new Date() }).where(eq(schema.communityPosts.id, postId)).returning();
     return post;
   }
+
+  async softDeletePost(postId: string) {
+    const [post] = await this.db.update(schema.communityPosts)
+      .set({ deletedAt: new Date(), status: 'HIDDEN', updatedAt: new Date() })
+      .where(and(eq(schema.communityPosts.id, postId), isNull(schema.communityPosts.deletedAt)))
+      .returning();
+    return post;
+  }
 }

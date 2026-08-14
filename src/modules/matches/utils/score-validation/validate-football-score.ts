@@ -21,6 +21,34 @@ export function validateFootballScoreDetails(context: ScoreValidationContext): S
           throw new BadRequestException('football.team1Goals và football.team2Goals phải là số nguyên không âm.');
         }
         const phase = typeof value.phase === 'string' ? value.phase : 'FIRST_HALF';
+        const phases = new Set([
+          'FIRST_HALF', 'HALFTIME', 'SECOND_HALF', 'STOPPAGE_TIME',
+          'FULL_TIME', 'EXTRA_TIME_FIRST_HALF', 'EXTRA_TIME_BREAK',
+          'EXTRA_TIME_SECOND_HALF', 'PENALTY_SHOOTOUT', 'COMPLETED',
+        ]);
+        if (!phases.has(phase)) {
+          throw new BadRequestException('football.phase không hợp lệ.');
+        }
+        if (value.events !== undefined) {
+          if (!Array.isArray(value.events) || value.events.length > 500) {
+            throw new BadRequestException('football.events phải là danh sách tối đa 500 sự kiện.');
+          }
+          for (const event of value.events) {
+            if (!event || typeof event !== 'object' || Array.isArray(event)) {
+              throw new BadRequestException('football.events chứa phần tử không hợp lệ.');
+            }
+            const item = event as Record<string, unknown>;
+            if (!['GOAL', 'OWN_GOAL', 'PENALTY_GOAL', 'YELLOW_CARD', 'RED_CARD', 'FOUL', 'SUBSTITUTION', 'VAR', 'NOTE'].includes(String(item.type))) {
+              throw new BadRequestException('football.events.type không hợp lệ.');
+            }
+            if (item.team !== 1 && item.team !== 2) {
+              throw new BadRequestException('football.events.team phải là 1 hoặc 2.');
+            }
+            if (item.minute !== undefined && (!Number.isInteger(item.minute) || Number(item.minute) < 0 || Number(item.minute) > 150)) {
+              throw new BadRequestException('football.events.minute không hợp lệ.');
+            }
+          }
+        }
         const isFinished = phase === 'FULL_TIME' || phase === 'COMPLETED' || phase === 'PENALTY_SHOOTOUT';
         return [{
           key: 'football',

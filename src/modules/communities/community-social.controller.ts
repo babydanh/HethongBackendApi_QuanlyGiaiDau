@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -55,6 +55,18 @@ export class CommunitySocialController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.socialService.createPost(communityId, user, dto, idempotencyKey);
+  }
+
+  @Delete('posts/:postId')
+  @Post('posts/:postId/delete')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xóa bài viết (tác giả hoặc BQT)' })
+  deletePost(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('postId', ParseUUIDPipe) postId: string,
+    @CurrentUser() user: { id: string; roles?: string[] },
+  ) {
+    return this.socialService.deletePost(communityId, postId, user);
   }
 
   @Get('posts/:postId/comments')
