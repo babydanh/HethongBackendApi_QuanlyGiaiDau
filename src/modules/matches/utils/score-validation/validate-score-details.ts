@@ -16,7 +16,9 @@ export function validateScoreDetails(
   }
 
   const normalizedEntries = extractNormalizedScoreEntries(scoreDetails);
-  if (normalizedEntries.length === 0) {
+  const hasFootballPayload = resolvedConfig.kind === 'FOOTBALL'
+    && Boolean(scoreDetails.football && typeof scoreDetails.football === 'object' && !Array.isArray(scoreDetails.football));
+  if (normalizedEntries.length === 0 && !hasFootballPayload) {
     throw new BadRequestException('Không tìm thấy set/game hợp lệ trong scoreDetails.');
   }
 
@@ -52,7 +54,10 @@ export function validateScoreDetails(
 
   // Bóng đá: tỷ số bàn thắng tự do + cho phép hòa — dùng validator riêng (không rally-point).
   if (resolvedConfig.kind === 'FOOTBALL') {
-    return validateFootballScoreDetails(context);
+    return validateFootballScoreDetails({
+      ...context,
+      normalizedEntries: normalizedEntriesForValidation,
+    });
   }
 
   switch (resolvedConfig.scoringModel) {

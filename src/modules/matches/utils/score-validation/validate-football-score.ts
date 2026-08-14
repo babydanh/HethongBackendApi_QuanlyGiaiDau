@@ -8,8 +8,31 @@ import type { ScoreValidationContext, ScoreValidationSummary } from './score-val
  * - Cho phép HÒA (p1 === p2) — khi đó không xác định winner (winner null).
  */
 export function validateFootballScoreDetails(context: ScoreValidationContext): ScoreValidationSummary {
-  const { resolvedConfig, normalizedEntries } = context;
-  const setsToWin = Math.max(1, Math.ceil(resolvedConfig.bestOf / 2));
+  const { resolvedConfig } = context;
+  const football = context.scoreDetails.football;
+  const normalizedEntries = football && typeof football === 'object' && !Array.isArray(football)
+    ? (() => {
+        const value = football as Record<string, unknown>;
+        const team1Goals = value.team1Goals;
+        const team2Goals = value.team2Goals;
+        if (typeof team1Goals !== 'number' || typeof team2Goals !== 'number'
+          || !Number.isInteger(team1Goals) || !Number.isInteger(team2Goals)
+          || team1Goals < 0 || team2Goals < 0) {
+          throw new BadRequestException('football.team1Goals và football.team2Goals phải là số nguyên không âm.');
+        }
+        const phase = typeof value.phase === 'string' ? value.phase : 'FIRST_HALF';
+        const isFinished = phase === 'FULL_TIME' || phase === 'COMPLETED' || phase === 'PENALTY_SHOOTOUT';
+        return [{
+          key: 'football',
+          p1: team1Goals,
+          p2: team2Goals,
+          scoreStr: `${team1Goals}-${team2Goals}`,
+          isFinished,
+          isOverridden: false,
+        }];
+      })()
+    : context.normalizedEntries;
+  const setsToWin = 1;
   let p1SetsWon = 0;
   let p2SetsWon = 0;
   let winnerReachedAtSetIndex: number | null = null;

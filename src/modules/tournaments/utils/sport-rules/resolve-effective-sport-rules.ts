@@ -65,7 +65,7 @@ const SPORT_DEFAULTS: Record<SportRuleKind, SportDefaults> = {
   },
   FOOTBALL: {
     kind: 'FOOTBALL',
-    scoringModel: 'RALLY_POINT_SET',
+    scoringModel: 'FOOTBALL_MATCH',
     setsToWin: 1,
     pointsPerSet: 1,
     mustWinByTwo: false,
