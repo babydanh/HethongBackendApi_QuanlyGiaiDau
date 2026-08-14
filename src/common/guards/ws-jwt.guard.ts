@@ -39,6 +39,16 @@ export class WsJwtGuard implements CanActivate {
                 token = client.handshake.query.token as string;
             }
 
+            // Flutter's Socket.IO client sends bearer credentials as an
+            // Authorization handshake header. Accept it in addition to the
+            // browser auth/cookie shapes above so mobile chat is authenticated.
+            if (!token) {
+                const authorization = client.handshake.headers.authorization;
+                if (typeof authorization === 'string' && authorization.trim()) {
+                    token = authorization.trim().replace(/^Bearer\s+/i, '').trim();
+                }
+            }
+
             if (!token) {
                 throw new WsException('Unauthorized');
             }

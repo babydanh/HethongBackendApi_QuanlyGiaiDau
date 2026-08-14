@@ -102,3 +102,15 @@ export const chatReadStates = pgTable('chat_read_states', {
 }, (table) => ({
   roomUserUnique: uniqueIndex('uq_chat_read_states_room_user').on(table.roomId, table.userId),
 }));
+
+/** User-level chat block. A block is symmetric for access checks, but the
+ * blocker is retained so the owner can later revoke it without ambiguity. */
+export const chatBlocks = pgTable('chat_blocks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  blockerId: uuid('blocker_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  blockedId: uuid('blocked_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pairUnique: uniqueIndex('uq_chat_blocks_pair').on(table.blockerId, table.blockedId),
+  noSelfBlock: check('chat_blocks_no_self', sql`${table.blockerId} <> ${table.blockedId}`),
+}));

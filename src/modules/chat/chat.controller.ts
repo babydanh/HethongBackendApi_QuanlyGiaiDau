@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -92,6 +93,27 @@ export class ChatController {
   @ApiOperation({ summary: 'Lấy cuộc hội thoại hỗ trợ của người dùng hiện tại' })
   async getMySupportConversation(@CurrentUser() user: JwtPayload) {
     return this.chatService.getMySupportConversation(user.sub);
+  }
+
+  @Get('blocks')
+  async getBlockedUsers(@CurrentUser() user: JwtPayload) {
+    return this.chatService.getBlockedUsers(user.sub);
+  }
+
+  @Post('blocks/:userId')
+  async blockUser(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.blockUser(user.sub, userId);
+  }
+
+  @Delete('blocks/:userId')
+  async unblockUser(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.unblockUser(user.sub, userId);
   }
 
   @Post('support')

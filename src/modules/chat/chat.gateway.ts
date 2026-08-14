@@ -121,6 +121,13 @@ export class ChatGateway {
     const room = await this.chatRepository.findRoomById(payload.roomId);
     const canAccess = await this.chatRepository.canAccessRoom(payload.roomId, user.sub);
     if (!room || !canAccess) return { event: 'chat:error', data: 'Forbidden' };
+    if (room.type === 'DIRECT') {
+      const otherUserId = (await this.chatRepository.getRoomMemberIds(payload.roomId))
+        .find((memberId) => memberId !== user.sub);
+      if (otherUserId && await this.chatRepository.isBlockedBetween(user.sub, otherUserId)) {
+        return { event: 'chat:error', data: 'Blocked' };
+      }
+    }
     const persisted = await this.chatRepository.saveMessage(user.sub, { roomId: payload.roomId, messageText: payload.content.trim() });
     const messagePayload = { ...persisted, content: persisted.messageText, timestamp: persisted.createdAt.toISOString() };
     if (room.type === 'CLUB') this.broadcastClubMessage(payload.roomId, messagePayload);
