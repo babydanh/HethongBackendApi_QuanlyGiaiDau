@@ -319,12 +319,16 @@ export class MatchesRepository {
 
     const tournamentVenues = tournamentIdsForMatches.size > 0
       ? await this.db
-        .select({ tournamentId: schema.tournaments.id, venueName: schema.tournamentVenues.name })
+        .select({ 
+          tournamentId: schema.tournaments.id, 
+          venueName: schema.tournamentVenues.name,
+          venueAddress: schema.tournamentVenues.locationAddress,
+        })
         .from(schema.tournaments)
         .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
         .where(inArray(schema.tournaments.id, Array.from(tournamentIdsForMatches)))
       : [];
-    const tournamentVenueMap = new Map(tournamentVenues.map((venue) => [venue.tournamentId, venue.venueName]));
+    const tournamentVenueMap = new Map(tournamentVenues.map((venue) => [venue.tournamentId, { name: venue.venueName, address: venue.venueAddress }]));
 
     const participantsMap = new Map<string, { id: string; teamName: string; seed: number | null; members: { userId: string; fullName: string | null }[] }>();
     if (participantIds.size > 0) {
@@ -402,6 +406,12 @@ export class MatchesRepository {
                and division_venue.deleted_at is null),
             ${schema.tournamentVenues.name}
           )`,
+          venueAddress: sql<string | null>`coalesce(
+            (select division_venue.location_address from tournament_venues division_venue
+             where division_venue.id = tournament_divisions.venue_id
+               and division_venue.deleted_at is null),
+            ${schema.tournamentVenues.locationAddress}
+          )`,
           categoryId: schema.tournaments.categoryId,
           categoryName: schema.categories.name,
           matchType: schema.tournaments.matchType,
@@ -431,6 +441,7 @@ export class MatchesRepository {
           categoryId: g.categoryId || undefined,
           categoryName: g.categoryName || undefined,
           venueName: g.venueName || null,
+          venueAddress: g.venueAddress || null,
           matchType: g.divisionMatchType || g.matchType || undefined,
           genderRestriction: g.divisionGenderRestriction || g.genderRestriction || undefined,
         });
@@ -459,7 +470,8 @@ export class MatchesRepository {
         } : null,
         tournament: {
           name: groupStage?.tournamentName || null,
-          venueName: groupStage?.venueName || tournamentVenueMap.get(match.tournamentId) || null,
+          venueName: groupStage?.venueName || tournamentVenueMap.get(match.tournamentId)?.name || null,
+          venueAddress: groupStage?.venueAddress || tournamentVenueMap.get(match.tournamentId)?.address || null,
           categoryId: groupStage?.categoryId,
           matchType: groupStage?.matchType,
           genderRestriction: groupStage?.genderRestriction,
@@ -525,6 +537,19 @@ export class MatchesRepository {
         divisionMatchType: schema.tournamentDivisions.matchType,
         divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
         createdBy: schema.tournaments.createdBy,
+        venueId: schema.tournaments.venueId,
+        venueName: sql<string | null>`coalesce(
+          (select division_venue.name from tournament_venues division_venue
+           where division_venue.id = tournament_divisions.venue_id
+             and division_venue.deleted_at is null),
+          ${schema.tournamentVenues.name}
+        )`,
+        venueAddress: sql<string | null>`coalesce(
+          (select division_venue.location_address from tournament_venues division_venue
+           where division_venue.id = tournament_divisions.venue_id
+             and division_venue.deleted_at is null),
+          ${schema.tournamentVenues.locationAddress}
+        )`,
         stageType: schema.tournamentStages.type,
         roundConfig: schema.tournamentStages.roundConfig,
         sportRules: schema.tournaments.sportRules,
@@ -540,6 +565,7 @@ export class MatchesRepository {
         eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
       )
       .leftJoin(schema.categories, eq(schema.categories.id, schema.tournaments.categoryId))
+      .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
       .leftJoin(schema.tournamentGroups, eq(schema.tournamentGroups.id, match.groupId!))
       .where(
         and(
@@ -689,6 +715,8 @@ export class MatchesRepository {
             createdBy: group.createdBy,
             sportRules: group.sportRules,
             tournamentConfig: group.tournamentConfig,
+            venueName: group.venueName,
+            venueAddress: group.venueAddress,
           }
         : null,
       stage: group ? {
