@@ -12,6 +12,6 @@ import { CommunitySocialService } from './community-social.service';
   imports: [NotificationsModule, StorageModule],
   controllers: [CommunitiesController, CommunitySocialController],
   providers: [CommunitiesService, CommunitiesRepository, CommunitySocialService, CommunitySocialRepository],
-  exports: [CommunitiesService],
+  exports: [CommunitiesService, CommunitySocialRepository],
 })
 export class CommunitiesModule {}

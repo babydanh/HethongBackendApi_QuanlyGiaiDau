@@ -10,9 +10,10 @@ import { RedisModule } from '../../providers/redis/redis.module';
 import { RegistrationLockService } from './registration-lock.service';
 import { StorageModule } from '../../providers/storage/storage.module';
 import { AuthModule } from '../auth/auth.module';
+import { CommunitiesModule } from '../communities/communities.module';
 
 @Module({
-  imports: [DatabaseModule, SeriesModule, RedisModule, StorageModule, AuthModule],
+  imports: [DatabaseModule, SeriesModule, RedisModule, StorageModule, AuthModule, CommunitiesModule],
   controllers: [TournamentsController],
   providers: [
     TournamentsService,

@@ -13,6 +13,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { communities } from './communities.schema';
 import { users } from './users.schema';
+import { tournaments } from './tournaments.schema';
 
 export const communitySocialSettings = pgTable('community_social_settings', {
   communityId: uuid('community_id')
@@ -34,6 +35,8 @@ export const communityPosts = pgTable('community_posts', {
     .references(() => communities.id, { onDelete: 'cascade' })
     .notNull(),
   authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+  tournamentId: uuid('tournament_id').references(() => tournaments.id, { onDelete: 'cascade' }),
+  type: varchar('type', { length: 30 }).default('NORMAL').notNull(),
   body: text('body'),
   mediaUrls: text('media_urls').array().default(sql`'{}'::text[]`).notNull(),
   topics: text('topics').array().default(sql`'{}'::text[]`).notNull(),
@@ -48,6 +51,7 @@ export const communityPosts = pgTable('community_posts', {
 }, (table) => ({
   feedIndex: index('idx_community_posts_feed').on(table.communityId, table.createdAt, table.id),
   statusIndex: index('idx_community_posts_status').on(table.communityId, table.status, table.createdAt),
+  tournamentIndex: index('idx_community_posts_tournament').on(table.tournamentId),
   idempotencyUnique: uniqueIndex('uq_community_posts_idempotency')
     .on(table.communityId, table.authorId, table.idempotencyKey)
     .where(sql`${table.idempotencyKey} IS NOT NULL`),

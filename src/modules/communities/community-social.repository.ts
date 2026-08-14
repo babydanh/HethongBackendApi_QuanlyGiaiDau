@@ -114,6 +114,18 @@ export class CommunitySocialRepository {
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
         },
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+          sport: schema.categories.slug,
+          categoryName: schema.categories.name,
+          matchType: schema.tournaments.matchType,
+          startDate: schema.tournaments.startDate,
+          endDate: schema.tournaments.endDate,
+          status: schema.tournaments.status,
+          bannerUrl: schema.tournaments.bannerUrl,
+          maxParticipants: schema.tournaments.maxParticipants,
+        },
         viewerReaction: viewerId
           ? sql<string | null>`(
               SELECT ${schema.communityPostReactions.reactionType}
@@ -127,6 +139,8 @@ export class CommunitySocialRepository {
       .from(schema.communityPosts)
       .leftJoin(schema.users, eq(schema.communityPosts.authorId, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.communityPosts.authorId, schema.profiles.userId))
+      .leftJoin(schema.tournaments, eq(schema.communityPosts.tournamentId, schema.tournaments.id))
+      .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
       .where(and(...conditions))
       .orderBy(desc(schema.communityPosts.createdAt), desc(schema.communityPosts.id))
       .limit(limit + 1);
@@ -135,6 +149,7 @@ export class CommunitySocialRepository {
     const data = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
       ...row.post,
       author: row.author?.id ? row.author : null,
+      tournament: row.tournament?.id ? row.tournament : null,
       viewerReaction: row.viewerReaction,
     }));
     const last = data[data.length - 1];
@@ -296,5 +311,36 @@ export class CommunitySocialRepository {
       .where(and(eq(schema.communityPosts.id, postId), isNull(schema.communityPosts.deletedAt)))
       .returning();
     return post;
+  }
+
+  async createTournamentPost(
+    communityId: string,
+    authorId: string,
+    tournamentId: string,
+    tournamentName: string,
+    bannerUrl?: string | null,
+  ) {
+    const mediaUrls = bannerUrl ? [bannerUrl] : [];
+    const body = `🏆 CLB vừa công bố giải đấu mới: **${tournamentName}**! Các thành viên hãy nhanh tay đăng ký tham gia ngay.`;
+    const [post] = await this.db.insert(schema.communityPosts)
+      .values({
+        communityId,
+        authorId,
+        tournamentId,
+        type: 'TOURNAMENT_ANNOUNCEMENT',
+        body,
+        mediaUrls,
+        status: 'PUBLISHED',
+      })
+      .returning();
+    return post;
+  }
+
+  async softDeletePostsByTournamentId(tournamentId: string) {
+    const deleted = await this.db.update(schema.communityPosts)
+      .set({ deletedAt: new Date(), status: 'HIDDEN', updatedAt: new Date() })
+      .where(and(eq(schema.communityPosts.tournamentId, tournamentId), isNull(schema.communityPosts.deletedAt)))
+      .returning();
+    return deleted;
   }
 }
