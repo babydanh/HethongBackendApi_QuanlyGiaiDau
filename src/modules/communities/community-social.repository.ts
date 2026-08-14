@@ -146,12 +146,35 @@ export class CommunitySocialRepository {
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
-    const data = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+    const initialData = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
       ...row.post,
       author: row.author?.id ? row.author : null,
       tournament: row.tournament?.id ? row.tournament : null,
       viewerReaction: row.viewerReaction,
     }));
+
+    // Attach poll data if post has a poll
+    const postIds = initialData.map((p) => p.id);
+    const polls = postIds.length > 0
+      ? await this.db
+          .select({ id: schema.communityPolls.id, postId: schema.communityPolls.postId })
+          .from(schema.communityPolls)
+          .where(inArray(schema.communityPolls.postId, postIds))
+      : [];
+
+    const pollDetailsMap = new Map<string, any>();
+    for (const p of polls) {
+      if (p.postId) {
+        const details = await this.getPollDetails(p.id, viewerId);
+        if (details) pollDetailsMap.set(p.postId, details);
+      }
+    }
+
+    const data = initialData.map((p) => ({
+      ...p,
+      poll: pollDetailsMap.get(p.id) || null,
+    }));
+
     const last = data[data.length - 1];
     return {
       data,
@@ -336,6 +359,206 @@ export class CommunitySocialRepository {
     return post;
   }
 
+  async createPoll(
+    communityId: string,
+    creatorId: string,
+    dto: { question: string; options: string[]; allowMultipleAnswers?: boolean; allowAddOptions?: boolean; expiresAt?: string },
+    postId?: string,
+  ) {
+    const [poll] = await this.db
+      .insert(schema.communityPolls)
+      .values({
+        communityId,
+        creatorId,
+        postId: postId ?? null,
+        question: dto.question.trim(),
+        allowMultipleAnswers: dto.allowMultipleAnswers ?? false,
+        allowAddOptions: dto.allowAddOptions ?? true,
+        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+      })
+      .returning();
+
+    if (!poll) return null;
+
+    if (dto.options.length > 0) {
+      await this.db.insert(schema.communityPollOptions).values(
+        dto.options.map((opt) => ({
+          pollId: poll.id,
+          creatorId,
+          optionText: opt.trim(),
+        })),
+      );
+    }
+
+    return this.getPollDetails(poll.id, creatorId);
+  }
+
+  async getPollDetails(pollId: string, viewerId?: string) {
+    const [poll] = await this.db
+      .select({
+        poll: schema.communityPolls,
+        creator: {
+          id: schema.users.id,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        },
+      })
+      .from(schema.communityPolls)
+      .leftJoin(schema.users, eq(schema.communityPolls.creatorId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.communityPolls.creatorId, schema.profiles.userId))
+      .where(eq(schema.communityPolls.id, pollId))
+      .limit(1);
+
+    if (!poll) return null;
+
+    const options = await this.db
+      .select()
+      .from(schema.communityPollOptions)
+      .where(eq(schema.communityPollOptions.pollId, pollId))
+      .orderBy(schema.communityPollOptions.createdAt);
+
+    const optionIds = options.map((o) => o.id);
+    let votes: {
+      optionId: string;
+      userId: string;
+      fullName: string | null;
+      avatarUrl: string | null;
+    }[] = [];
+
+    if (optionIds.length > 0) {
+      votes = await this.db
+        .select({
+          optionId: schema.communityPollVotes.optionId,
+          userId: schema.communityPollVotes.userId,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        })
+        .from(schema.communityPollVotes)
+        .leftJoin(schema.users, eq(schema.communityPollVotes.userId, schema.users.id))
+        .leftJoin(schema.profiles, eq(schema.communityPollVotes.userId, schema.profiles.userId))
+        .where(inArray(schema.communityPollVotes.optionId, optionIds));
+    }
+
+    const totalVotes = votes.length;
+
+    const optionsWithVoters = options.map((opt) => {
+      const optVotes = votes.filter((v) => v.optionId === opt.id);
+      const isVoted = viewerId ? optVotes.some((v) => v.userId === viewerId) : false;
+      return {
+        id: opt.id,
+        pollId: opt.pollId,
+        optionText: opt.optionText,
+        voteCount: optVotes.length,
+        isVoted,
+        voters: optVotes.map((v) => ({
+          id: v.userId,
+          fullName: v.fullName || 'Thành viên',
+          avatarUrl: v.avatarUrl,
+        })),
+      };
+    });
+
+    return {
+      ...poll.poll,
+      creator: poll.creator?.id ? poll.creator : null,
+      totalVotes,
+      options: optionsWithVoters,
+    };
+  }
+
+  async getPollByPostId(postId: string, viewerId?: string) {
+    const [poll] = await this.db
+      .select({ id: schema.communityPolls.id })
+      .from(schema.communityPolls)
+      .where(eq(schema.communityPolls.postId, postId))
+      .limit(1);
+
+    if (!poll) return null;
+    return this.getPollDetails(poll.id, viewerId);
+  }
+
+  async votePollOption(pollId: string, optionId: string, userId: string) {
+    const [poll] = await this.db
+      .select()
+      .from(schema.communityPolls)
+      .where(eq(schema.communityPolls.id, pollId))
+      .limit(1);
+
+    if (!poll) return null;
+
+    // Check if already voted for this option
+    const [existing] = await this.db
+      .select()
+      .from(schema.communityPollVotes)
+      .where(
+        and(
+          eq(schema.communityPollVotes.optionId, optionId),
+          eq(schema.communityPollVotes.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      // Toggle off / Unvote
+      await this.db
+        .delete(schema.communityPollVotes)
+        .where(eq(schema.communityPollVotes.id, existing.id));
+      await this.db
+        .update(schema.communityPollOptions)
+        .set({ voteCount: sql`GREATEST(${schema.communityPollOptions.voteCount} - 1, 0)` })
+        .where(eq(schema.communityPollOptions.id, optionId));
+    } else {
+      // If single answer only, remove previous votes in this poll
+      if (!poll.allowMultipleAnswers) {
+        const userVotes = await this.db
+          .select()
+          .from(schema.communityPollVotes)
+          .where(
+            and(
+              eq(schema.communityPollVotes.pollId, pollId),
+              eq(schema.communityPollVotes.userId, userId),
+            ),
+          );
+
+        for (const uv of userVotes) {
+          await this.db
+            .delete(schema.communityPollVotes)
+            .where(eq(schema.communityPollVotes.id, uv.id));
+          await this.db
+            .update(schema.communityPollOptions)
+            .set({ voteCount: sql`GREATEST(${schema.communityPollOptions.voteCount} - 1, 0)` })
+            .where(eq(schema.communityPollOptions.id, uv.optionId));
+        }
+      }
+
+      // Add vote
+      await this.db.insert(schema.communityPollVotes).values({
+        pollId,
+        optionId,
+        userId,
+      });
+
+      await this.db
+        .update(schema.communityPollOptions)
+        .set({ voteCount: sql`${schema.communityPollOptions.voteCount} + 1` })
+        .where(eq(schema.communityPollOptions.id, optionId));
+    }
+
+    return this.getPollDetails(pollId, userId);
+  }
+
+  async addPollOption(pollId: string, creatorId: string, optionText: string) {
+    const [created] = await this.db
+      .insert(schema.communityPollOptions)
+      .values({
+        pollId,
+        creatorId,
+        optionText: optionText.trim(),
+      })
+      .returning();
+    return created ? this.getPollDetails(pollId, creatorId) : null;
+  }
+
   async softDeletePostsByTournamentId(tournamentId: string) {
     const deleted = await this.db.update(schema.communityPosts)
       .set({ deletedAt: new Date(), status: 'HIDDEN', updatedAt: new Date() })
@@ -344,3 +567,4 @@ export class CommunitySocialRepository {
     return deleted;
   }
 }
+

@@ -107,3 +107,43 @@ export const communityMemberSocialPreferences = pgTable('community_member_social
 }, (table) => ({
   uniqueMemberPreference: uniqueIndex('uq_community_member_social_preferences').on(table.communityId, table.userId),
 }));
+
+export const communityPolls = pgTable('community_polls', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  communityId: uuid('community_id').references(() => communities.id, { onDelete: 'cascade' }).notNull(),
+  postId: uuid('post_id').references(() => communityPosts.id, { onDelete: 'cascade' }),
+  creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
+  question: text('question').notNull(),
+  allowMultipleAnswers: boolean('allow_multiple_answers').default(false).notNull(),
+  allowAddOptions: boolean('allow_add_options').default(true).notNull(),
+  isClosed: boolean('is_closed').default(false).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  postPollIndex: index('idx_community_polls_post').on(table.postId),
+  communityPollIndex: index('idx_community_polls_community').on(table.communityId),
+}));
+
+export const communityPollOptions = pgTable('community_poll_options', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  pollId: uuid('poll_id').references(() => communityPolls.id, { onDelete: 'cascade' }).notNull(),
+  creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
+  optionText: text('option_text').notNull(),
+  voteCount: integer('vote_count').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pollOptionIndex: index('idx_community_poll_options_poll').on(table.pollId),
+}));
+
+export const communityPollVotes = pgTable('community_poll_votes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  pollId: uuid('poll_id').references(() => communityPolls.id, { onDelete: 'cascade' }).notNull(),
+  optionId: uuid('option_id').references(() => communityPollOptions.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniqueVote: uniqueIndex('uq_community_poll_votes_user_option').on(table.optionId, table.userId),
+  pollVoteIndex: index('idx_community_poll_votes_poll').on(table.pollId, table.userId),
+}));
+
