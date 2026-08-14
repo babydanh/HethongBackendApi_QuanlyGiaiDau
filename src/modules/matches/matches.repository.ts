@@ -1098,25 +1098,27 @@ export class MatchesRepository {
     // 2. Two-legged knockout (bóng đá): chỉ advance khi CẢ2 leg COMPLETED.
     //    Tính aggregate = tổng bàn thắng 2 lượt; hòa tổng → luân lưu (penaltyShootout).
     let effectiveWinnerId = winnerId;
-    if (existing.tieId && existing.leg) {
+    // Use the row returned by the completion UPDATE. `existing` is a
+    // pre-completion snapshot and therefore cannot establish this leg's status.
+    if (updated.tieId && updated.leg) {
       const [otherLeg] = await tx
         .select()
         .from(schema.matches)
         .where(
           and(
-            eq(schema.matches.tieId, existing.tieId),
-            ne(schema.matches.id, id),
+            eq(schema.matches.tieId, updated.tieId),
+            ne(schema.matches.id, updated.id),
             isNull(schema.matches.deletedAt),
           ),
         )
         .limit(1);
 
       const otherDone = otherLeg && otherLeg.status === 'COMPLETED';
-      const thisDone = existing.status === 'COMPLETED';
-      if (otherDone && thisDone && existing.nextMatchId) {
+      const thisDone = updated.status === 'COMPLETED';
+      if (otherDone && thisDone && updated.nextMatchId) {
         // Aggregate: leg1 p1 vs p2, leg2 p1 vs p2 (vai home/away đã đổi ở generator)
-        const leg1 = existing.leg === 1 ? existing : otherLeg!;
-        const leg2 = existing.leg === 2 ? existing : otherLeg!;
+        const leg1 = updated.leg === 1 ? updated : otherLeg!;
+        const leg2 = updated.leg === 2 ? updated : otherLeg!;
         const totalP1 = (leg1.p1SetsWon || 0) + (leg2.p1SetsWon || 0);
         const totalP2 = (leg1.p2SetsWon || 0) + (leg2.p2SetsWon || 0);
 
@@ -1126,7 +1128,7 @@ export class MatchesRepository {
           effectiveWinnerId = leg1.participant2Id ?? leg2.participant2Id;
         } else {
           // Hòa aggregate → luân lưu: lấy từ scoreDetails.shootout của leg cuối
-          const shootout = (existing.scoreDetails as Record<string, unknown> | null)?.shootout as
+          const shootout = (updated.scoreDetails as Record<string, unknown> | null)?.shootout as
             | Record<string, unknown>
             | undefined;
           const shootoutWinnerId = shootout?.winnerId as string | undefined;
@@ -1136,9 +1138,9 @@ export class MatchesRepository {
           // Nếu không có luân lưu → không advance (chờ BTC xử lý)
         }
       }
-    } else if (!effectiveWinnerId && existing.tieId && existing.nextMatchId) {
+    } else if (!effectiveWinnerId && updated.tieId && updated.nextMatchId) {
       // Knockout hòa + penaltyShootout: dùng shootout từ scoreDetails
-      const shootout = (existing.scoreDetails as Record<string, unknown> | null)?.shootout as
+      const shootout = (updated.scoreDetails as Record<string, unknown> | null)?.shootout as
         | Record<string, unknown>
         | undefined;
       effectiveWinnerId = (shootout?.winnerId as string | undefined) ?? null;
