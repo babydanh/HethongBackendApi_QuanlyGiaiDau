@@ -182,7 +182,18 @@ export class CommunitySocialRepository {
     await this.db.update(schema.communityPosts)
       .set({ commentCount: sql`${schema.communityPosts.commentCount} + 1`, updatedAt: new Date() })
       .where(eq(schema.communityPosts.id, postId));
-    return comment;
+
+    // Fetch author information to return complete author object
+    const [row] = await this.db.select({
+      comment: schema.communityPostComments,
+      author: { id: schema.users.id, fullName: schema.profiles.fullName, avatarUrl: schema.profiles.avatarUrl }
+    }).from(schema.communityPostComments)
+      .leftJoin(schema.users, eq(schema.communityPostComments.authorId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.communityPostComments.authorId, schema.profiles.userId))
+      .where(eq(schema.communityPostComments.id, comment.id))
+      .limit(1);
+
+    return row ? { ...row.comment, author: row.author?.id ? row.author : null } : comment;
   }
 
   async updateComment(commentId: string, body: string) {
@@ -198,6 +209,11 @@ export class CommunitySocialRepository {
       .set({ deletedAt: new Date(), status: 'HIDDEN', updatedAt: new Date() })
       .where(and(eq(schema.communityPostComments.id, commentId), isNull(schema.communityPostComments.deletedAt)))
       .returning();
+    if (comment) {
+      await this.db.update(schema.communityPosts)
+        .set({ commentCount: sql`GREATEST(${schema.communityPosts.commentCount} - 1, 0)`, updatedAt: new Date() })
+        .where(eq(schema.communityPosts.id, comment.postId));
+    }
     return comment;
   }
 
