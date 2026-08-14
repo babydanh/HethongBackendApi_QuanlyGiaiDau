@@ -19,6 +19,7 @@ export class ChatRepository {
         id: schema.chatRooms.id,
         name: schema.chatRooms.name,
         type: schema.chatRooms.type,
+        communityId: schema.chatRooms.communityId,
         createdAt: schema.chatRooms.createdAt,
       })
       .from(schema.chatRoomMembers)
@@ -41,6 +42,8 @@ export class ChatRepository {
         createdAt: string;
       };
       updatedAt: string;
+      unreadCount: number;
+      communityId: string | null;
     }[] = [];
 
     for (const room of roomsWithMembership) {
@@ -77,6 +80,7 @@ export class ChatRepository {
 
       roomsList.push({
         ...room,
+        unreadCount: await this.countUnreadUsingState(room.id, userId),
         participants,
         lastMessage: lastMessage ? {
           id: lastMessage.id,
