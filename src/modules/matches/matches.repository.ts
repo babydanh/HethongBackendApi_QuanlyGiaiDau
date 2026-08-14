@@ -276,7 +276,7 @@ export class MatchesRepository {
       .from(schema.matches)
       .where(whereClause);
 
-    let matchesQuery = this.db
+    const matchesQuery = this.db
       .select()
       .from(schema.matches)
       .where(whereClause)

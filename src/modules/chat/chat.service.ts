@@ -44,6 +44,13 @@ export class ChatService {
       throw new BadRequestException('Direct room must have exactly 2 members');
     }
 
+    if (data.type === 'DIRECT') {
+      const otherUserId = data.memberIds.find((memberId) => memberId !== userId);
+      if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
+        throw new ForbiddenException('Không thể mở chat vì một trong hai người đã chặn nhau.');
+      }
+    }
+
     return this.chatRepository.createRoomWithMembers(data);
   }
 
@@ -107,6 +114,14 @@ export class ChatService {
       }
     }
 
+    if (roomType === RoomType.DIRECT) {
+      const otherUserId = (await this.chatRepository.getRoomMemberIds(data.roomId))
+        .find((memberId) => memberId !== userId);
+      if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
+        throw new ForbiddenException('Không thể gửi tin nhắn vì một trong hai người đã chặn nhau.');
+      }
+    }
+
     const message = await this.chatRepository.saveMessage(userId, {
       ...data,
       messageText,
@@ -147,6 +162,13 @@ export class ChatService {
       if (!isMember) {
         throw new ForbiddenException('You are not a member of this chat room');
       }
+      if (roomType === RoomType.DIRECT) {
+        const otherUserId = (await this.chatRepository.getRoomMemberIds(roomId))
+          .find((memberId) => memberId !== userId);
+        if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
+          throw new ForbiddenException('Bạn không thể truy cập cuộc trò chuyện này vì đã bị chặn.');
+        }
+      }
     }
 
     return this.chatRepository.getMessagesPage(roomId, limit, cursor);
@@ -160,6 +182,22 @@ export class ChatService {
   async getUnreadCount(userId: string, roomId: string) {
     await this.getMessages(userId, roomId, 1);
     return { count: await this.chatRepository.countUnreadUsingState(roomId, userId) };
+  }
+
+  async blockUser(blockerId: string, blockedId: string) {
+    if (blockerId === blockedId) throw new BadRequestException('Không thể tự chặn chính mình.');
+    if (!(await this.chatRepository.isActiveUser(blockedId))) {
+      throw new NotFoundException('Không tìm thấy người dùng để chặn.');
+    }
+    return this.chatRepository.createBlock(blockerId, blockedId);
+  }
+
+  async unblockUser(blockerId: string, blockedId: string) {
+    return { success: await this.chatRepository.deleteBlock(blockerId, blockedId) };
+  }
+
+  async getBlockedUsers(blockerId: string) {
+    return this.chatRepository.getBlocks(blockerId);
   }
 
   async getMySupportConversation(userId: string) {

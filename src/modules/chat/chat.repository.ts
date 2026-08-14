@@ -138,6 +138,65 @@ export class ChatRepository {
     return !!record;
   }
 
+  async getRoomMemberIds(roomId: string) {
+    const rows = await this.db.select({ userId: schema.chatRoomMembers.userId })
+      .from(schema.chatRoomMembers)
+      .where(eq(schema.chatRoomMembers.roomId, roomId));
+    return rows.map((row) => row.userId);
+  }
+
+  async isActiveUser(userId: string) {
+    const [user] = await this.db.select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(eq(schema.users.id, userId), sql`${schema.users.deletedAt} IS NULL`))
+      .limit(1);
+    return !!user;
+  }
+
+  async isBlockedBetween(firstUserId: string, secondUserId: string) {
+    const [record] = await this.db
+      .select({ id: schema.chatBlocks.id })
+      .from(schema.chatBlocks)
+      .where(or(
+        and(eq(schema.chatBlocks.blockerId, firstUserId), eq(schema.chatBlocks.blockedId, secondUserId)),
+        and(eq(schema.chatBlocks.blockerId, secondUserId), eq(schema.chatBlocks.blockedId, firstUserId)),
+      ))
+      .limit(1);
+    return !!record;
+  }
+
+  async createBlock(blockerId: string, blockedId: string) {
+    const [record] = await this.db
+      .insert(schema.chatBlocks)
+      .values({ blockerId, blockedId })
+      .onConflictDoNothing({ target: [schema.chatBlocks.blockerId, schema.chatBlocks.blockedId] })
+      .returning();
+    return record ?? (await this.db.select().from(schema.chatBlocks).where(and(
+      eq(schema.chatBlocks.blockerId, blockerId), eq(schema.chatBlocks.blockedId, blockedId),
+    )).limit(1))[0];
+  }
+
+  async deleteBlock(blockerId: string, blockedId: string) {
+    const deleted = await this.db.delete(schema.chatBlocks).where(and(
+      eq(schema.chatBlocks.blockerId, blockerId), eq(schema.chatBlocks.blockedId, blockedId),
+    )).returning({ id: schema.chatBlocks.id });
+    return deleted.length > 0;
+  }
+
+  async getBlocks(blockerId: string) {
+    return this.db.select({
+      id: schema.chatBlocks.id,
+      blockedId: schema.chatBlocks.blockedId,
+      createdAt: schema.chatBlocks.createdAt,
+      fullName: schema.profiles.fullName,
+      avatarUrl: schema.profiles.avatarUrl,
+    }).from(schema.chatBlocks)
+      .innerJoin(schema.users, eq(schema.chatBlocks.blockedId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.chatBlocks.blockedId, schema.profiles.userId))
+      .where(eq(schema.chatBlocks.blockerId, blockerId))
+      .orderBy(desc(schema.chatBlocks.createdAt));
+  }
+
   /**
    * P2D.1 — Member của cộng đồng (dùng cho guard kênh chat CLUB).
    */
