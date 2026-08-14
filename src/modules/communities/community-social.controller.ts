@@ -153,4 +153,15 @@ export class CommunitySocialController {
   ) {
     return this.socialService.addPollOption(communityId, pollId, optionText, user);
   }
+
+  @Post('polls/:pollId/close')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Kết thúc cuộc bình chọn sớm' })
+  closePoll(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('pollId', ParseUUIDPipe) pollId: string,
+    @CurrentUser() user: { id: string; roles?: string[] },
+  ) {
+    return this.socialService.closePoll(communityId, pollId, user);
+  }
 }
