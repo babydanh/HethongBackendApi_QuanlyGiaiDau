@@ -72,7 +72,9 @@ export const communitySports = pgTable('community_sports', {
   categoryId: uuid('category_id')
     .references(() => categories.id, { onDelete: 'cascade' })
     .notNull(),
-});
+}, (table) => ({
+  oneSportPerCommunity: unique('community_sports_community_id_unique').on(table.communityId),
+}));
 
 export const communityMembers = pgTable('community_members', {
   id: uuid('id').primaryKey().defaultRandom(),

@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  ArrayMaxSize,
+  ArrayMinSize,
   IsLatitude,
   IsLongitude,
   IsNotEmpty,
@@ -56,13 +58,14 @@ export class CreateCommunityDto {
   @IsOptional()
   lng?: number;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     type: [String],
-    description: 'Danh sách ID các môn thể thao',
+    description: 'Đúng một ID môn thể thao chính của CLB',
   })
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1)
   @IsUUID('4', { each: true })
-  @IsOptional()
   categoryIds?: string[];
 
   @ApiProperty({ description: 'Mã tỉnh/thành phố' })
