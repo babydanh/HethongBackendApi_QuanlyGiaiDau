@@ -55,6 +55,7 @@ import {
 import { RedisService } from '../../providers/redis/redis.service';
 import { StorageService } from '../../providers/storage/storage.service';
 import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
+import { CommunitySocialRepository } from '../communities/community-social.repository';
 
 @Injectable()
 export class TournamentsService {
@@ -65,6 +66,7 @@ export class TournamentsService {
     private readonly storageService: StorageService,
     private readonly redisService: RedisService,
     private readonly configService: ConfigService,
+    private readonly communitySocialRepository: CommunitySocialRepository,
   ) {}
 
   /**
@@ -468,6 +470,21 @@ export class TournamentsService {
 
     const record = await this.tournamentsRepository.create(userId, createTournamentDto);
 
+    // Auto-post to Community Feed if tournament belongs to a community and is not a sub-division
+    if (record.communityId && !record.parentId) {
+      try {
+        await this.communitySocialRepository.createTournamentPost(
+          record.communityId,
+          userId,
+          record.id,
+          record.name,
+          record.bannerUrl,
+        );
+      } catch (err) {
+        console.error('Failed to auto-post tournament to community feed:', err);
+      }
+    }
+
     // Invalidate tournament list cache
     try {
       await this.redisService.delByPattern('tournaments:list:*');
@@ -604,6 +621,21 @@ export class TournamentsService {
     const updated = await this.tournamentsRepository.update(record.id, userId, {
       status: 'REGISTRATION_OPEN',
     });
+
+    // Auto-post to Community Feed for Lite tournaments
+    if (fullDto.communityId) {
+      try {
+        await this.communitySocialRepository.createTournamentPost(
+          fullDto.communityId,
+          userId,
+          record.id,
+          record.name,
+          record.bannerUrl,
+        );
+      } catch (err) {
+        console.error('Failed to auto-post lite tournament to community feed:', err);
+      }
+    }
 
     const inviteCode = updated.inviteCode ?? record.inviteCode;
 
@@ -1107,10 +1139,15 @@ export class TournamentsService {
     if (systemRoles.includes('ADMIN')) {
       await this.cleanupTournamentImages(existing);
       const result = await this.tournamentsRepository.softDelete(id, userId);
+      try {
+        await this.communitySocialRepository.softDeletePostsByTournamentId(id);
+      } catch (err) {
+        console.error('Failed to soft delete tournament community posts:', err);
+      }
       // Invalidate tournament list cache
       try {
         await this.redisService.delByPattern('tournaments:list:*');
-      await this.redisService.delByPattern('matches:list:*');
+        await this.redisService.delByPattern('matches:list:*');
       } catch (e) {
         // Redis down — ignore
       }
@@ -1136,6 +1173,12 @@ export class TournamentsService {
 
     await this.cleanupTournamentImages(existing);
     const result = await this.tournamentsRepository.softDelete(id, userId);
+
+    try {
+      await this.communitySocialRepository.softDeletePostsByTournamentId(id);
+    } catch (err) {
+      console.error('Failed to soft delete tournament community posts:', err);
+    }
 
     // Invalidate tournament list cache
     try {
