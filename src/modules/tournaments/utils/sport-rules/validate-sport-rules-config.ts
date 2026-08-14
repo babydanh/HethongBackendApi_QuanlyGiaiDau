@@ -123,7 +123,7 @@ const SCORING_MODEL_BY_KIND: Record<SportRuleKind, SportScoringModel> = {
   PICKLEBALL_RALLY: 'RALLY_POINT_SET',
   PICKLEBALL_SIDE_OUT: 'PICKLEBALL_SIDE_OUT',
   TENNIS: 'TENNIS_SET',
-  FOOTBALL: 'RALLY_POINT_SET',
+  FOOTBALL: 'FOOTBALL_MATCH',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

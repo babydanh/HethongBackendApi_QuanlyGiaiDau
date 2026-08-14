@@ -1102,24 +1102,37 @@ export class TournamentsRepository {
 
         if (divisions.length === 0) return null;
 
-        const leaderGender = await getProfileGender(userId, 'Bạn');
         const requestedDivisionId = data.tournamentDivisionId ?? data.divisionId;
+        const requestedDivision = requestedDivisionId
+          ? divisions.find((division) => division.id === requestedDivisionId)
+          : undefined;
+        const requestedGenderRestriction = (requestedDivision?.genderRestriction || '').toUpperCase();
+        const isExplicitOpenDivision = Boolean(
+          requestedDivisionId &&
+          requestedDivision &&
+          !['MALE', 'FEMALE', 'MIXED'].includes(requestedGenderRestriction),
+        );
+        const requiresLeaderGender = !isExplicitOpenDivision && (Boolean(partnerUserId)
+          || !requestedDivisionId
+          || (requestedGenderRestriction !== '' && requestedGenderRestriction !== 'OPEN'));
+        const leaderGender = requiresLeaderGender
+          ? await getProfileGender(userId, 'Bạn')
+          : null;
         let targetMatchType = normalizeMatchType(tournament.matchType);
         let targetGenderRestriction: 'MALE' | 'FEMALE' | 'MIXED' = leaderGender === 'MALE' ? 'MALE' : 'FEMALE';
 
-        if (partnerUserId) {
+        if (partnerUserId && !isExplicitOpenDivision) {
           const partnerGender = await getProfileGender(partnerUserId, 'Đồng đội');
           targetGenderRestriction = leaderGender === partnerGender ? leaderGender : 'MIXED';
           targetMatchType = targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
-        } else if (targetMatchType === 'MIXED_DOUBLES' && !requestedDivisionId) {
+        } else if (!partnerUserId && targetMatchType === 'MIXED_DOUBLES' && !requestedDivisionId) {
           throw new BadRequestException('Hình thức Đôi Nam Nữ yêu cầu nhập đồng đội để xác định giới tính cặp.');
         }
 
-        if (!partnerUserId && requestedDivisionId) {
-          const requestedDivision = divisions.find((division) => division.id === requestedDivisionId);
+        if (requestedDivisionId) {
           if (requestedDivision) {
             targetMatchType = normalizeMatchType(requestedDivision.matchType);
-            const reqGender = (requestedDivision.genderRestriction || '').toUpperCase();
+            const reqGender = requestedGenderRestriction;
             if (reqGender === 'MALE' || reqGender === 'FEMALE' || reqGender === 'MIXED') {
               targetGenderRestriction = reqGender;
             }
@@ -1159,10 +1172,10 @@ export class TournamentsRepository {
         }
 
         const divGender = (selectedDivision.genderRestriction || '').toUpperCase();
-        if (divGender === 'MALE' && leaderGender !== 'MALE') {
+        if (divGender === 'MALE' && leaderGender && leaderGender !== 'MALE') {
           throw new BadRequestException('Hình thức thi đấu đã chọn chỉ dành cho VĐV Nam.');
         }
-        if (divGender === 'FEMALE' && leaderGender !== 'FEMALE') {
+        if (divGender === 'FEMALE' && leaderGender && leaderGender !== 'FEMALE') {
           throw new BadRequestException('Hình thức thi đấu đã chọn chỉ dành cho VĐV Nữ.');
         }
 

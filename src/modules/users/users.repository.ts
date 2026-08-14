@@ -153,7 +153,7 @@ export class UsersRepository {
   }
 
   async findAll(query: QueryUserDto) {
-    const { page = 1, limit, search, order, cursor, role, status, from, to } = query;
+    const { page = 1, limit = 10, search, order, cursor, role, status, from, to } = query;
 
     let whereClause = and(
       isNull(schema.users.deletedAt),
@@ -217,7 +217,7 @@ export class UsersRepository {
       userWhere = and(whereClause, cursorPredicate)!;
     }
 
-    let userQuery = this.db
+    const userQuery = this.db
       .select({
         id: schema.users.id,
         email: schema.users.email,
@@ -231,11 +231,11 @@ export class UsersRepository {
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(userWhere)
       .orderBy(sortConfig, order === 'desc' ? desc(schema.users.id) : asc(schema.users.id))
-      .limit(limit! + 1)
+      .limit(limit + 1)
       .$dynamic();
     const userRows = await userQuery;
-    const hasMore = userRows.length > limit!;
-    const data = hasMore ? userRows.slice(0, limit!) : userRows;
+    const hasMore = userRows.length > limit;
+    const data = hasMore ? userRows.slice(0, limit) : userRows;
     const lastUser = data[data.length - 1];
 
     // Simple count (in real app we should do a proper count query)
@@ -319,7 +319,7 @@ export class UsersRepository {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit!),
+        totalPages: Math.ceil(total / limit),
         nextCursor: hasMore && lastUser ? Buffer.from(JSON.stringify({ createdAt: lastUser.createdAt.toISOString(), id: lastUser.id })).toString('base64url') : null,
         hasMore,
       },
@@ -499,10 +499,22 @@ export class UsersRepository {
     const highlightRank = [...activeRanks.map((rank) => ({ ...rank, source: 'SINGLES' as const })), ...activePairRanks.map((rank) => ({ ...rank, source: 'DOUBLES' as const }))]
       .sort((a, b) => b.eloPoints - a.eloPoints || b.matchesPlayed - a.matchesPlayed)[0] ?? null;
 
+    const userRoles = await this.db
+      .select({
+        roleName: schema.roles.name,
+      })
+      .from(schema.userToRoles)
+      .innerJoin(schema.roles, eq(schema.userToRoles.roleId, schema.roles.id))
+      .where(eq(schema.userToRoles.userId, userId));
+
+    const rolesList = userRoles.map((r) => r.roleName);
+
     const achievements = await this.getPublicProfileAchievements(userId);
 
     return {
       ...user,
+      role: rolesList[0] || 'PLAYER',
+      roles: rolesList,
       ranks: user.isMock ? [] : ranks,
       pairRanks: user.isMock ? [] : pairRanks,
       highlightRank: user.isMock ? null : highlightRank,

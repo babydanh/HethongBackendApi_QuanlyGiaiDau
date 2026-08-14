@@ -9,4 +9,4 @@ export const SPORT_RULE_KINDS = [
 
 export type SportRuleKind = (typeof SPORT_RULE_KINDS)[number];
 
-export type SportScoringModel = 'RALLY_POINT_SET' | 'TENNIS_SET' | 'PICKLEBALL_SIDE_OUT';
+export type SportScoringModel = 'RALLY_POINT_SET' | 'TENNIS_SET' | 'PICKLEBALL_SIDE_OUT' | 'FOOTBALL_MATCH';
