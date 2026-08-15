@@ -1,10 +1,10 @@
 packages:
   - '.'
 
-allowBuilds:
-  '@nestjs/core': true
-  '@scarf/scarf': false
-  bcrypt: true
-  esbuild: true
-  msgpackr-extract: true
-  unrs-resolver: true
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - '@scarf/scarf'
+  - 'bcrypt'
+  - 'esbuild'
+  - 'msgpackr-extract'
+  - 'unrs-resolver'
