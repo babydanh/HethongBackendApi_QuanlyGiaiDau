@@ -230,4 +230,8 @@ export class ChatGateway {
   broadcastRoomUpdated(roomId: string, room: unknown) {
     this.server.to(`chat:${roomId}`).emit('chat:room:updated', { roomId, room });
   }
+
+  broadcastPollVoted(roomId: string, messageId: string, metadata: unknown) {
+    this.server.to(`chat:${roomId}`).emit('chat:poll:voted', { roomId, messageId, metadata });
+  }
 }

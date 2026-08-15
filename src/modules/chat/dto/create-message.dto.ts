@@ -33,4 +33,18 @@ export class CreateMessageDto {
   @IsUUID()
   @IsOptional()
   replyToId?: string;
+
+  @ApiPropertyOptional({
+    example: 'TEXT',
+    description: 'Loại tin nhắn (TEXT, POLL, TOURNAMENT_SHARE, LINK_PREVIEW)',
+  })
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @ApiPropertyOptional({
+    description: 'Dữ liệu mở rộng theo loại tin nhắn (Poll options, Tournament details, OG Metadata)',
+  })
+  @IsOptional()
+  metadata?: Record<string, any>;
 }

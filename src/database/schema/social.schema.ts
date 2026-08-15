@@ -6,6 +6,7 @@ import {
   boolean,
   timestamp,
   integer,
+  jsonb,
   check,
   uniqueIndex,
   index,
@@ -92,6 +93,8 @@ export const chatMessages = pgTable('chat_messages', {
     .array()
     .default(sql`'{}'::text[]`)
     .notNull(),
+  type: varchar('type', { length: 32 }).default('TEXT').notNull(),
+  metadata: jsonb('metadata'),
   clientMessageId: varchar('client_message_id', { length: 128 }),
   isRead: boolean('is_read').default(false).notNull(),
   isRevoked: boolean('is_revoked').default(false).notNull(),
