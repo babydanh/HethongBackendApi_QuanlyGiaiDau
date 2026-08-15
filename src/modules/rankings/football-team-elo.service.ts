@@ -54,6 +54,7 @@ export class FootballTeamEloService {
         participant1Id: schema.matches.participant1Id,
         participant2Id: schema.matches.participant2Id,
         winnerId: schema.matches.winnerId,
+        scoreDetails: schema.matches.scoreDetails,
         tournamentId: schema.matches.tournamentId,
       })
       .from(schema.matches)
@@ -100,14 +101,18 @@ export class FootballTeamEloService {
       const [rank1, rank2] = ranks;
       const score1 = match.winnerId ? (match.winnerId === match.participant1Id ? 1 : 0) : 0.5;
       const score2 = 1 - score1;
+      const scoreDetails = match.scoreDetails as Record<string, unknown> | null | undefined;
+      const specialResult = scoreDetails?.specialResult as Record<string, unknown> | undefined;
+      const specialAction = typeof specialResult?.action === 'string' ? specialResult.action : null;
+      const isWalkover = specialAction === 'WALKOVER' || specialAction === 'DISQUALIFICATION';
       const expected1 = 1 / (1 + 10 ** ((rank2.eloPoints - rank1.eloPoints) / 400));
       const expected2 = 1 - expected1;
       const delta1 = Math.round(this.kFactor * (score1 - expected1));
       const delta2 = Math.round(this.kFactor * (score2 - expected2));
       const now = new Date();
       const updates = [
-        { rank: rank1, delta: delta1, score: score1, won: score1 === 1 },
-        { rank: rank2, delta: delta2, score: score2, won: score2 === 1 },
+        { rank: rank1, delta: delta1, score: score1, won: score1 === 1, outcome: isWalkover ? (score1 === 1 ? 'FORFEIT' : 'NO_SHOW') : (score1 === 1 ? 'WIN' : score1 === 0.5 ? 'DRAW' : 'LOSS') },
+        { rank: rank2, delta: delta2, score: score2, won: score2 === 1, outcome: isWalkover ? (score2 === 1 ? 'FORFEIT' : 'NO_SHOW') : (score2 === 1 ? 'WIN' : score2 === 0.5 ? 'DRAW' : 'LOSS') },
       ];
       for (const item of updates) {
         const afterElo = Math.max(0, item.rank.eloPoints + item.delta);
@@ -132,7 +137,8 @@ export class FootballTeamEloService {
           beforeElo: item.rank.eloPoints,
           afterElo,
           delta: item.delta,
-          outcome: item.won ? 'WIN' : item.score === 0.5 ? 'DRAW' : 'LOSS',
+          outcome: item.outcome,
+          reason: specialAction ?? 'MATCH_COMPLETED',
         });
       }
       return { handled: true };

@@ -342,4 +342,33 @@ describe('validateScoreDetails', () => {
       totalSets: 1,
     });
   });
+
+  it('FOOTBALL validates phase and event bounds in the structured payload', () => {
+    const result = validateScoreDetails(
+      {
+        football: {
+          team1Goals: 2,
+          team2Goals: 1,
+          phase: 'FULL_TIME',
+          events: [{ type: 'GOAL', team: 1, minute: 12 }],
+        },
+      },
+      buildResolvedConfig({ kind: 'FOOTBALL', bestOf: 1, setsToWin: 1, pointsPerSet: 1, maxPoints: 99 }),
+    );
+
+    expect(result.p1SetsWon).toBe(1);
+    expect(result.p2SetsWon).toBe(0);
+  });
+
+  it('FOOTBALL rejects an invalid phase or event team', () => {
+    expect(() => validateScoreDetails(
+      { football: { team1Goals: 0, team2Goals: 0, phase: 'INVALID' } },
+      buildResolvedConfig({ kind: 'FOOTBALL', bestOf: 1, setsToWin: 1, pointsPerSet: 1, maxPoints: 99 }),
+    )).toThrow(BadRequestException);
+
+    expect(() => validateScoreDetails(
+      { football: { team1Goals: 0, team2Goals: 0, phase: 'FULL_TIME', events: [{ type: 'GOAL', team: 3 }] } },
+      buildResolvedConfig({ kind: 'FOOTBALL', bestOf: 1, setsToWin: 1, pointsPerSet: 1, maxPoints: 99 }),
+    )).toThrow(BadRequestException);
+  });
 });
