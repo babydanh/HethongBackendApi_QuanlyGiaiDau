@@ -1,5 +1,5 @@
 # Base image
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 RUN npm install -g pnpm
 
 # Install dependencies
@@ -19,7 +19,7 @@ RUN pnpm build
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 # Production image
-FROM node:20-alpine AS deploy
+FROM node:22-alpine AS deploy
 WORKDIR /app
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules

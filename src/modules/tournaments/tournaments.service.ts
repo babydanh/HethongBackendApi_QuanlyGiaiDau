@@ -57,6 +57,7 @@ import { RedisService } from '../../providers/redis/redis.service';
 import { StorageService } from '../../providers/storage/storage.service';
 import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
 import { CommunitySocialRepository } from '../communities/community-social.repository';
+import { validateFootballRosterSelection } from './utils/football-roster-validation';
 
 @Injectable()
 export class TournamentsService {
@@ -1819,30 +1820,19 @@ export class TournamentsService {
       const selectedTeamSize = Number(tournamentConfig.teamSize ?? tournamentConfig.minTeamSize ?? 0);
       const maxReserve = Math.max(0, Number(tournamentConfig.maxReserve ?? 0));
       const maxTeamSize = Number(tournamentConfig.maxTeamSize ?? (selectedTeamSize > 0 ? selectedTeamSize + maxReserve : 99));
-      const activeTeamMemberIds = new Set(footballTeam.members.map((member) => member.userId));
-      const requestedMemberIds = registerTournamentDto.memberIds?.length
-        ? [...new Set([userId, ...registerTournamentDto.memberIds])]
-        : [...activeTeamMemberIds];
-      const reserveMemberIds = [...new Set(registerTournamentDto.reserveMemberIds ?? [])];
-      if (reserveMemberIds.includes(userId)) {
-        throw new BadRequestException('Đội trưởng phải nằm trong đội hình chính của đăng ký.');
-      }
-      if (requestedMemberIds.some((memberId) => reserveMemberIds.includes(memberId))) {
-        throw new BadRequestException('Một thành viên không thể vừa là cầu thủ chính vừa là dự bị.');
-      }
-      if (requestedMemberIds.some((memberId) => !activeTeamMemberIds.has(memberId))) {
-        throw new BadRequestException('Đội hình đăng ký chỉ được chọn thành viên đang hoạt động của đội bóng.');
-      }
-      if (reserveMemberIds.some((memberId) => !activeTeamMemberIds.has(memberId))) {
-        throw new BadRequestException('Danh sách dự bị chỉ được chọn thành viên đang hoạt động của đội bóng.');
-      }
-      if (requestedMemberIds.length < minTeamSize || (selectedTeamSize > 0 && requestedMemberIds.length > selectedTeamSize)) {
-        throw new BadRequestException(`Đội hình chính phải có từ ${minTeamSize} đến ${selectedTeamSize || maxTeamSize} thành viên.`);
-      }
-      if (reserveMemberIds.length > maxReserve || requestedMemberIds.length + reserveMemberIds.length > maxTeamSize) {
-        throw new BadRequestException(`Đội hình chỉ được có tối đa ${maxReserve} cầu thủ dự bị và ${maxTeamSize} thành viên tổng cộng.`);
-      }
-      userIds = [...requestedMemberIds, ...reserveMemberIds];
+      const roster = validateFootballRosterSelection({
+        leaderId: userId,
+        memberIds: registerTournamentDto.memberIds?.length
+          ? registerTournamentDto.memberIds
+          : footballTeam.members.map((member) => member.userId),
+        reserveMemberIds: registerTournamentDto.reserveMemberIds ?? [],
+        activeMemberIds: new Set(footballTeam.members.map((member) => member.userId)),
+        minMainSize: minTeamSize,
+        maxMainSize: selectedTeamSize,
+        maxReserve,
+        maxTotalSize: maxTeamSize,
+      });
+      userIds = roster.allMemberIds;
     }
 
     await this.validateEloLimits(tournament, userIds, { division: requestedDivision });
@@ -3020,15 +3010,9 @@ export class TournamentsService {
     if (!participant || participant.tournamentId !== tournamentId) {
       throw new NotFoundException('Người tham gia không tồn tại');
     }
-    const footballEntry = await this.tournamentsRepository.findFootballEntryForParticipant(participantId);
-    if (footballEntry?.entry) {
-      if (footballEntry.entry.status !== 'CONFIRMED' && footballEntry.entry.status !== 'LOCKED') {
-        throw new BadRequestException('Chưa đủ thành viên xác nhận roster để khóa đội.');
-      }
-      if (footballEntry.entry.status === 'CONFIRMED') {
-        await this.tournamentsRepository.lockFootballEntry(footballEntry.entry.id, userId);
-      }
-    }
+    // The repository locks the participant and its football entry in one
+    // transaction. Keeping the status check there prevents a member response
+    // racing with the lock request from leaving the two records inconsistent.
     return this.tournamentsRepository.lockParticipantRoster(participantId, userId);
   }
 

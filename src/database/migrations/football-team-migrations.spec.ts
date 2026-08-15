@@ -28,4 +28,30 @@ describe('football team migration bundle', () => {
     expect(link).toContain('ADD COLUMN IF NOT EXISTS football_team_id');
     expect(required.indexOf(required[0])).toBeLessThan(required.indexOf(required[3]));
   });
+
+  it('is safe for existing participant data and has no destructive table DDL', () => {
+    for (const file of required) {
+      const sql = readFileSync(join(directory, file), 'utf8');
+      expect(sql).not.toMatch(/DROP\s+TABLE/i);
+      expect(sql).not.toMatch(/DROP\s+COLUMN/i);
+
+      const addColumnStatements = sql.match(/ALTER\s+TABLE[\s\S]*?ADD\s+COLUMN[^;]*;/gi) ?? [];
+      for (const statement of addColumnStatements) {
+        expect(statement).toMatch(/ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS/i);
+      }
+    }
+  });
+
+  it('keeps standalone football migrations discoverable by the production runner', () => {
+    const runnerPath = join(directory, '..', '..', '..', 'run-prod-migration.js');
+    const runner = readFileSync(runnerPath, 'utf8');
+
+    expect(runner).toContain("!file.startsWith('meta')");
+    expect(runner).toContain('.filter((tag) => !journalTags.has(tag))');
+    expect(runner).toContain('.sort()');
+    for (const file of required) {
+      expect(runner).toContain('standaloneMigrations');
+      expect(existsSync(join(directory, file))).toBe(true);
+    }
+  });
 });

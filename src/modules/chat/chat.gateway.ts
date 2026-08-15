@@ -13,6 +13,7 @@ import { ChatMessagePayload } from './interfaces/chat-message-payload.interface'
 import { corsOptions } from '../../config/cors.config';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { UserRole } from '../../common/constants/enums';
+import { hasRole } from '../../common/helpers/role.helper';
 import { ChatRepository } from './chat.repository';
 
 interface SupportTypingPayload {
@@ -40,10 +41,8 @@ export class ChatGateway {
     @ConnectedSocket() client: Socket,
   ) {
     const user = client.data.user as JwtPayload | undefined;
-    const roles = user?.roles ?? (user?.role ? [user.role] : []);
-    const isSupportStaff = roles.some(
-      (role) => role === UserRole.ADMIN || role === UserRole.MODERATOR,
-    );
+    const isSupportStaff =
+      hasRole(user, UserRole.ADMIN) || hasRole(user, UserRole.MODERATOR);
     // P2D.1: room CLUB kiểm tra qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
     const isMember = user?.sub
       ? await this.chatRepository.canAccessRoom(roomId, user.sub)
@@ -74,10 +73,8 @@ export class ChatGateway {
   @SubscribeMessage('subscribeSupportInbox')
   handleSubscribeSupportInbox(@ConnectedSocket() client: Socket) {
     const user = client.data.user as JwtPayload | undefined;
-    const roles = user?.roles ?? (user?.role ? [user.role] : []);
-    const canManageSupport = roles.some(
-      (role) => role === UserRole.ADMIN || role === UserRole.MODERATOR,
-    );
+    const canManageSupport =
+      hasRole(user, UserRole.ADMIN) || hasRole(user, UserRole.MODERATOR);
 
     if (!canManageSupport) {
       return { event: 'support:error', data: 'Forbidden' };
@@ -161,10 +158,8 @@ export class ChatGateway {
       return { event: 'support:error', data: 'Unauthorized' };
     }
 
-    const roles = user.roles ?? (user.role ? [user.role] : []);
-    const isSupportStaff = roles.some(
-      (role) => role === UserRole.ADMIN || role === UserRole.MODERATOR,
-    );
+    const isSupportStaff =
+      hasRole(user, UserRole.ADMIN) || hasRole(user, UserRole.MODERATOR);
     const isMember = await this.chatRepository.isMemberOfRoom(
       payload.roomId,
       user.sub,
