@@ -4,7 +4,7 @@ import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { PaymentStatus } from '../../common/constants/enums';
-import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt, like, isNull, desc, asc } from 'drizzle-orm';
+import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt, like, isNull, desc, asc, gt, notExists } from 'drizzle-orm';
 import { AuditService, Transaction } from '../audit/audit.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -25,6 +25,7 @@ import {
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
 import { sortFootballStandings } from './utils/football-standings';
+import { validateFootballRosterSelection } from './utils/football-roster-validation';
 
 @Injectable()
 export class TournamentsRepository {
@@ -1454,12 +1455,6 @@ export class TournamentsRepository {
         const footballMembers = await tx.select({ userId: schema.footballTeamMembers.userId })
           .from(schema.footballTeamMembers)
           .where(and(eq(schema.footballTeamMembers.teamId, data.footballTeamId), eq(schema.footballTeamMembers.status, 'ACTIVE')));
-        const requestedMemberIds = Array.isArray(data.memberIds) && data.memberIds.length > 0
-          ? [...new Set([userId, ...data.memberIds])]
-          : footballMembers.map((member) => member.userId);
-        const requestedReserveMemberIds = Array.isArray(data.reserveMemberIds)
-          ? [...new Set(data.reserveMemberIds)]
-          : [];
         const teamConfig = (tournament.tournamentConfig || {}) as Record<string, unknown>;
         const configuredTeamSize = Number(teamConfig.teamSize ?? teamConfig.minTeamSize ?? 0);
         const configuredMaxTeamSize = Number(
@@ -1468,31 +1463,21 @@ export class TournamentsRepository {
             : Number.MAX_SAFE_INTEGER),
         );
         const configuredMaxReserve = Math.max(0, Number(teamConfig.maxReserve ?? 0));
-        if (requestedReserveMemberIds.includes(userId)) {
-          throw new BadRequestException('Đội trưởng phải nằm trong đội hình chính của đăng ký.');
-        }
-        if (requestedMemberIds.some((memberId) => requestedReserveMemberIds.includes(memberId))) {
-          throw new BadRequestException('Một thành viên không thể vừa là cầu thủ chính vừa là dự bị.');
-        }
         const activeMemberIds = new Set(footballMembers.map((member) => member.userId));
-        if (requestedMemberIds.some((memberId) => !activeMemberIds.has(memberId))) {
-          throw new BadRequestException('Đội hình đăng ký chứa thành viên không còn hoạt động trong đội bóng.');
-        }
-        if (requestedReserveMemberIds.some((memberId) => !activeMemberIds.has(memberId))) {
-          throw new BadRequestException('Danh sách dự bị chứa thành viên không còn hoạt động trong đội bóng.');
-        }
-        if (configuredTeamSize > 0 && requestedMemberIds.length < configuredTeamSize) {
-          throw new BadRequestException(`Đội hình chính phải có ít nhất ${configuredTeamSize} cầu thủ.`);
-        }
-        if (configuredTeamSize > 0 && requestedMemberIds.length > configuredTeamSize) {
-          throw new BadRequestException(`Đội hình chính không được vượt quá ${configuredTeamSize} cầu thủ; hãy chuyển người dư sang danh sách dự bị.`);
-        }
-        if (requestedReserveMemberIds.length > configuredMaxReserve ||
-            requestedMemberIds.length + requestedReserveMemberIds.length > configuredMaxTeamSize) {
-          throw new BadRequestException(`Đội hình chỉ được có tối đa ${configuredMaxReserve} dự bị và ${configuredMaxTeamSize} thành viên tổng cộng.`);
-        }
-        footballTeamMemberIds = requestedMemberIds;
-        footballTeamReserveMemberIds = requestedReserveMemberIds;
+        const roster = validateFootballRosterSelection({
+          leaderId: userId,
+          memberIds: Array.isArray(data.memberIds) && data.memberIds.length > 0
+            ? data.memberIds
+            : footballMembers.map((member) => member.userId),
+          reserveMemberIds: Array.isArray(data.reserveMemberIds) ? data.reserveMemberIds : [],
+          activeMemberIds,
+          minMainSize: configuredTeamSize,
+          maxMainSize: configuredTeamSize,
+          maxReserve: configuredMaxReserve,
+          maxTotalSize: configuredMaxTeamSize,
+        });
+        footballTeamMemberIds = roster.mainMemberIds;
+        footballTeamReserveMemberIds = roster.reserveMemberIds;
         finalTeamName = footballTeam.name;
         footballTeamLogoUrl = footballTeam.logoUrl ?? null;
       }
@@ -2510,6 +2495,14 @@ export class TournamentsRepository {
   }
 
   async findFootballTeamForRegistration(teamId: string, userId: string) {
+    const activeBan = this.db.select({ id: schema.userBans.id })
+      .from(schema.userBans)
+      .where(and(
+        eq(schema.userBans.userId, schema.users.id),
+        eq(schema.userBans.isActive, true),
+        inArray(schema.userBans.banType, ['SOFT_BAN', 'HARD_BAN']),
+        or(isNull(schema.userBans.expiresAt), gt(schema.userBans.expiresAt, new Date())),
+      ));
     const [team] = await this.db.select({
       team: schema.footballTeams,
       membership: schema.footballTeamMembers,
@@ -2523,7 +2516,13 @@ export class TournamentsRepository {
           eq(schema.footballTeamMembers.status, 'ACTIVE'),
         ),
       )
-      .where(eq(schema.footballTeams.id, teamId))
+      .innerJoin(schema.users, eq(schema.users.id, schema.footballTeamMembers.userId))
+      .where(and(
+        eq(schema.footballTeams.id, teamId),
+        isNull(schema.users.deletedAt),
+        eq(schema.users.isMock, false),
+        notExists(activeBan),
+      ))
       .limit(1);
     if (!team) return null;
 
@@ -2532,7 +2531,14 @@ export class TournamentsRepository {
       role: schema.footballTeamMembers.role,
     })
       .from(schema.footballTeamMembers)
-      .where(and(eq(schema.footballTeamMembers.teamId, teamId), eq(schema.footballTeamMembers.status, 'ACTIVE')));
+      .innerJoin(schema.users, eq(schema.users.id, schema.footballTeamMembers.userId))
+      .where(and(
+        eq(schema.footballTeamMembers.teamId, teamId),
+        eq(schema.footballTeamMembers.status, 'ACTIVE'),
+        isNull(schema.users.deletedAt),
+        eq(schema.users.isMock, false),
+        notExists(activeBan),
+      ));
     return { ...team.team, membership: team.membership, members };
   }
 
@@ -3842,6 +3848,29 @@ export class TournamentsRepository {
         throw new BadRequestException('Chỉ đội đã hoàn tất đăng ký mới được khóa roster.');
       }
       if (participant.rosterLockedAt) return participant;
+      if (participant.footballTeamId && participant.tournamentDivisionId) {
+        const [entry] = await tx
+          .select()
+          .from(schema.tournamentTeamEntries)
+          .where(and(
+            eq(schema.tournamentTeamEntries.tournamentId, participant.tournamentId),
+            eq(schema.tournamentTeamEntries.divisionId, participant.tournamentDivisionId),
+            eq(schema.tournamentTeamEntries.teamId, participant.footballTeamId),
+          ))
+          .for('update')
+          .limit(1);
+        if (entry && entry.status !== 'CONFIRMED' && entry.status !== 'LOCKED') {
+          throw new BadRequestException('Chưa đủ thành viên xác nhận roster để khóa đội.');
+        }
+        if (entry?.status === 'CONFIRMED') {
+          const [lockedEntry] = await tx
+            .update(schema.tournamentTeamEntries)
+            .set({ status: 'LOCKED', lockedAt: new Date(), updatedAt: new Date() })
+            .where(eq(schema.tournamentTeamEntries.id, entry.id))
+            .returning();
+          await this.auditService.logUpdate(tx, userId, 'tournament_team_entries', entry.id, entry, lockedEntry);
+        }
+      }
       const [updated] = await tx.update(schema.tournamentParticipants)
         .set({ rosterLockedAt: new Date() })
         .where(eq(schema.tournamentParticipants.id, participantId))
