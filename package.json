@@ -121,5 +121,14 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "bcrypt",
+      "esbuild",
+      "msgpackr-extract",
+      "unrs-resolver"
+    ]
   }
 }
