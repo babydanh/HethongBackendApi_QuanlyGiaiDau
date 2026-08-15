@@ -1,8 +1,11 @@
 packages:
   - '.'
 
+dangerouslyAllowAllBuilds: true
+
 allowBuilds:
   '@nestjs/core': true
+  '@scarf/scarf': true
   bcrypt: true
   esbuild: true
   msgpackr-extract: true
