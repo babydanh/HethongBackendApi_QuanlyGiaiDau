@@ -74,27 +74,45 @@ export class TournamentsService {
    * chủ giải (createdBy) hoặc đồng tổ chức (CO_ORGANIZER trong tournamentStaff).
    */
   
-  calculateNextRecurringDate(frequency: string, dayOfWeek: number, timeOfDay: string, fromDate = new Date()): Date {
+  calculateNextRecurringDate(frequency: string, daysOfWeek: number[] | number, timeOfDay: string, fromDate = new Date()): Date {
     const [hours, minutes] = (timeOfDay || '18:00').split(':').map(Number);
     const target = new Date(fromDate);
     target.setHours(hours, minutes, 0, 0);
 
     if (frequency === 'DAILY') {
       target.setDate(target.getDate() + 1);
-    } else if (frequency === 'WEEKLY') {
-      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
-      if (daysAhead === 0) daysAhead = 7;
-      target.setDate(target.getDate() + daysAhead);
-    } else if (frequency === 'BIWEEKLY') {
-      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
-      if (daysAhead === 0) daysAhead = 14;
-      else daysAhead += 7;
-      target.setDate(target.getDate() + daysAhead);
-    } else if (frequency === 'MONTHLY') {
-      target.setMonth(target.getMonth() + 1);
-    } else {
-      target.setDate(target.getDate() + 7);
+      return target;
     }
+
+    if (frequency === 'MONTHLY') {
+      target.setMonth(target.getMonth() + 1);
+      return target;
+    }
+
+    const days: number[] = Array.isArray(daysOfWeek)
+      ? daysOfWeek.length > 0 ? daysOfWeek : [6]
+      : [typeof daysOfWeek === 'number' ? daysOfWeek : 6];
+
+    const currentDay = fromDate.getDay();
+    const isTodayPast = fromDate.getTime() >= target.getTime();
+
+    let minDaysAhead = 999;
+    for (const d of days) {
+      let diff = (d - currentDay + 7) % 7;
+      if (diff === 0 && isTodayPast) {
+        diff = frequency === 'BIWEEKLY' ? 14 : 7;
+      }
+      if (diff === 0 && !isTodayPast) {
+        diff = 0;
+      }
+      if (diff > 0 && diff < minDaysAhead) {
+        minDaysAhead = diff;
+      }
+    }
+
+    if (minDaysAhead === 999) minDaysAhead = 7;
+    target.setDate(fromDate.getDate() + minDaysAhead);
+    target.setHours(hours, minutes, 0, 0);
     return target;
   }
 
@@ -598,13 +616,16 @@ export class TournamentsService {
     if (dto.isRecurring) {
       const frequency = dto.recurringFrequency || 'WEEKLY';
       const timeOfDay = dto.recurringTimeOfDay || dto.startTime || '18:00';
-      const dayOfWeek = dto.recurringDayOfWeek ?? (dto.startDate ? new Date(dto.startDate).getDay() : 6);
-      const nextRun = this.calculateNextRecurringDate(frequency, dayOfWeek, timeOfDay);
+      const daysOfWeek: number[] = dto.recurringDaysOfWeek && dto.recurringDaysOfWeek.length > 0
+        ? dto.recurringDaysOfWeek
+        : [dto.recurringDayOfWeek ?? (dto.startDate ? new Date(dto.startDate).getDay() : 6)];
+      const nextRun = this.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay);
 
       recurringConfig = {
         enabled: true,
         frequency,
-        dayOfWeek,
+        dayOfWeek: daysOfWeek[0],
+        daysOfWeek,
         timeOfDay,
         templateName: dto.name,
         sport,

@@ -7,6 +7,7 @@ import {
   IsBoolean,
   IsUUID,
   IsDateString,
+  IsArray,
   Min,
   Max,
   IsIn,
@@ -113,6 +114,12 @@ export class CreateLiteTournamentDto {
   @Min(0)
   @Max(6)
   recurringDayOfWeek?: number;
+
+  @ApiPropertyOptional({ example: [2, 4, 6], description: 'Danh sách các thứ trong tuần (0: CN, 1: T2, ..., 6: T7)' })
+  @IsArray()
+  @IsOptional()
+  @IsNumber({}, { each: true })
+  recurringDaysOfWeek?: number[];
 
   @ApiPropertyOptional({ example: '18:00', description: 'Giờ thi đấu định kỳ (HH:mm)' })
   @IsString()

@@ -104,27 +104,45 @@ export class TournamentSchedulerService {
     }
   }
 
-  calculateNextRecurringDate(frequency: string, dayOfWeek: number, timeOfDay: string, fromDate = new Date()): Date {
+  calculateNextRecurringDate(frequency: string, daysOfWeek: number[] | number, timeOfDay: string, fromDate = new Date()): Date {
     const [hours, minutes] = (timeOfDay || '18:00').split(':').map(Number);
     const target = new Date(fromDate);
     target.setHours(hours, minutes, 0, 0);
 
     if (frequency === 'DAILY') {
       target.setDate(target.getDate() + 1);
-    } else if (frequency === 'WEEKLY') {
-      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
-      if (daysAhead === 0) daysAhead = 7;
-      target.setDate(target.getDate() + daysAhead);
-    } else if (frequency === 'BIWEEKLY') {
-      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
-      if (daysAhead === 0) daysAhead = 14;
-      else daysAhead += 7;
-      target.setDate(target.getDate() + daysAhead);
-    } else if (frequency === 'MONTHLY') {
-      target.setMonth(target.getMonth() + 1);
-    } else {
-      target.setDate(target.getDate() + 7);
+      return target;
     }
+
+    if (frequency === 'MONTHLY') {
+      target.setMonth(target.getMonth() + 1);
+      return target;
+    }
+
+    const days: number[] = Array.isArray(daysOfWeek)
+      ? daysOfWeek.length > 0 ? daysOfWeek : [6]
+      : [typeof daysOfWeek === 'number' ? daysOfWeek : 6];
+
+    const currentDay = fromDate.getDay();
+    const isTodayPast = fromDate.getTime() >= target.getTime();
+
+    let minDaysAhead = 999;
+    for (const d of days) {
+      let diff = (d - currentDay + 7) % 7;
+      if (diff === 0 && isTodayPast) {
+        diff = frequency === 'BIWEEKLY' ? 14 : 7;
+      }
+      if (diff === 0 && !isTodayPast) {
+        diff = 0;
+      }
+      if (diff > 0 && diff < minDaysAhead) {
+        minDaysAhead = diff;
+      }
+    }
+
+    if (minDaysAhead === 999) minDaysAhead = 7;
+    target.setDate(fromDate.getDate() + minDaysAhead);
+    target.setHours(hours, minutes, 0, 0);
     return target;
   }
 
@@ -154,7 +172,9 @@ export class TournamentSchedulerService {
         const config = (t.tournamentConfig as Record<string, any>) || {};
         const rec = config.recurring || {};
         const frequency = rec.frequency || 'WEEKLY';
-        const dayOfWeek = rec.dayOfWeek ?? 6;
+        const daysOfWeek: number[] = rec.daysOfWeek && rec.daysOfWeek.length > 0
+          ? rec.daysOfWeek
+          : [rec.dayOfWeek ?? 6];
         const timeOfDay = rec.timeOfDay || '18:00';
 
         const nextTournamentDate = new Date(rec.nextRunAt || now);
@@ -197,7 +217,7 @@ export class TournamentSchedulerService {
           })
           .returning();
 
-        const nextNextRun = this.calculateNextRecurringDate(frequency, dayOfWeek, timeOfDay, nextTournamentDate);
+        const nextNextRun = this.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay, nextTournamentDate);
         const updatedConfig = {
           ...config,
           recurring: {
