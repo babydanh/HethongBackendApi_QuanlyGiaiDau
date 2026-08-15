@@ -588,6 +588,15 @@ export class TournamentsService {
     };
 
     // 7. Check authorization: must be community member (JOINED)
+    const communitySportsLite = await this.tournamentsRepository.findCommunitySports(dto.communityId);
+    if (communitySportsLite.length > 0) {
+      const isMatch = communitySportsLite.some((s) => s.categoryId === category.id);
+      if (!isMatch) {
+        throw new BadRequestException(
+          `Giải đấu của câu lạc bộ phải thuộc bộ môn của câu lạc bộ (${communitySportsLite.map((s) => s.categoryName).join(', ')}).`,
+        );
+      }
+    }
     if (!systemRoles.includes('ADMIN')) {
       const member = await this.tournamentsRepository.findCommunityMember(dto.communityId, userId);
       if (!member || member.status !== 'JOINED' || !['OWNER', 'MODERATOR'].includes(member.role)) {

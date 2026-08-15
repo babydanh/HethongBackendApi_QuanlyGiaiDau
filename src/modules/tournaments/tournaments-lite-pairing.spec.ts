@@ -46,12 +46,12 @@ describe('deriveGroupStageConfig (pure)', () => {
 
 describe('TournamentsService — Lite pairing guards', () => {
   let service: TournamentsService;
-  let mockRepo: jest.Mocked<Partial<TournamentsRepository>>;
-  let mockBracketGenerator: jest.Mocked<Partial<BracketGeneratorService>>;
-  let mockNotifications: jest.Mocked<Partial<NotificationsService>>;
-  let mockStorage: jest.Mocked<Partial<StorageService>>;
-  let mockRedis: jest.Mocked<Partial<RedisService>>;
-  let mockConfig: jest.Mocked<Partial<ConfigService>>;
+  let mockRepo: any;
+  let mockBracketGenerator: any;
+  let mockNotifications: any;
+  let mockStorage: any;
+  let mockRedis: any;
+  let mockConfig: any;
 
   const liteTournament = {
     id: 'tournament-1',
@@ -102,6 +102,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockStorage as any,
       mockRedis as any,
       mockConfig as any,
+      {} as any,
     );
   });
 
