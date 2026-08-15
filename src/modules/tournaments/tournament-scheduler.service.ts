@@ -334,7 +334,8 @@ export class TournamentSchedulerService {
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentId, t.id),
-              eq(schema.tournamentParticipants.status, 'CONFIRMED')
+              // Đếm tất cả đội/VĐV hợp lệ đã đăng ký (COMPLETE hoặc đang chờ ghép đôi PENDING_PARTNER)
+              sql`${schema.tournamentParticipants.teamStatus} IN ('COMPLETE', 'PENDING_PARTNER', 'PENDING_APPROVAL')`
             )
           );
 
