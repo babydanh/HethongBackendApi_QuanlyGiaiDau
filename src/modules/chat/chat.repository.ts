@@ -816,6 +816,8 @@ export class ChatRepository {
             id: schema.chatMessages.id,
             senderId: schema.chatMessages.senderId,
             messageText: schema.chatMessages.messageText,
+            attachmentsUrls: schema.chatMessages.attachmentsUrls,
+            isRevoked: schema.chatMessages.isRevoked,
             createdAt: schema.chatMessages.createdAt,
             senderName: schema.profiles.fullName,
           })
@@ -846,6 +848,17 @@ export class ChatRepository {
           ? (room.createdAt instanceof Date ? room.createdAt.toISOString() : new Date(room.createdAt).toISOString())
           : nowIso;
 
+        let lastMsgContent = '';
+        if (lastMessage) {
+          if (lastMessage.isRevoked) {
+            lastMsgContent = 'Tin nhắn đã thu hồi';
+          } else if (lastMessage.messageText) {
+            lastMsgContent = lastMessage.messageText;
+          } else if (lastMessage.attachmentsUrls && lastMessage.attachmentsUrls.length > 0) {
+            lastMsgContent = '🖼️ [Hình ảnh]';
+          }
+        }
+
         return {
           ...room,
           participants,
@@ -855,7 +868,7 @@ export class ChatRepository {
                 id: lastMessage.id,
                 senderId: lastMessage.senderId,
                 senderName: lastMessage.senderName,
-                content: lastMessage.messageText ?? '',
+                content: lastMsgContent,
                 createdAt: lastMsgDateIso || nowIso,
               }
             : null,
