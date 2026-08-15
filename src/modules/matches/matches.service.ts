@@ -234,6 +234,34 @@ export class MatchesService {
     return winnerId;
   }
 
+  private validateFootballPhaseTransition(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+    previousScoreDetails: unknown,
+    nextScoreDetails: Record<string, unknown>,
+  ) {
+    const config = this.resolveMatchConfig(match);
+    if (config.kind !== 'FOOTBALL') return;
+    const previous = previousScoreDetails && typeof previousScoreDetails === 'object'
+      ? (previousScoreDetails as Record<string, unknown>).football
+      : undefined;
+    const next = nextScoreDetails.football;
+    if (!previous || typeof previous !== 'object' || !next || typeof next !== 'object' || Array.isArray(next)) return;
+
+    const previousPhase = (previous as Record<string, unknown>).phase;
+    const nextPhase = (next as Record<string, unknown>).phase;
+    if (typeof previousPhase !== 'string' || typeof nextPhase !== 'string' || previousPhase === nextPhase) return;
+    const phases = [
+      'FIRST_HALF', 'HALFTIME', 'SECOND_HALF', 'STOPPAGE_TIME', 'FULL_TIME',
+      'EXTRA_TIME_FIRST_HALF', 'EXTRA_TIME_BREAK', 'EXTRA_TIME_SECOND_HALF',
+      'PENALTY_SHOOTOUT', 'COMPLETED',
+    ];
+    const previousIndex = phases.indexOf(previousPhase);
+    const nextIndex = phases.indexOf(nextPhase);
+    if (previousIndex < 0 || nextIndex < 0 || nextIndex < previousIndex) {
+      throw new BadRequestException(`football.phase không thể chuyển từ ${previousPhase} sang ${nextPhase}.`);
+    }
+  }
+
   private validateBasicOverrideScoreDetails(scoreDetails: Record<string, unknown>) {
     const rawSets = scoreDetails.sets;
     if (!Array.isArray(rawSets)) {
@@ -471,6 +499,7 @@ export class MatchesService {
         overrideReason,
         user.sub,
       );
+      this.validateFootballPhaseTransition(existing, existing.scoreDetails, scoreDetails);
     }
 
     // 1. Validate score details if provided
