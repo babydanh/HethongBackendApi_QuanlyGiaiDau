@@ -177,6 +177,9 @@ export const tournamentParticipants = pgTable('tournament_participants', {
     .references(() => users.id, { onDelete: 'restrict' })
     .notNull(),
   teamName: varchar('team_name', { length: 255 }).notNull(),
+  // FK is applied by the standalone migration to avoid a runtime schema import cycle.
+  footballTeamId: uuid('football_team_id'),
+  footballTeamLogoUrl: varchar('football_team_logo_url', { length: 1000 }),
   seed: integer('seed'),
   points: integer('points').default(0).notNull(),
   rankingConsent: boolean('ranking_consent').default(false).notNull(),
@@ -190,6 +193,7 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   registeredAt: timestamp('registered_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+  rosterLockedAt: timestamp('roster_locked_at', { withTimezone: true }),
 }, (table) => ({
   idxParticipantsTournamentStatus: index('idx_participants_tournament_status').on(
     table.tournamentId,

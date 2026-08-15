@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS football_team_invites (
   CONSTRAINT football_team_invites_status_check CHECK (status IN ('PENDING', 'ACCEPTED', 'DECLINED', 'CANCELLED', 'EXPIRED'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_football_team_invites_pending ON football_team_invites(team_id, user_id, status);
+DROP INDEX IF EXISTS uq_football_team_invites_pending;
+CREATE UNIQUE INDEX uq_football_team_invites_pending
+  ON football_team_invites(team_id, user_id)
+  WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_football_team_invites_user_status ON football_team_invites(user_id, status, created_at);
 
 CREATE TABLE IF NOT EXISTS tournament_team_entries (

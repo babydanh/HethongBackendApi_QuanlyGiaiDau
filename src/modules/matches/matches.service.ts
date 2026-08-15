@@ -204,6 +204,36 @@ export class MatchesService {
     });
   }
 
+  private validateFootballShootout(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+    scoreDetails: Record<string, unknown> | null | undefined,
+  ): string {
+    if (!match || !scoreDetails) {
+      throw new BadRequestException('Trận bóng đá loại trực tiếp hòa cần tỷ số luân lưu hợp lệ.');
+    }
+    const config = this.resolveMatchConfig(match);
+    const tournamentConfig = match.tournament?.tournamentConfig as Record<string, unknown> | undefined;
+    if (config.kind !== 'FOOTBALL' || tournamentConfig?.penaltyShootout !== true || match.stage?.type === 'ROUND_ROBIN') {
+      throw new BadRequestException('Luân lưu chỉ được dùng cho trận bóng đá loại trực tiếp khi giải đã bật luân lưu.');
+    }
+    const football = scoreDetails.football as Record<string, unknown> | undefined;
+    const regulation1 = football?.team1Goals;
+    const regulation2 = football?.team2Goals;
+    const shootout = (scoreDetails.shootout ?? football?.shootout) as Record<string, unknown> | undefined;
+    const team1Goals = shootout?.team1Goals;
+    const team2Goals = shootout?.team2Goals;
+    if (!football || !Number.isInteger(regulation1) || !Number.isInteger(regulation2) || regulation1 !== regulation2 ||
+      !shootout || !Number.isInteger(team1Goals) || !Number.isInteger(team2Goals) ||
+      (team1Goals as number) < 0 || (team2Goals as number) < 0 || team1Goals === team2Goals) {
+      throw new BadRequestException('Luân lưu chỉ hợp lệ khi tỷ số chính hòa và có hai số nguyên khác nhau.');
+    }
+    const winnerId = (team1Goals as number) > (team2Goals as number) ? match.participant1Id : match.participant2Id;
+    if (!winnerId || shootout.winnerId !== winnerId) {
+      throw new BadRequestException('WinnerId phải khớp với đội thắng luân lưu.');
+    }
+    return winnerId;
+  }
+
   private validateBasicOverrideScoreDetails(scoreDetails: Record<string, unknown>) {
     const rawSets = scoreDetails.sets;
     if (!Array.isArray(rawSets)) {
@@ -446,9 +476,30 @@ export class MatchesService {
     // 1. Validate score details if provided
     if (scoreDetails) {
       if (overrideReason) {
-        const validation = this.validateBasicOverrideScoreDetails(scoreDetails);
+        // An override records an exceptional rule decision; it must never
+        // bypass the sport validator. Football draws and shootouts are valid
+        // domain outcomes and are therefore validated with football rules.
+        const resolvedConfig = this.resolveMatchConfig(existing);
+        const tournamentConfig = existing.tournament?.tournamentConfig as Record<string, unknown> | undefined;
+        const sportRules = existing.tournament?.sportRules as Record<string, unknown> | undefined;
+        const matchConfig = existing.matchConfig as Record<string, unknown> | undefined;
+        resolvedConfig.mode = (tournamentConfig?.mode as string | undefined)
+          || (sportRules?.mode as string | undefined)
+          || (matchConfig?.mode as string | undefined);
+        const validation = resolvedConfig.kind === 'FOOTBALL'
+          ? validateScoreDetails(scoreDetails, resolvedConfig)
+          : this.validateBasicOverrideScoreDetails(scoreDetails);
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
+        if (resolvedConfig.kind === 'FOOTBALL' && !winnerId) {
+          const football = scoreDetails.football;
+          if (football && typeof football === 'object' && !Array.isArray(football)) {
+            const goals1 = Number((football as Record<string, unknown>).team1Goals);
+            const goals2 = Number((football as Record<string, unknown>).team2Goals);
+            if (goals1 > goals2) winnerId = existing.participant1Id || undefined;
+            if (goals2 > goals1) winnerId = existing.participant2Id || undefined;
+          }
+        }
       } else {
         // Resolve config hierarchy (Stage -> Round -> Match)
         const resolvedConfig = this.resolveMatchConfig(existing);
@@ -493,16 +544,9 @@ export class MatchesService {
       const isShootoutDecided = shootout?.winnerId === winnerId;
 
       if (shootout) {
-        const team1Goals = shootout.team1Goals;
-        const team2Goals = shootout.team2Goals;
-        if (!Number.isInteger(team1Goals) || !Number.isInteger(team2Goals) || (team1Goals as number) < 0 || (team2Goals as number) < 0 || team1Goals === team2Goals) {
-          throw new BadRequestException('Tá»· sá»‘ luÃ¢n lÆ°u pháº£i lÃ  sá»‘ nguyÃªn khÃ´ng Ã¢m vÃ  pháº£i cÃ³ Ä‘á»™i tháº¯ng.');
-        }
-        const shootoutWinner = (team1Goals as number) > (team2Goals as number)
-          ? existing.participant1Id
-          : existing.participant2Id;
-        if (!shootoutWinner || shootout.winnerId !== shootoutWinner) {
-          throw new BadRequestException('WinnerId pháº£i khÃ³p vá»›i tá»· sá»‘ luÃ¢n lÆ°u cao hÆ¡n.');
+        const shootoutWinner = this.validateFootballShootout(existing, scoreDetails);
+        if (shootout.winnerId !== shootoutWinner) {
+          throw new BadRequestException('WinnerId phải khớp với tỷ số luân lưu cao hơn.');
         }
       }
 
@@ -672,6 +716,16 @@ export class MatchesService {
         const isFootball = resolvedConfig.kind === 'FOOTBALL';
         const isDraw = existing.p1SetsWon === existing.p2SetsWon;
         if (isFootball && isDraw) {
+          const isRoundRobin = existing.stage?.type === 'ROUND_ROBIN';
+          const tournamentConfig = existing.tournament?.tournamentConfig as Record<string, unknown> | undefined;
+          const shootoutEnabled = tournamentConfig?.penaltyShootout === true;
+          if (!isRoundRobin) {
+            if (!shootoutEnabled) {
+              throw new BadRequestException('Trận bóng đá loại trực tiếp đang hòa; giải chưa bật luân lưu.');
+            }
+            const shootoutWinner = this.validateFootballShootout(existing, existing.scoreDetails as Record<string, unknown> | null | undefined);
+            return this.finalizeCompletedMatch(existing, id, shootoutWinner, user.sub);
+          }
           return this.finalizeCompletedMatch(existing, id, null, user.sub);
         }
       }

@@ -41,6 +41,7 @@ import { MailModule } from './providers/mail/mail.module';
 import { AiModule } from './modules/ai/ai.module';
 import { LivestreamModule } from './modules/livestream/livestream.module';
 import { AppVersionModule } from './modules/app-version/app-version.module';
+import { FootballTeamsModule } from './modules/football-teams/football-teams.module';
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { AppVersionModule } from './modules/app-version/app-version.module';
     AiModule,
     LivestreamModule,
     AppVersionModule,
+    FootballTeamsModule,
   ],
   controllers: [AppController],
   providers: [

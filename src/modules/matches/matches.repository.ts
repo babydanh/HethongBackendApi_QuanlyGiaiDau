@@ -1119,7 +1119,19 @@ export class MatchesRepository {
       participantIds.length === consentRows.length &&
       consentRows.every((row) => row.rankingConsent);
 
-    if (eloTournament?.isRanked && winnerId && allParticipantsConsented) {
+    const footballTeamRows = participantIds.length
+      ? await tx
+          .select({ footballTeamId: schema.tournamentParticipants.footballTeamId })
+          .from(schema.tournamentParticipants)
+          .where(inArray(schema.tournamentParticipants.id, participantIds))
+      : [];
+    const isFootballTeamMatch = footballTeamRows.length === participantIds.length
+      && footballTeamRows.length === 2
+      && footballTeamRows.every((row) => Boolean(row.footballTeamId));
+
+    // Football group-stage draws have no winner, but still produce a team-ELO
+    // event. Individual/pair ELO keeps the historical winner-only contract.
+    if (eloTournament?.isRanked && (winnerId || isFootballTeamMatch) && allParticipantsConsented) {
       await tx
         .insert(schema.matchEloOutbox)
         .values({

@@ -853,6 +853,48 @@ export class TournamentsController {
     return this.tournamentsService.updateParticipantStatus(id, participantId, status, user.sub, this.getSystemRoles(user));
   }
 
+  @Post(':id/participants/:participantId/lock-roster')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Khóa roster đội trước khi lập sơ đồ thi đấu' })
+  async lockParticipantRoster(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.lockParticipantRoster(
+      id,
+      participantId,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Get(':id/participants/:participantId/football-roster')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy trạng thái xác nhận roster đội bóng' })
+  async getFootballRosterStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.getFootballRosterStatus(id, participantId, user.sub);
+  }
+
+  @Post(':id/participants/:participantId/football-roster/respond')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xác nhận hoặc từ chối roster đội bóng trong giải' })
+  async respondFootballRoster(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body('action') action: 'CONFIRM' | 'DECLINE',
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.respondFootballRoster(id, participantId, user.sub, action);
+  }
+
   @Post(':id/reserve-slots')
   @Verified()
   @ApiBearerAuth()

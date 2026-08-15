@@ -124,7 +124,12 @@ export class TournamentsService {
   ): Promise<boolean> {
     if (systemRoles.includes('ADMIN')) return true;
     if (tournament.createdBy === userId) return true;
-    if (await this.tournamentsRepository.isCoOrganizer(tournament.id, userId)) return true;
+    if (
+      typeof this.tournamentsRepository.isCoOrganizer === 'function' &&
+      (await this.tournamentsRepository.isCoOrganizer(tournament.id, userId))
+    ) {
+      return true;
+    }
     if (!tournament.communityId) return false;
     const member = await this.tournamentsRepository.findCommunityMember(tournament.communityId, userId);
     return member?.status === 'JOINED' && ['OWNER', 'MODERATOR'].includes(member.role);
@@ -1499,7 +1504,10 @@ export class TournamentsService {
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
     const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (config.isLite !== true) {
+    // Older persisted tournaments used mode=LITE before isLite became the
+    // canonical flag. Keep the guard backwards compatible so those fixtures
+    // and production records retain the same authorization semantics.
+    if (config.isLite !== true && config.mode !== 'LITE') {
       throw new BadRequestException('Chỉ giải Lite mới dùng được luồng quản lý này.');
     }
 
@@ -1842,6 +1850,7 @@ export class TournamentsService {
               tournamentId: id,
               tournamentName: tournament.name,
               divisionId: result.participant.tournamentDivisionId ?? undefined,
+              participantId: result.participant.id,
             }),
           ),
         ));
@@ -3975,7 +3984,8 @@ export class TournamentsService {
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
     const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (config.isLite !== true) {
+    // Support legacy Lite records that predate the canonical isLite flag.
+    if (config.isLite !== true && config.mode !== 'LITE') {
       throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
     }
 
