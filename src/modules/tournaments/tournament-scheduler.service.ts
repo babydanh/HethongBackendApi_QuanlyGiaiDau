@@ -186,6 +186,7 @@ export class TournamentSchedulerService {
 
         const newTournamentConfig = {
           ...config,
+          isLite: true,
           recurring: {
             ...rec,
             enabled: false,
