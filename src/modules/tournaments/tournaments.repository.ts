@@ -1,10 +1,33 @@
-import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { PaymentStatus } from '../../common/constants/enums';
-import { eq, ne, ilike, and, or, count, SQL, inArray, sql, lt, like, isNull, desc, asc, gt, notExists } from 'drizzle-orm';
+import {
+  eq,
+  ne,
+  ilike,
+  and,
+  or,
+  count,
+  SQL,
+  inArray,
+  sql,
+  lt,
+  like,
+  isNull,
+  desc,
+  asc,
+  gt,
+  notExists,
+} from 'drizzle-orm';
 import { AuditService, Transaction } from '../audit/audit.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -16,7 +39,12 @@ import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
-import { RosterMember, BracketMatch, BracketGroup, BracketStage } from './interfaces/tournament-config.interface';
+import {
+  RosterMember,
+  BracketMatch,
+  BracketGroup,
+  BracketStage,
+} from './interfaces/tournament-config.interface';
 import { SeriesService } from '../series/series.service';
 import { ExclusionRuleException } from '../series/exceptions/exclusion-rule.exception';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
@@ -26,13 +54,17 @@ import {
 } from '../../common/helpers/bracket-advancement.helper';
 import { sortFootballStandings } from './utils/football-standings';
 import { validateFootballRosterSelection } from './utils/football-roster-validation';
+import { assertFootballRosterLockable } from './utils/football-roster-lock';
 
 @Injectable()
 export class TournamentsRepository {
-  private normalizeGender(value: string | null | undefined): 'MALE' | 'FEMALE' | null {
+  private normalizeGender(
+    value: string | null | undefined,
+  ): 'MALE' | 'FEMALE' | null {
     const normalized = value?.trim().toUpperCase();
     if (normalized === 'MALE' || normalized === 'NAM') return 'MALE';
-    if (normalized === 'FEMALE' || normalized === 'NU' || normalized === 'NỮ') return 'FEMALE';
+    if (normalized === 'FEMALE' || normalized === 'NU' || normalized === 'NỮ')
+      return 'FEMALE';
     return null;
   }
   constructor(
@@ -46,21 +78,37 @@ export class TournamentsRepository {
   }
 
   /** Preserve unrelated stage settings when a partial round configuration is saved. */
-  private mergeRoundConfig(existing: unknown, incoming: unknown): Record<string, unknown> {
-    const previous = existing && typeof existing === 'object' && !Array.isArray(existing)
-      ? (existing as Record<string, unknown>)
-      : {};
-    const next = incoming && typeof incoming === 'object' && !Array.isArray(incoming)
-      ? (incoming as Record<string, unknown>)
-      : {};
+  private mergeRoundConfig(
+    existing: unknown,
+    incoming: unknown,
+  ): Record<string, unknown> {
+    const previous =
+      existing && typeof existing === 'object' && !Array.isArray(existing)
+        ? (existing as Record<string, unknown>)
+        : {};
+    const next =
+      incoming && typeof incoming === 'object' && !Array.isArray(incoming)
+        ? (incoming as Record<string, unknown>)
+        : {};
     const merged: Record<string, unknown> = { ...previous, ...next };
 
-    for (const key of ['groupsConfig', 'advancementConfig', 'playoffConfig', 'scoring', 'tiebreakerRules', 'rounds']) {
+    for (const key of [
+      'groupsConfig',
+      'advancementConfig',
+      'playoffConfig',
+      'scoring',
+      'tiebreakerRules',
+      'rounds',
+    ]) {
       const previousValue = previous[key];
       const nextValue = next[key];
       if (
-        previousValue && typeof previousValue === 'object' && !Array.isArray(previousValue) &&
-        nextValue && typeof nextValue === 'object' && !Array.isArray(nextValue)
+        previousValue &&
+        typeof previousValue === 'object' &&
+        !Array.isArray(previousValue) &&
+        nextValue &&
+        typeof nextValue === 'object' &&
+        !Array.isArray(nextValue)
       ) {
         merged[key] = {
           ...(previousValue as Record<string, unknown>),
@@ -142,7 +190,25 @@ export class TournamentsRepository {
       defaultVisibility?: 'PUBLIC' | 'PRIVATE' | null;
     },
   ) {
-    const { page = 1, limit = 10, cursor, search, categoryId, status, tournamentType, matchType, communityId, visibility, region, createdBy, startDate, endDate, bracketType, genderRestriction, isRanked } = query;
+    const {
+      page = 1,
+      limit = 10,
+      cursor,
+      search,
+      categoryId,
+      status,
+      tournamentType,
+      matchType,
+      communityId,
+      visibility,
+      region,
+      createdBy,
+      startDate,
+      endDate,
+      bracketType,
+      genderRestriction,
+      isRanked,
+    } = query;
     const defaultTournamentType = options?.defaultTournamentType;
     const defaultVisibility = options?.defaultVisibility;
 
@@ -152,12 +218,14 @@ export class TournamentsRepository {
     conditions.push(sql`${schema.tournaments.deletedAt} IS NULL`);
 
     // Exclude DRAFT, PENDING_APPROVAL, SUSPENDED, CANCELLED, and PENDING_DELETE tournaments from public listing
-    conditions.push(sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`);
+    conditions.push(
+      sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`,
+    );
 
     if (search) {
       const pattern = `%${search}%`;
       conditions.push(
-        sql`(${schema.tournaments.name}::text ILIKE ${pattern} OR ${schema.tournaments.description}::text ILIKE ${pattern} OR ${schema.tournaments.city}::text ILIKE ${pattern})`
+        sql`(${schema.tournaments.name}::text ILIKE ${pattern} OR ${schema.tournaments.description}::text ILIKE ${pattern} OR ${schema.tournaments.city}::text ILIKE ${pattern})`,
       );
     }
     if (categoryId) {
@@ -187,8 +255,8 @@ export class TournamentsRepository {
         matchConds.push(
           or(
             eq(schema.tournaments.genderRestriction, genderRestriction),
-            isNull(schema.tournaments.genderRestriction)
-          ) as SQL
+            isNull(schema.tournaments.genderRestriction),
+          ) as SQL,
         );
       }
 
@@ -200,12 +268,14 @@ export class TournamentsRepository {
             where d.tournament_id = ${schema.tournaments.id}
             ${matchType ? sql`and d.match_type = ${matchType}` : sql``}
             ${genderRestriction ? sql`and (d.gender_restriction = ${genderRestriction} or d.gender_restriction is null)` : sql``}
-          )`
-        ) as SQL
+          )`,
+        ) as SQL,
       );
     }
     if (bracketType) {
-      conditions.push(sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`);
+      conditions.push(
+        sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`,
+      );
     }
     if (isRanked !== undefined) {
       conditions.push(eq(schema.tournaments.isRanked, isRanked));
@@ -229,21 +299,31 @@ export class TournamentsRepository {
           select 1 from ${schema.tournamentVenues} v 
           where v.id = ${schema.tournaments.venueId} 
           and v.location_address ilike ${`%${region}%`}
-        )`
+        )`,
       );
     }
 
     if (startDate) {
-      conditions.push(sql`date(${schema.tournaments.endDate}) >= ${startDate}::date`);
+      conditions.push(
+        sql`date(${schema.tournaments.endDate}) >= ${startDate}::date`,
+      );
     }
 
     if (endDate) {
-      conditions.push(sql`date(coalesce(${schema.tournaments.registrationStartDate}, ${schema.tournaments.startDate})) <= ${endDate}::date`);
+      conditions.push(
+        sql`date(coalesce(${schema.tournaments.registrationStartDate}, ${schema.tournaments.startDate})) <= ${endDate}::date`,
+      );
     }
 
-    const baseWhereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const baseWhereClause =
+      conditions.length > 0 ? and(...conditions) : undefined;
     const [decodedCursor] = cursor
-      ? [CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor)]
+      ? [
+          CursorPaginationHelper.decodeCursor<{
+            id: string;
+            createdAt: string;
+          }>(cursor),
+        ]
       : [null];
     if (decodedCursor) {
       conditions.push(
@@ -278,10 +358,19 @@ export class TournamentsRepository {
         },
       })
       .from(schema.tournaments)
-      .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-      .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
+      .leftJoin(
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
+      )
+      .leftJoin(
+        schema.tournamentVenues,
+        eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+      )
       .where(whereClause)
-      .orderBy(sql`${schema.tournaments.createdAt} DESC`, sql`${schema.tournaments.id} DESC`)
+      .orderBy(
+        sql`${schema.tournaments.createdAt} DESC`,
+        sql`${schema.tournaments.id} DESC`,
+      )
       .limit(limit + 1)
       .$dynamic();
     const resolvedRows = await rows;
@@ -323,7 +412,9 @@ export class TournamentsRepository {
             maxParticipants: schema.tournamentDivisions.maxParticipants,
           })
           .from(schema.tournamentDivisions)
-          .where(eq(schema.tournamentDivisions.tournamentId, row.tournament.id));
+          .where(
+            eq(schema.tournamentDivisions.tournamentId, row.tournament.id),
+          );
 
         const divisions: DivisionInfo[] = await Promise.all(
           rawDivs.map(async (d) => {
@@ -346,7 +437,7 @@ export class TournamentsRepository {
                 participants: dCount.count,
               },
             };
-          })
+          }),
         );
 
         return {
@@ -358,7 +449,7 @@ export class TournamentsRepository {
           },
           divisions: divisions.length > 0 ? divisions : null,
         };
-      })
+      }),
     );
 
     return {
@@ -368,12 +459,13 @@ export class TournamentsRepository {
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
-        nextCursor: hasMore && data.length > 0
-          ? CursorPaginationHelper.encodeCursor({
-              id: data[data.length - 1].id,
-              createdAt: data[data.length - 1].createdAt,
-            })
-          : null,
+        nextCursor:
+          hasMore && data.length > 0
+            ? CursorPaginationHelper.encodeCursor({
+                id: data[data.length - 1].id,
+                createdAt: data[data.length - 1].createdAt,
+              })
+            : null,
         hasMore,
       },
     };
@@ -426,16 +518,25 @@ export class TournamentsRepository {
         },
       })
       .from(schema.tournaments)
-      .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-      .leftJoin(schema.communities, eq(schema.tournaments.communityId, schema.communities.id))
-      .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
+      .leftJoin(
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
+      )
+      .leftJoin(
+        schema.communities,
+        eq(schema.tournaments.communityId, schema.communities.id),
+      )
+      .leftJoin(
+        schema.tournamentVenues,
+        eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+      )
       .leftJoin(schema.users, eq(schema.tournaments.createdBy, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(
         and(
           eq(schema.tournaments.id, id),
-          isNull(schema.tournaments.deletedAt)
-        )
+          isNull(schema.tournaments.deletedAt),
+        ),
       )
       .limit(1);
 
@@ -464,34 +565,52 @@ export class TournamentsRepository {
       const [totalCount] = await this.db
         .select({ count: count() })
         .from(schema.matches)
-        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .innerJoin(
+          schema.tournamentGroups,
+          eq(schema.matches.groupId, schema.tournamentGroups.id),
+        )
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+        )
         .where(eq(schema.tournamentStages.tournamentId, id));
       matchesTotal = totalCount.count;
 
       const [completedCount] = await this.db
         .select({ count: count() })
         .from(schema.matches)
-        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .innerJoin(
+          schema.tournamentGroups,
+          eq(schema.matches.groupId, schema.tournamentGroups.id),
+        )
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+        )
         .where(
           and(
             eq(schema.tournamentStages.tournamentId, id),
-            eq(schema.matches.status, 'COMPLETED')
-          )
+            eq(schema.matches.status, 'COMPLETED'),
+          ),
         );
       matchesCompleted = completedCount.count;
 
       const [liveCount] = await this.db
         .select({ count: count() })
         .from(schema.matches)
-        .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+        .innerJoin(
+          schema.tournamentGroups,
+          eq(schema.matches.groupId, schema.tournamentGroups.id),
+        )
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+        )
         .where(
           and(
             eq(schema.tournamentStages.tournamentId, id),
-            eq(schema.matches.status, 'ONGOING')
-          )
+            eq(schema.matches.status, 'ONGOING'),
+          ),
         );
       matchesLive = liveCount.count;
     } catch {
@@ -509,8 +628,8 @@ export class TournamentsRepository {
             eq(schema.tournaments.createdBy, row.tournament.createdBy),
             eq(schema.tournaments.visibility, 'PUBLIC'),
             eq(schema.tournaments.status, 'COMPLETED'),
-            sql`${schema.tournaments.deletedAt} IS NULL`
-          )
+            sql`${schema.tournaments.deletedAt} IS NULL`,
+          ),
         );
       isTrusted = resultCount.count >= 3;
     }
@@ -560,7 +679,10 @@ export class TournamentsRepository {
           .from(schema.tournamentParticipants)
           .where(
             and(
-              eq(schema.tournamentParticipants.tournamentDivisionId, division.id),
+              eq(
+                schema.tournamentParticipants.tournamentDivisionId,
+                division.id,
+              ),
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
               ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
@@ -581,7 +703,7 @@ export class TournamentsRepository {
             matches: matchCountByDivision.count,
           },
         };
-      })
+      }),
     );
 
     return {
@@ -590,12 +712,14 @@ export class TournamentsRepository {
       community: row.community?.id ? row.community : null,
       venue: row.venue?.id ? row.venue : null,
       creator: row.creator?.id ? row.creator : null,
-      organizer: row.creator?.id ? { 
-        id: row.creator.id, 
-        fullName: row.creator.fullName, 
-        avatarUrl: row.creator.avatarUrl,
-        isTrusted
-      } : null,
+      organizer: row.creator?.id
+        ? {
+            id: row.creator.id,
+            fullName: row.creator.fullName,
+            avatarUrl: row.creator.avatarUrl,
+            isTrusted,
+          }
+        : null,
       _summary: {
         participantCount: participantCount.count,
         matchesTotal,
@@ -615,18 +739,23 @@ export class TournamentsRepository {
       let configKey = 'PLATFORM_FEE_PERCENTAGE_CLUB';
       let defaultPct = '0';
       if (data.tournamentType === 'PUBLIC') {
-        configKey = data.isRanked ? 'PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED' : 'PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED';
+        configKey = data.isRanked
+          ? 'PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED'
+          : 'PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED';
         defaultPct = '5';
       }
-      
+
       const [configRecord] = await tx
         .select()
         .from(schema.systemConfigs)
         .where(eq(schema.systemConfigs.key, configKey))
         .limit(1);
-      const platformFeePercentage = data.platformFeePercentage !== undefined 
-        ? data.platformFeePercentage.toString() 
-        : (configRecord ? configRecord.value : defaultPct);
+      const platformFeePercentage =
+        data.platformFeePercentage !== undefined
+          ? data.platformFeePercentage.toString()
+          : configRecord
+            ? configRecord.value
+            : defaultPct;
 
       const [record] = await tx
         .insert(schema.tournaments)
@@ -641,8 +770,12 @@ export class TournamentsRepository {
           tournamentConfig: data.tournamentConfig,
           entryFee: (data.entryFee || 0).toString(),
           platformFeePercentage,
-          registrationStartDate: data.registrationStartDate ? new Date(data.registrationStartDate) : null,
-          registrationEndDate: data.registrationEndDate ? new Date(data.registrationEndDate) : null,
+          registrationStartDate: data.registrationStartDate
+            ? new Date(data.registrationStartDate)
+            : null,
+          registrationEndDate: data.registrationEndDate
+            ? new Date(data.registrationEndDate)
+            : null,
           maxParticipants: data.maxParticipants || null,
           startDate: data.startDate ? new Date(data.startDate) : null,
           endDate: data.endDate ? new Date(data.endDate) : null,
@@ -662,23 +795,37 @@ export class TournamentsRepository {
           isRanked: data.isRanked !== undefined ? data.isRanked : true,
         })
         .returning();
-      
-      await this.auditService.logCreate(tx, userId, 'tournaments', record.id, record);
+
+      await this.auditService.logCreate(
+        tx,
+        userId,
+        'tournaments',
+        record.id,
+        record,
+      );
       return record;
     });
   }
 
   async update(id: string, userId: string, data: UpdateTournamentDto) {
     const updatedResult = await this.db.transaction(async (tx) => {
-      const [oldRecord] = await tx.select().from(schema.tournaments).where(eq(schema.tournaments.id, id)).limit(1);
+      const [oldRecord] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, id))
+        .limit(1);
 
       const [updated] = await tx
         .update(schema.tournaments)
         .set({
           ...(data.name && { name: data.name }),
           ...(data.categoryId && { categoryId: data.categoryId }),
-          ...(data.communityId !== undefined && { communityId: data.communityId }),
-          ...(data.description !== undefined && { description: data.description }),
+          ...(data.communityId !== undefined && {
+            communityId: data.communityId,
+          }),
+          ...(data.description !== undefined && {
+            description: data.description,
+          }),
           ...(data.status && { status: data.status }),
           ...(data.sportRules && { sportRules: data.sportRules }),
           ...(data.tournamentConfig && {
@@ -691,26 +838,42 @@ export class TournamentsRepository {
             platformFeePercentage: data.platformFeePercentage.toString(),
           }),
           ...(data.registrationStartDate !== undefined && {
-            registrationStartDate: data.registrationStartDate ? new Date(data.registrationStartDate) : null,
+            registrationStartDate: data.registrationStartDate
+              ? new Date(data.registrationStartDate)
+              : null,
           }),
           ...(data.registrationEndDate !== undefined && {
-            registrationEndDate: data.registrationEndDate ? new Date(data.registrationEndDate) : null,
+            registrationEndDate: data.registrationEndDate
+              ? new Date(data.registrationEndDate)
+              : null,
           }),
-          ...(data.maxParticipants !== undefined && { maxParticipants: data.maxParticipants }),
+          ...(data.maxParticipants !== undefined && {
+            maxParticipants: data.maxParticipants,
+          }),
           ...(data.startDate && { startDate: new Date(data.startDate) }),
           ...(data.endDate && { endDate: new Date(data.endDate) }),
           ...(data.venueId !== undefined && { venueId: data.venueId }),
           ...(data.tournamentType && { tournamentType: data.tournamentType }),
           ...(data.bannerUrl !== undefined && { bannerUrl: data.bannerUrl }),
           ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl }),
-          ...(data.galleryImages !== undefined && { galleryImages: data.galleryImages }),
-          ...(data.prizeDescription !== undefined && { prizeDescription: data.prizeDescription }),
+          ...(data.galleryImages !== undefined && {
+            galleryImages: data.galleryImages,
+          }),
+          ...(data.prizeDescription !== undefined && {
+            prizeDescription: data.prizeDescription,
+          }),
           ...(data.prizes !== undefined && { prizes: data.prizes }),
-          ...(data.contactInfo !== undefined && { contactInfo: data.contactInfo }),
+          ...(data.contactInfo !== undefined && {
+            contactInfo: data.contactInfo,
+          }),
           ...(data.visibility !== undefined && { visibility: data.visibility }),
-          ...(data.genderRestriction !== undefined && { genderRestriction: data.genderRestriction }),
+          ...(data.genderRestriction !== undefined && {
+            genderRestriction: data.genderRestriction,
+          }),
           ...(data.parentId !== undefined && { parentId: data.parentId }),
-          ...(data.isRegistrationLocked !== undefined && { isRegistrationLocked: data.isRegistrationLocked }),
+          ...(data.isRegistrationLocked !== undefined && {
+            isRegistrationLocked: data.isRegistrationLocked,
+          }),
           updatedAt: new Date(),
         })
         .where(eq(schema.tournaments.id, id))
@@ -723,12 +886,19 @@ export class TournamentsRepository {
           .from(schema.tournamentRosters)
           .innerJoin(
             schema.tournamentParticipants,
-            eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+            eq(
+              schema.tournamentRosters.participantId,
+              schema.tournamentParticipants.id,
+            ),
           )
           .where(eq(schema.tournamentParticipants.tournamentId, id));
 
         const userIdsToLock = [
-          ...new Set(participantsRoster.map((r) => r.userId).filter((uid): uid is string => !!uid)),
+          ...new Set(
+            participantsRoster
+              .map((r) => r.userId)
+              .filter((uid): uid is string => !!uid),
+          ),
         ];
 
         if (userIdsToLock.length > 0) {
@@ -740,25 +910,31 @@ export class TournamentsRepository {
       }
 
       // Escrow / Payout Logic when status transitions to REGISTRATION_CLOSED
-      if (data.status === 'REGISTRATION_CLOSED' && oldRecord.status !== 'REGISTRATION_CLOSED') {
-        const isPaidPublic = oldRecord.tournamentType === 'PUBLIC' && parseFloat(oldRecord.entryFee || '0') > 0;
+      if (
+        data.status === 'REGISTRATION_CLOSED' &&
+        oldRecord.status !== 'REGISTRATION_CLOSED'
+      ) {
+        const isPaidPublic =
+          oldRecord.tournamentType === 'PUBLIC' &&
+          parseFloat(oldRecord.entryFee || '0') > 0;
         if (isPaidPublic) {
           const [resultPayments] = await tx
-            .select({ total: sql<string>`coalesce(sum(${schema.payments.amount}), '0')` })
+            .select({
+              total: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
+            })
             .from(schema.payments)
             .where(
               and(
                 eq(schema.payments.tournamentId, id),
-                eq(schema.payments.status, 'COMPLETED')
-              )
+                eq(schema.payments.status, 'COMPLETED'),
+              ),
             );
           const totalCollected = parseFloat(resultPayments.total);
 
           if (totalCollected > 0) {
-
-
-
-            const platformFeeRetained = totalCollected * (parseFloat(oldRecord.platformFeePercentage || '0') / 100);
+            const platformFeeRetained =
+              totalCollected *
+              (parseFloat(oldRecord.platformFeePercentage || '0') / 100);
             const amountRequested = totalCollected - platformFeeRetained;
 
             if (amountRequested > 0) {
@@ -770,13 +946,17 @@ export class TournamentsRepository {
                     eq(schema.tournaments.createdBy, oldRecord.createdBy),
                     eq(schema.tournaments.visibility, 'PUBLIC'),
                     eq(schema.tournaments.status, 'COMPLETED'),
-                    sql`${schema.tournaments.deletedAt} IS NULL`
-                  )
+                    sql`${schema.tournaments.deletedAt} IS NULL`,
+                  ),
                 );
-              
+
               const isTrusted = resultCount.count >= 3;
-              const targetPayoutStatus = isTrusted ? 'PENDING_DISBURSEMENT' : 'HELD_IN_ESCROW';
-              const payoutTrigger = isTrusted ? 'AUTO_ON_LOCK' : 'MANUAL_ON_COMPLETE';
+              const targetPayoutStatus = isTrusted
+                ? 'PENDING_DISBURSEMENT'
+                : 'HELD_IN_ESCROW';
+              const payoutTrigger = isTrusted
+                ? 'AUTO_ON_LOCK'
+                : 'MANUAL_ON_COMPLETE';
 
               const [payoutRecord] = await tx
                 .insert(schema.organizerPayouts)
@@ -791,7 +971,11 @@ export class TournamentsRepository {
                   bankAccountName: 'PENDING',
                   status: targetPayoutStatus,
                   payoutTrigger,
-                  holdUntil: isTrusted ? null : (oldRecord.endDate ? new Date(oldRecord.endDate) : null),
+                  holdUntil: isTrusted
+                    ? null
+                    : oldRecord.endDate
+                      ? new Date(oldRecord.endDate)
+                      : null,
                 })
                 .returning();
 
@@ -800,7 +984,9 @@ export class TournamentsRepository {
                 previousStatus: 'NONE',
                 newStatus: targetPayoutStatus,
                 changedBy: userId,
-                note: isTrusted ? 'AUTO_CREATED_TRUSTED_ORGANIZER' : 'AUTO_CREATED_ESCROW_HOLD',
+                note: isTrusted
+                  ? 'AUTO_CREATED_TRUSTED_ORGANIZER'
+                  : 'AUTO_CREATED_ESCROW_HOLD',
               });
             }
           }
@@ -815,8 +1001,8 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.organizerPayouts.tournamentId, id),
-              eq(schema.organizerPayouts.status, 'HELD_IN_ESCROW')
-            )
+              eq(schema.organizerPayouts.status, 'HELD_IN_ESCROW'),
+            ),
           )
           .limit(1);
 
@@ -839,7 +1025,14 @@ export class TournamentsRepository {
         }
       }
 
-      await this.auditService.logUpdate(tx, userId, 'tournaments', id, oldRecord, updated);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournaments',
+        id,
+        oldRecord,
+        updated,
+      );
       return updated;
     });
 
@@ -856,7 +1049,11 @@ export class TournamentsRepository {
 
   async softDelete(id: string, userId: string) {
     return await this.db.transaction(async (tx) => {
-      const [oldRecord] = await tx.select().from(schema.tournaments).where(eq(schema.tournaments.id, id)).limit(1);
+      const [oldRecord] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, id))
+        .limit(1);
 
       const [deleted] = await tx
         .update(schema.tournaments)
@@ -880,7 +1077,13 @@ export class TournamentsRepository {
         .delete(schema.notifications)
         .where(like(schema.notifications.redirectUrl, `%/${id}%`));
 
-      await this.auditService.logDelete(tx, userId, 'tournaments', id, oldRecord);
+      await this.auditService.logDelete(
+        tx,
+        userId,
+        'tournaments',
+        id,
+        oldRecord,
+      );
       return deleted;
     });
   }
@@ -890,7 +1093,12 @@ export class TournamentsRepository {
       const [oldRecord] = await tx
         .select()
         .from(schema.tournaments)
-        .where(and(eq(schema.tournaments.id, id), isNull(schema.tournaments.deletedAt)))
+        .where(
+          and(
+            eq(schema.tournaments.id, id),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        )
         .limit(1);
 
       if (!oldRecord) return null;
@@ -902,7 +1110,14 @@ export class TournamentsRepository {
         .where(eq(schema.tournaments.id, id))
         .returning();
 
-      await this.auditService.logUpdate(tx, userId, 'tournaments', id, oldRecord, archived);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournaments',
+        id,
+        oldRecord,
+        archived,
+      );
       return archived;
     });
   }
@@ -975,7 +1190,12 @@ export class TournamentsRepository {
       .returning();
   }
 
-  async registerParticipant(tournamentId: string, userId: string, data: RegisterTournamentDto, inviteCode?: string) {
+  async registerParticipant(
+    tournamentId: string,
+    userId: string,
+    data: RegisterTournamentDto,
+    inviteCode?: string,
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -1003,13 +1223,22 @@ export class TournamentsRepository {
           series: schema.tournamentSeries,
         })
         .from(schema.seriesEvents)
-        .innerJoin(schema.seriesLegs, eq(schema.seriesEvents.legId, schema.seriesLegs.id))
-        .innerJoin(schema.tournamentSeries, eq(schema.seriesLegs.seriesId, schema.tournamentSeries.id))
+        .innerJoin(
+          schema.seriesLegs,
+          eq(schema.seriesEvents.legId, schema.seriesLegs.id),
+        )
+        .innerJoin(
+          schema.tournamentSeries,
+          eq(schema.seriesLegs.seriesId, schema.tournamentSeries.id),
+        )
         .where(eq(schema.seriesEvents.tournamentId, tournamentId))
         .limit(1);
 
       if (seriesEvent && seriesEvent.series.rules) {
-        const rules = seriesEvent.series.rules as unknown as { exclusionRule?: boolean; exclusionScope?: 'CATEGORY' | 'ALL' };
+        const rules = seriesEvent.series.rules as unknown as {
+          exclusionRule?: boolean;
+          exclusionScope?: 'CATEGORY' | 'ALL';
+        };
         if (rules.exclusionRule) {
           const scope = rules.exclusionScope || 'CATEGORY';
           const conds = [
@@ -1018,7 +1247,9 @@ export class TournamentsRepository {
             eq(schema.seriesStandings.lockedOut, true),
           ];
           if (scope === 'CATEGORY') {
-            conds.push(eq(schema.seriesStandings.categoryId, tournament.categoryId));
+            conds.push(
+              eq(schema.seriesStandings.categoryId, tournament.categoryId),
+            );
           }
           const [standing] = await tx
             .select()
@@ -1030,33 +1261,47 @@ export class TournamentsRepository {
             throw new ExclusionRuleException(
               `Bạn đã giành Vé Thẳng trong chặng này và bị khóa không được đăng ký tiếp nội dung ${
                 scope === 'CATEGORY' ? 'này' : 'thi đấu thuộc chặng'
-              }.`
+              }.`,
             );
           }
         }
       }
 
       // 2. Kiểm tra trạng thái - chỉ mở đăng ký khi REGISTRATION_OPEN hoặc UPCOMING (DRAFT không cho đăng ký dù có mã mời)
-      if (tournament.status !== 'REGISTRATION_OPEN' && tournament.status !== 'UPCOMING') {
+      if (
+        tournament.status !== 'REGISTRATION_OPEN' &&
+        tournament.status !== 'UPCOMING'
+      ) {
         throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký.');
       }
 
       // 3. Kiểm tra thời hạn đăng ký
       const now = new Date();
-      if (tournament.registrationStartDate && now < tournament.registrationStartDate) {
+      if (
+        tournament.registrationStartDate &&
+        now < tournament.registrationStartDate
+      ) {
         throw new BadRequestException('Thời gian đăng ký chưa bắt đầu.');
       }
-      if (tournament.registrationEndDate && now > tournament.registrationEndDate) {
+      if (
+        tournament.registrationEndDate &&
+        now > tournament.registrationEndDate
+      ) {
         throw new BadRequestException('Thời gian đăng ký đã kết thúc.');
       }
 
       // 4. Kiểm tra mã mời nếu giải PRIVATE hoặc ở chế độ INVITE_ONLY
-      const tConfig = (tournament.tournamentConfig || {}) as Record<string, any>;
+      const tConfig = (tournament.tournamentConfig || {}) as Record<
+        string,
+        any
+      >;
       const regMode = tConfig.registrationMode || 'OPEN';
 
       if (regMode === 'INVITE_ONLY' || tournament.visibility === 'PRIVATE') {
         if (!inviteCode || tournament.inviteCode !== inviteCode) {
-          throw new BadRequestException('Mã mời giải đấu không hợp lệ hoặc thiếu.');
+          throw new BadRequestException(
+            'Mã mời giải đấu không hợp lệ hoặc thiếu.',
+          );
         }
       }
 
@@ -1070,16 +1315,27 @@ export class TournamentsRepository {
         const rawGender = (profile?.gender || '').trim().toUpperCase();
         let gender = rawGender;
         if (rawGender === 'NAM' || rawGender === 'MALE') gender = 'MALE';
-        else if (rawGender === 'NỮ' || rawGender === 'NU' || rawGender === 'FEMALE') gender = 'FEMALE';
+        else if (
+          rawGender === 'NỮ' ||
+          rawGender === 'NU' ||
+          rawGender === 'FEMALE'
+        )
+          gender = 'FEMALE';
 
         if (gender !== 'MALE' && gender !== 'FEMALE') {
-          throw new BadRequestException(`${label} cần cập nhật giới tính trong hồ sơ cá nhân để đăng ký.`);
+          throw new BadRequestException(
+            `${label} cần cập nhật giới tính trong hồ sơ cá nhân để đăng ký.`,
+          );
         }
         return gender;
       };
 
       const normalizeMatchType = (matchType: string | null) => {
-        if (matchType === 'SINGLES' || matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES') {
+        if (
+          matchType === 'SINGLES' ||
+          matchType === 'DOUBLES' ||
+          matchType === 'MIXED_DOUBLES'
+        ) {
           return matchType;
         }
         return 'DOUBLES';
@@ -1105,38 +1361,60 @@ export class TournamentsRepository {
 
         if (divisions.length === 0) return null;
 
-        const requestedDivisionId = data.tournamentDivisionId ?? data.divisionId;
+        const requestedDivisionId =
+          data.tournamentDivisionId ?? data.divisionId;
         const requestedDivision = requestedDivisionId
           ? divisions.find((division) => division.id === requestedDivisionId)
           : undefined;
-        const requestedGenderRestriction = (requestedDivision?.genderRestriction || '').toUpperCase();
+        const requestedGenderRestriction = (
+          requestedDivision?.genderRestriction || ''
+        ).toUpperCase();
         const isExplicitOpenDivision = Boolean(
           requestedDivisionId &&
           requestedDivision &&
           !['MALE', 'FEMALE', 'MIXED'].includes(requestedGenderRestriction),
         );
-        const requiresLeaderGender = !isExplicitOpenDivision && (Boolean(partnerUserId)
-          || !requestedDivisionId
-          || (requestedGenderRestriction !== '' && requestedGenderRestriction !== 'OPEN'));
+        const requiresLeaderGender =
+          !isExplicitOpenDivision &&
+          (Boolean(partnerUserId) ||
+            !requestedDivisionId ||
+            (requestedGenderRestriction !== '' &&
+              requestedGenderRestriction !== 'OPEN'));
         const leaderGender = requiresLeaderGender
           ? await getProfileGender(userId, 'Bạn')
           : null;
         let targetMatchType = normalizeMatchType(tournament.matchType);
-        let targetGenderRestriction: 'MALE' | 'FEMALE' | 'MIXED' = leaderGender === 'MALE' ? 'MALE' : 'FEMALE';
+        let targetGenderRestriction: 'MALE' | 'FEMALE' | 'MIXED' =
+          leaderGender === 'MALE' ? 'MALE' : 'FEMALE';
 
         if (partnerUserId && !isExplicitOpenDivision) {
-          const partnerGender = await getProfileGender(partnerUserId, 'Đồng đội');
-          targetGenderRestriction = leaderGender === partnerGender ? leaderGender : 'MIXED';
-          targetMatchType = targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
-        } else if (!partnerUserId && targetMatchType === 'MIXED_DOUBLES' && !requestedDivisionId) {
-          throw new BadRequestException('Hình thức Đôi Nam Nữ yêu cầu nhập đồng đội để xác định giới tính cặp.');
+          const partnerGender = await getProfileGender(
+            partnerUserId,
+            'Đồng đội',
+          );
+          targetGenderRestriction =
+            leaderGender === partnerGender ? leaderGender : 'MIXED';
+          targetMatchType =
+            targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
+        } else if (
+          !partnerUserId &&
+          targetMatchType === 'MIXED_DOUBLES' &&
+          !requestedDivisionId
+        ) {
+          throw new BadRequestException(
+            'Hình thức Đôi Nam Nữ yêu cầu nhập đồng đội để xác định giới tính cặp.',
+          );
         }
 
         if (requestedDivisionId) {
           if (requestedDivision) {
             targetMatchType = normalizeMatchType(requestedDivision.matchType);
             const reqGender = requestedGenderRestriction;
-            if (reqGender === 'MALE' || reqGender === 'FEMALE' || reqGender === 'MIXED') {
+            if (
+              reqGender === 'MALE' ||
+              reqGender === 'FEMALE' ||
+              reqGender === 'MIXED'
+            ) {
               targetGenderRestriction = reqGender;
             }
           }
@@ -1147,11 +1425,16 @@ export class TournamentsRepository {
           if (restriction === 'MALE' && targetGenderRestriction !== 'MALE') {
             throw new BadRequestException('Giải đấu chỉ dành cho Nam.');
           }
-          if (restriction === 'FEMALE' && targetGenderRestriction !== 'FEMALE') {
+          if (
+            restriction === 'FEMALE' &&
+            targetGenderRestriction !== 'FEMALE'
+          ) {
             throw new BadRequestException('Giải đấu chỉ dành cho Nữ.');
           }
           if (restriction === 'MIXED' && targetGenderRestriction !== 'MIXED') {
-            throw new BadRequestException('Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.');
+            throw new BadRequestException(
+              'Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.',
+            );
           }
         }
 
@@ -1161,25 +1444,42 @@ export class TournamentsRepository {
               (division) =>
                 division.matchType === targetMatchType &&
                 (division.genderRestriction === targetGenderRestriction ||
-                 !division.genderRestriction ||
-                 division.genderRestriction.toUpperCase() === 'OPEN'),
+                  !division.genderRestriction ||
+                  division.genderRestriction.toUpperCase() === 'OPEN'),
             );
 
         if (!selectedDivision) {
-          const fallbackLabel = targetGenderRestriction === 'MIXED'
-            ? 'Đôi Nam Nữ'
-            : targetMatchType === 'SINGLES'
-              ? targetGenderRestriction === 'MALE' ? 'Đơn Nam' : 'Đơn Nữ'
-              : targetGenderRestriction === 'MALE' ? 'Đôi Nam' : 'Đôi Nữ';
-          throw new BadRequestException(`Không có hình thức thi đấu ${fallbackLabel} phù hợp cho giải này.`);
+          const fallbackLabel =
+            targetGenderRestriction === 'MIXED'
+              ? 'Đôi Nam Nữ'
+              : targetMatchType === 'SINGLES'
+                ? targetGenderRestriction === 'MALE'
+                  ? 'Đơn Nam'
+                  : 'Đơn Nữ'
+                : targetGenderRestriction === 'MALE'
+                  ? 'Đôi Nam'
+                  : 'Đôi Nữ';
+          throw new BadRequestException(
+            `Không có hình thức thi đấu ${fallbackLabel} phù hợp cho giải này.`,
+          );
         }
 
-        const divGender = (selectedDivision.genderRestriction || '').toUpperCase();
+        const divGender = (
+          selectedDivision.genderRestriction || ''
+        ).toUpperCase();
         if (divGender === 'MALE' && leaderGender && leaderGender !== 'MALE') {
-          throw new BadRequestException('Hình thức thi đấu đã chọn chỉ dành cho VĐV Nam.');
+          throw new BadRequestException(
+            'Hình thức thi đấu đã chọn chỉ dành cho VĐV Nam.',
+          );
         }
-        if (divGender === 'FEMALE' && leaderGender && leaderGender !== 'FEMALE') {
-          throw new BadRequestException('Hình thức thi đấu đã chọn chỉ dành cho VĐV Nữ.');
+        if (
+          divGender === 'FEMALE' &&
+          leaderGender &&
+          leaderGender !== 'FEMALE'
+        ) {
+          throw new BadRequestException(
+            'Hình thức thi đấu đã chọn chỉ dành cho VĐV Nữ.',
+          );
         }
 
         if (selectedDivision.maxParticipants) {
@@ -1188,7 +1488,10 @@ export class TournamentsRepository {
             .from(schema.tournamentParticipants)
             .where(
               and(
-                eq(schema.tournamentParticipants.tournamentDivisionId, selectedDivision.id),
+                eq(
+                  schema.tournamentParticipants.tournamentDivisionId,
+                  selectedDivision.id,
+                ),
                 eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
                 eq(schema.tournamentParticipants.isPaid, true),
               ),
@@ -1213,20 +1516,33 @@ export class TournamentsRepository {
           .where(eq(schema.tournaments.id, tournamentId))
           .for('update');
 
-        if (!lockedTournament) throw new BadRequestException('Giải đấu không tồn tại.');
+        if (!lockedTournament)
+          throw new BadRequestException('Giải đấu không tồn tại.');
 
         // Lite tournament: count distinct roster users; SINGLES max=maxParticipants, DOUBLES max=maxParticipants*2
-        const tCfg = (lockedTournament.tournamentConfig || {}) as Record<string, unknown>;
+        const tCfg = (lockedTournament.tournamentConfig || {}) as Record<
+          string,
+          unknown
+        >;
         if (tCfg.isLite === true) {
-          const isDoubles = lockedTournament.matchType === 'DOUBLES' || lockedTournament.matchType === 'MIXED_DOUBLES';
-          const maxSlots: number = isDoubles ? lockedTournament.maxParticipants! * 2 : lockedTournament.maxParticipants!;
+          const isDoubles =
+            lockedTournament.matchType === 'DOUBLES' ||
+            lockedTournament.matchType === 'MIXED_DOUBLES';
+          const maxSlots: number = isDoubles
+            ? lockedTournament.maxParticipants! * 2
+            : lockedTournament.maxParticipants!;
 
           const [{ count: activeRosterUsers }] = await tx
-            .select({ count: sql<number>`count(distinct ${schema.tournamentRosters.userId})` })
+            .select({
+              count: sql<number>`count(distinct ${schema.tournamentRosters.userId})`,
+            })
             .from(schema.tournamentRosters)
             .innerJoin(
               schema.tournamentParticipants,
-              eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+              eq(
+                schema.tournamentRosters.participantId,
+                schema.tournamentParticipants.id,
+              ),
             )
             .where(
               and(
@@ -1238,7 +1554,9 @@ export class TournamentsRepository {
             );
 
           if (Number(activeRosterUsers) >= maxSlots) {
-            throw new BadRequestException('Giải đấu đã đủ số lượng người tham gia.');
+            throw new BadRequestException(
+              'Giải đấu đã đủ số lượng người tham gia.',
+            );
           }
         } else {
           // Normal (non-Lite) mode: count COMPLETE+paid participants (existing behavior)
@@ -1268,12 +1586,14 @@ export class TournamentsRepository {
             and(
               eq(schema.communityMembers.communityId, tournament.communityId),
               eq(schema.communityMembers.userId, userId),
-              eq(schema.communityMembers.status, 'JOINED')
-            )
+              eq(schema.communityMembers.status, 'JOINED'),
+            ),
           )
           .limit(1);
         if (member.length === 0) {
-          throw new BadRequestException('Chỉ thành viên CLB mới được đăng ký giải đấu này.');
+          throw new BadRequestException(
+            'Chỉ thành viên CLB mới được đăng ký giải đấu này.',
+          );
         }
       }
 
@@ -1281,7 +1601,13 @@ export class TournamentsRepository {
       const existingRosters = await tx
         .select({ userId: schema.tournamentRosters.userId })
         .from(schema.tournamentRosters)
-        .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+        .innerJoin(
+          schema.tournamentParticipants,
+          eq(
+            schema.tournamentRosters.participantId,
+            schema.tournamentParticipants.id,
+          ),
+        )
         .where(
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
@@ -1289,44 +1615,59 @@ export class TournamentsRepository {
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
             ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
             ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-            ne(schema.tournamentParticipants.teamStatus, 'EXPIRED')
-          )
+            ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+          ),
         );
       if (existingRosters.length > 0) {
-        throw new BadRequestException('Bạn đã đăng ký tham gia giải đấu này rồi.');
+        throw new BadRequestException(
+          'Bạn đã đăng ký tham gia giải đấu này rồi.',
+        );
       }
 
       // 9. Thêm participant
       const tournamentIsDoubles = this.isDoublesMatchType(tournament.matchType);
-      
+
       let partnerId: string | null = null;
       if (tournamentIsDoubles && data.partnerEmailOrPhone) {
         // Resolve partner account
         const [partnerUser] = await tx
           .select({ id: schema.users.id })
           .from(schema.users)
-          .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+          .leftJoin(
+            schema.profiles,
+            eq(schema.users.id, schema.profiles.userId),
+          )
           .where(
             or(
               eq(schema.users.email, data.partnerEmailOrPhone),
-              eq(schema.profiles.phoneNumber, data.partnerEmailOrPhone)
-            )
+              eq(schema.profiles.phoneNumber, data.partnerEmailOrPhone),
+            ),
           )
           .limit(1);
 
         if (!partnerUser) {
-          throw new BadRequestException('Không tìm thấy tài khoản Sporto của đồng đội. Vui lòng kiểm tra lại Email hoặc SĐT.');
+          throw new BadRequestException(
+            'Không tìm thấy tài khoản Sporto của đồng đội. Vui lòng kiểm tra lại Email hoặc SĐT.',
+          );
         }
 
         if (partnerUser.id === userId) {
-          throw new BadRequestException('Email/SĐT của đồng đội không được trùng với tài khoản của bạn.');
+          throw new BadRequestException(
+            'Email/SĐT của đồng đội không được trùng với tài khoản của bạn.',
+          );
         }
 
         // Check if partner already in tournament
         const partnerExisting = await tx
           .select({ userId: schema.tournamentRosters.userId })
           .from(schema.tournamentRosters)
-          .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+          .innerJoin(
+            schema.tournamentParticipants,
+            eq(
+              schema.tournamentRosters.participantId,
+              schema.tournamentParticipants.id,
+            ),
+          )
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
@@ -1334,45 +1675,82 @@ export class TournamentsRepository {
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED')
-            )
+              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+            ),
           );
         if (partnerExisting.length > 0) {
-          throw new BadRequestException('Đồng đội của bạn đã đăng ký tham gia giải đấu này rồi.');
+          throw new BadRequestException(
+            'Đồng đội của bạn đã đăng ký tham gia giải đấu này rồi.',
+          );
         }
 
         // Enforce gender constraints for partner if any
-        if (tournament.genderRestriction && !(data.tournamentDivisionId ?? data.divisionId)) {
+        if (
+          tournament.genderRestriction &&
+          !(data.tournamentDivisionId ?? data.divisionId)
+        ) {
           const [partnerProfile] = await tx
             .select({ gender: schema.profiles.gender })
             .from(schema.profiles)
             .where(eq(schema.profiles.userId, partnerUser.id))
             .limit(1);
-          
+
           if (!partnerProfile || !partnerProfile.gender) {
-            throw new BadRequestException('Đồng đội chưa cập nhật giới tính trong hồ sơ cá nhân.');
+            throw new BadRequestException(
+              'Đồng đội chưa cập nhật giới tính trong hồ sơ cá nhân.',
+            );
           }
 
-          const leaderProfileRes = await tx.select({ gender: schema.profiles.gender }).from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
-          const rawLeaderG = (leaderProfileRes[0]?.gender || '').trim().toUpperCase();
-          const leaderGenderVal = (rawLeaderG === 'NAM' || rawLeaderG === 'MALE') ? 'MALE' : (rawLeaderG === 'NỮ' || rawLeaderG === 'NU' || rawLeaderG === 'FEMALE') ? 'FEMALE' : rawLeaderG;
+          const leaderProfileRes = await tx
+            .select({ gender: schema.profiles.gender })
+            .from(schema.profiles)
+            .where(eq(schema.profiles.userId, userId))
+            .limit(1);
+          const rawLeaderG = (leaderProfileRes[0]?.gender || '')
+            .trim()
+            .toUpperCase();
+          const leaderGenderVal =
+            rawLeaderG === 'NAM' || rawLeaderG === 'MALE'
+              ? 'MALE'
+              : rawLeaderG === 'NỮ' ||
+                  rawLeaderG === 'NU' ||
+                  rawLeaderG === 'FEMALE'
+                ? 'FEMALE'
+                : rawLeaderG;
 
-          const rawPartnerG = (partnerProfile.gender || '').trim().toUpperCase();
-          const partnerGenderVal = (rawPartnerG === 'NAM' || rawPartnerG === 'MALE') ? 'MALE' : (rawPartnerG === 'NỮ' || rawPartnerG === 'NU' || rawPartnerG === 'FEMALE') ? 'FEMALE' : rawPartnerG;
+          const rawPartnerG = (partnerProfile.gender || '')
+            .trim()
+            .toUpperCase();
+          const partnerGenderVal =
+            rawPartnerG === 'NAM' || rawPartnerG === 'MALE'
+              ? 'MALE'
+              : rawPartnerG === 'NỮ' ||
+                  rawPartnerG === 'NU' ||
+                  rawPartnerG === 'FEMALE'
+                ? 'FEMALE'
+                : rawPartnerG;
           const restriction = tournament.genderRestriction.toUpperCase();
 
           if (restriction === 'MALE' && partnerGenderVal !== 'MALE') {
-            throw new BadRequestException('Giải đấu chỉ dành cho Nam (cả 2 VĐV phải là Nam).');
+            throw new BadRequestException(
+              'Giải đấu chỉ dành cho Nam (cả 2 VĐV phải là Nam).',
+            );
           }
           if (restriction === 'FEMALE' && partnerGenderVal !== 'FEMALE') {
-            throw new BadRequestException('Giải đấu chỉ dành cho Nữ (cả 2 VĐV phải là Nữ).');
+            throw new BadRequestException(
+              'Giải đấu chỉ dành cho Nữ (cả 2 VĐV phải là Nữ).',
+            );
           }
           if (restriction === 'MIXED') {
             if (!leaderGenderVal) {
-              throw new BadRequestException('Bạn cần cập nhật giới tính trong hồ sơ để xác nhận Mixed Doubles.');
+              throw new BadRequestException(
+                'Bạn cần cập nhật giới tính trong hồ sơ để xác nhận Mixed Doubles.',
+              );
             }
             if (leaderGenderVal === partnerGenderVal) {
-              throw new BadRequestException('Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.');
+              throw new BadRequestException(
+                'Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.',
+              );
             }
           }
         }
@@ -1383,12 +1761,19 @@ export class TournamentsRepository {
       const resolvedDivision = await resolveMatchingDivision(partnerId);
       const selectedDivision = resolvedDivision?.division ?? null;
       const isWaitlisted = resolvedDivision?.isWaitlisted === true;
-      const effectiveMatchType = selectedDivision?.matchType ?? tournament.matchType;
+      const effectiveMatchType =
+        selectedDivision?.matchType ?? tournament.matchType;
       const isDoubles = this.isDoublesMatchType(effectiveMatchType);
       // Team sport (bóng đá): config có teamSize → đội nhiều người, không qua PENDING_PARTNER.
-      const tConfigForTeam = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-      const isTeamSport = tConfigForTeam.teamSize != null || tConfigForTeam.minTeamSize != null;
-      const payableEntryFeeAmount = parseFloat(selectedDivision?.entryFee ?? tournament.entryFee ?? '0');
+      const tConfigForTeam = (tournament.tournamentConfig || {}) as Record<
+        string,
+        unknown
+      >;
+      const isTeamSport =
+        tConfigForTeam.teamSize != null || tConfigForTeam.minTeamSize != null;
+      const payableEntryFeeAmount = parseFloat(
+        selectedDivision?.entryFee ?? tournament.entryFee ?? '0',
+      );
 
       const registrationDeadlines = [
         selectedDivision?.registrationEndDate,
@@ -1401,18 +1786,26 @@ export class TournamentsRepository {
       )[0];
 
       if (registrationDeadline && now >= registrationDeadline) {
-        throw new BadRequestException('Hạn đăng ký của nội dung thi đấu này đã kết thúc.');
+        throw new BadRequestException(
+          'Hạn đăng ký của nội dung thi đấu này đã kết thúc.',
+        );
       }
 
       // Team sport: luôn tạo link mời mở (token), không giới hạn 1h partner.
       // Đôi: token mời đồng đội như cũ (PENDING_PARTNER, hết hạn theo deadline).
-      const teamInviteToken = (isDoubles || (isTeamSport && !data.footballTeamId))
-        ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase()
-        : null;
+      const teamInviteToken =
+        isDoubles || (isTeamSport && !data.footballTeamId)
+          ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase()
+          : null;
       const inviteBaseExpiresAt = new Date(now.getTime() + 60 * 60 * 1000);
       const partnerInviteExpiresAt = isDoubles
         ? registrationDeadline
-          ? new Date(Math.min(inviteBaseExpiresAt.getTime(), registrationDeadline.getTime()))
+          ? new Date(
+              Math.min(
+                inviteBaseExpiresAt.getTime(),
+                registrationDeadline.getTime(),
+              ),
+            )
           : inviteBaseExpiresAt
         : null;
 
@@ -1430,46 +1823,84 @@ export class TournamentsRepository {
       let footballTeamReserveMemberIds: string[] = [];
       let footballTeamLogoUrl: string | null = null;
       if (isTeamSport && data.footballTeamId) {
-        const [footballTeam] = await tx.select({
-          id: schema.footballTeams.id,
-          name: schema.footballTeams.name,
-          categoryId: schema.footballTeams.categoryId,
-          logoUrl: schema.footballTeams.logoUrl,
-          status: schema.footballTeams.status,
-        }).from(schema.footballTeams)
+        const [footballTeam] = await tx
+          .select({
+            id: schema.footballTeams.id,
+            name: schema.footballTeams.name,
+            categoryId: schema.footballTeams.categoryId,
+            logoUrl: schema.footballTeams.logoUrl,
+            status: schema.footballTeams.status,
+          })
+          .from(schema.footballTeams)
           .where(eq(schema.footballTeams.id, data.footballTeamId))
           .limit(1);
-        if (!footballTeam || footballTeam.status !== 'ACTIVE' || footballTeam.categoryId !== tournament.categoryId) {
-          throw new BadRequestException('Đội bóng không hợp lệ cho giải đấu này.');
+        if (
+          !footballTeam ||
+          footballTeam.status !== 'ACTIVE' ||
+          footballTeam.categoryId !== tournament.categoryId
+        ) {
+          throw new BadRequestException(
+            'Đội bóng không hợp lệ cho giải đấu này.',
+          );
         }
-        const [leaderMembership] = await tx.select({ role: schema.footballTeamMembers.role })
+        const [leaderMembership] = await tx
+          .select({ role: schema.footballTeamMembers.role })
           .from(schema.footballTeamMembers)
-          .where(and(
-            eq(schema.footballTeamMembers.teamId, data.footballTeamId),
-            eq(schema.footballTeamMembers.userId, userId),
-            eq(schema.footballTeamMembers.status, 'ACTIVE'),
-          )).limit(1);
-        if (!leaderMembership || !['CAPTAIN', 'MANAGER'].includes(leaderMembership.role)) {
-          throw new ForbiddenException('Chỉ đội trưởng hoặc quản lý mới được đăng ký đội bóng.');
+          .where(
+            and(
+              eq(schema.footballTeamMembers.teamId, data.footballTeamId),
+              eq(schema.footballTeamMembers.userId, userId),
+              eq(schema.footballTeamMembers.status, 'ACTIVE'),
+            ),
+          )
+          .limit(1);
+        if (
+          !leaderMembership ||
+          !['CAPTAIN', 'MANAGER'].includes(leaderMembership.role)
+        ) {
+          throw new ForbiddenException(
+            'Chỉ đội trưởng hoặc quản lý mới được đăng ký đội bóng.',
+          );
         }
-        const footballMembers = await tx.select({ userId: schema.footballTeamMembers.userId })
+        const footballMembers = await tx
+          .select({ userId: schema.footballTeamMembers.userId })
           .from(schema.footballTeamMembers)
-          .where(and(eq(schema.footballTeamMembers.teamId, data.footballTeamId), eq(schema.footballTeamMembers.status, 'ACTIVE')));
-        const teamConfig = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-        const configuredTeamSize = Number(teamConfig.teamSize ?? teamConfig.minTeamSize ?? 0);
-        const configuredMaxTeamSize = Number(
-          teamConfig.maxTeamSize ?? (configuredTeamSize > 0
-            ? configuredTeamSize + Math.max(0, Number(teamConfig.maxReserve ?? 0))
-            : Number.MAX_SAFE_INTEGER),
+          .where(
+            and(
+              eq(schema.footballTeamMembers.teamId, data.footballTeamId),
+              eq(schema.footballTeamMembers.status, 'ACTIVE'),
+            ),
+          );
+        const teamConfig = (tournament.tournamentConfig || {}) as Record<
+          string,
+          unknown
+        >;
+        const configuredTeamSize = Number(
+          teamConfig.teamSize ?? teamConfig.minTeamSize ?? 0,
         );
-        const configuredMaxReserve = Math.max(0, Number(teamConfig.maxReserve ?? 0));
-        const activeMemberIds = new Set(footballMembers.map((member) => member.userId));
+        const configuredMaxTeamSize = Number(
+          teamConfig.maxTeamSize ??
+            (configuredTeamSize > 0
+              ? configuredTeamSize +
+                Math.max(0, Number(teamConfig.maxReserve ?? 0))
+              : Number.MAX_SAFE_INTEGER),
+        );
+        const configuredMaxReserve = Math.max(
+          0,
+          Number(teamConfig.maxReserve ?? 0),
+        );
+        const activeMemberIds = new Set(
+          footballMembers.map((member) => member.userId),
+        );
         const roster = validateFootballRosterSelection({
           leaderId: userId,
-          memberIds: Array.isArray(data.memberIds) && data.memberIds.length > 0
-            ? data.memberIds
-            : footballMembers.map((member) => member.userId),
-          reserveMemberIds: Array.isArray(data.reserveMemberIds) ? data.reserveMemberIds : [],
+          memberIds:
+            Array.isArray(data.memberIds) && data.memberIds.length > 0
+              ? data.memberIds
+              : footballMembers.map((member) => member.userId),
+          reserveMemberIds: Array.isArray(data.reserveMemberIds)
+            ? data.reserveMemberIds
+            : [],
           activeMemberIds,
           minMainSize: configuredTeamSize,
           maxMainSize: configuredTeamSize,
@@ -1482,37 +1913,62 @@ export class TournamentsRepository {
         footballTeamLogoUrl = footballTeam.logoUrl ?? null;
       }
       if (isTeamSport && data.footballTeamId && selectedDivision) {
-        const divisionGender = (selectedDivision.genderRestriction || '').trim().toUpperCase();
+        const divisionGender = (selectedDivision.genderRestriction || '')
+          .trim()
+          .toUpperCase();
         if (divisionGender === 'MALE' || divisionGender === 'FEMALE') {
-          const rosterIds = [...footballTeamMemberIds, ...footballTeamReserveMemberIds];
-          const rosterProfiles = rosterIds.length > 0
-            ? await tx
-              .select({ userId: schema.profiles.userId, gender: schema.profiles.gender })
-              .from(schema.profiles)
-              .where(inArray(schema.profiles.userId, rosterIds))
-            : [];
-          const profileGender = new Map(rosterProfiles.map((profile) => [profile.userId, (profile.gender || '').trim().toUpperCase()]));
+          const rosterIds = [
+            ...footballTeamMemberIds,
+            ...footballTeamReserveMemberIds,
+          ];
+          const rosterProfiles =
+            rosterIds.length > 0
+              ? await tx
+                  .select({
+                    userId: schema.profiles.userId,
+                    gender: schema.profiles.gender,
+                  })
+                  .from(schema.profiles)
+                  .where(inArray(schema.profiles.userId, rosterIds))
+              : [];
+          const profileGender = new Map(
+            rosterProfiles.map((profile) => [
+              profile.userId,
+              (profile.gender || '').trim().toUpperCase(),
+            ]),
+          );
           for (const rosterId of rosterIds) {
             const rawGender = profileGender.get(rosterId);
-            const normalizedGender = rawGender === 'NAM' || rawGender === 'MALE'
-              ? 'MALE'
-              : rawGender === 'NỮ' || rawGender === 'NU' || rawGender === 'FEMALE'
-                ? 'FEMALE'
-                : null;
+            const normalizedGender =
+              rawGender === 'NAM' || rawGender === 'MALE'
+                ? 'MALE'
+                : rawGender === 'NỮ' ||
+                    rawGender === 'NU' ||
+                    rawGender === 'FEMALE'
+                  ? 'FEMALE'
+                  : null;
             if (!normalizedGender) {
-              throw new BadRequestException('Mọi thành viên đội bóng phải cập nhật giới tính trước khi đăng ký division này.');
+              throw new BadRequestException(
+                'Mọi thành viên đội bóng phải cập nhật giới tính trước khi đăng ký division này.',
+              );
             }
             if (normalizedGender !== divisionGender) {
-              throw new BadRequestException(divisionGender === 'MALE' ? 'Division này chỉ dành cho Nam.' : 'Division này chỉ dành cho Nữ.');
+              throw new BadRequestException(
+                divisionGender === 'MALE'
+                  ? 'Division này chỉ dành cho Nam.'
+                  : 'Division này chỉ dành cho Nữ.',
+              );
             }
           }
         }
       }
       if (isTeamSport && data.footballTeamId) {
-        const selectedFootballMemberIds = [...new Set([
-          ...footballTeamMemberIds,
-          ...footballTeamReserveMemberIds,
-        ])];
+        const selectedFootballMemberIds = [
+          ...new Set([
+            ...footballTeamMemberIds,
+            ...footballTeamReserveMemberIds,
+          ]),
+        ];
         if (selectedFootballMemberIds.length > 0) {
           const existingFootballRoster = await tx
             .select({
@@ -1522,16 +1978,24 @@ export class TournamentsRepository {
             .from(schema.tournamentRosters)
             .innerJoin(
               schema.tournamentParticipants,
-              eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+              eq(
+                schema.tournamentRosters.participantId,
+                schema.tournamentParticipants.id,
+              ),
             )
-            .where(and(
-              eq(schema.tournamentParticipants.tournamentId, tournamentId),
-              inArray(schema.tournamentRosters.userId, selectedFootballMemberIds),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
-            ));
+            .where(
+              and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                inArray(
+                  schema.tournamentRosters.userId,
+                  selectedFootballMemberIds,
+                ),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+              ),
+            );
           if (existingFootballRoster.length > 0) {
             throw new BadRequestException(
               'Một hoặc nhiều thành viên đội bóng đã đăng ký nội dung khác trong giải đấu này.',
@@ -1577,10 +2041,15 @@ export class TournamentsRepository {
 
       // 10b. Team sport: thêm các thành viên (memberIds) như roster MAIN.
       if (isTeamSport) {
-        const requestedMemberIds = footballTeamMemberIds.length > 0
-          ? footballTeamMemberIds
-          : (Array.isArray(data.memberIds) ? data.memberIds : []);
-        const uniqueMemberIds = [...new Set(requestedMemberIds.filter((mid) => mid !== userId))];
+        const requestedMemberIds =
+          footballTeamMemberIds.length > 0
+            ? footballTeamMemberIds
+            : Array.isArray(data.memberIds)
+              ? data.memberIds
+              : [];
+        const uniqueMemberIds = [
+          ...new Set(requestedMemberIds.filter((mid) => mid !== userId)),
+        ];
         for (const mid of uniqueMemberIds) {
           // Chống trùng + không để user đã ở roster khác của giải
           const [existing] = await tx
@@ -1601,7 +2070,8 @@ export class TournamentsRepository {
           });
         }
         for (const reserveId of [...new Set(footballTeamReserveMemberIds)]) {
-          if (reserveId === userId || uniqueMemberIds.includes(reserveId)) continue;
+          if (reserveId === userId || uniqueMemberIds.includes(reserveId))
+            continue;
           await tx.insert(schema.tournamentRosters).values({
             participantId: participant.id,
             userId: reserveId,
@@ -1615,34 +2085,51 @@ export class TournamentsRepository {
       // source, while this entry tracks per-member confirmation and survives
       // later changes to the external team.
       if (isTeamSport && data.footballTeamId && selectedDivision?.id) {
-        const snapshotMainMemberIds = [...new Set(
-          (footballTeamMemberIds.length > 0 ? footballTeamMemberIds : [userId])
-            .filter((memberId) => memberId.trim().length > 0),
-        )];
-        const snapshotReserveMemberIds = [...new Set(
-          footballTeamReserveMemberIds.filter((memberId) => memberId.trim().length > 0),
-        )];
-        const snapshotMemberIds = [...snapshotMainMemberIds, ...snapshotReserveMemberIds];
+        const snapshotMainMemberIds = [
+          ...new Set(
+            (footballTeamMemberIds.length > 0
+              ? footballTeamMemberIds
+              : [userId]
+            ).filter((memberId) => memberId.trim().length > 0),
+          ),
+        ];
+        const snapshotReserveMemberIds = [
+          ...new Set(
+            footballTeamReserveMemberIds.filter(
+              (memberId) => memberId.trim().length > 0,
+            ),
+          ),
+        ];
+        const snapshotMemberIds = [
+          ...snapshotMainMemberIds,
+          ...snapshotReserveMemberIds,
+        ];
         const captainRows = await tx
           .select({ userId: schema.footballTeamMembers.userId })
           .from(schema.footballTeamMembers)
-          .where(and(
-            eq(schema.footballTeamMembers.teamId, data.footballTeamId),
-            eq(schema.footballTeamMembers.status, 'ACTIVE'),
-            or(
-              eq(schema.footballTeamMembers.role, 'CAPTAIN'),
-              eq(schema.footballTeamMembers.role, 'MANAGER'),
+          .where(
+            and(
+              eq(schema.footballTeamMembers.teamId, data.footballTeamId),
+              eq(schema.footballTeamMembers.status, 'ACTIVE'),
+              or(
+                eq(schema.footballTeamMembers.role, 'CAPTAIN'),
+                eq(schema.footballTeamMembers.role, 'MANAGER'),
+              ),
             ),
-          ));
+          );
         const captainIdsSnapshot = captainRows.map((row) => row.userId);
-        const hasPendingConfirmation = snapshotMemberIds.some((memberId) => memberId !== userId);
+        const hasPendingConfirmation = snapshotMemberIds.some(
+          (memberId) => memberId !== userId,
+        );
         const [entry] = await tx
           .insert(schema.tournamentTeamEntries)
           .values({
             tournamentId,
             divisionId: selectedDivision.id,
             teamId: data.footballTeamId,
-          status: hasPendingConfirmation ? 'PENDING_CONFIRMATION' : 'CONFIRMED',
+            status: hasPendingConfirmation
+              ? 'PENDING_CONFIRMATION'
+              : 'CONFIRMED',
             displayNameSnapshot: finalTeamName,
             logoUrlSnapshot: footballTeamLogoUrl,
             captainIdsSnapshot,
@@ -1656,7 +2143,9 @@ export class TournamentsRepository {
             snapshotMemberIds.map((memberId) => ({
               entryId: entry.id,
               userId: memberId,
-              role: snapshotMainMemberIds.includes(memberId) ? 'MAIN' : 'RESERVE',
+              role: snapshotMainMemberIds.includes(memberId)
+                ? 'MAIN'
+                : 'RESERVE',
               confirmationStatus: memberId === userId ? 'CONFIRMED' : 'PENDING',
             })),
           );
@@ -1667,15 +2156,22 @@ export class TournamentsRepository {
       const paymentUrl: string | null = null;
 
       // 12. Audit log
-      await this.auditService.logCreate(tx, userId, 'tournament_participants', participant.id, participant);
+      await this.auditService.logCreate(
+        tx,
+        userId,
+        'tournament_participants',
+        participant.id,
+        participant,
+      );
 
       return {
         participant,
         entryFee: payableEntryFeeAmount,
         paymentUrl,
-        teamInviteLink: (isDoubles || (isTeamSport && !data.footballTeamId))
-          ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
-          : null,
+        teamInviteLink:
+          isDoubles || (isTeamSport && !data.footballTeamId)
+            ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
+            : null,
         isWaitlisted,
       };
     });
@@ -1691,23 +2187,34 @@ export class TournamentsRepository {
         .limit(1);
 
       if (!participant) {
-        throw new NotFoundException('Lời mời ghép đôi không tồn tại hoặc đã bị hủy.');
+        throw new NotFoundException(
+          'Lời mời ghép đôi không tồn tại hoặc đã bị hủy.',
+        );
       }
 
-      if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
+      if (
+        !participant.partnerInviteExpiresAt ||
+        new Date() >= participant.partnerInviteExpiresAt
+      ) {
         await tx
           .update(schema.tournamentParticipants)
           .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
           .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Lời mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.');
+        throw new BadRequestException(
+          'Lời mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.',
+        );
       }
 
       if (participant.teamStatus !== 'PENDING_PARTNER') {
-        throw new BadRequestException('Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.');
+        throw new BadRequestException(
+          'Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.',
+        );
       }
 
       if (participant.partnerUserId !== partnerUserId) {
-        throw new BadRequestException('Chỉ đúng tài khoản đồng đội được mời mới có thể xác nhận lời mời này.');
+        throw new BadRequestException(
+          'Chỉ đúng tài khoản đồng đội được mời mới có thể xác nhận lời mời này.',
+        );
       }
 
       const [tournament] = await tx
@@ -1721,15 +2228,24 @@ export class TournamentsRepository {
       const [division] = participant.tournamentDivisionId
         ? await tx
             .select({
-              registrationEndDate: schema.tournamentDivisions.registrationEndDate,
+              registrationEndDate:
+                schema.tournamentDivisions.registrationEndDate,
               matchType: schema.tournamentDivisions.matchType,
               genderRestriction: schema.tournamentDivisions.genderRestriction,
             })
             .from(schema.tournamentDivisions)
-            .where(eq(schema.tournamentDivisions.id, participant.tournamentDivisionId))
+            .where(
+              eq(
+                schema.tournamentDivisions.id,
+                participant.tournamentDivisionId,
+              ),
+            )
             .limit(1)
         : [null];
-      const registrationDeadlines = [tournament?.registrationEndDate, division?.registrationEndDate]
+      const registrationDeadlines = [
+        tournament?.registrationEndDate,
+        division?.registrationEndDate,
+      ]
         .filter(Boolean)
         .map((value) => new Date(value as Date | string));
       const registrationDeadline = registrationDeadlines.sort(
@@ -1740,7 +2256,9 @@ export class TournamentsRepository {
           .update(schema.tournamentParticipants)
           .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
           .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Giải đấu đã đóng đăng ký. Lời mời ghép đôi không thể xác nhận thêm.');
+        throw new BadRequestException(
+          'Giải đấu đã đóng đăng ký. Lời mời ghép đôi không thể xác nhận thêm.',
+        );
       }
 
       const [leaderRoster] = await tx
@@ -1749,7 +2267,8 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentRosters.participantId, participantId))
         .limit(1);
       const [leaderProfile] = leaderRoster
-        ? await tx.select({ gender: schema.profiles.gender })
+        ? await tx
+            .select({ gender: schema.profiles.gender })
             .from(schema.profiles)
             .where(eq(schema.profiles.userId, leaderRoster.userId))
             .limit(1)
@@ -1762,16 +2281,27 @@ export class TournamentsRepository {
       const leaderGender = this.normalizeGender(leaderProfile?.gender);
       const partnerGender = this.normalizeGender(partnerProfile?.gender);
       if (!leaderGender || !partnerGender) {
-        throw new BadRequestException('Cáº£ hai VÄV cáº§n cáº­p nháº­t giá»›i tÃ­nh trong há»“ sÆ¡ Ä‘á»ƒ tham gia.');
+        throw new BadRequestException(
+          'Cáº£ hai VÄV cáº§n cáº­p nháº­t giá»›i tÃ­nh trong há»“ sÆ¡ Ä‘á»ƒ tham gia.',
+        );
       }
-      const targetGender = leaderGender === partnerGender ? leaderGender : 'MIXED';
-      const targetMatchType = targetGender === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
-      const divisionGender = this.normalizeGender(division?.genderRestriction) ??
+      const targetGender =
+        leaderGender === partnerGender ? leaderGender : 'MIXED';
+      const targetMatchType =
+        targetGender === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
+      const divisionGender =
+        this.normalizeGender(division?.genderRestriction) ??
         (division?.genderRestriction || '').toUpperCase();
-      if (division &&
-          (division.matchType !== targetMatchType ||
-            (divisionGender && divisionGender !== 'OPEN' && divisionGender !== targetGender))) {
-        throw new BadRequestException('Äá»“ng Ä‘á»™i khÃ´ng phÃ¹ há»£p vá»›i hÃ¬nh thá»©c thi Ä‘áº¥u Ä‘Ã£ Ä‘Äƒng kÃ½.');
+      if (
+        division &&
+        (division.matchType !== targetMatchType ||
+          (divisionGender &&
+            divisionGender !== 'OPEN' &&
+            divisionGender !== targetGender))
+      ) {
+        throw new BadRequestException(
+          'Äá»“ng Ä‘á»™i khÃ´ng phÃ¹ há»£p vá»›i hÃ¬nh thá»©c thi Ä‘áº¥u Ä‘Ã£ Ä‘Äƒng kÃ½.',
+        );
       }
 
       // Check duplicate roster
@@ -1793,9 +2323,11 @@ export class TournamentsRepository {
         });
       }
 
-      const targetStatus = ((tournament?.tournamentConfig || {}) as Record<string, unknown>).registrationMode === 'APPROVAL'
-        ? 'PENDING_APPROVAL'
-        : 'COMPLETE';
+      const targetStatus =
+        ((tournament?.tournamentConfig || {}) as Record<string, unknown>)
+          .registrationMode === 'APPROVAL'
+          ? 'PENDING_APPROVAL'
+          : 'COMPLETE';
 
       const [updated] = await tx
         .update(schema.tournamentParticipants)
@@ -1817,7 +2349,8 @@ export class TournamentsRepository {
           id: schema.tournamentParticipants.id,
           partnerUserId: schema.tournamentParticipants.partnerUserId,
           teamStatus: schema.tournamentParticipants.teamStatus,
-          partnerInviteExpiresAt: schema.tournamentParticipants.partnerInviteExpiresAt,
+          partnerInviteExpiresAt:
+            schema.tournamentParticipants.partnerInviteExpiresAt,
         })
         .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, participantId))
@@ -1825,12 +2358,19 @@ export class TournamentsRepository {
         .limit(1);
 
       if (!participant) {
-        throw new NotFoundException('Lời mời ghép đôi không tồn tại hoặc đã bị hủy.');
+        throw new NotFoundException(
+          'Lời mời ghép đôi không tồn tại hoặc đã bị hủy.',
+        );
       }
       if (participant.partnerUserId !== partnerUserId) {
-        throw new BadRequestException('Chỉ đúng tài khoản đồng đội được mời mới có thể từ chối lời mời này.');
+        throw new BadRequestException(
+          'Chỉ đúng tài khoản đồng đội được mời mới có thể từ chối lời mời này.',
+        );
       }
-      if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
+      if (
+        !participant.partnerInviteExpiresAt ||
+        new Date() >= participant.partnerInviteExpiresAt
+      ) {
         await tx
           .update(schema.tournamentParticipants)
           .set({ teamStatus: 'EXPIRED', partnerInviteExpiresAt: null })
@@ -1838,7 +2378,9 @@ export class TournamentsRepository {
         throw new BadRequestException('Lời mời ghép đôi đã hết hạn.');
       }
       if (participant.teamStatus !== 'PENDING_PARTNER') {
-        throw new BadRequestException('Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.');
+        throw new BadRequestException(
+          'Lời mời ghép đôi này đã được xử lý hoặc đã kết thúc.',
+        );
       }
 
       const [updated] = await tx
@@ -1850,7 +2392,12 @@ export class TournamentsRepository {
     });
   }
 
-  async joinTeam(tournamentId: string, userId: string, participantId: string, teamInviteToken: string) {
+  async joinTeam(
+    tournamentId: string,
+    userId: string,
+    participantId: string,
+    teamInviteToken: string,
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -1868,13 +2415,22 @@ export class TournamentsRepository {
           series: schema.tournamentSeries,
         })
         .from(schema.seriesEvents)
-        .innerJoin(schema.seriesLegs, eq(schema.seriesEvents.legId, schema.seriesLegs.id))
-        .innerJoin(schema.tournamentSeries, eq(schema.seriesLegs.seriesId, schema.tournamentSeries.id))
+        .innerJoin(
+          schema.seriesLegs,
+          eq(schema.seriesEvents.legId, schema.seriesLegs.id),
+        )
+        .innerJoin(
+          schema.tournamentSeries,
+          eq(schema.seriesLegs.seriesId, schema.tournamentSeries.id),
+        )
         .where(eq(schema.seriesEvents.tournamentId, tournamentId))
         .limit(1);
 
       if (seriesEvent && seriesEvent.series.rules) {
-        const rules = seriesEvent.series.rules as unknown as { exclusionRule?: boolean; exclusionScope?: 'CATEGORY' | 'ALL' };
+        const rules = seriesEvent.series.rules as unknown as {
+          exclusionRule?: boolean;
+          exclusionScope?: 'CATEGORY' | 'ALL';
+        };
         if (rules.exclusionRule) {
           const scope = rules.exclusionScope || 'CATEGORY';
           const conds = [
@@ -1883,7 +2439,9 @@ export class TournamentsRepository {
             eq(schema.seriesStandings.lockedOut, true),
           ];
           if (scope === 'CATEGORY') {
-            conds.push(eq(schema.seriesStandings.categoryId, tournament.categoryId));
+            conds.push(
+              eq(schema.seriesStandings.categoryId, tournament.categoryId),
+            );
           }
           const [standing] = await tx
             .select()
@@ -1895,7 +2453,7 @@ export class TournamentsRepository {
             throw new ExclusionRuleException(
               `Bạn đã giành Vé Thẳng trong chặng này và bị khóa không được tham gia tiếp nội dung ${
                 scope === 'CATEGORY' ? 'này' : 'thi đấu thuộc chặng'
-              }.`
+              }.`,
             );
           }
         }
@@ -1908,35 +2466,54 @@ export class TournamentsRepository {
         .where(
           and(
             eq(schema.tournamentParticipants.id, participantId),
-            eq(schema.tournamentParticipants.teamInviteToken, teamInviteToken)
-          )
+            eq(schema.tournamentParticipants.teamInviteToken, teamInviteToken),
+          ),
         )
         .for('update')
         .limit(1);
 
       if (!participant) {
-        throw new BadRequestException('Mã mời đồng đội hoặc đội thi đấu không hợp lệ.');
+        throw new BadRequestException(
+          'Mã mời đồng đội hoặc đội thi đấu không hợp lệ.',
+        );
       }
 
       // Team sport (bóng đá): link mời MỞ — không giới hạn partner/1h, không cần PENDING_PARTNER.
-      const teamConfig = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-      const isTeamSport = teamConfig.teamSize != null || teamConfig.minTeamSize != null;
+      const teamConfig = (tournament.tournamentConfig || {}) as Record<
+        string,
+        unknown
+      >;
+      const isTeamSport =
+        teamConfig.teamSize != null || teamConfig.minTeamSize != null;
 
       if (!isTeamSport) {
-        if (!participant.partnerInviteExpiresAt || new Date() >= participant.partnerInviteExpiresAt) {
+        if (
+          !participant.partnerInviteExpiresAt ||
+          new Date() >= participant.partnerInviteExpiresAt
+        ) {
           await tx
             .update(schema.tournamentParticipants)
-            .set({ teamStatus: 'EXPIRED', teamInviteToken: null, partnerInviteExpiresAt: null })
+            .set({
+              teamStatus: 'EXPIRED',
+              teamInviteToken: null,
+              partnerInviteExpiresAt: null,
+            })
             .where(eq(schema.tournamentParticipants.id, participantId));
-          throw new BadRequestException('Mã mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.');
+          throw new BadRequestException(
+            'Mã mời ghép đôi đã hết hạn. Suất giữ chỗ đã được giải phóng.',
+          );
         }
 
         if (participant.teamStatus !== 'PENDING_PARTNER') {
-          throw new BadRequestException('Đội thi đấu này đã đủ thành viên hoặc không ở trạng thái chờ.');
+          throw new BadRequestException(
+            'Đội thi đấu này đã đủ thành viên hoặc không ở trạng thái chờ.',
+          );
         }
 
         if (participant.partnerUserId && participant.partnerUserId !== userId) {
-          throw new BadRequestException('Chỉ đúng tài khoản đồng đội đã được mời mới có thể tham gia đội này.');
+          throw new BadRequestException(
+            'Chỉ đúng tài khoản đồng đội đã được mời mới có thể tham gia đội này.',
+          );
         }
       }
 
@@ -1944,29 +2521,45 @@ export class TournamentsRepository {
       const existingRosters = await tx
         .select({ userId: schema.tournamentRosters.userId })
         .from(schema.tournamentRosters)
-        .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+        .innerJoin(
+          schema.tournamentParticipants,
+          eq(
+            schema.tournamentRosters.participantId,
+            schema.tournamentParticipants.id,
+          ),
+        )
         .where(
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentRosters.userId, userId),
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
             ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
-          )
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          ),
         );
       if (existingRosters.length > 0) {
-        throw new BadRequestException('Bạn đã đăng ký tham gia giải đấu này rồi.');
+        throw new BadRequestException(
+          'Bạn đã đăng ký tham gia giải đấu này rồi.',
+        );
       }
 
       const [division] = participant.tournamentDivisionId
         ? await tx
             .select()
             .from(schema.tournamentDivisions)
-            .where(eq(schema.tournamentDivisions.id, participant.tournamentDivisionId))
+            .where(
+              eq(
+                schema.tournamentDivisions.id,
+                participant.tournamentDivisionId,
+              ),
+            )
             .limit(1)
         : [null];
 
-      const registrationDeadlines = [tournament.registrationEndDate, division?.registrationEndDate]
+      const registrationDeadlines = [
+        tournament.registrationEndDate,
+        division?.registrationEndDate,
+      ]
         .filter(Boolean)
         .map((value) => new Date(value as Date | string));
       const registrationDeadline = registrationDeadlines.sort(
@@ -1975,9 +2568,15 @@ export class TournamentsRepository {
       if (registrationDeadline && new Date() >= registrationDeadline) {
         await tx
           .update(schema.tournamentParticipants)
-          .set({ teamStatus: 'EXPIRED', teamInviteToken: null, partnerInviteExpiresAt: null })
+          .set({
+            teamStatus: 'EXPIRED',
+            teamInviteToken: null,
+            partnerInviteExpiresAt: null,
+          })
           .where(eq(schema.tournamentParticipants.id, participantId));
-        throw new BadRequestException('Giải đấu đã đóng đăng ký. Mã mời ghép đôi không thể sử dụng thêm.');
+        throw new BadRequestException(
+          'Giải đấu đã đóng đăng ký. Mã mời ghép đôi không thể sử dụng thêm.',
+        );
       }
 
       // 4. Lấy giới tính của Leader và Partner để kiểm tra ràng buộc
@@ -1986,7 +2585,7 @@ export class TournamentsRepository {
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, participantId))
         .limit(1);
-      
+
       if (leaderRoster.length === 0) {
         throw new BadRequestException('Không tìm thấy trưởng nhóm.');
       }
@@ -2013,27 +2612,42 @@ export class TournamentsRepository {
           (teamLeaderGender !== 'MALE' && teamLeaderGender !== 'FEMALE') ||
           (teamPartnerGender !== 'MALE' && teamPartnerGender !== 'FEMALE')
         ) {
-          throw new BadRequestException('Cả hai VĐV cần cập nhật giới tính trong hồ sơ để tham gia.');
+          throw new BadRequestException(
+            'Cả hai VĐV cần cập nhật giới tính trong hồ sơ để tham gia.',
+          );
         }
 
-        const targetGenderRestriction = teamLeaderGender === teamPartnerGender ? teamLeaderGender : 'MIXED';
-        const targetMatchType = targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
+        const targetGenderRestriction =
+          teamLeaderGender === teamPartnerGender ? teamLeaderGender : 'MIXED';
+        const targetMatchType =
+          targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
 
-        const divGender = this.normalizeGender(division.genderRestriction) ??
+        const divGender =
+          this.normalizeGender(division.genderRestriction) ??
           (division.genderRestriction || '').toUpperCase();
-        const isMatchTypeValid = division.matchType === targetMatchType || 
-          (division.matchType === 'DOUBLES' && targetMatchType === 'MIXED_DOUBLES' && (!divGender || divGender === 'OPEN'));
+        const isMatchTypeValid =
+          division.matchType === targetMatchType ||
+          (division.matchType === 'DOUBLES' &&
+            targetMatchType === 'MIXED_DOUBLES' &&
+            (!divGender || divGender === 'OPEN'));
         if (
           !isMatchTypeValid ||
-          (divGender && divGender !== 'OPEN' && divGender !== targetGenderRestriction)
+          (divGender &&
+            divGender !== 'OPEN' &&
+            divGender !== targetGenderRestriction)
         ) {
-          throw new BadRequestException('Đồng đội không phù hợp với hình thức thi đấu đã đăng ký.');
+          throw new BadRequestException(
+            'Đồng đội không phù hợp với hình thức thi đấu đã đăng ký.',
+          );
         }
       } else if (!isTeamSport && tournament.genderRestriction) {
         if (!teamPartnerGender) {
-          throw new BadRequestException('Vui lòng cập nhật giới tính trong hồ sơ để tham gia.');
+          throw new BadRequestException(
+            'Vui lòng cập nhật giới tính trong hồ sơ để tham gia.',
+          );
         }
-        const restriction = this.normalizeGender(tournament.genderRestriction) ??
+        const restriction =
+          this.normalizeGender(tournament.genderRestriction) ??
           tournament.genderRestriction.toUpperCase();
 
         if (restriction === 'MALE' && teamPartnerGender !== 'MALE') {
@@ -2044,10 +2658,14 @@ export class TournamentsRepository {
         }
         if (restriction === 'MIXED') {
           if (!teamLeaderGender) {
-            throw new BadRequestException('Không tìm thấy giới tính của trưởng nhóm để xác nhận Mixed Doubles.');
+            throw new BadRequestException(
+              'Không tìm thấy giới tính của trưởng nhóm để xác nhận Mixed Doubles.',
+            );
           }
           if (teamLeaderGender === teamPartnerGender) {
-            throw new BadRequestException('Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.');
+            throw new BadRequestException(
+              'Giải đấu Mixed Doubles yêu cầu 1 Nam và 1 Nữ.',
+            );
           }
         }
       }
@@ -2067,13 +2685,11 @@ export class TournamentsRepository {
       }
 
       // 5. Thêm roster cho Partner (team sport: role MAIN, người join qua link)
-      await tx
-        .insert(schema.tournamentRosters)
-        .values({
-          participantId: participant.id,
-          userId: userId,
-          role: 'MAIN',
-        });
+      await tx.insert(schema.tournamentRosters).values({
+        participantId: participant.id,
+        userId: userId,
+        role: 'MAIN',
+      });
 
       // 6. Cập nhật trạng thái đội hoàn tất:
       // - OPEN => COMPLETE
@@ -2085,7 +2701,8 @@ export class TournamentsRepository {
 
       const tCfg = (tournament.tournamentConfig || {}) as Record<string, any>;
       const regMode = tCfg.registrationMode || 'OPEN';
-      const targetStatus = regMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
+      const targetStatus =
+        regMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
 
       const [updatedParticipant] = await tx
         .update(schema.tournamentParticipants)
@@ -2099,7 +2716,14 @@ export class TournamentsRepository {
       // Payment intent is created later by the checkout flow.
       const paymentUrl: string | null = null;
 
-      await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, participant, updatedParticipant);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_participants',
+        participantId,
+        participant,
+        updatedParticipant,
+      );
 
       return {
         participant: updatedParticipant,
@@ -2111,7 +2735,11 @@ export class TournamentsRepository {
   async withdraw(
     tournamentId: string,
     userId: string,
-    bankData?: { bankName?: string; bankAccountNumber?: string; bankAccountName?: string },
+    bankData?: {
+      bankName?: string;
+      bankAccountNumber?: string;
+      bankAccountName?: string;
+    },
     divisionId?: string,
   ) {
     return await this.db.transaction(async (tx) => {
@@ -2119,21 +2747,36 @@ export class TournamentsRepository {
       const userRoster = await tx
         .select({ participantId: schema.tournamentRosters.participantId })
         .from(schema.tournamentRosters)
-        .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
+        .innerJoin(
+          schema.tournamentParticipants,
+          eq(
+            schema.tournamentRosters.participantId,
+            schema.tournamentParticipants.id,
+          ),
+        )
         .where(
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentRosters.userId, userId),
-            ...(divisionId ? [eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)] : []),
+            ...(divisionId
+              ? [
+                  eq(
+                    schema.tournamentParticipants.tournamentDivisionId,
+                    divisionId,
+                  ),
+                ]
+              : []),
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
             ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
-          )
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          ),
         )
         .limit(1);
 
       if (userRoster.length === 0) {
-        throw new BadRequestException('Bạn chưa đăng ký giải đấu này hoặc đã rút lui.');
+        throw new BadRequestException(
+          'Bạn chưa đăng ký giải đấu này hoặc đã rút lui.',
+        );
       }
 
       const participantId = userRoster[0].participantId;
@@ -2144,8 +2787,9 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentParticipants.id, participantId))
         .limit(1);
 
-      if (!oldParticipant) throw new NotFoundException('Không tìm thấy người tham gia');
-      
+      if (!oldParticipant)
+        throw new NotFoundException('Không tìm thấy người tham gia');
+
       // A confirmed participant may still withdraw before the tournament starts.
       // Paid registrations become PENDING_REFUND and are handled by the organizer.
 
@@ -2158,8 +2802,13 @@ export class TournamentsRepository {
 
       if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-      if (tournament.status === 'IN_PROGRESS' || tournament.status === 'COMPLETED') {
-        throw new BadRequestException('Giải đấu đã bắt đầu hoặc kết thúc, không thể rút lui.');
+      if (
+        tournament.status === 'IN_PROGRESS' ||
+        tournament.status === 'COMPLETED'
+      ) {
+        throw new BadRequestException(
+          'Giải đấu đã bắt đầu hoặc kết thúc, không thể rút lui.',
+        );
       }
 
       // 2.5 Lấy bank details từ request body hoặc từ profile của user
@@ -2170,8 +2819,10 @@ export class TournamentsRepository {
         .limit(1);
 
       const finalBankName = bankData?.bankName || profile?.bankName;
-      const finalBankAccountNumber = bankData?.bankAccountNumber || profile?.bankAccountNumber;
-      const finalBankAccountName = bankData?.bankAccountName || profile?.bankAccountName;
+      const finalBankAccountNumber =
+        bankData?.bankAccountNumber || profile?.bankAccountNumber;
+      const finalBankAccountName =
+        bankData?.bankAccountName || profile?.bankAccountName;
       const entryFeeAmount = await this.resolveDivisionEntryFee(
         tx,
         tournament,
@@ -2180,7 +2831,11 @@ export class TournamentsRepository {
 
       if (oldParticipant.isPaid) {
         if (entryFeeAmount > 0) {
-          if (!finalBankName?.trim() || !finalBankAccountNumber?.trim() || !finalBankAccountName?.trim()) {
+          if (
+            !finalBankName?.trim() ||
+            !finalBankAccountNumber?.trim() ||
+            !finalBankAccountName?.trim()
+          ) {
             throw new BadRequestException(
               'Vui lòng nhập đầy đủ thông tin tài khoản ngân hàng để nhận lại tiền hoàn lệ phí.',
             );
@@ -2220,26 +2875,42 @@ export class TournamentsRepository {
               and(
                 eq(schema.payments.tournamentId, tournamentId),
                 eq(schema.payments.participantId, participantId),
-                eq(schema.payments.status, 'COMPLETED')
-              )
+                eq(schema.payments.status, 'COMPLETED'),
+              ),
             );
           refundAmount = entryFeeAmount.toString();
         }
       }
 
-      await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, oldParticipant, updatedParticipant);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_participants',
+        participantId,
+        oldParticipant,
+        updatedParticipant,
+      );
 
       // 5. Promote waitlisted participant nếu có slot trống
-      await this.promoteNextWaitlisted(tx, tournamentId, oldParticipant.tournamentDivisionId ?? undefined);
+      await this.promoteNextWaitlisted(
+        tx,
+        tournamentId,
+        oldParticipant.tournamentDivisionId ?? undefined,
+      );
 
       return {
-        message: 'Đã rút khỏi giải đấu thành công. Yêu cầu hoàn tiền đang được Ban tổ chức xử lý.',
+        message:
+          'Đã rút khỏi giải đấu thành công. Yêu cầu hoàn tiền đang được Ban tổ chức xử lý.',
         refundAmount,
       };
     });
   }
 
-  async kickParticipant(tournamentId: string, participantId: string, userId: string) {
+  async kickParticipant(
+    tournamentId: string,
+    participantId: string,
+    userId: string,
+  ) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
       const [tournament] = await tx
@@ -2257,14 +2928,17 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentParticipants.id, participantId))
         .limit(1);
 
-      if (!participant) throw new NotFoundException('Không tìm thấy người tham gia');
+      if (!participant)
+        throw new NotFoundException('Không tìm thấy người tham gia');
 
       if (participant.tournamentId !== tournamentId) {
         throw new NotFoundException('Người tham gia không thuộc giải đấu này');
       }
-      
+
       if (['COMPLETED', 'CANCELLED'].includes(tournament.status)) {
-        throw new BadRequestException('Giải đấu đã kết thúc, không thể kick người tham gia.');
+        throw new BadRequestException(
+          'Giải đấu đã kết thúc, không thể kick người tham gia.',
+        );
       }
 
       // 3. Cập nhật trạng thái sang KICKED
@@ -2300,8 +2974,8 @@ export class TournamentsRepository {
               and(
                 eq(schema.payments.tournamentId, tournamentId),
                 eq(schema.payments.participantId, participantId),
-                eq(schema.payments.status, 'COMPLETED')
-              )
+                eq(schema.payments.status, 'COMPLETED'),
+              ),
             );
           refundAmount = entryFeeAmount.toString();
         }
@@ -2313,18 +2987,22 @@ export class TournamentsRepository {
         .from(schema.matches)
         .where(
           and(
-            or(eq(schema.matches.status, 'SCHEDULED'), eq(schema.matches.status, 'ONGOING')),
+            or(
+              eq(schema.matches.status, 'SCHEDULED'),
+              eq(schema.matches.status, 'ONGOING'),
+            ),
             or(
               eq(schema.matches.participant1Id, participantId),
-              eq(schema.matches.participant2Id, participantId)
-            )
-          )
+              eq(schema.matches.participant2Id, participantId),
+            ),
+          ),
         );
 
       for (const match of activeMatches) {
-        const opponentId = (match.participant1Id === participantId)
-          ? match.participant2Id
-          : match.participant1Id;
+        const opponentId =
+          match.participant1Id === participantId
+            ? match.participant2Id
+            : match.participant1Id;
 
         const winnerId = opponentId || null;
 
@@ -2373,10 +3051,21 @@ export class TournamentsRepository {
         }
       }
 
-      await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, participant, updatedParticipant);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_participants',
+        participantId,
+        participant,
+        updatedParticipant,
+      );
 
       // Promote waitlisted participant nếu có slot trống
-      await this.promoteNextWaitlisted(tx, tournamentId, participant.tournamentDivisionId ?? undefined);
+      await this.promoteNextWaitlisted(
+        tx,
+        tournamentId,
+        participant.tournamentDivisionId ?? undefined,
+      );
 
       return {
         message: 'Đội thi đấu đã bị kick và hoàn tiền thành công.',
@@ -2385,23 +3074,40 @@ export class TournamentsRepository {
     });
   }
 
-  async myRegistration(tournamentId: string, userId: string, divisionId?: string) {
-      const userRoster = await this.db
-        .select({ participantId: schema.tournamentRosters.participantId })
-        .from(schema.tournamentRosters)
-        .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
-        .where(
-          and(
-            eq(schema.tournamentParticipants.tournamentId, tournamentId),
-            eq(schema.tournamentRosters.userId, userId),
-            ...(divisionId ? [eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)] : []),
-            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-            ne(schema.tournamentParticipants.teamStatus, 'EXPIRED')
-          )
-        )
-        .limit(1);
+  async myRegistration(
+    tournamentId: string,
+    userId: string,
+    divisionId?: string,
+  ) {
+    const userRoster = await this.db
+      .select({ participantId: schema.tournamentRosters.participantId })
+      .from(schema.tournamentRosters)
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
+      )
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          eq(schema.tournamentRosters.userId, userId),
+          ...(divisionId
+            ? [
+                eq(
+                  schema.tournamentParticipants.tournamentDivisionId,
+                  divisionId,
+                ),
+              ]
+            : []),
+          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+          ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+          ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+        ),
+      )
+      .limit(1);
 
     if (userRoster.length === 0) {
       return { registered: false };
@@ -2423,7 +3129,10 @@ export class TournamentsRepository {
         avatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.tournamentRosters)
-      .innerJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.tournamentRosters.userId, schema.users.id),
+      )
       .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(eq(schema.tournamentRosters.participantId, participantId));
 
@@ -2445,19 +3154,25 @@ export class TournamentsRepository {
           participant.teamStatus === 'PENDING_PARTNER' &&
           participant.registeredBy === userId &&
           participant.teamInviteToken
-          ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${participant.teamInviteToken}`
-          : null
-      }
+            ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${participant.teamInviteToken}`
+            : null,
+      },
     };
   }
 
-  async findParticipantByTournamentAndUser(tournamentId: string, userId: string) {
+  async findParticipantByTournamentAndUser(
+    tournamentId: string,
+    userId: string,
+  ) {
     const [participant] = await this.db
       .select({ participant: schema.tournamentParticipants })
       .from(schema.tournamentParticipants)
       .innerJoin(
         schema.tournamentRosters,
-        eq(schema.tournamentParticipants.id, schema.tournamentRosters.participantId),
+        eq(
+          schema.tournamentParticipants.id,
+          schema.tournamentRosters.participantId,
+        ),
       )
       .where(
         and(
@@ -2495,18 +3210,25 @@ export class TournamentsRepository {
   }
 
   async findFootballTeamForRegistration(teamId: string, userId: string) {
-    const activeBan = this.db.select({ id: schema.userBans.id })
+    const activeBan = this.db
+      .select({ id: schema.userBans.id })
       .from(schema.userBans)
-      .where(and(
-        eq(schema.userBans.userId, schema.users.id),
-        eq(schema.userBans.isActive, true),
-        inArray(schema.userBans.banType, ['SOFT_BAN', 'HARD_BAN']),
-        or(isNull(schema.userBans.expiresAt), gt(schema.userBans.expiresAt, new Date())),
-      ));
-    const [team] = await this.db.select({
-      team: schema.footballTeams,
-      membership: schema.footballTeamMembers,
-    })
+      .where(
+        and(
+          eq(schema.userBans.userId, schema.users.id),
+          eq(schema.userBans.isActive, true),
+          inArray(schema.userBans.banType, ['SOFT_BAN', 'HARD_BAN']),
+          or(
+            isNull(schema.userBans.expiresAt),
+            gt(schema.userBans.expiresAt, new Date()),
+          ),
+        ),
+      );
+    const [team] = await this.db
+      .select({
+        team: schema.footballTeams,
+        membership: schema.footballTeamMembers,
+      })
       .from(schema.footballTeams)
       .innerJoin(
         schema.footballTeamMembers,
@@ -2516,29 +3238,40 @@ export class TournamentsRepository {
           eq(schema.footballTeamMembers.status, 'ACTIVE'),
         ),
       )
-      .innerJoin(schema.users, eq(schema.users.id, schema.footballTeamMembers.userId))
-      .where(and(
-        eq(schema.footballTeams.id, teamId),
-        isNull(schema.users.deletedAt),
-        eq(schema.users.isMock, false),
-        notExists(activeBan),
-      ))
+      .innerJoin(
+        schema.users,
+        eq(schema.users.id, schema.footballTeamMembers.userId),
+      )
+      .where(
+        and(
+          eq(schema.footballTeams.id, teamId),
+          isNull(schema.users.deletedAt),
+          eq(schema.users.isMock, false),
+          notExists(activeBan),
+        ),
+      )
       .limit(1);
     if (!team) return null;
 
-    const members = await this.db.select({
-      userId: schema.footballTeamMembers.userId,
-      role: schema.footballTeamMembers.role,
-    })
+    const members = await this.db
+      .select({
+        userId: schema.footballTeamMembers.userId,
+        role: schema.footballTeamMembers.role,
+      })
       .from(schema.footballTeamMembers)
-      .innerJoin(schema.users, eq(schema.users.id, schema.footballTeamMembers.userId))
-      .where(and(
-        eq(schema.footballTeamMembers.teamId, teamId),
-        eq(schema.footballTeamMembers.status, 'ACTIVE'),
-        isNull(schema.users.deletedAt),
-        eq(schema.users.isMock, false),
-        notExists(activeBan),
-      ));
+      .innerJoin(
+        schema.users,
+        eq(schema.users.id, schema.footballTeamMembers.userId),
+      )
+      .where(
+        and(
+          eq(schema.footballTeamMembers.teamId, teamId),
+          eq(schema.footballTeamMembers.status, 'ACTIVE'),
+          isNull(schema.users.deletedAt),
+          eq(schema.users.isMock, false),
+          notExists(activeBan),
+        ),
+      );
     return { ...team.team, membership: team.membership, members };
   }
 
@@ -2614,7 +3347,8 @@ export class TournamentsRepository {
         teamName: schema.tournamentParticipants.teamName,
         seed: schema.tournamentParticipants.seed,
         isPaid: schema.tournamentParticipants.isPaid,
-        tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
+        tournamentDivisionId:
+          schema.tournamentParticipants.tournamentDivisionId,
         teamStatus: schema.tournamentParticipants.teamStatus,
         registeredAt: schema.tournamentParticipants.registeredAt,
         registeredBy: {
@@ -2624,13 +3358,19 @@ export class TournamentsRepository {
         },
       })
       .from(schema.tournamentParticipants)
-      .leftJoin(schema.users, eq(schema.tournamentParticipants.registeredBy, schema.users.id))
+      .leftJoin(
+        schema.users,
+        eq(schema.tournamentParticipants.registeredBy, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(
         divisionId
           ? and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
-              eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+              eq(
+                schema.tournamentParticipants.tournamentDivisionId,
+                divisionId,
+              ),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
               ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
@@ -2652,7 +3392,7 @@ export class TournamentsRepository {
                     eq(schema.tournamentParticipants.isPaid, true),
                   ]
                 : []),
-            )
+            ),
       );
 
     if (participants.length === 0) return [];
@@ -2672,16 +3412,22 @@ export class TournamentsRepository {
         tierName: schema.eloTiers.name,
       })
       .from(schema.tournamentRosters)
-      .leftJoin(schema.users, eq(schema.tournamentRosters.userId, schema.users.id))
+      .leftJoin(
+        schema.users,
+        eq(schema.tournamentRosters.userId, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .leftJoin(
         schema.userRanks,
         and(
           eq(schema.tournamentRosters.userId, schema.userRanks.userId),
-          eq(schema.userRanks.categoryId, categoryId)
-        )
+          eq(schema.userRanks.categoryId, categoryId),
+        ),
       )
-      .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
+      .leftJoin(
+        schema.eloTiers,
+        eq(schema.userRanks.tierId, schema.eloTiers.id),
+      )
       .where(inArray(schema.tournamentRosters.participantId, participantIds));
 
     // Group rosters by participantId
@@ -2715,7 +3461,7 @@ export class TournamentsRepository {
         const andQuery = and(
           eq(schema.pairRanks.user1Id, uids[0]),
           eq(schema.pairRanks.user2Id, uids[1]),
-          eq(schema.pairRanks.categoryId, categoryId)
+          eq(schema.pairRanks.categoryId, categoryId),
         );
         if (andQuery) {
           pairQueries.push(andQuery);
@@ -2786,7 +3532,10 @@ export class TournamentsRepository {
         divisionId
           ? and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
-              eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+              eq(
+                schema.tournamentParticipants.tournamentDivisionId,
+                divisionId,
+              ),
             )
           : eq(schema.tournamentParticipants.tournamentId, tournamentId),
       );
@@ -2808,7 +3557,10 @@ export class TournamentsRepository {
     const participantIds = participantRows.map((row) => row.id);
     const matchIds = matchRows.map((row) => row.id);
     const auditConditions: SQL[] = [
-      and(eq(schema.auditLogs.tableName, 'tournaments'), eq(schema.auditLogs.recordId, tournamentId)) as SQL,
+      and(
+        eq(schema.auditLogs.tableName, 'tournaments'),
+        eq(schema.auditLogs.recordId, tournamentId),
+      ) as SQL,
     ];
 
     if (participantIds.length > 0) {
@@ -2852,7 +3604,10 @@ export class TournamentsRepository {
       .limit(limit);
   }
 
-  async findBracket(tournamentId: string, divisionId?: string): Promise<{ stages: BracketStage[] }> {
+  async findBracket(
+    tournamentId: string,
+    divisionId?: string,
+  ): Promise<{ stages: BracketStage[] }> {
     const stages = await this.db
       .select()
       .from(schema.tournamentStages)
@@ -2865,7 +3620,7 @@ export class TournamentsRepository {
               )
             : eq(schema.tournamentStages.tournamentId, tournamentId),
           isNull(schema.tournamentStages.deletedAt),
-        )
+        ),
       )
       .orderBy(schema.tournamentStages.order);
 
@@ -2887,7 +3642,7 @@ export class TournamentsRepository {
         .from(schema.matches)
         .where(inArray(schema.matches.groupId, groupIds))
         .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
-      
+
       const participants = await this.db
         .select({
           id: schema.tournamentParticipants.id,
@@ -2900,7 +3655,10 @@ export class TournamentsRepository {
           divisionId
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+                eq(
+                  schema.tournamentParticipants.tournamentDivisionId,
+                  divisionId,
+                ),
               )
             : eq(schema.tournamentParticipants.tournamentId, tournamentId),
         );
@@ -2912,28 +3670,45 @@ export class TournamentsRepository {
           fullName: schema.profiles.fullName,
         })
         .from(schema.tournamentRosters)
-        .leftJoin(schema.profiles, eq(schema.tournamentRosters.userId, schema.profiles.userId))
-        .where(inArray(schema.tournamentRosters.participantId, participants.map((p) => p.id)));
+        .leftJoin(
+          schema.profiles,
+          eq(schema.tournamentRosters.userId, schema.profiles.userId),
+        )
+        .where(
+          inArray(
+            schema.tournamentRosters.participantId,
+            participants.map((p) => p.id),
+          ),
+        );
 
-      const rostersMap = new Map<string, { userId: string; fullName: string | null }[]>();
+      const rostersMap = new Map<
+        string,
+        { userId: string; fullName: string | null }[]
+      >();
       for (const r of rosters) {
         const list = rostersMap.get(r.participantId) || [];
         list.push({ userId: r.userId, fullName: r.fullName });
         rostersMap.set(r.participantId, list);
       }
 
-      const participantMap = new Map(participants.map((p) => [
-        p.id, 
-        {
-          ...p,
-          members: rostersMap.get(p.id) || [],
-        }
-      ]));
+      const participantMap = new Map(
+        participants.map((p) => [
+          p.id,
+          {
+            ...p,
+            members: rostersMap.get(p.id) || [],
+          },
+        ]),
+      );
 
       matchesList = dbMatches.map((m) => ({
         ...m,
-        participant1: m.participant1Id ? participantMap.get(m.participant1Id) : null,
-        participant2: m.participant2Id ? participantMap.get(m.participant2Id) : null,
+        participant1: m.participant1Id
+          ? participantMap.get(m.participant1Id)
+          : null,
+        participant2: m.participant2Id
+          ? participantMap.get(m.participant2Id)
+          : null,
       }));
     }
 
@@ -2981,8 +3756,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournaments.createdBy, userId),
-          sql`${schema.tournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+        ),
       );
     return Number(result[0]?.count || 0);
   }
@@ -2994,8 +3769,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournaments.createdBy, userId),
-          isNull(schema.tournaments.deletedAt)
-        )
+          isNull(schema.tournaments.deletedAt),
+        ),
       );
     return Number(result?.count || 0);
   }
@@ -3008,37 +3783,55 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournaments.createdBy, userId),
-          sql`${schema.tournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+        ),
       );
 
     // 2. Tournaments joined by user
     const joined = await this.db
       .select({ id: schema.tournaments.id })
       .from(schema.tournaments)
-      .innerJoin(schema.tournamentParticipants, eq(schema.tournaments.id, schema.tournamentParticipants.tournamentId))
-      .innerJoin(schema.tournamentRosters, eq(schema.tournamentParticipants.id, schema.tournamentRosters.participantId))
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(schema.tournaments.id, schema.tournamentParticipants.tournamentId),
+      )
+      .innerJoin(
+        schema.tournamentRosters,
+        eq(
+          schema.tournamentParticipants.id,
+          schema.tournamentRosters.participantId,
+        ),
+      )
       .where(
         and(
           eq(schema.tournamentRosters.userId, userId),
-          sql`${schema.tournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+        ),
       );
 
     // 3. Tournaments where the user is a co-organizer (invited via staff)
     const coOrganized = await this.db
       .select({ id: schema.tournaments.id })
       .from(schema.tournaments)
-      .innerJoin(schema.tournamentStaff, eq(schema.tournaments.id, schema.tournamentStaff.tournamentId))
+      .innerJoin(
+        schema.tournamentStaff,
+        eq(schema.tournaments.id, schema.tournamentStaff.tournamentId),
+      )
       .where(
         and(
           eq(schema.tournamentStaff.userId, userId),
           eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
-          sql`${schema.tournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+        ),
       );
 
-    const ids = Array.from(new Set([...created.map(t => t.id), ...joined.map(t => t.id), ...coOrganized.map(t => t.id)]));
+    const ids = Array.from(
+      new Set([
+        ...created.map((t) => t.id),
+        ...joined.map((t) => t.id),
+        ...coOrganized.map((t) => t.id),
+      ]),
+    );
     if (ids.length === 0) return [];
 
     return await this.db
@@ -3047,8 +3840,8 @@ export class TournamentsRepository {
       .where(
         and(
           inArray(schema.tournaments.id, ids),
-          sql`${schema.tournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+        ),
       );
   }
 
@@ -3073,115 +3866,191 @@ export class TournamentsRepository {
       },
     } as const;
 
-    const [organizedRaw, participatingRaw, coOrganizerRaw, refereeInvites, refereeTournaments, refereeMatchesRaw] =
-      await Promise.all([
-        this.db
-          .select(tournamentSummarySelect)
-          .from(schema.tournaments)
-          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-          .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
-          .where(and(eq(schema.tournaments.createdBy, userId), isNull(schema.tournaments.deletedAt)))
-          .orderBy(desc(schema.tournaments.updatedAt)),
-        this.db
-          .select(tournamentSummarySelect)
-          .from(schema.tournamentRosters)
-          .innerJoin(schema.tournamentParticipants, eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id))
-          .innerJoin(schema.tournaments, eq(schema.tournamentParticipants.tournamentId, schema.tournaments.id))
-          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-          .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
-          .where(and(eq(schema.tournamentRosters.userId, userId), isNull(schema.tournaments.deletedAt)))
-          .orderBy(desc(schema.tournaments.updatedAt)),
-        this.db
-          .select(tournamentSummarySelect)
-          .from(schema.tournamentStaff)
-          .innerJoin(schema.tournaments, eq(schema.tournamentStaff.tournamentId, schema.tournaments.id))
-          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-          .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
-          .where(
-            and(
-              eq(schema.tournamentStaff.userId, userId),
-              eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
-              isNull(schema.tournaments.deletedAt),
-            ),
-          )
-          .orderBy(desc(schema.tournaments.updatedAt)),
-        this.db
-          .select({
-            refereeId: schema.tournamentReferees.id,
-            tournamentId: schema.tournamentReferees.tournamentId,
-            tournamentName: schema.tournaments.name,
-            logoUrl: schema.tournaments.logoUrl,
-            tournamentStatus: schema.tournaments.status,
-            categoryName: schema.categories.name,
-            assignedAt: schema.tournamentReferees.createdAt,
-            status: schema.tournamentReferees.status,
-          })
-          .from(schema.tournamentReferees)
-          .innerJoin(schema.tournaments, eq(schema.tournamentReferees.tournamentId, schema.tournaments.id))
-          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-          .where(
-            and(
-              eq(schema.tournamentReferees.userId, userId),
-              eq(schema.tournamentReferees.status, 'INVITED'),
-              isNull(schema.tournaments.deletedAt),
-            ),
-          )
-          .orderBy(desc(schema.tournamentReferees.createdAt)),
-        this.db
-          .select({
-            refereeId: schema.tournamentReferees.id,
-            tournamentId: schema.tournamentReferees.tournamentId,
-            tournamentName: schema.tournaments.name,
-            logoUrl: schema.tournaments.logoUrl,
-            tournamentStatus: schema.tournaments.status,
-            categoryName: schema.categories.name,
-            assignedAt: schema.tournamentReferees.createdAt,
-            status: schema.tournamentReferees.status,
-          })
-          .from(schema.tournamentReferees)
-          .innerJoin(schema.tournaments, eq(schema.tournamentReferees.tournamentId, schema.tournaments.id))
-          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-          .where(
-            and(
-              eq(schema.tournamentReferees.userId, userId),
-              eq(schema.tournamentReferees.status, 'ACCEPTED'),
-              isNull(schema.tournaments.deletedAt),
-            ),
-          )
-          .orderBy(desc(schema.tournamentReferees.createdAt)),
-        this.db
-          .select({
-            id: schema.matches.id,
-            tournamentId: schema.tournaments.id,
-            tournamentName: schema.tournaments.name,
-            logoUrl: schema.tournaments.logoUrl,
-            categoryName: schema.categories.name,
-            stageName: schema.tournamentStages.name,
-            groupName: schema.tournamentGroups.name,
-            roundNumber: schema.matches.roundNumber,
-            matchOrder: schema.matches.matchOrder,
-            status: schema.matches.status,
-            scheduledAt: schema.matches.scheduledAt,
-            courtName: schema.matches.courtName,
-            participant1Id: schema.matches.participant1Id,
-            participant2Id: schema.matches.participant2Id,
-          })
-          .from(schema.matches)
-          .innerJoin(schema.tournamentStages, eq(schema.matches.stageId, schema.tournamentStages.id))
-          .innerJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
-          .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-          .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-          .where(
-            and(
-              eq(schema.matches.refereeId, userId),
-              isNull(schema.matches.deletedAt),
-              isNull(schema.tournaments.deletedAt),
-            ),
-          )
-          .orderBy(asc(schema.matches.scheduledAt), asc(schema.matches.roundNumber), asc(schema.matches.matchOrder)),
-      ]);
+    const [
+      organizedRaw,
+      participatingRaw,
+      coOrganizerRaw,
+      refereeInvites,
+      refereeTournaments,
+      refereeMatchesRaw,
+    ] = await Promise.all([
+      this.db
+        .select(tournamentSummarySelect)
+        .from(schema.tournaments)
+        .leftJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+        )
+        .where(
+          and(
+            eq(schema.tournaments.createdBy, userId),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.tournaments.updatedAt)),
+      this.db
+        .select(tournamentSummarySelect)
+        .from(schema.tournamentRosters)
+        .innerJoin(
+          schema.tournamentParticipants,
+          eq(
+            schema.tournamentRosters.participantId,
+            schema.tournamentParticipants.id,
+          ),
+        )
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentParticipants.tournamentId, schema.tournaments.id),
+        )
+        .leftJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+        )
+        .where(
+          and(
+            eq(schema.tournamentRosters.userId, userId),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.tournaments.updatedAt)),
+      this.db
+        .select(tournamentSummarySelect)
+        .from(schema.tournamentStaff)
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentStaff.tournamentId, schema.tournaments.id),
+        )
+        .leftJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+        )
+        .where(
+          and(
+            eq(schema.tournamentStaff.userId, userId),
+            eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.tournaments.updatedAt)),
+      this.db
+        .select({
+          refereeId: schema.tournamentReferees.id,
+          tournamentId: schema.tournamentReferees.tournamentId,
+          tournamentName: schema.tournaments.name,
+          logoUrl: schema.tournaments.logoUrl,
+          tournamentStatus: schema.tournaments.status,
+          categoryName: schema.categories.name,
+          assignedAt: schema.tournamentReferees.createdAt,
+          status: schema.tournamentReferees.status,
+        })
+        .from(schema.tournamentReferees)
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentReferees.tournamentId, schema.tournaments.id),
+        )
+        .leftJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .where(
+          and(
+            eq(schema.tournamentReferees.userId, userId),
+            eq(schema.tournamentReferees.status, 'INVITED'),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.tournamentReferees.createdAt)),
+      this.db
+        .select({
+          refereeId: schema.tournamentReferees.id,
+          tournamentId: schema.tournamentReferees.tournamentId,
+          tournamentName: schema.tournaments.name,
+          logoUrl: schema.tournaments.logoUrl,
+          tournamentStatus: schema.tournaments.status,
+          categoryName: schema.categories.name,
+          assignedAt: schema.tournamentReferees.createdAt,
+          status: schema.tournamentReferees.status,
+        })
+        .from(schema.tournamentReferees)
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentReferees.tournamentId, schema.tournaments.id),
+        )
+        .leftJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .where(
+          and(
+            eq(schema.tournamentReferees.userId, userId),
+            eq(schema.tournamentReferees.status, 'ACCEPTED'),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        )
+        .orderBy(desc(schema.tournamentReferees.createdAt)),
+      this.db
+        .select({
+          id: schema.matches.id,
+          tournamentId: schema.tournaments.id,
+          tournamentName: schema.tournaments.name,
+          logoUrl: schema.tournaments.logoUrl,
+          categoryName: schema.categories.name,
+          stageName: schema.tournamentStages.name,
+          groupName: schema.tournamentGroups.name,
+          roundNumber: schema.matches.roundNumber,
+          matchOrder: schema.matches.matchOrder,
+          status: schema.matches.status,
+          scheduledAt: schema.matches.scheduledAt,
+          courtName: schema.matches.courtName,
+          participant1Id: schema.matches.participant1Id,
+          participant2Id: schema.matches.participant2Id,
+        })
+        .from(schema.matches)
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.matches.stageId, schema.tournamentStages.id),
+        )
+        .innerJoin(
+          schema.tournamentGroups,
+          eq(schema.matches.groupId, schema.tournamentGroups.id),
+        )
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+        )
+        .leftJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .where(
+          and(
+            eq(schema.matches.refereeId, userId),
+            isNull(schema.matches.deletedAt),
+            isNull(schema.tournaments.deletedAt),
+          ),
+        )
+        .orderBy(
+          asc(schema.matches.scheduledAt),
+          asc(schema.matches.roundNumber),
+          asc(schema.matches.matchOrder),
+        ),
+    ]);
 
-    const organizedIds = new Set(organizedRaw.map((tournament) => tournament.id));
+    const organizedIds = new Set(
+      organizedRaw.map((tournament) => tournament.id),
+    );
     const dedupeByTournamentId = <T extends { id: string }>(items: T[]) => {
       const map = new Map<string, T>();
       for (const item of items) {
@@ -3194,7 +4063,11 @@ export class TournamentsRepository {
 
     const participantIds = Array.from(
       new Set(
-        refereeMatchesRaw.flatMap((match) => [match.participant1Id, match.participant2Id].filter((id): id is string => Boolean(id))),
+        refereeMatchesRaw.flatMap((match) =>
+          [match.participant1Id, match.participant2Id].filter(
+            (id): id is string => Boolean(id),
+          ),
+        ),
       ),
     );
 
@@ -3209,12 +4082,16 @@ export class TournamentsRepository {
             .where(inArray(schema.tournamentParticipants.id, participantIds))
         : [];
 
-    const participantsMap = new Map(participants.map((participant) => [participant.id, participant.teamName]));
+    const participantsMap = new Map(
+      participants.map((participant) => [participant.id, participant.teamName]),
+    );
 
     return {
       organizedTournaments: dedupeByTournamentId(organizedRaw),
       participatingTournaments: dedupeByTournamentId(
-        participatingRaw.filter((tournament) => !organizedIds.has(tournament.id)),
+        participatingRaw.filter(
+          (tournament) => !organizedIds.has(tournament.id),
+        ),
       ),
       coOrganizerTournaments: dedupeByTournamentId(
         coOrganizerRaw.filter((tournament) => !organizedIds.has(tournament.id)),
@@ -3223,8 +4100,12 @@ export class TournamentsRepository {
       refereeTournaments,
       refereeMatches: refereeMatchesRaw.map((match) => ({
         ...match,
-        participant1Name: match.participant1Id ? participantsMap.get(match.participant1Id) ?? null : null,
-        participant2Name: match.participant2Id ? participantsMap.get(match.participant2Id) ?? null : null,
+        participant1Name: match.participant1Id
+          ? (participantsMap.get(match.participant1Id) ?? null)
+          : null,
+        participant2Name: match.participant2Id
+          ? (participantsMap.get(match.participant2Id) ?? null)
+          : null,
       })),
     };
   }
@@ -3261,7 +4142,11 @@ export class TournamentsRepository {
   async regenerateInviteCode(id: string, userId: string) {
     return await this.db.transaction(async (tx) => {
       const newCode = await this.generateUniqueInviteCode(tx);
-      const [oldRecord] = await tx.select().from(schema.tournaments).where(eq(schema.tournaments.id, id)).limit(1);
+      const [oldRecord] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, id))
+        .limit(1);
 
       const [updated] = await tx
         .update(schema.tournaments)
@@ -3269,7 +4154,14 @@ export class TournamentsRepository {
         .where(eq(schema.tournaments.id, id))
         .returning();
 
-      await this.auditService.logUpdate(tx, userId, 'tournaments', id, oldRecord, updated);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournaments',
+        id,
+        oldRecord,
+        updated,
+      );
       return updated;
     });
   }
@@ -3299,7 +4191,9 @@ export class TournamentsRepository {
           ...(data.name && { name: data.name }),
           ...(data.type && { type: data.type }),
           ...(data.order !== undefined && { order: data.order }),
-          ...(data.roundConfig !== undefined && { roundConfig: data.roundConfig }),
+          ...(data.roundConfig !== undefined && {
+            roundConfig: data.roundConfig,
+          }),
           ...(data.venueId !== undefined && { venueId: data.venueId || null }),
           ...(data.scheduledDate !== undefined && {
             scheduledDate: data.scheduledDate || null,
@@ -3314,7 +4208,14 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentStages.id, id))
         .returning();
 
-      await this.auditService.logUpdate(tx, userId, 'tournament_stages', id, oldRecord, updated);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_stages',
+        id,
+        oldRecord,
+        updated,
+      );
       return updated;
     });
   }
@@ -3352,12 +4253,21 @@ export class TournamentsRepository {
         .update(schema.tournamentGroups)
         .set({
           ...(data.name && { name: data.name }),
-          ...(data.roundConfig !== undefined && { roundConfig: data.roundConfig }),
+          ...(data.roundConfig !== undefined && {
+            roundConfig: data.roundConfig,
+          }),
         })
         .where(eq(schema.tournamentGroups.id, id))
         .returning();
 
-      await this.auditService.logUpdate(tx, userId, 'tournament_groups', id, oldRecord, updated);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_groups',
+        id,
+        oldRecord,
+        updated,
+      );
       return updated;
     });
   }
@@ -3374,12 +4284,22 @@ export class TournamentsRepository {
           logoUrl: data.logoUrl || null,
         })
         .returning();
-      await this.auditService.logCreate(tx, userId, 'parent_tournaments', record.id, record);
+      await this.auditService.logCreate(
+        tx,
+        userId,
+        'parent_tournaments',
+        record.id,
+        record,
+      );
       return record;
     });
   }
 
-  async updateParent(id: string, userId: string, data: UpdateParentTournamentDto) {
+  async updateParent(
+    id: string,
+    userId: string,
+    data: UpdateParentTournamentDto,
+  ) {
     return await this.db.transaction(async (tx) => {
       const [oldRecord] = await tx
         .select()
@@ -3393,7 +4313,9 @@ export class TournamentsRepository {
         .update(schema.parentTournaments)
         .set({
           ...(data.name && { name: data.name }),
-          ...(data.description !== undefined && { description: data.description }),
+          ...(data.description !== undefined && {
+            description: data.description,
+          }),
           ...(data.bannerUrl !== undefined && { bannerUrl: data.bannerUrl }),
           ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl }),
           updatedAt: new Date(),
@@ -3401,7 +4323,14 @@ export class TournamentsRepository {
         .where(eq(schema.parentTournaments.id, id))
         .returning();
 
-      await this.auditService.logUpdate(tx, userId, 'parent_tournaments', id, oldRecord, updated);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'parent_tournaments',
+        id,
+        oldRecord,
+        updated,
+      );
       return updated;
     });
   }
@@ -3413,8 +4342,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.parentTournaments.id, id),
-          sql`${schema.parentTournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.parentTournaments.deletedAt} IS NULL`,
+        ),
       )
       .limit(1);
 
@@ -3438,16 +4367,19 @@ export class TournamentsRepository {
         category: {
           id: schema.categories.id,
           name: schema.categories.name,
-        }
+        },
       })
       .from(schema.tournaments)
-      .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
+      .leftJoin(
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
+      )
       .where(
         and(
           eq(schema.tournaments.parentId, id),
           sql`${schema.tournaments.deletedAt} IS NULL`,
-          sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`
-        )
+          sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`,
+        ),
       );
 
     const divisions = await Promise.all(
@@ -3461,17 +4393,17 @@ export class TournamentsRepository {
               eq(schema.tournamentParticipants.tournamentId, div.id),
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED')
-            )
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            ),
           );
 
         return {
           ...div,
           _summary: {
-            participantCount: pCount?.count || 0
-          }
+            participantCount: pCount?.count || 0,
+          },
         };
-      })
+      }),
     );
 
     return {
@@ -3479,8 +4411,14 @@ export class TournamentsRepository {
       divisions,
       _aggregation: {
         totalDivisions: divisions.length,
-        totalParticipants: divisions.reduce((sum, d) => sum + (d._summary?.participantCount || 0), 0),
-        divisionStatuses: divisions.map(d => ({ name: d.name, status: d.status })),
+        totalParticipants: divisions.reduce(
+          (sum, d) => sum + (d._summary?.participantCount || 0),
+          0,
+        ),
+        divisionStatuses: divisions.map((d) => ({
+          name: d.name,
+          status: d.status,
+        })),
       },
     };
   }
@@ -3492,8 +4430,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournaments.parentId, parentId),
-          sql`${schema.tournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+        ),
       );
   }
 
@@ -3504,8 +4442,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.parentTournaments.createdBy, userId),
-          sql`${schema.parentTournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.parentTournaments.deletedAt} IS NULL`,
+        ),
       );
   }
 
@@ -3563,19 +4501,29 @@ export class TournamentsRepository {
           .where(like(schema.notifications.redirectUrl, `%/${divId}%`));
       }
 
-      await this.auditService.logDelete(tx, userId, 'parent_tournaments', id, oldRecord);
+      await this.auditService.logDelete(
+        tx,
+        userId,
+        'parent_tournaments',
+        id,
+        oldRecord,
+      );
       return deleted;
     });
   }
 
-  async seedMockParticipants(tournamentId: string, names: string[], divisionId?: string) {
+  async seedMockParticipants(
+    tournamentId: string,
+    names: string[],
+    divisionId?: string,
+  ) {
     return await this.db.transaction(async (tx) => {
       const tournament = await tx
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1)
-        .then(res => res[0]);
+        .then((res) => res[0]);
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
@@ -3587,14 +4535,16 @@ export class TournamentsRepository {
           .from(schema.tournamentDivisions)
           .where(eq(schema.tournamentDivisions.id, divisionId))
           .limit(1)
-          .then(res => res[0]);
+          .then((res) => res[0]);
         if (division) {
           matchType = division.matchType;
         }
       }
 
-      const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
-      const createdParticipants: (typeof schema.tournamentParticipants.$inferSelect)[] = [];
+      const isDoubles =
+        matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+      const createdParticipants: (typeof schema.tournamentParticipants.$inferSelect)[] =
+        [];
 
       if (isDoubles) {
         for (let i = 0; i < names.length; i += 2) {
@@ -3604,26 +4554,53 @@ export class TournamentsRepository {
           const mockEmail1 = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@mock.com`;
           const mockEmail2 = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@mock.com`;
 
-          const [user1] = await tx.insert(schema.users).values({ email: mockEmail1, isMock: true }).returning();
-          await tx.insert(schema.profiles).values({ userId: user1.id, fullName: name1 }).returning();
+          const [user1] = await tx
+            .insert(schema.users)
+            .values({ email: mockEmail1, isMock: true })
+            .returning();
+          await tx
+            .insert(schema.profiles)
+            .values({ userId: user1.id, fullName: name1 })
+            .returning();
 
-          const [user2] = await tx.insert(schema.users).values({ email: mockEmail2, isMock: true }).returning();
-          await tx.insert(schema.profiles).values({ userId: user2.id, fullName: name2 }).returning();
+          const [user2] = await tx
+            .insert(schema.users)
+            .values({ email: mockEmail2, isMock: true })
+            .returning();
+          await tx
+            .insert(schema.profiles)
+            .values({ userId: user2.id, fullName: name2 })
+            .returning();
 
           const teamName = `${name1} - ${name2}`;
-          const [participant] = await tx.insert(schema.tournamentParticipants).values({
-            tournamentId,
-            tournamentDivisionId: divisionId ?? null,
-            registeredBy: user1.id,
-            teamName,
-            isPaid: true,
-            teamInviteToken: null,
-            teamStatus: 'COMPLETE',
-            isMock: true,
-          }).returning();
+          const [participant] = await tx
+            .insert(schema.tournamentParticipants)
+            .values({
+              tournamentId,
+              tournamentDivisionId: divisionId ?? null,
+              registeredBy: user1.id,
+              teamName,
+              isPaid: true,
+              teamInviteToken: null,
+              teamStatus: 'COMPLETE',
+              isMock: true,
+            })
+            .returning();
 
-          await tx.insert(schema.tournamentRosters).values({ participantId: participant.id, userId: user1.id, role: 'MAIN' });
-          await tx.insert(schema.tournamentRosters).values({ participantId: participant.id, userId: user2.id, role: 'MAIN' });
+          await tx
+            .insert(schema.tournamentRosters)
+            .values({
+              participantId: participant.id,
+              userId: user1.id,
+              role: 'MAIN',
+            });
+          await tx
+            .insert(schema.tournamentRosters)
+            .values({
+              participantId: participant.id,
+              userId: user2.id,
+              role: 'MAIN',
+            });
 
           createdParticipants.push(participant);
         }
@@ -3631,21 +4608,36 @@ export class TournamentsRepository {
         for (const name of names) {
           const mockEmail = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@mock.com`;
 
-          const [user] = await tx.insert(schema.users).values({ email: mockEmail, isMock: true }).returning();
-          await tx.insert(schema.profiles).values({ userId: user.id, fullName: name }).returning();
+          const [user] = await tx
+            .insert(schema.users)
+            .values({ email: mockEmail, isMock: true })
+            .returning();
+          await tx
+            .insert(schema.profiles)
+            .values({ userId: user.id, fullName: name })
+            .returning();
 
-          const [participant] = await tx.insert(schema.tournamentParticipants).values({
-            tournamentId,
-            tournamentDivisionId: divisionId ?? null,
-            registeredBy: user.id,
-            teamName: name,
-            isPaid: true,
-            teamInviteToken: null,
-            teamStatus: 'COMPLETE',
-            isMock: true,
-          }).returning();
+          const [participant] = await tx
+            .insert(schema.tournamentParticipants)
+            .values({
+              tournamentId,
+              tournamentDivisionId: divisionId ?? null,
+              registeredBy: user.id,
+              teamName: name,
+              isPaid: true,
+              teamInviteToken: null,
+              teamStatus: 'COMPLETE',
+              isMock: true,
+            })
+            .returning();
 
-          await tx.insert(schema.tournamentRosters).values({ participantId: participant.id, userId: user.id, role: 'MAIN' });
+          await tx
+            .insert(schema.tournamentRosters)
+            .values({
+              participantId: participant.id,
+              userId: user.id,
+              role: 'MAIN',
+            });
 
           createdParticipants.push(participant);
         }
@@ -3656,7 +4648,9 @@ export class TournamentsRepository {
         await tx
           .update(schema.tournamentParticipants)
           .set({ seed: idx + 1 })
-          .where(eq(schema.tournamentParticipants.id, createdParticipants[idx].id));
+          .where(
+            eq(schema.tournamentParticipants.id, createdParticipants[idx].id),
+          );
       }
 
       return createdParticipants;
@@ -3673,17 +4667,20 @@ export class TournamentsRepository {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.isMock, true),
-                eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+                eq(
+                  schema.tournamentParticipants.tournamentDivisionId,
+                  divisionId,
+                ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.isMock, true),
-              )
+              ),
         );
 
       if (mockParts.length === 0) return { count: 0 };
 
-      const partIds = mockParts.map(p => p.id);
+      const partIds = mockParts.map((p) => p.id);
 
       const mockRosters = await tx
         .select({ userId: schema.tournamentRosters.userId })
@@ -3727,13 +4724,18 @@ export class TournamentsRepository {
         .where(inArray(schema.tournamentParticipants.id, partIds));
 
       if (mockRosters.length > 0) {
-        const userIds = mockRosters.map(r => r.userId);
+        const userIds = mockRosters.map((r) => r.userId);
         await tx
           .delete(schema.profiles)
           .where(inArray(schema.profiles.userId, userIds));
         await tx
           .delete(schema.users)
-          .where(and(inArray(schema.users.id, userIds), eq(schema.users.isMock, true)));
+          .where(
+            and(
+              inArray(schema.users.id, userIds),
+              eq(schema.users.isMock, true),
+            ),
+          );
       }
 
       return { count: partIds.length };
@@ -3758,7 +4760,9 @@ export class TournamentsRepository {
       }
 
       if (!participant.isMock) {
-        throw new BadRequestException('Chỉ có thể xóa các VĐV giả lập bằng hành động này');
+        throw new BadRequestException(
+          'Chỉ có thể xóa các VĐV giả lập bằng hành động này',
+        );
       }
 
       const mockRosters = await tx
@@ -3789,14 +4793,21 @@ export class TournamentsRepository {
         .delete(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, participantId));
 
-      const userIds = Array.from(new Set(mockRosters.map((roster) => roster.userId)));
+      const userIds = Array.from(
+        new Set(mockRosters.map((roster) => roster.userId)),
+      );
       if (userIds.length > 0) {
         await tx
           .delete(schema.profiles)
           .where(inArray(schema.profiles.userId, userIds));
         await tx
           .delete(schema.users)
-          .where(and(inArray(schema.users.id, userIds), eq(schema.users.isMock, true)));
+          .where(
+            and(
+              inArray(schema.users.id, userIds),
+              eq(schema.users.isMock, true),
+            ),
+          );
       }
 
       return { count: 1 };
@@ -3814,8 +4825,14 @@ export class TournamentsRepository {
         return null;
       }
 
-      if (status === 'REJECTED' && (existing.teamStatus === 'COMPLETE' || existing.teamStatus === 'APPROVED')) {
-        throw new BadRequestException('Không thể từ chối đội đã được duyệt hoặc hoàn tất đăng ký.');
+      if (
+        status === 'REJECTED' &&
+        (existing.teamStatus === 'COMPLETE' ||
+          existing.teamStatus === 'APPROVED')
+      ) {
+        throw new BadRequestException(
+          'Không thể từ chối đội đã được duyệt hoặc hoàn tất đăng ký.',
+        );
       }
 
       const [updated] = await tx
@@ -3839,39 +4856,87 @@ export class TournamentsRepository {
 
   async lockParticipantRoster(participantId: string, userId: string) {
     return this.db.transaction(async (tx) => {
-      const [participant] = await tx.select().from(schema.tournamentParticipants)
+      const [participant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, participantId))
         .for('update')
         .limit(1);
       if (!participant) return null;
-      if (participant.teamStatus !== 'COMPLETE' && participant.teamStatus !== 'APPROVED') {
-        throw new BadRequestException('Chỉ đội đã hoàn tất đăng ký mới được khóa roster.');
+      if (
+        participant.teamStatus !== 'COMPLETE' &&
+        participant.teamStatus !== 'APPROVED'
+      ) {
+        throw new BadRequestException(
+          'Chỉ đội đã hoàn tất đăng ký mới được khóa roster.',
+        );
       }
       if (participant.rosterLockedAt) return participant;
       if (participant.footballTeamId && participant.tournamentDivisionId) {
         const [entry] = await tx
           .select()
           .from(schema.tournamentTeamEntries)
-          .where(and(
-            eq(schema.tournamentTeamEntries.tournamentId, participant.tournamentId),
-            eq(schema.tournamentTeamEntries.divisionId, participant.tournamentDivisionId),
-            eq(schema.tournamentTeamEntries.teamId, participant.footballTeamId),
-          ))
+          .where(
+            and(
+              eq(
+                schema.tournamentTeamEntries.tournamentId,
+                participant.tournamentId,
+              ),
+              eq(
+                schema.tournamentTeamEntries.divisionId,
+                participant.tournamentDivisionId,
+              ),
+              eq(
+                schema.tournamentTeamEntries.teamId,
+                participant.footballTeamId,
+              ),
+            ),
+          )
           .for('update')
           .limit(1);
-        if (entry && entry.status !== 'CONFIRMED' && entry.status !== 'LOCKED') {
-          throw new BadRequestException('Chưa đủ thành viên xác nhận roster để khóa đội.');
-        }
+        const snapshots = entry
+          ? await tx
+              .select({
+                confirmationStatus:
+                  schema.tournamentTeamRosterSnapshots.confirmationStatus,
+                role: schema.tournamentTeamRosterSnapshots.role,
+              })
+              .from(schema.tournamentTeamRosterSnapshots)
+              .where(eq(schema.tournamentTeamRosterSnapshots.entryId, entry.id))
+              .for('update')
+          : [];
+        assertFootballRosterLockable({
+          entryExists: Boolean(entry),
+          entryStatus: entry?.status,
+          confirmations: snapshots.map(
+            (row) =>
+              row.confirmationStatus as 'PENDING' | 'CONFIRMED' | 'DECLINED',
+          ),
+          mainRosterCount: snapshots.filter((row) => row.role === 'MAIN')
+            .length,
+        });
         if (entry?.status === 'CONFIRMED') {
           const [lockedEntry] = await tx
             .update(schema.tournamentTeamEntries)
-            .set({ status: 'LOCKED', lockedAt: new Date(), updatedAt: new Date() })
+            .set({
+              status: 'LOCKED',
+              lockedAt: new Date(),
+              updatedAt: new Date(),
+            })
             .where(eq(schema.tournamentTeamEntries.id, entry.id))
             .returning();
-          await this.auditService.logUpdate(tx, userId, 'tournament_team_entries', entry.id, entry, lockedEntry);
+          await this.auditService.logUpdate(
+            tx,
+            userId,
+            'tournament_team_entries',
+            entry.id,
+            entry,
+            lockedEntry,
+          );
         }
       }
-      const [updated] = await tx.update(schema.tournamentParticipants)
+      const [updated] = await tx
+        .update(schema.tournamentParticipants)
         .set({ rosterLockedAt: new Date() })
         .where(eq(schema.tournamentParticipants.id, participantId))
         .returning();
@@ -3903,9 +4968,18 @@ export class TournamentsRepository {
       .leftJoin(
         schema.tournamentTeamEntries,
         and(
-          eq(schema.tournamentTeamEntries.tournamentId, schema.tournamentParticipants.tournamentId),
-          eq(schema.tournamentTeamEntries.divisionId, schema.tournamentParticipants.tournamentDivisionId),
-          eq(schema.tournamentTeamEntries.teamId, schema.tournamentParticipants.footballTeamId),
+          eq(
+            schema.tournamentTeamEntries.tournamentId,
+            schema.tournamentParticipants.tournamentId,
+          ),
+          eq(
+            schema.tournamentTeamEntries.divisionId,
+            schema.tournamentParticipants.tournamentDivisionId,
+          ),
+          eq(
+            schema.tournamentTeamEntries.teamId,
+            schema.tournamentParticipants.footballTeamId,
+          ),
         ),
       )
       .where(eq(schema.tournamentParticipants.id, participantId))
@@ -3919,40 +4993,63 @@ export class TournamentsRepository {
         id: schema.tournamentTeamRosterSnapshots.id,
         userId: schema.tournamentTeamRosterSnapshots.userId,
         role: schema.tournamentTeamRosterSnapshots.role,
-        confirmationStatus: schema.tournamentTeamRosterSnapshots.confirmationStatus,
+        confirmationStatus:
+          schema.tournamentTeamRosterSnapshots.confirmationStatus,
         fullName: schema.profiles.fullName,
         avatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.tournamentTeamRosterSnapshots)
-      .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.tournamentTeamRosterSnapshots.userId))
+      .leftJoin(
+        schema.profiles,
+        eq(schema.profiles.userId, schema.tournamentTeamRosterSnapshots.userId),
+      )
       .where(eq(schema.tournamentTeamRosterSnapshots.entryId, entryId));
   }
 
-  async respondFootballRoster(entryId: string, userId: string, action: 'CONFIRM' | 'DECLINE') {
+  async respondFootballRoster(
+    entryId: string,
+    userId: string,
+    action: 'CONFIRM' | 'DECLINE',
+  ) {
     return this.db.transaction(async (tx) => {
       const [snapshot] = await tx
         .select()
         .from(schema.tournamentTeamRosterSnapshots)
-        .where(and(
-          eq(schema.tournamentTeamRosterSnapshots.entryId, entryId),
-          eq(schema.tournamentTeamRosterSnapshots.userId, userId),
-        ))
+        .where(
+          and(
+            eq(schema.tournamentTeamRosterSnapshots.entryId, entryId),
+            eq(schema.tournamentTeamRosterSnapshots.userId, userId),
+          ),
+        )
         .for('update')
         .limit(1);
-      if (!snapshot) throw new NotFoundException('Bạn không nằm trong roster đăng ký đội này.');
+      if (!snapshot)
+        throw new NotFoundException(
+          'Bạn không nằm trong roster đăng ký đội này.',
+        );
 
       await tx
         .update(schema.tournamentTeamRosterSnapshots)
-        .set({ confirmationStatus: action === 'CONFIRM' ? 'CONFIRMED' : 'DECLINED' })
+        .set({
+          confirmationStatus: action === 'CONFIRM' ? 'CONFIRMED' : 'DECLINED',
+        })
         .where(eq(schema.tournamentTeamRosterSnapshots.id, snapshot.id));
 
       const remaining = await tx
-        .select({ confirmationStatus: schema.tournamentTeamRosterSnapshots.confirmationStatus })
+        .select({
+          confirmationStatus:
+            schema.tournamentTeamRosterSnapshots.confirmationStatus,
+        })
         .from(schema.tournamentTeamRosterSnapshots)
         .where(eq(schema.tournamentTeamRosterSnapshots.entryId, entryId));
-      const hasDeclined = remaining.some((row) => row.confirmationStatus === 'DECLINED');
-      const hasPending = remaining.some((row) => row.confirmationStatus === 'PENDING');
-      const nextStatus = hasDeclined || hasPending ? 'PENDING_CONFIRMATION' : 'CONFIRMED';
+      const hasDeclined = remaining.some(
+        (row) => row.confirmationStatus === 'DECLINED',
+      );
+      const hasPending = remaining.some(
+        (row) => row.confirmationStatus === 'PENDING',
+      );
+      const nextStatus =
+        hasDeclined || hasPending ? 'PENDING_CONFIRMATION' : 'CONFIRMED';
       await tx
         .update(schema.tournamentTeamEntries)
         .set({
@@ -3961,7 +5058,11 @@ export class TournamentsRepository {
           updatedAt: new Date(),
         })
         .where(eq(schema.tournamentTeamEntries.id, entryId));
-      return { entryId, confirmationStatus: action === 'CONFIRM' ? 'CONFIRMED' : 'DECLINED', status: nextStatus };
+      return {
+        entryId,
+        confirmationStatus: action === 'CONFIRM' ? 'CONFIRMED' : 'DECLINED',
+        status: nextStatus,
+      };
     });
   }
 
@@ -3973,17 +5074,27 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentTeamEntries.id, entryId))
         .for('update')
         .limit(1);
-      if (!entry) throw new NotFoundException('Đăng ký đội bóng không tồn tại.');
+      if (!entry)
+        throw new NotFoundException('Đăng ký đội bóng không tồn tại.');
       if (entry.status === 'LOCKED') return entry;
       if (entry.status !== 'CONFIRMED') {
-        throw new BadRequestException('Chưa đủ thành viên xác nhận roster để khóa đội.');
+        throw new BadRequestException(
+          'Chưa đủ thành viên xác nhận roster để khóa đội.',
+        );
       }
       const [updated] = await tx
         .update(schema.tournamentTeamEntries)
         .set({ status: 'LOCKED', lockedAt: new Date(), updatedAt: new Date() })
         .where(eq(schema.tournamentTeamEntries.id, entryId))
         .returning();
-      await this.auditService.logUpdate(tx, userId, 'tournament_team_entries', entryId, entry, updated);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_team_entries',
+        entryId,
+        entry,
+        updated,
+      );
       return updated;
     });
   }
@@ -4008,33 +5119,51 @@ export class TournamentsRepository {
   }
 
   /** Team sport: đội trưởng thêm 1 thành viên vào đội (role MAIN/RESERVE). */
-  async addRoster(participantId: string, userId: string, role: 'MAIN' | 'RESERVE', maxTeamSize?: number) {
+  async addRoster(
+    participantId: string,
+    userId: string,
+    role: 'MAIN' | 'RESERVE',
+    maxTeamSize?: number,
+  ) {
     return this.db.transaction(async (tx) => {
-      const [participant] = await tx.select({
-        id: schema.tournamentParticipants.id,
-        rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
-      }).from(schema.tournamentParticipants)
+      const [participant] = await tx
+        .select({
+          id: schema.tournamentParticipants.id,
+          rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
+        })
+        .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, participantId))
         .for('update')
         .limit(1);
-      if (!participant) throw new NotFoundException('Đội thi đấu không tồn tại.');
+      if (!participant)
+        throw new NotFoundException('Đội thi đấu không tồn tại.');
       if (participant.rosterLockedAt) {
-        throw new BadRequestException('Roster đội đã được khóa, không thể thêm thành viên.');
+        throw new BadRequestException(
+          'Roster đội đã được khóa, không thể thêm thành viên.',
+        );
       }
-      const existing = await tx.select({ id: schema.tournamentRosters.id })
+      const existing = await tx
+        .select({ id: schema.tournamentRosters.id })
         .from(schema.tournamentRosters)
-        .where(and(
-          eq(schema.tournamentRosters.participantId, participantId),
-          eq(schema.tournamentRosters.userId, userId),
-        )).limit(1);
-      if (existing.length > 0) throw new BadRequestException('Thành viên này đã có trong đội.');
+        .where(
+          and(
+            eq(schema.tournamentRosters.participantId, participantId),
+            eq(schema.tournamentRosters.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (existing.length > 0)
+        throw new BadRequestException('Thành viên này đã có trong đội.');
       if (maxTeamSize !== undefined) {
-        const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` })
+        const [{ count }] = await tx
+          .select({ count: sql<number>`count(*)::int` })
           .from(schema.tournamentRosters)
           .where(eq(schema.tournamentRosters.participantId, participantId));
-        if (Number(count) >= maxTeamSize) throw new BadRequestException('Đội đã đạt số thành viên tối đa.');
+        if (Number(count) >= maxTeamSize)
+          throw new BadRequestException('Đội đã đạt số thành viên tối đa.');
       }
-      const [row] = await tx.insert(schema.tournamentRosters)
+      const [row] = await tx
+        .insert(schema.tournamentRosters)
         .values({ participantId, userId, role })
         .returning();
       return row;
@@ -4044,23 +5173,35 @@ export class TournamentsRepository {
   /** Team sport: đội trưởng xoá thành viên khỏi đội. */
   async removeRoster(participantId: string, userId: string) {
     return this.db.transaction(async (tx) => {
-      const [participant] = await tx.select({
-        id: schema.tournamentParticipants.id,
-        rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
-      }).from(schema.tournamentParticipants)
+      const [participant] = await tx
+        .select({
+          id: schema.tournamentParticipants.id,
+          rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
+        })
+        .from(schema.tournamentParticipants)
         .where(eq(schema.tournamentParticipants.id, participantId))
         .for('update')
         .limit(1);
-      if (!participant) throw new NotFoundException('Đội thi đấu không tồn tại.');
+      if (!participant)
+        throw new NotFoundException('Đội thi đấu không tồn tại.');
       if (participant.rosterLockedAt) {
-        throw new BadRequestException('Roster đội đã được khóa, không thể xóa thành viên.');
+        throw new BadRequestException(
+          'Roster đội đã được khóa, không thể xóa thành viên.',
+        );
       }
-      const deleted = await tx.delete(schema.tournamentRosters)
-        .where(and(
-          eq(schema.tournamentRosters.participantId, participantId),
-          eq(schema.tournamentRosters.userId, userId),
-        )).returning();
-      if (deleted.length === 0) throw new BadRequestException('Không tìm thấy thành viên này trong đội.');
+      const deleted = await tx
+        .delete(schema.tournamentRosters)
+        .where(
+          and(
+            eq(schema.tournamentRosters.participantId, participantId),
+            eq(schema.tournamentRosters.userId, userId),
+          ),
+        )
+        .returning();
+      if (deleted.length === 0)
+        throw new BadRequestException(
+          'Không tìm thấy thành viên này trong đội.',
+        );
       return deleted[0];
     });
   }
@@ -4074,7 +5215,7 @@ export class TournamentsRepository {
         or(
           eq(schema.users.email, emailOrPhone),
           eq(schema.profiles.phoneNumber, emailOrPhone),
-        )
+        ),
       )
       .limit(1);
     return user;
@@ -4093,7 +5234,7 @@ export class TournamentsRepository {
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1)
-        .then(res => res[0]);
+        .then((res) => res[0]);
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
@@ -4118,8 +5259,14 @@ export class TournamentsRepository {
         divisionMatchType = division.matchType;
       }
 
-      const isDoubles = divisionMatchType === 'DOUBLES' || divisionMatchType === 'MIXED_DOUBLES';
-      const teamStatus = isDoubles ? (partnerId ? 'COMPLETE' : 'PENDING_PARTNER') : 'COMPLETE';
+      const isDoubles =
+        divisionMatchType === 'DOUBLES' ||
+        divisionMatchType === 'MIXED_DOUBLES';
+      const teamStatus = isDoubles
+        ? partnerId
+          ? 'COMPLETE'
+          : 'PENDING_PARTNER'
+        : 'COMPLETE';
 
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
@@ -4152,7 +5299,11 @@ export class TournamentsRepository {
     });
   }
 
-  async getUserElo(userId: string, categoryId: string, matchType: string): Promise<number> {
+  async getUserElo(
+    userId: string,
+    categoryId: string,
+    matchType: string,
+  ): Promise<number> {
     const result = await this.db
       .select({ eloPoints: schema.userRanks.eloPoints })
       .from(schema.userRanks)
@@ -4161,14 +5312,19 @@ export class TournamentsRepository {
           eq(schema.userRanks.userId, userId),
           eq(schema.userRanks.categoryId, categoryId),
           eq(schema.userRanks.matchType, matchType),
-          sql`${schema.userRanks.communityId} IS NULL`
-        )
+          sql`${schema.userRanks.communityId} IS NULL`,
+        ),
       )
       .limit(1);
     return result[0]?.eloPoints ?? 1000;
   }
 
-  async getUserEloInTx(tx: Transaction, userId: string, categoryId: string, matchType: string): Promise<number> {
+  async getUserEloInTx(
+    tx: Transaction,
+    userId: string,
+    categoryId: string,
+    matchType: string,
+  ): Promise<number> {
     const result = await tx
       .select({ eloPoints: schema.userRanks.eloPoints })
       .from(schema.userRanks)
@@ -4177,8 +5333,8 @@ export class TournamentsRepository {
           eq(schema.userRanks.userId, userId),
           eq(schema.userRanks.categoryId, categoryId),
           eq(schema.userRanks.matchType, matchType),
-          sql`${schema.userRanks.communityId} IS NULL`
-        )
+          sql`${schema.userRanks.communityId} IS NULL`,
+        ),
       )
       .limit(1);
     return result[0]?.eloPoints ?? 1000;
@@ -4191,8 +5347,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournamentRosters.participantId, participantId),
-          eq(schema.tournamentRosters.role, 'MAIN')
-        )
+          eq(schema.tournamentRosters.role, 'MAIN'),
+        ),
       )
       .limit(1);
     return result[0] || null;
@@ -4215,8 +5371,8 @@ export class TournamentsRepository {
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED')
-          )
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          ),
         );
 
       // 3. Refund each paid participant
@@ -4245,8 +5401,8 @@ export class TournamentsRepository {
                 and(
                   eq(schema.payments.tournamentId, tournamentId),
                   eq(schema.payments.participantId, participant.id),
-                  eq(schema.payments.status, 'COMPLETED')
-                )
+                  eq(schema.payments.status, 'COMPLETED'),
+                ),
               );
           }
         }
@@ -4274,8 +5430,8 @@ export class TournamentsRepository {
               and(
                 inArray(schema.matches.groupId, groupIds),
                 ne(schema.matches.status, 'COMPLETED'),
-                ne(schema.matches.status, 'CANCELLED')
-              )
+                ne(schema.matches.status, 'CANCELLED'),
+              ),
             );
         }
       }
@@ -4294,8 +5450,8 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournaments.parentId, parentId),
-          sql`${schema.tournaments.deletedAt} IS NULL`
-        )
+          sql`${schema.tournaments.deletedAt} IS NULL`,
+        ),
       );
 
     const participantCounts = await Promise.all(
@@ -4308,15 +5464,15 @@ export class TournamentsRepository {
               eq(schema.tournamentParticipants.tournamentId, child.id),
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED')
-            )
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            ),
           );
         return result?.count || 0;
-      })
+      }),
     );
 
     const totalParticipants = participantCounts.reduce((sum, c) => sum + c, 0);
-    const statuses = children.map(c => c.status);
+    const statuses = children.map((c) => c.status);
 
     return {
       totalParticipants,
@@ -4336,13 +5492,23 @@ export class TournamentsRepository {
     };
 
     return {
-      feePublicRanked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED', '0')),
-      feePublicUnranked: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED', '0')),
+      feePublicRanked: parseFloat(
+        await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_RANKED', '0'),
+      ),
+      feePublicUnranked: parseFloat(
+        await getVal('TOURNAMENT_PUBLISH_FEE_PUBLIC_UNRANKED', '0'),
+      ),
       feeClub: parseFloat(await getVal('TOURNAMENT_PUBLISH_FEE_CLUB', '0')),
-      pctPublicRanked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5')),
-      pctPublicUnranked: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5')),
+      pctPublicRanked: parseFloat(
+        await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5'),
+      ),
+      pctPublicUnranked: parseFloat(
+        await getVal('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5'),
+      ),
       pctClub: parseFloat(await getVal('PLATFORM_FEE_PERCENTAGE_CLUB', '0')),
-      allowEntryFees: (await getVal('ALLOW_TOURNAMENT_ENTRY_FEES', 'true')).toLowerCase() === 'true',
+      allowEntryFees:
+        (await getVal('ALLOW_TOURNAMENT_ENTRY_FEES', 'true')).toLowerCase() ===
+        'true',
     };
   }
 
@@ -4369,7 +5535,7 @@ export class TournamentsRepository {
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
             eq(schema.tournamentParticipants.isPaid, true),
-          )
+          ),
         );
 
       if (completedCount.count >= tournament.maxParticipants) {
@@ -4379,13 +5545,16 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.tournamentParticipants.tournamentId, tournamentId),
-              eq(schema.tournamentParticipants.teamStatus, 'PENDING_APPROVAL')
-            )
+              eq(schema.tournamentParticipants.teamStatus, 'PENDING_APPROVAL'),
+            ),
           );
 
         if (pendingParts.length === 0) return [];
 
-        const canceledLeaders: Array<{ leaderId: string; divisionId: string | null }> = [];
+        const canceledLeaders: Array<{
+          leaderId: string;
+          divisionId: string | null;
+        }> = [];
 
         for (const p of pendingParts) {
           await tx
@@ -4416,8 +5585,8 @@ export class TournamentsRepository {
                 and(
                   eq(schema.payments.tournamentId, tournamentId),
                   eq(schema.payments.participantId, p.id),
-                  eq(schema.payments.status, 'COMPLETED')
-                )
+                  eq(schema.payments.status, 'COMPLETED'),
+                ),
               );
           }
 
@@ -4449,12 +5618,15 @@ export class TournamentsRepository {
           tournament: schema.tournaments,
         })
         .from(schema.tournamentParticipants)
-        .innerJoin(schema.tournaments, eq(schema.tournamentParticipants.tournamentId, schema.tournaments.id))
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentParticipants.tournamentId, schema.tournaments.id),
+        )
         .where(
           and(
             eq(schema.tournamentParticipants.teamStatus, 'PENDING_PARTNER'),
-            lt(schema.tournamentParticipants.registeredAt, timeoutThreshold)
-          )
+            lt(schema.tournamentParticipants.registeredAt, timeoutThreshold),
+          ),
         );
 
       if (expiredParts.length === 0) return [];
@@ -4495,8 +5667,8 @@ export class TournamentsRepository {
               and(
                 eq(schema.payments.tournamentId, tournament.id),
                 eq(schema.payments.participantId, participant.id),
-                eq(schema.payments.status, 'COMPLETED')
-              )
+                eq(schema.payments.status, 'COMPLETED'),
+              ),
             );
         }
 
@@ -4553,7 +5725,12 @@ export class TournamentsRepository {
         ? await tx
             .select({ matchType: schema.tournamentDivisions.matchType })
             .from(schema.tournamentDivisions)
-            .where(eq(schema.tournamentDivisions.id, nextWaitlisted.tournamentDivisionId))
+            .where(
+              eq(
+                schema.tournamentDivisions.id,
+                nextWaitlisted.tournamentDivisionId,
+              ),
+            )
             .limit(1)
         : [null];
 
@@ -4570,7 +5747,8 @@ export class TournamentsRepository {
         nextWaitlisted.tournamentDivisionId,
       );
       const regMode =
-        ((tournament?.tournamentConfig || {}) as Record<string, unknown>).registrationMode === 'APPROVAL'
+        ((tournament?.tournamentConfig || {}) as Record<string, unknown>)
+          .registrationMode === 'APPROVAL'
           ? 'APPROVAL'
           : 'OPEN';
       const promotedStatus =
@@ -4604,14 +5782,22 @@ export class TournamentsRepository {
         avatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.tournamentReferees)
-      .innerJoin(schema.users, eq(schema.tournamentReferees.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.tournamentReferees.userId, schema.users.id),
+      )
       .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(eq(schema.tournamentReferees.tournamentId, tournamentId));
   }
 
   // ──────── Staff ────────
 
-  async addStaffMember(tournamentId: string, userId: string, role: string, createdBy: string) {
+  async addStaffMember(
+    tournamentId: string,
+    userId: string,
+    role: string,
+    createdBy: string,
+  ) {
     const [existing] = await this.db
       .select()
       .from(schema.tournamentStaff)
@@ -4671,7 +5857,9 @@ export class TournamentsRepository {
   }
 
   async findStaffByTournament(tournamentId: string, role?: string) {
-    const conditions: SQL[] = [eq(schema.tournamentStaff.tournamentId, tournamentId)];
+    const conditions: SQL[] = [
+      eq(schema.tournamentStaff.tournamentId, tournamentId),
+    ];
     if (role) conditions.push(eq(schema.tournamentStaff.role, role));
     const rows = await this.db
       .select({
@@ -4682,7 +5870,10 @@ export class TournamentsRepository {
         avatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.tournamentStaff)
-      .innerJoin(schema.users, eq(schema.tournamentStaff.userId, schema.users.id))
+      .innerJoin(
+        schema.users,
+        eq(schema.tournamentStaff.userId, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(and(...conditions));
     // Người được mời chưa có hồ sơ (profiles) vẫn phải xuất hiện trong danh sách
@@ -4733,7 +5924,10 @@ export class TournamentsRepository {
     }));
   }
 
-  async updateSeeds(tournamentId: string, seeds: { participantId: string; seed: number }[]) {
+  async updateSeeds(
+    tournamentId: string,
+    seeds: { participantId: string; seed: number }[],
+  ) {
     return await this.db.transaction(async (tx) => {
       for (const item of seeds) {
         await tx
@@ -4742,8 +5936,8 @@ export class TournamentsRepository {
           .where(
             and(
               eq(schema.tournamentParticipants.id, item.participantId),
-              eq(schema.tournamentParticipants.tournamentId, tournamentId)
-            )
+              eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            ),
           );
       }
       return { success: true };
@@ -4766,7 +5960,10 @@ export class TournamentsRepository {
             .from(schema.tournamentParticipants)
             .where(
               and(
-                eq(schema.tournamentParticipants.tournamentDivisionId, division.id),
+                eq(
+                  schema.tournamentParticipants.tournamentDivisionId,
+                  division.id,
+                ),
                 ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
                 ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
                 ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
@@ -4779,10 +5976,13 @@ export class TournamentsRepository {
               participants: participantCountByDivision.count,
             },
           };
-        })
+        }),
       );
     } catch (error) {
-      console.error(`Failed to get divisions for tournament ${tournamentId}:`, error);
+      console.error(
+        `Failed to get divisions for tournament ${tournamentId}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -4802,7 +6002,10 @@ export class TournamentsRepository {
     }
   }
 
-  async createDivision(division: CreateDivisionDto & { tournamentId: string }, userId: string | null) {
+  async createDivision(
+    division: CreateDivisionDto & { tournamentId: string },
+    userId: string | null,
+  ) {
     try {
       return await this.db.transaction(async (tx) => {
         try {
@@ -4819,7 +6022,9 @@ export class TournamentsRepository {
               venueId: division.venueId ?? null,
               bracketType: division.bracketType ?? null,
               roundConfig: division.roundConfig ?? null,
-              startDate: division.startDate ? new Date(division.startDate) : null,
+              startDate: division.startDate
+                ? new Date(division.startDate)
+                : null,
               registrationEndDate: division.registrationEndDate
                 ? new Date(division.registrationEndDate)
                 : null,
@@ -4835,7 +6040,7 @@ export class TournamentsRepository {
             userId,
             'tournament_divisions',
             created.id,
-            created
+            created,
           );
 
           return created;
@@ -4850,7 +6055,11 @@ export class TournamentsRepository {
     }
   }
 
-  async updateDivision(id: string, dto: UpdateDivisionDto, userId: string | null) {
+  async updateDivision(
+    id: string,
+    dto: UpdateDivisionDto,
+    userId: string | null,
+  ) {
     try {
       return await this.db.transaction(async (tx) => {
         const [oldRecord] = await tx
@@ -4863,9 +6072,10 @@ export class TournamentsRepository {
           throw new NotFoundException('Không tìm thấy nội dung thi đấu');
         }
 
-        const mergedRoundConfig = dto.roundConfig === undefined
-          ? undefined
-          : this.mergeRoundConfig(oldRecord.roundConfig, dto.roundConfig);
+        const mergedRoundConfig =
+          dto.roundConfig === undefined
+            ? undefined
+            : this.mergeRoundConfig(oldRecord.roundConfig, dto.roundConfig);
 
         const [updated] = await tx
           .update(schema.tournamentDivisions)
@@ -4886,8 +6096,12 @@ export class TournamentsRepository {
               isConfigOverride: dto.isConfigOverride,
             }),
             ...(dto.venueId !== undefined && { venueId: dto.venueId }),
-            ...(dto.bracketType !== undefined && { bracketType: dto.bracketType }),
-            ...(mergedRoundConfig !== undefined && { roundConfig: mergedRoundConfig }),
+            ...(dto.bracketType !== undefined && {
+              bracketType: dto.bracketType,
+            }),
+            ...(mergedRoundConfig !== undefined && {
+              roundConfig: mergedRoundConfig,
+            }),
             ...(dto.startDate !== undefined && {
               startDate: dto.startDate ? new Date(dto.startDate) : null,
             }),
@@ -4911,7 +6125,7 @@ export class TournamentsRepository {
           'tournament_divisions',
           id,
           oldRecord,
-          updated
+          updated,
         );
 
         return updated;
@@ -4938,10 +6152,14 @@ export class TournamentsRepository {
         const [{ value: remainingDivisions }] = await tx
           .select({ value: count() })
           .from(schema.tournamentDivisions)
-          .where(eq(schema.tournamentDivisions.tournamentId, oldRecord.tournamentId));
+          .where(
+            eq(schema.tournamentDivisions.tournamentId, oldRecord.tournamentId),
+          );
 
         if (remainingDivisions <= 1) {
-          throw new BadRequestException('Phải có ít nhất 1 hình thức thi đấu. Hãy xóa cả giải đấu nếu không cần.');
+          throw new BadRequestException(
+            'Phải có ít nhất 1 hình thức thi đấu. Hãy xóa cả giải đấu nếu không cần.',
+          );
         }
 
         const [{ value: activeParticipants }] = await tx
@@ -4957,7 +6175,9 @@ export class TournamentsRepository {
           );
 
         if (activeParticipants > 0) {
-          throw new BadRequestException('Không thể xóa hình thức đang có người chơi thật. Hãy di chuyển hoặc loại bỏ người chơi thật trước.');
+          throw new BadRequestException(
+            'Không thể xóa hình thức đang có người chơi thật. Hãy di chuyển hoặc loại bỏ người chơi thật trước.',
+          );
         }
 
         const mockParticipants = await tx
@@ -4969,13 +6189,21 @@ export class TournamentsRepository {
               eq(schema.tournamentParticipants.isMock, true),
             ),
           );
-        const mockParticipantIds = mockParticipants.map((participant) => participant.id);
-        const mockRosterUsers = mockParticipantIds.length > 0
-          ? await tx
-              .select({ userId: schema.tournamentRosters.userId })
-              .from(schema.tournamentRosters)
-              .where(inArray(schema.tournamentRosters.participantId, mockParticipantIds))
-          : [];
+        const mockParticipantIds = mockParticipants.map(
+          (participant) => participant.id,
+        );
+        const mockRosterUsers =
+          mockParticipantIds.length > 0
+            ? await tx
+                .select({ userId: schema.tournamentRosters.userId })
+                .from(schema.tournamentRosters)
+                .where(
+                  inArray(
+                    schema.tournamentRosters.participantId,
+                    mockParticipantIds,
+                  ),
+                )
+            : [];
 
         // Hard delete since tournament_divisions doesn't have a deletedAt column
         // and cascade is handled by FK constraint
@@ -4983,7 +6211,9 @@ export class TournamentsRepository {
           .delete(schema.tournamentDivisions)
           .where(eq(schema.tournamentDivisions.id, id));
 
-        const mockUserIds = Array.from(new Set(mockRosterUsers.map((roster) => roster.userId)));
+        const mockUserIds = Array.from(
+          new Set(mockRosterUsers.map((roster) => roster.userId)),
+        );
         if (mockUserIds.length > 0) {
           const remainingRosterUsers = await tx
             .select({ userId: schema.tournamentRosters.userId })
@@ -4992,12 +6222,16 @@ export class TournamentsRepository {
           const remainingRegistrants = await tx
             .select({ userId: schema.tournamentParticipants.registeredBy })
             .from(schema.tournamentParticipants)
-            .where(inArray(schema.tournamentParticipants.registeredBy, mockUserIds));
+            .where(
+              inArray(schema.tournamentParticipants.registeredBy, mockUserIds),
+            );
           const referencedUserIds = new Set([
             ...remainingRosterUsers.map((row) => row.userId),
             ...remainingRegistrants.map((row) => row.userId),
           ]);
-          const orphanMockUserIds = mockUserIds.filter((mockUserId) => !referencedUserIds.has(mockUserId));
+          const orphanMockUserIds = mockUserIds.filter(
+            (mockUserId) => !referencedUserIds.has(mockUserId),
+          );
 
           if (orphanMockUserIds.length > 0) {
             await tx
@@ -5019,10 +6253,13 @@ export class TournamentsRepository {
           userId,
           'tournament_divisions',
           id,
-          oldRecord
+          oldRecord,
         );
 
-        return { success: true, removedMockParticipants: mockParticipantIds.length };
+        return {
+          success: true,
+          removedMockParticipants: mockParticipantIds.length,
+        };
       });
     } catch (error) {
       console.error(`Failed to delete division ${id}:`, error);
@@ -5030,8 +6267,16 @@ export class TournamentsRepository {
     }
   }
 
-  async updateDivisionConfig(id: string, dto: UpdateDivisionDto, userId: string | null) {
-    return this.updateDivision(id, { ...dto, isConfigOverride: dto.isConfigOverride ?? true }, userId);
+  async updateDivisionConfig(
+    id: string,
+    dto: UpdateDivisionDto,
+    userId: string | null,
+  ) {
+    return this.updateDivision(
+      id,
+      { ...dto, isConfigOverride: dto.isConfigOverride ?? true },
+      userId,
+    );
   }
 
   async getParticipantsByDivision(divisionId: string) {
@@ -5050,16 +6295,22 @@ export class TournamentsRepository {
           },
         })
         .from(schema.tournamentParticipants)
-        .leftJoin(schema.users, eq(schema.tournamentParticipants.registeredBy, schema.users.id))
+        .leftJoin(
+          schema.users,
+          eq(schema.tournamentParticipants.registeredBy, schema.users.id),
+        )
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
         .where(
           and(
             eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN')
-          )
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+          ),
         );
     } catch (error) {
-      console.error(`Failed to get participants for division ${divisionId}:`, error);
+      console.error(
+        `Failed to get participants for division ${divisionId}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -5150,7 +6401,10 @@ export class TournamentsRepository {
     return referee || null;
   }
 
-  async updateRefereeStatus(refereeId: string, status: 'ACCEPTED' | 'DECLINED') {
+  async updateRefereeStatus(
+    refereeId: string,
+    status: 'ACCEPTED' | 'DECLINED',
+  ) {
     const [updated] = await this.db
       .update(schema.tournamentReferees)
       .set({ status, assignedAt: new Date() })
@@ -5246,10 +6500,12 @@ export class TournamentsRepository {
     const [existing] = await this.db
       .select()
       .from(schema.tournamentFollows)
-      .where(and(
-        eq(schema.tournamentFollows.tournamentId, tournamentId),
-        eq(schema.tournamentFollows.userId, userId),
-      ))
+      .where(
+        and(
+          eq(schema.tournamentFollows.tournamentId, tournamentId),
+          eq(schema.tournamentFollows.userId, userId),
+        ),
+      )
       .limit(1);
 
     if (existing) return existing;
@@ -5264,10 +6520,12 @@ export class TournamentsRepository {
   async unfollowTournament(tournamentId: string, userId: string) {
     await this.db
       .delete(schema.tournamentFollows)
-      .where(and(
-        eq(schema.tournamentFollows.tournamentId, tournamentId),
-        eq(schema.tournamentFollows.userId, userId),
-      ));
+      .where(
+        and(
+          eq(schema.tournamentFollows.tournamentId, tournamentId),
+          eq(schema.tournamentFollows.userId, userId),
+        ),
+      );
   }
 
   async getFollowedTournamentIds(userId: string): Promise<string[]> {
@@ -5275,7 +6533,7 @@ export class TournamentsRepository {
       .select({ tournamentId: schema.tournamentFollows.tournamentId })
       .from(schema.tournamentFollows)
       .where(eq(schema.tournamentFollows.userId, userId));
-    return rows.map(r => r.tournamentId);
+    return rows.map((r) => r.tournamentId);
   }
 
   async getFollowerUserIds(tournamentId: string): Promise<string[]> {
@@ -5283,7 +6541,7 @@ export class TournamentsRepository {
       .select({ userId: schema.tournamentFollows.userId })
       .from(schema.tournamentFollows)
       .where(eq(schema.tournamentFollows.tournamentId, tournamentId));
-    return rows.map(r => r.userId);
+    return rows.map((r) => r.userId);
   }
 
   async getFollowedTournaments(userId: string) {
@@ -5301,11 +6559,16 @@ export class TournamentsRepository {
 
   async countLiteActiveRosterUsers(tournamentId: string): Promise<number> {
     const [result] = await this.db
-      .select({ count: sql<number>`count(distinct ${schema.tournamentRosters.userId})` })
+      .select({
+        count: sql<number>`count(distinct ${schema.tournamentRosters.userId})`,
+      })
       .from(schema.tournamentRosters)
       .innerJoin(
         schema.tournamentParticipants,
-        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
       )
       .where(
         and(
@@ -5333,12 +6596,13 @@ export class TournamentsRepository {
       .orderBy(schema.tournamentParticipants.registeredAt);
 
     const pIds = participants.map((p) => p.id);
-    const rosters = pIds.length > 0
-      ? await this.db
-          .select()
-          .from(schema.tournamentRosters)
-          .where(inArray(schema.tournamentRosters.participantId, pIds))
-      : [];
+    const rosters =
+      pIds.length > 0
+        ? await this.db
+            .select()
+            .from(schema.tournamentRosters)
+            .where(inArray(schema.tournamentRosters.participantId, pIds))
+        : [];
 
     const rosterMap = new Map<string, typeof rosters>();
     for (const r of rosters) {
@@ -5349,16 +6613,17 @@ export class TournamentsRepository {
 
     // Fetch user profiles for roster members
     const userIds = [...new Set(rosters.map((r) => r.userId))];
-    const profiles = userIds.length > 0
-      ? await this.db
-          .select({
-            userId: schema.profiles.userId,
-            fullName: schema.profiles.fullName,
-            avatarUrl: schema.profiles.avatarUrl,
-          })
-          .from(schema.profiles)
-          .where(inArray(schema.profiles.userId, userIds))
-      : [];
+    const profiles =
+      userIds.length > 0
+        ? await this.db
+            .select({
+              userId: schema.profiles.userId,
+              fullName: schema.profiles.fullName,
+              avatarUrl: schema.profiles.avatarUrl,
+            })
+            .from(schema.profiles)
+            .where(inArray(schema.profiles.userId, userIds))
+        : [];
     const profileMap = new Map(profiles.map((p) => [p.userId, p]));
 
     return participants.map((p) => ({
@@ -5371,11 +6636,11 @@ export class TournamentsRepository {
   }
 
   async findLitePendingPartnerParticipants(tournamentId: string) {
-    const allParticipants = await this.findLiteParticipantsWithRosters(tournamentId);
+    const allParticipants =
+      await this.findLiteParticipantsWithRosters(tournamentId);
     return allParticipants.filter(
       (p) =>
-        p.teamStatus === 'PENDING_PARTNER' &&
-        (p.rosters?.length ?? 0) === 1,
+        p.teamStatus === 'PENDING_PARTNER' && (p.rosters?.length ?? 0) === 1,
     );
   }
 
@@ -5414,7 +6679,10 @@ export class TournamentsRepository {
   ) {
     // Lock participants in sorted order to prevent deadlocks
     const sortedIds = [p1Id, p2Id].sort();
-    const lockedRows: Record<string, typeof schema.tournamentParticipants.$inferSelect> = {};
+    const lockedRows: Record<
+      string,
+      typeof schema.tournamentParticipants.$inferSelect
+    > = {};
 
     for (const id of sortedIds) {
       const [p] = await tx
@@ -5448,7 +6716,9 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentRosters.participantId, p1Id));
       if (p1RostersCheck.length === 2) {
         // Verify p2's registeredBy user is one of p1's rosters
-        const p2UserInP1 = p1RostersCheck.some((r) => r.userId === p2.registeredBy);
+        const p2UserInP1 = p1RostersCheck.some(
+          (r) => r.userId === p2.registeredBy,
+        );
         if (p2UserInP1) {
           return p1;
         }
@@ -5457,10 +6727,14 @@ export class TournamentsRepository {
 
     // Reject non-PENDING_PARTNER states (idempotency check already handled COMPLETE/PENDING_APPROVAL)
     if (p1.teamStatus !== 'PENDING_PARTNER') {
-      throw new BadRequestException(`Participant 1 đang ở trạng thái ${p1.teamStatus}, không thể ghép cặp`);
+      throw new BadRequestException(
+        `Participant 1 đang ở trạng thái ${p1.teamStatus}, không thể ghép cặp`,
+      );
     }
     if (p2.teamStatus !== 'PENDING_PARTNER') {
-      throw new BadRequestException(`Participant 2 đang ở trạng thái ${p2.teamStatus}, không thể ghép cặp`);
+      throw new BadRequestException(
+        `Participant 2 đang ở trạng thái ${p2.teamStatus}, không thể ghép cặp`,
+      );
     }
 
     // Check each has exactly 1 roster
@@ -5487,7 +6761,10 @@ export class TournamentsRepository {
       .from(schema.tournamentRosters)
       .innerJoin(
         schema.tournamentParticipants,
-        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
       )
       .where(
         and(
@@ -5500,7 +6777,9 @@ export class TournamentsRepository {
         ),
       );
     if (allRostersCheck.length > 0) {
-      throw new BadRequestException('Thành viên của Participant 2 đã tham gia đội khác trong giải này');
+      throw new BadRequestException(
+        'Thành viên của Participant 2 đã tham gia đội khác trong giải này',
+      );
     }
 
     // Move p2 roster to p1
@@ -5511,7 +6790,8 @@ export class TournamentsRepository {
       .where(eq(schema.tournamentRosters.id, p2Roster.id));
 
     // Update p1
-    const targetStatus = registrationMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
+    const targetStatus =
+      registrationMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
     const [updatedP1] = await tx
       .update(schema.tournamentParticipants)
       .set({
@@ -5534,8 +6814,22 @@ export class TournamentsRepository {
       .returning();
 
     // Audit
-    await this.auditService.logUpdate(tx, userId, 'tournament_participants', p1Id, p1, updatedP1);
-    await this.auditService.logUpdate(tx, userId, 'tournament_participants', p2Id, p2, updatedP2);
+    await this.auditService.logUpdate(
+      tx,
+      userId,
+      'tournament_participants',
+      p1Id,
+      p1,
+      updatedP1,
+    );
+    await this.auditService.logUpdate(
+      tx,
+      userId,
+      'tournament_participants',
+      p2Id,
+      p2,
+      updatedP2,
+    );
 
     return updatedP1;
   }
@@ -5558,8 +6852,13 @@ export class TournamentsRepository {
       throw new BadRequestException('Participant không hợp lệ');
     }
 
-    if (participant.teamStatus !== 'COMPLETE' && participant.teamStatus !== 'PENDING_APPROVAL') {
-      throw new BadRequestException(`Không thể tách cặp participant ở trạng thái ${participant.teamStatus}`);
+    if (
+      participant.teamStatus !== 'COMPLETE' &&
+      participant.teamStatus !== 'PENDING_APPROVAL'
+    ) {
+      throw new BadRequestException(
+        `Không thể tách cặp participant ở trạng thái ${participant.teamStatus}`,
+      );
     }
 
     // Must have exactly 2 rosters
@@ -5569,20 +6868,36 @@ export class TournamentsRepository {
       .where(eq(schema.tournamentRosters.participantId, participantId));
 
     if (rosters.length !== 2) {
-      throw new BadRequestException('Participant phải có đúng 2 thành viên để tách cặp');
+      throw new BadRequestException(
+        'Participant phải có đúng 2 thành viên để tách cặp',
+      );
     }
 
     // Deterministic leader: roster whose userId == participant.registeredBy
-    const leaderRoster = rosters.find((r) => r.userId === participant.registeredBy);
-    const partnerRoster = rosters.find((r) => r.userId !== participant.registeredBy);
+    const leaderRoster = rosters.find(
+      (r) => r.userId === participant.registeredBy,
+    );
+    const partnerRoster = rosters.find(
+      (r) => r.userId !== participant.registeredBy,
+    );
 
     if (!leaderRoster || !partnerRoster) {
-      throw new BadRequestException('Không thể xác định đội trưởng — lỗi dữ liệu.');
+      throw new BadRequestException(
+        'Không thể xác định đội trưởng — lỗi dữ liệu.',
+      );
     }
 
     // Create invite tokens
-    const leaderToken = crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
-    const partnerToken = crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
+    const leaderToken = crypto
+      .randomUUID()
+      .replace(/-/g, '')
+      .substring(0, 12)
+      .toUpperCase();
+    const partnerToken = crypto
+      .randomUUID()
+      .replace(/-/g, '')
+      .substring(0, 12)
+      .toUpperCase();
 
     // Get profile names
     const [leaderProfile] = await tx
@@ -5629,8 +6944,21 @@ export class TournamentsRepository {
       .returning();
 
     // Audit
-    await this.auditService.logCreate(tx, userId, 'tournament_participants', newParticipant.id, newParticipant);
-    await this.auditService.logUpdate(tx, userId, 'tournament_participants', participantId, participant, updatedOriginal);
+    await this.auditService.logCreate(
+      tx,
+      userId,
+      'tournament_participants',
+      newParticipant.id,
+      newParticipant,
+    );
+    await this.auditService.logUpdate(
+      tx,
+      userId,
+      'tournament_participants',
+      participantId,
+      participant,
+      updatedOriginal,
+    );
 
     return { leader: updatedOriginal, partner: newParticipant };
   }
@@ -5656,7 +6984,10 @@ export class TournamentsRepository {
     if (tCfg.isLite !== true) {
       throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
     }
-    if (tournament.matchType !== 'DOUBLES' && tournament.matchType !== 'MIXED_DOUBLES') {
+    if (
+      tournament.matchType !== 'DOUBLES' &&
+      tournament.matchType !== 'MIXED_DOUBLES'
+    ) {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
@@ -5671,7 +7002,9 @@ export class TournamentsRepository {
         ),
       );
     if (stageCount.count > 0) {
-      throw new BadRequestException('Không thể ghép cặp sau khi đã sinh nhánh đấu.');
+      throw new BadRequestException(
+        'Không thể ghép cặp sau khi đã sinh nhánh đấu.',
+      );
     }
     const [matchCount] = await tx
       .select({ count: count() })
@@ -5683,7 +7016,9 @@ export class TournamentsRepository {
         ),
       );
     if (matchCount.count > 0) {
-      throw new BadRequestException('Không thể ghép cặp sau khi đã sinh trận đấu.');
+      throw new BadRequestException(
+        'Không thể ghép cặp sau khi đã sinh trận đấu.',
+      );
     }
 
     return tournament;
@@ -5700,14 +7035,31 @@ export class TournamentsRepository {
     return await this.db.transaction(async (tx) => {
       // Lock tournament and validate LITE/DOUBLES/bracket-gate in one tx
       await this.assertLitePairableInTx(tx, tournamentId);
-      return this.pairLiteParticipantsInTx(tx, tournamentId, p1Id, p2Id, userId, registrationMode, teamName);
+      return this.pairLiteParticipantsInTx(
+        tx,
+        tournamentId,
+        p1Id,
+        p2Id,
+        userId,
+        registrationMode,
+        teamName,
+      );
     });
   }
 
-  async lockTournamentAndUnpair(tournamentId: string, participantId: string, userId: string) {
+  async lockTournamentAndUnpair(
+    tournamentId: string,
+    participantId: string,
+    userId: string,
+  ) {
     return await this.db.transaction(async (tx) => {
       await this.assertLitePairableInTx(tx, tournamentId);
-      return this.unpairParticipantInTx(tx, tournamentId, participantId, userId);
+      return this.unpairParticipantInTx(
+        tx,
+        tournamentId,
+        participantId,
+        userId,
+      );
     });
   }
 
@@ -5719,7 +7071,9 @@ export class TournamentsRepository {
     return await this.db.transaction(async (tx) => {
       // Lock tournament and validate
       const tournament = await this.assertLitePairableInTx(tx, tournamentId);
-      const registrationMode = ((tournament.tournamentConfig || {}) as Record<string, unknown>).registrationMode as string || 'OPEN';
+      const registrationMode =
+        (((tournament.tournamentConfig || {}) as Record<string, unknown>)
+          .registrationMode as string) || 'OPEN';
 
       // Query pending participants INSIDE the transaction with FOR UPDATE (fixes TOCTOU + no lock outside tx)
       const pendingParticipants = await tx
@@ -5736,12 +7090,13 @@ export class TournamentsRepository {
 
       // Filter to those with exactly 1 roster; fetch rosters via tx
       const pIds = pendingParticipants.map((p) => p.id);
-      const allRosters = pIds.length > 0
-        ? await tx
-            .select()
-            .from(schema.tournamentRosters)
-            .where(inArray(schema.tournamentRosters.participantId, pIds))
-        : [];
+      const allRosters =
+        pIds.length > 0
+          ? await tx
+              .select()
+              .from(schema.tournamentRosters)
+              .where(inArray(schema.tournamentRosters.participantId, pIds))
+          : [];
 
       const rosterMap = new Map<string, typeof allRosters>();
       for (const r of allRosters) {
@@ -5752,15 +7107,16 @@ export class TournamentsRepository {
 
       // Fetch profiles for roster users via tx
       const userIds = [...new Set(allRosters.map((r) => r.userId))];
-      const profiles = userIds.length > 0
-        ? await tx
-            .select({
-              userId: schema.profiles.userId,
-              fullName: schema.profiles.fullName,
-            })
-            .from(schema.profiles)
-            .where(inArray(schema.profiles.userId, userIds))
-        : [];
+      const profiles =
+        userIds.length > 0
+          ? await tx
+              .select({
+                userId: schema.profiles.userId,
+                fullName: schema.profiles.fullName,
+              })
+              .from(schema.profiles)
+              .where(inArray(schema.profiles.userId, userIds))
+          : [];
       const profileMap = new Map(profiles.map((p) => [p.userId, p]));
 
       const pending = pendingParticipants
@@ -5774,7 +7130,9 @@ export class TournamentsRepository {
         }));
 
       if (pending.length < 2) {
-        throw new BadRequestException('Cần ít nhất 2 người chơi đang chờ ghép cặp.');
+        throw new BadRequestException(
+          'Cần ít nhất 2 người chơi đang chờ ghép cặp.',
+        );
       }
 
       let ordered = [...pending];
@@ -5790,7 +7148,12 @@ export class TournamentsRepository {
           ordered.map(async (p) => {
             const rosterUser = p.rosters?.[0];
             const elo = rosterUser?.userId
-              ? await this.getUserEloInTx(tx, rosterUser.userId, tournament.categoryId, tournament.matchType)
+              ? await this.getUserEloInTx(
+                  tx,
+                  rosterUser.userId,
+                  tournament.categoryId,
+                  tournament.matchType,
+                )
               : 1000;
             return { participant: p, elo };
           }),
@@ -5815,7 +7178,11 @@ export class TournamentsRepository {
         ordered = reordered;
       }
 
-      const paired: Array<{ participant1Id: string; participant2Id: string; teamName: string }> = [];
+      const paired: Array<{
+        participant1Id: string;
+        participant2Id: string;
+        teamName: string;
+      }> = [];
       const unpairedIds: string[] = [];
 
       for (let i = 0; i < ordered.length; i += 2) {
@@ -5835,7 +7202,15 @@ export class TournamentsRepository {
         const p2Name = p2Profile?.fullName || 'VĐV';
         const teamName = `${p1Name} / ${p2Name}`;
 
-        await this.pairLiteParticipantsInTx(tx, tournamentId, p1.id, p2.id, userId, registrationMode, teamName);
+        await this.pairLiteParticipantsInTx(
+          tx,
+          tournamentId,
+          p1.id,
+          p2.id,
+          userId,
+          registrationMode,
+          teamName,
+        );
         paired.push({ participant1Id: p1.id, participant2Id: p2.id, teamName });
       }
 
@@ -5871,7 +7246,7 @@ export class TournamentsRepository {
 
     if (stages.length === 0) return [];
 
-    const stageIds = stages.map(s => s.id);
+    const stageIds = stages.map((s) => s.id);
 
     const groups = await this.db
       .select()
@@ -5886,7 +7261,7 @@ export class TournamentsRepository {
 
     if (groups.length === 0) return [];
 
-    const groupIds = groups.map(g => g.id);
+    const groupIds = groups.map((g) => g.id);
 
     const standings = await this.db
       .select()
@@ -5921,11 +7296,13 @@ export class TournamentsRepository {
         scoreDetails: schema.matches.scoreDetails,
       })
       .from(schema.matches)
-      .where(and(
-        inArray(schema.matches.groupId, groupIds),
-        eq(schema.matches.status, 'COMPLETED'),
-        isNull(schema.matches.deletedAt),
-      ));
+      .where(
+        and(
+          inArray(schema.matches.groupId, groupIds),
+          eq(schema.matches.status, 'COMPLETED'),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
 
     for (const [groupId, groupRows] of standingsByGroup) {
       const ordered = sortFootballStandings(groupRows, groupMatches);
@@ -5937,34 +7314,42 @@ export class TournamentsRepository {
     });
 
     // Lấy participant info kèm seed
-    const participantIds = [...new Set(sortedStandings.map(s => s.participantId))];
-    const participants = participantIds.length > 0
-      ? await this.db
-          .select({
-            id: schema.tournamentParticipants.id,
-            teamName: schema.tournamentParticipants.teamName,
-            logoUrl: schema.tournamentParticipants.footballTeamLogoUrl,
-            seed: schema.tournamentParticipants.seed,
-          })
-          .from(schema.tournamentParticipants)
-          .where(inArray(schema.tournamentParticipants.id, participantIds))
-      : [];
+    const participantIds = [
+      ...new Set(sortedStandings.map((s) => s.participantId)),
+    ];
+    const participants =
+      participantIds.length > 0
+        ? await this.db
+            .select({
+              id: schema.tournamentParticipants.id,
+              teamName: schema.tournamentParticipants.teamName,
+              logoUrl: schema.tournamentParticipants.footballTeamLogoUrl,
+              seed: schema.tournamentParticipants.seed,
+            })
+            .from(schema.tournamentParticipants)
+            .where(inArray(schema.tournamentParticipants.id, participantIds))
+        : [];
 
-    const participantMap = new Map(participants.map(p => [p.id, { teamName: p.teamName, logoUrl: p.logoUrl, seed: p.seed }]));
+    const participantMap = new Map(
+      participants.map((p) => [
+        p.id,
+        { teamName: p.teamName, logoUrl: p.logoUrl, seed: p.seed },
+      ]),
+    );
 
     return {
-      stages: stages.map(s => ({
+      stages: stages.map((s) => ({
         id: s.id,
         name: s.name,
         type: s.type,
         order: s.order,
       })),
-      groups: groups.map(g => ({
+      groups: groups.map((g) => ({
         id: g.id,
         name: g.name,
         stageId: g.stageId,
       })),
-      standings: sortedStandings.map(s => ({
+      standings: sortedStandings.map((s) => ({
         id: s.id,
         groupId: s.groupId,
         participantId: s.participantId,
@@ -5988,7 +7373,10 @@ export class TournamentsRepository {
       isNull(schema.matches.deletedAt),
       isNull(schema.tournamentStages.deletedAt),
     ];
-    if (divisionId) conditions.push(eq(schema.tournamentStages.tournamentDivisionId, divisionId));
+    if (divisionId)
+      conditions.push(
+        eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+      );
 
     return this.db
       .select({
@@ -6009,9 +7397,18 @@ export class TournamentsRepository {
         participant2Name: sql<string | null>`p2.team_name`,
       })
       .from(schema.matches)
-      .innerJoin(schema.tournamentStages, eq(schema.matches.stageId, schema.tournamentStages.id))
-      .leftJoin(sql`"tournament_participants" p1`, sql`p1.id = ${schema.matches.participant1Id}`)
-      .leftJoin(sql`"tournament_participants" p2`, sql`p2.id = ${schema.matches.participant2Id}`)
+      .innerJoin(
+        schema.tournamentStages,
+        eq(schema.matches.stageId, schema.tournamentStages.id),
+      )
+      .leftJoin(
+        sql`"tournament_participants" p1`,
+        sql`p1.id = ${schema.matches.participant1Id}`,
+      )
+      .leftJoin(
+        sql`"tournament_participants" p2`,
+        sql`p2.id = ${schema.matches.participant2Id}`,
+      )
       .where(and(...conditions))
       .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
   }
