@@ -633,6 +633,7 @@ export class TournamentsService {
         bracketType: finalBracketType,
         maxTeams,
         isRanked: dto.isRanked ?? false,
+        advanceDays: dto.recurringAdvanceDays ?? 0,
         nextRunAt: nextRun.toISOString(),
         lastGeneratedAt: new Date().toISOString(),
       };
@@ -1748,7 +1749,7 @@ export class TournamentsService {
       }
     }
 
-    const userIds = [userId];
+    let userIds = [userId];
     let partnerUser: { id: string } | null = null;
     if (registerTournamentDto.partnerEmailOrPhone) {
       partnerUser = await this.tournamentsRepository.findUserByEmailOrPhone(registerTournamentDto.partnerEmailOrPhone);
@@ -1765,9 +1766,48 @@ export class TournamentsService {
       ? await this.tournamentsRepository.findDivisionById(requestedDivisionId)
       : null;
 
+    const tournamentConfig = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    const isFootballTeamTournament =
+      tournamentConfig.teamSize != null || tournamentConfig.minTeamSize != null;
+    let footballTeam: Awaited<ReturnType<TournamentsRepository['findFootballTeamForRegistration']>> = null;
+    if (isFootballTeamTournament) {
+      if (registerTournamentDto.partnerEmailOrPhone) {
+        throw new BadRequestException('Giải bóng đá dùng đội đã tạo, không ghép đồng đội bằng email.');
+      }
+      if (!registerTournamentDto.footballTeamId) {
+        throw new BadRequestException('Vui lòng chọn đội bóng trước khi đăng ký.');
+      }
+      footballTeam = await this.tournamentsRepository.findFootballTeamForRegistration(
+        registerTournamentDto.footballTeamId,
+        userId,
+      );
+      if (!footballTeam || footballTeam.status !== 'ACTIVE') {
+        throw new ForbiddenException('Bạn không có quyền đăng ký bằng đội bóng này.');
+      }
+      if (!['CAPTAIN', 'MANAGER'].includes(footballTeam.membership.role)) {
+        throw new ForbiddenException('Chỉ đội trưởng hoặc quản lý mới được đăng ký đội bóng.');
+      }
+      if (footballTeam.categoryId !== tournament.categoryId) {
+        throw new BadRequestException('Đội bóng không cùng môn thể thao với giải đấu.');
+      }
+      const minTeamSize = Number(tournamentConfig.minTeamSize ?? tournamentConfig.teamSize ?? 0);
+      const maxTeamSize = Number(tournamentConfig.maxTeamSize ?? tournamentConfig.teamSize ?? 99);
+      const activeTeamMemberIds = new Set(footballTeam.members.map((member) => member.userId));
+      const requestedMemberIds = registerTournamentDto.memberIds?.length
+        ? [...new Set([userId, ...registerTournamentDto.memberIds])]
+        : [...activeTeamMemberIds];
+      if (requestedMemberIds.some((memberId) => !activeTeamMemberIds.has(memberId))) {
+        throw new BadRequestException('Đội hình đăng ký chỉ được chọn thành viên đang hoạt động của đội bóng.');
+      }
+      if (requestedMemberIds.length < minTeamSize || requestedMemberIds.length > maxTeamSize) {
+        throw new BadRequestException(`Đội hình phải có từ ${minTeamSize} đến ${maxTeamSize} thành viên.`);
+      }
+      userIds = requestedMemberIds;
+    }
+
     await this.validateEloLimits(tournament, userIds, { division: requestedDivision });
     // Khi mời partner ngay: chặn đội vi phạm genderRestriction của division
-    await this.validateGenderRestriction(requestedDivision, [userId, partnerUser?.id]);
+    await this.validateGenderRestriction(requestedDivision, userIds);
 
     const result = await this.tournamentsRepository.registerParticipant(id, userId, registerTournamentDto, inviteCode);
 
@@ -1898,6 +1938,9 @@ export class TournamentsService {
     }
 
     const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (participant?.rosterLockedAt) {
+      throw new BadRequestException('Roster đội đã được khóa, không thể thêm thành viên.');
+    }
     const division = participant?.tournamentDivisionId
       ? await this.tournamentsRepository.findDivisionById(participant.tournamentDivisionId)
       : null;
@@ -2013,6 +2056,10 @@ export class TournamentsService {
       throw new BadRequestException('Giải đấu không trong thời gian đăng ký.');
     }
 
+    if (participant.rosterLockedAt) {
+      throw new BadRequestException('Roster đội đã được khóa, không thể thêm thành viên.');
+    }
+
     // Chặn mời chính mình
     if (memberUserId === userId) {
       throw new BadRequestException('Bạn đã là đội trưởng của đội.');
@@ -2034,7 +2081,7 @@ export class TournamentsService {
       throw new BadRequestException('Thành viên này đã ở trong đội.');
     }
 
-    return this.tournamentsRepository.addRoster(participantId, memberUserId, role);
+    return this.tournamentsRepository.addRoster(participantId, memberUserId, role, maxTeamSize);
   }
 
   /**
@@ -2050,6 +2097,10 @@ export class TournamentsService {
     }
     if (memberUserId === userId) {
       throw new BadRequestException('Không thể tự xoá đội trưởng. Hãy rút đội.');
+    }
+
+    if (participant.rosterLockedAt) {
+      throw new BadRequestException('Roster đội đã được khóa, không thể xóa thành viên.');
     }
 
     return this.tournamentsRepository.removeRoster(participantId, memberUserId);
@@ -2883,6 +2934,27 @@ export class TournamentsService {
     }
 
     return updated;
+  }
+
+  async lockParticipantRoster(
+    tournamentId: string,
+    participantId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+    if (!['REGISTRATION_CLOSED', 'UPCOMING', 'IN_PROGRESS', 'ONGOING'].includes(tournament.status)) {
+      throw new BadRequestException('Chỉ được khóa roster sau khi đóng đăng ký.');
+    }
+    if (!(await this.isManager(tournament, userId, systemRoles))) {
+      throw new ForbiddenException('Bạn không có quyền khóa roster.');
+    }
+    const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant || participant.tournamentId !== tournamentId) {
+      throw new NotFoundException('Người tham gia không tồn tại');
+    }
+    return this.tournamentsRepository.lockParticipantRoster(participantId, userId);
   }
 
   async assignReservedSlot(
