@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, lte, gte, sql } from 'drizzle-orm';
+import { eq, and, lte, gte, ne, isNull, sql } from 'drizzle-orm';
 
 @Injectable()
 export class TournamentSchedulerService {
@@ -139,6 +139,8 @@ export class TournamentSchedulerService {
         .where(
           and(
             eq(schema.tournaments.tournamentType, 'CLUB'),
+            isNull(schema.tournaments.deletedAt),
+            ne(schema.tournaments.status, 'CANCELLED'),
             sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'enabled')::boolean = true`,
             sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt')::timestamptz <= ${now}`
           )
@@ -156,7 +158,7 @@ export class TournamentSchedulerService {
         const timeOfDay = rec.timeOfDay || '18:00';
 
         const nextTournamentDate = new Date(rec.nextRunAt || now);
-        const dateStr = nextTournamentDate.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const dateStr = nextTournamentDate.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric' });
         const newName = `${rec.templateName || t.name} (${dateStr})`;
 
         const [hours, minutes] = timeOfDay.split(':').map(Number);
@@ -170,6 +172,7 @@ export class TournamentSchedulerService {
           },
         };
 
+        const inviteCode = Math.random().toString(36).substring(2, 10).toUpperCase();
         const newTournament = await this.db
           .insert(schema.tournaments)
           .values({
@@ -189,6 +192,7 @@ export class TournamentSchedulerService {
             registrationStartDate: now,
             registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
             status: 'REGISTRATION_OPEN',
+            inviteCode,
             createdBy: t.createdBy,
           })
           .returning();
