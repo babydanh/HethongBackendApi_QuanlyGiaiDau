@@ -25,4 +25,12 @@ export class CreateMessageDto {
   @IsString({ each: true })
   @IsOptional()
   attachmentsUrls?: string[];
+
+  @ApiPropertyOptional({
+    example: 'uuid-message-id',
+    description: 'ID tin nhắn được trả lời/trích dẫn',
+  })
+  @IsUUID()
+  @IsOptional()
+  replyToId?: string;
 }

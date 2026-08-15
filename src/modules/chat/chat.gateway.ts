@@ -210,4 +210,24 @@ export class ChatGateway {
   broadcastSupportRead(roomId: string) {
     this.server.to(this.supportStaffRoom).emit('support:read', { roomId });
   }
+
+  broadcastMessageRevoked(roomId: string, messageId: string, revokedBy: string) {
+    this.server.to(`chat:${roomId}`).emit('chat:message:revoked', { roomId, messageId, revokedBy });
+  }
+
+  broadcastMessagePinned(roomId: string, messageId: string, pinnedBy: string, pinnedMessage?: unknown) {
+    this.server.to(`chat:${roomId}`).emit('chat:message:pinned', { roomId, messageId, pinnedBy, pinnedMessage });
+  }
+
+  broadcastMessageUnpinned(roomId: string, messageId: string, unpinnedBy: string) {
+    this.server.to(`chat:${roomId}`).emit('chat:message:unpinned', { roomId, messageId, unpinnedBy });
+  }
+
+  broadcastMessageReaction(roomId: string, messageId: string, userId: string, emoji: string, reactions: string[]) {
+    this.server.to(`chat:${roomId}`).emit('chat:message:reaction', { roomId, messageId, userId, emoji, reactions });
+  }
+
+  broadcastRoomUpdated(roomId: string, room: unknown) {
+    this.server.to(`chat:${roomId}`).emit('chat:room:updated', { roomId, room });
+  }
 }

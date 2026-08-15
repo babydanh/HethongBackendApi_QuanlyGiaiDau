@@ -23,6 +23,17 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Verify backend tests before publishing image
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies and run tests
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm test -- --runInBand --silent
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -89,6 +100,21 @@ jobs:
 
             # 5. Khởi động lại service backend với image mới
             docker compose up -d --force-recreate --no-deps backend
+
+            # 5b. Smoke check public API after migration/restart. Fail the deploy
+            # if the container is running but the API cannot serve a basic read.
+            for attempt in 1 2 3 4 5; do
+              if curl --fail --silent --show-error --max-time 15 "https://sporto.asia/api/v1/categories?limit=1" >/dev/null; then
+                echo "Backend smoke check passed"
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "Backend smoke check failed"
+                docker compose logs --tail=80 backend
+                exit 1
+              fi
+              sleep 10
+            done
 
             # 6. Dọn dẹp các Docker Image cũ
             docker image prune -f

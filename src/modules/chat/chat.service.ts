@@ -103,7 +103,13 @@ export class ChatService {
     // P2D.1: room CLUB guard qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
     const roomType = room.type as RoomType;
     if (roomType === RoomType.CLUB && room.communityId) {
-      await this.assertClubMember(room.communityId, userId);
+      const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
+      if (!role) {
+        throw new ForbiddenException('Bạn phải là thành viên của CLB để gửi tin nhắn.');
+      }
+      if (room.isAnnouncementOnly && role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
+        throw new ForbiddenException('Phòng chat đang ở chế độ Chỉ Ban Quản Trị được nhắn tin.');
+      }
     } else {
       const isMember = await this.chatRepository.isMemberOfRoom(
         data.roomId,
@@ -172,6 +178,111 @@ export class ChatService {
     }
 
     return this.chatRepository.getMessagesPage(roomId, limit, cursor);
+  }
+
+  async revokeMessage(userId: string, messageId: string) {
+    const message = await this.chatRepository.findMessageById(messageId);
+    if (!message) {
+      throw new NotFoundException('Không tìm thấy tin nhắn.');
+    }
+    if (message.isRevoked) {
+      return message;
+    }
+
+    const room = await this.chatRepository.findRoomById(message.roomId);
+    if (!room) {
+      throw new NotFoundException('Không tìm thấy phòng chat.');
+    }
+
+    let isAllowed = message.senderId === userId;
+    if (!isAllowed && room.type === 'CLUB' && room.communityId) {
+      const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
+      isAllowed = role === 'OWNER' || role === 'ADMIN' || role === 'MODERATOR';
+    }
+
+    if (!isAllowed) {
+      throw new ForbiddenException('Bạn không có quyền thu hồi tin nhắn này.');
+    }
+
+    const updated = await this.chatRepository.revokeMessage(messageId, userId);
+    this.chatGateway.broadcastMessageRevoked(message.roomId, messageId, userId);
+    return updated;
+  }
+
+  async pinMessage(userId: string, roomId: string, messageId: string) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
+
+    if (room.type === 'CLUB' && room.communityId) {
+      const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
+      if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
+        throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền ghim tin nhắn.');
+      }
+    }
+
+    const res = await this.chatRepository.pinMessage(roomId, messageId, userId);
+    const pinnedMsg = await this.chatRepository.getPinnedMessage(roomId);
+    this.chatGateway.broadcastMessagePinned(roomId, messageId, userId, pinnedMsg);
+    return res;
+  }
+
+  async unpinMessage(userId: string, roomId: string, messageId: string) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
+
+    if (room.type === 'CLUB' && room.communityId) {
+      const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
+      if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
+        throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền bỏ ghim tin nhắn.');
+      }
+    }
+
+    const res = await this.chatRepository.unpinMessage(roomId, messageId);
+    this.chatGateway.broadcastMessageUnpinned(roomId, messageId, userId);
+    return res;
+  }
+
+  async getPinnedMessage(userId: string, roomId: string) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
+
+    if (room.type === 'CLUB' && room.communityId) {
+      await this.assertClubMember(room.communityId, userId);
+    }
+
+    return this.chatRepository.getPinnedMessage(roomId);
+  }
+
+  async toggleReaction(userId: string, messageId: string, emoji: string) {
+    const message = await this.chatRepository.findMessageById(messageId);
+    if (!message) throw new NotFoundException('Không tìm thấy tin nhắn.');
+
+    const room = await this.chatRepository.findRoomById(message.roomId);
+    if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
+
+    if (room.type === 'CLUB' && room.communityId) {
+      await this.assertClubMember(room.communityId, userId);
+    }
+
+    const reactions = await this.chatRepository.toggleReaction(messageId, userId, emoji);
+    this.chatGateway.broadcastMessageReaction(message.roomId, messageId, userId, emoji, reactions);
+    return { reactions };
+  }
+
+  async updateClubRoomSettings(userId: string, roomId: string, data: { name?: string; clubAvatar?: string; isAnnouncementOnly?: boolean; slowModeSeconds?: number }) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room || room.type !== 'CLUB' || !room.communityId) {
+      throw new NotFoundException('Phòng chat CLB không tồn tại.');
+    }
+
+    const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
+    if (role !== 'OWNER' && role !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ Chủ nhiệm hoặc Quản trị viên mới có thể đổi cài đặt phòng chat.');
+    }
+
+    const updated = await this.chatRepository.updateClubRoomSettings(roomId, data);
+    this.chatGateway.broadcastRoomUpdated(roomId, updated);
+    return updated;
   }
 
   async markRoomRead(userId: string, roomId: string) {
