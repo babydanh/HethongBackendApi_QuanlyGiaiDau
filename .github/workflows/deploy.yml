@@ -106,21 +106,20 @@ jobs:
             # 5. Khởi động lại service backend với image mới
             docker compose up -d --force-recreate --no-deps backend
 
-            # 5b. Smoke check API after migration/restart. Check local container port first,
-            # then public domain if available. Fail the deploy only if backend cannot serve requests.
-            for attempt in 1 2 3 4 5; do
-              if curl --fail --silent --show-error --max-time 15 "http://127.0.0.1:3000/api/v1/categories?limit=1" >/dev/null || \
-                 curl --fail --silent --show-error --max-time 15 "http://localhost:3000/api/v1/categories?limit=1" >/dev/null || \
-                 curl --fail --silent --show-error --insecure --max-time 15 "https://sporto.asia/api/v1/categories?limit=1" >/dev/null; then
+            # 5b. Smoke check API directly inside the backend container.
+            # This verifies the Nest application is alive, responsive, and connected to DB/Redis.
+            for attempt in 1 2 3 4 5 6; do
+              if docker compose exec -T backend node -e "const http=require('http');http.get('http://127.0.0.1:3000/api/v1/categories?limit=1',r=>process.exit(r.statusCode>=200&&r.statusCode<400?0:1)).on('error',()=>process.exit(1))" 2>/dev/null || \
+                 curl --fail --silent --show-error -H "User-Agent: Mozilla/5.0" --insecure --max-time 10 "https://sporto.asia/api/v1/categories?limit=1" >/dev/null; then
                 echo "Backend smoke check passed"
                 break
               fi
-              if [ "$attempt" -eq 5 ]; then
+              if [ "$attempt" -eq 6 ]; then
                 echo "Backend smoke check failed"
                 docker compose logs --tail=80 backend
                 exit 1
               fi
-              sleep 10
+              sleep 5
             done
 
             # 6. Dọn dẹp các Docker Image cũ
