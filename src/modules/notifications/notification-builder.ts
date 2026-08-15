@@ -2,6 +2,59 @@ import type { CreateNotificationDto } from './dto/create-notification.dto';
 import { NOTIFICATION_TYPES } from './notification-types';
 
 const getCommunityRedirect = (communityId: string): string => `/communities/${communityId}`;
+const getFootballTeamRedirect = (teamId: string): string => `/teams/${teamId}`;
+
+export const buildFootballTeamNotification = (params: {
+  teamId: string;
+  teamName: string;
+  receiverId: string;
+  senderId?: string;
+  type:
+    | 'FOOTBALL_TEAM_INVITED'
+    | 'FOOTBALL_TEAM_INVITE_ACCEPTED'
+    | 'FOOTBALL_TEAM_INVITE_DECLINED'
+    | 'FOOTBALL_TEAM_INVITE_CANCELLED'
+    | 'FOOTBALL_TEAM_ROLE_CHANGED'
+    | 'FOOTBALL_TEAM_MEMBER_REMOVED'
+    | 'FOOTBALL_TEAM_MEMBER_LEFT';
+}): CreateNotificationDto => {
+  const copy = {
+    FOOTBALL_TEAM_INVITED: ['Lời mời tham gia đội bóng', `Bạn được mời tham gia ${params.teamName}.`],
+    FOOTBALL_TEAM_INVITE_ACCEPTED: ['Lời mời đã được chấp nhận', `Một thành viên đã tham gia ${params.teamName}.`],
+    FOOTBALL_TEAM_INVITE_DECLINED: ['Lời mời đã bị từ chối', `Lời mời tham gia ${params.teamName} đã bị từ chối.`],
+    FOOTBALL_TEAM_INVITE_CANCELLED: ['Lời mời đã được hủy', `Lời mời tham gia ${params.teamName} đã được hủy.`],
+    FOOTBALL_TEAM_ROLE_CHANGED: ['Vai trò đội bóng đã thay đổi', `Vai trò của bạn trong ${params.teamName} đã được cập nhật.`],
+    FOOTBALL_TEAM_MEMBER_REMOVED: ['Bạn đã rời đội hình', `Bạn đã được xóa khỏi ${params.teamName}.`],
+    FOOTBALL_TEAM_MEMBER_LEFT: ['Thành viên đã rời đội', `Một thành viên đã rời ${params.teamName}.`],
+  } as const;
+  const [title, content] = copy[params.type];
+  return {
+    receiverId: params.receiverId,
+    senderId: params.senderId,
+    type: NOTIFICATION_TYPES[params.type],
+    title,
+    content,
+    redirectUrl: getFootballTeamRedirect(params.teamId),
+  };
+};
+
+export const buildFootballRosterConfirmationNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  divisionId?: string;
+  participantId?: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.TOURNAMENT_FOOTBALL_ROSTER_CONFIRMATION,
+  title: 'Xác nhận đội hình thi đấu',
+  content: `Bạn được chọn vào đội hình ${params.tournamentName}. Hãy xác nhận trước khi Ban tổ chức khóa roster.`,
+  redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
+    divisionId: params.divisionId,
+    tab: 'teams',
+    participantId: params.participantId,
+  }),
+});
 
 const buildRedirectPath = (
   pathname: string,
@@ -21,20 +74,22 @@ const buildRedirectPath = (
 
 const getTournamentRedirect = (
   tournamentId: string,
-  options?: { tab?: string; divisionId?: string },
+  options?: { tab?: string; divisionId?: string; participantId?: string },
 ): string =>
   buildRedirectPath(`/tournaments/${tournamentId}`, {
     tab: options?.tab,
     divisionId: options?.divisionId,
+    participantId: options?.participantId,
   });
 
 const getParticipantTournamentRedirect = (
   tournamentId: string,
-  options?: { divisionId?: string; tab?: 'teams' | 'bracket' | 'matches' },
+  options?: { divisionId?: string; tab?: 'teams' | 'bracket' | 'matches'; participantId?: string },
 ): string =>
   getTournamentRedirect(tournamentId, {
     tab: options?.tab ?? 'teams',
     divisionId: options?.divisionId,
+    participantId: options?.participantId,
   });
 
 const getOrganizerTournamentRedirect = (

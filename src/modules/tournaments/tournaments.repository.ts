@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
@@ -1403,7 +1403,7 @@ export class TournamentsRepository {
 
       // Team sport: luôn tạo link mời mở (token), không giới hạn 1h partner.
       // Đôi: token mời đồng đội như cũ (PENDING_PARTNER, hết hạn theo deadline).
-      const teamInviteToken = (isDoubles || isTeamSport)
+      const teamInviteToken = (isDoubles || (isTeamSport && !data.footballTeamId))
         ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase()
         : null;
       const inviteBaseExpiresAt = new Date(now.getTime() + 60 * 60 * 1000);
@@ -1423,6 +1423,45 @@ export class TournamentsRepository {
       const isPaid = payableEntryFeeAmount === 0;
 
       let finalTeamName = (data.teamName || '').trim();
+      let footballTeamMemberIds: string[] = [];
+      let footballTeamLogoUrl: string | null = null;
+      if (isTeamSport && data.footballTeamId) {
+        const [footballTeam] = await tx.select({
+          id: schema.footballTeams.id,
+          name: schema.footballTeams.name,
+          categoryId: schema.footballTeams.categoryId,
+          logoUrl: schema.footballTeams.logoUrl,
+          status: schema.footballTeams.status,
+        }).from(schema.footballTeams)
+          .where(eq(schema.footballTeams.id, data.footballTeamId))
+          .limit(1);
+        if (!footballTeam || footballTeam.status !== 'ACTIVE' || footballTeam.categoryId !== tournament.categoryId) {
+          throw new BadRequestException('Đội bóng không hợp lệ cho giải đấu này.');
+        }
+        const [leaderMembership] = await tx.select({ role: schema.footballTeamMembers.role })
+          .from(schema.footballTeamMembers)
+          .where(and(
+            eq(schema.footballTeamMembers.teamId, data.footballTeamId),
+            eq(schema.footballTeamMembers.userId, userId),
+            eq(schema.footballTeamMembers.status, 'ACTIVE'),
+          )).limit(1);
+        if (!leaderMembership || !['CAPTAIN', 'MANAGER'].includes(leaderMembership.role)) {
+          throw new ForbiddenException('Chỉ đội trưởng hoặc quản lý mới được đăng ký đội bóng.');
+        }
+        const footballMembers = await tx.select({ userId: schema.footballTeamMembers.userId })
+          .from(schema.footballTeamMembers)
+          .where(and(eq(schema.footballTeamMembers.teamId, data.footballTeamId), eq(schema.footballTeamMembers.status, 'ACTIVE')));
+        const requestedMemberIds = Array.isArray(data.memberIds) && data.memberIds.length > 0
+          ? [...new Set([userId, ...data.memberIds])]
+          : footballMembers.map((member) => member.userId);
+        const activeMemberIds = new Set(footballMembers.map((member) => member.userId));
+        if (requestedMemberIds.some((memberId) => !activeMemberIds.has(memberId))) {
+          throw new BadRequestException('Đội hình đăng ký chứa thành viên không còn hoạt động trong đội bóng.');
+        }
+        footballTeamMemberIds = requestedMemberIds;
+        finalTeamName = footballTeam.name;
+        footballTeamLogoUrl = footballTeam.logoUrl ?? null;
+      }
       if (!finalTeamName) {
         const [leaderProfile] = await tx
           .select({ fullName: schema.profiles.fullName })
@@ -1439,6 +1478,8 @@ export class TournamentsRepository {
           tournamentDivisionId: selectedDivision?.id ?? null,
           registeredBy: userId,
           teamName: finalTeamName,
+          footballTeamId: isTeamSport ? (data.footballTeamId ?? null) : null,
+          footballTeamLogoUrl: isTeamSport ? footballTeamLogoUrl : null,
           rankingConsent: data.rankingConsent === true,
           isPaid,
           // Keep the invite token even when a known partner was selected so the
@@ -1458,8 +1499,11 @@ export class TournamentsRepository {
       });
 
       // 10b. Team sport: thêm các thành viên (memberIds) như roster MAIN.
-      if (isTeamSport && Array.isArray(data.memberIds) && data.memberIds.length > 0) {
-        const uniqueMemberIds = [...new Set(data.memberIds.filter((mid) => mid !== userId))];
+      if (isTeamSport) {
+        const requestedMemberIds = footballTeamMemberIds.length > 0
+          ? footballTeamMemberIds
+          : (Array.isArray(data.memberIds) ? data.memberIds : []);
+        const uniqueMemberIds = [...new Set(requestedMemberIds.filter((mid) => mid !== userId))];
         for (const mid of uniqueMemberIds) {
           // Chống trùng + không để user đã ở roster khác của giải
           const [existing] = await tx
@@ -1481,6 +1525,55 @@ export class TournamentsRepository {
         }
       }
 
+      // Keep a first-class football entry/snapshot alongside the legacy
+      // participant rows. The participant remains the bracket-compatible
+      // source, while this entry tracks per-member confirmation and survives
+      // later changes to the external team.
+      if (isTeamSport && data.footballTeamId && selectedDivision?.id) {
+        const snapshotMemberIds = [...new Set(
+          (footballTeamMemberIds.length > 0 ? footballTeamMemberIds : [userId])
+            .filter((memberId) => memberId.trim().length > 0),
+        )];
+        const captainRows = await tx
+          .select({ userId: schema.footballTeamMembers.userId })
+          .from(schema.footballTeamMembers)
+          .where(and(
+            eq(schema.footballTeamMembers.teamId, data.footballTeamId),
+            eq(schema.footballTeamMembers.status, 'ACTIVE'),
+            or(
+              eq(schema.footballTeamMembers.role, 'CAPTAIN'),
+              eq(schema.footballTeamMembers.role, 'MANAGER'),
+            ),
+          ));
+        const captainIdsSnapshot = captainRows.map((row) => row.userId);
+        const hasPendingConfirmation = snapshotMemberIds.some((memberId) => memberId !== userId);
+        const [entry] = await tx
+          .insert(schema.tournamentTeamEntries)
+          .values({
+            tournamentId,
+            divisionId: selectedDivision.id,
+            teamId: data.footballTeamId,
+            status: hasPendingConfirmation ? 'PENDING_CONFIRMATION' : 'CONFIRMED',
+            displayNameSnapshot: finalTeamName,
+            logoUrlSnapshot: footballTeamLogoUrl,
+            captainIdsSnapshot,
+            createdBy: userId,
+            confirmedAt: hasPendingConfirmation ? null : new Date(),
+          })
+          .returning({ id: schema.tournamentTeamEntries.id });
+
+        if (entry) {
+          await tx.insert(schema.tournamentTeamRosterSnapshots).values(
+            snapshotMemberIds.map((memberId) => ({
+              entryId: entry.id,
+              userId: memberId,
+              role: memberId === userId ? 'MAIN' : 'MAIN',
+              confirmationStatus: memberId === userId ? 'CONFIRMED' : 'PENDING',
+            })),
+          );
+        }
+      }
+
       // Payment intent is created later by the checkout flow.
       const paymentUrl: string | null = null;
 
@@ -1491,7 +1584,7 @@ export class TournamentsRepository {
         participant,
         entryFee: payableEntryFeeAmount,
         paymentUrl,
-        teamInviteLink: (isDoubles || isTeamSport)
+        teamInviteLink: (isDoubles || (isTeamSport && !data.footballTeamId))
           ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
           : null,
         isWaitlisted,
@@ -2312,6 +2405,33 @@ export class TournamentsRepository {
       .where(eq(schema.communitySports.communityId, communityId));
   }
 
+  async findFootballTeamForRegistration(teamId: string, userId: string) {
+    const [team] = await this.db.select({
+      team: schema.footballTeams,
+      membership: schema.footballTeamMembers,
+    })
+      .from(schema.footballTeams)
+      .innerJoin(
+        schema.footballTeamMembers,
+        and(
+          eq(schema.footballTeamMembers.teamId, schema.footballTeams.id),
+          eq(schema.footballTeamMembers.userId, userId),
+          eq(schema.footballTeamMembers.status, 'ACTIVE'),
+        ),
+      )
+      .where(eq(schema.footballTeams.id, teamId))
+      .limit(1);
+    if (!team) return null;
+
+    const members = await this.db.select({
+      userId: schema.footballTeamMembers.userId,
+      role: schema.footballTeamMembers.role,
+    })
+      .from(schema.footballTeamMembers)
+      .where(and(eq(schema.footballTeamMembers.teamId, teamId), eq(schema.footballTeamMembers.status, 'ACTIVE')));
+    return { ...team.team, membership: team.membership, members };
+  }
+
   async findCommunityById(communityId: string) {
     const [record] = await this.db
       .select({
@@ -2662,6 +2782,7 @@ export class TournamentsRepository {
         .select({
           id: schema.tournamentParticipants.id,
           teamName: schema.tournamentParticipants.teamName,
+          logoUrl: schema.tournamentParticipants.footballTeamLogoUrl,
           seed: schema.tournamentParticipants.seed,
         })
         .from(schema.tournamentParticipants)
@@ -3606,6 +3727,134 @@ export class TournamentsRepository {
     });
   }
 
+  async lockParticipantRoster(participantId: string, userId: string) {
+    return this.db.transaction(async (tx) => {
+      const [participant] = await tx.select().from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .for('update')
+        .limit(1);
+      if (!participant) return null;
+      if (participant.teamStatus !== 'COMPLETE' && participant.teamStatus !== 'APPROVED') {
+        throw new BadRequestException('Chỉ đội đã hoàn tất đăng ký mới được khóa roster.');
+      }
+      if (participant.rosterLockedAt) return participant;
+      const [updated] = await tx.update(schema.tournamentParticipants)
+        .set({ rosterLockedAt: new Date() })
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .returning();
+      if (updated) {
+        await this.auditService.logUpdate(
+          tx,
+          userId,
+          'tournament_participants',
+          participantId,
+          participant as unknown as Record<string, unknown>,
+          updated as unknown as Record<string, unknown>,
+        );
+      }
+      return updated ?? null;
+    });
+  }
+
+  async findFootballEntryForParticipant(participantId: string) {
+    const [row] = await this.db
+      .select({
+        entry: schema.tournamentTeamEntries,
+        participant: {
+          tournamentId: schema.tournamentParticipants.tournamentId,
+          divisionId: schema.tournamentParticipants.tournamentDivisionId,
+          teamId: schema.tournamentParticipants.footballTeamId,
+        },
+      })
+      .from(schema.tournamentParticipants)
+      .leftJoin(
+        schema.tournamentTeamEntries,
+        and(
+          eq(schema.tournamentTeamEntries.tournamentId, schema.tournamentParticipants.tournamentId),
+          eq(schema.tournamentTeamEntries.divisionId, schema.tournamentParticipants.tournamentDivisionId),
+          eq(schema.tournamentTeamEntries.teamId, schema.tournamentParticipants.footballTeamId),
+        ),
+      )
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async getFootballEntryRoster(entryId: string) {
+    return this.db
+      .select({
+        id: schema.tournamentTeamRosterSnapshots.id,
+        userId: schema.tournamentTeamRosterSnapshots.userId,
+        role: schema.tournamentTeamRosterSnapshots.role,
+        confirmationStatus: schema.tournamentTeamRosterSnapshots.confirmationStatus,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.tournamentTeamRosterSnapshots)
+      .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.tournamentTeamRosterSnapshots.userId))
+      .where(eq(schema.tournamentTeamRosterSnapshots.entryId, entryId));
+  }
+
+  async respondFootballRoster(entryId: string, userId: string, action: 'CONFIRM' | 'DECLINE') {
+    return this.db.transaction(async (tx) => {
+      const [snapshot] = await tx
+        .select()
+        .from(schema.tournamentTeamRosterSnapshots)
+        .where(and(
+          eq(schema.tournamentTeamRosterSnapshots.entryId, entryId),
+          eq(schema.tournamentTeamRosterSnapshots.userId, userId),
+        ))
+        .for('update')
+        .limit(1);
+      if (!snapshot) throw new NotFoundException('Bạn không nằm trong roster đăng ký đội này.');
+
+      await tx
+        .update(schema.tournamentTeamRosterSnapshots)
+        .set({ confirmationStatus: action === 'CONFIRM' ? 'CONFIRMED' : 'DECLINED' })
+        .where(eq(schema.tournamentTeamRosterSnapshots.id, snapshot.id));
+
+      const remaining = await tx
+        .select({ confirmationStatus: schema.tournamentTeamRosterSnapshots.confirmationStatus })
+        .from(schema.tournamentTeamRosterSnapshots)
+        .where(eq(schema.tournamentTeamRosterSnapshots.entryId, entryId));
+      const hasDeclined = remaining.some((row) => row.confirmationStatus === 'DECLINED');
+      const hasPending = remaining.some((row) => row.confirmationStatus === 'PENDING');
+      const nextStatus = hasDeclined || hasPending ? 'PENDING_CONFIRMATION' : 'CONFIRMED';
+      await tx
+        .update(schema.tournamentTeamEntries)
+        .set({
+          status: nextStatus,
+          confirmedAt: nextStatus === 'CONFIRMED' ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.tournamentTeamEntries.id, entryId));
+      return { entryId, confirmationStatus: action === 'CONFIRM' ? 'CONFIRMED' : 'DECLINED', status: nextStatus };
+    });
+  }
+
+  async lockFootballEntry(entryId: string, userId: string) {
+    return this.db.transaction(async (tx) => {
+      const [entry] = await tx
+        .select()
+        .from(schema.tournamentTeamEntries)
+        .where(eq(schema.tournamentTeamEntries.id, entryId))
+        .for('update')
+        .limit(1);
+      if (!entry) throw new NotFoundException('Đăng ký đội bóng không tồn tại.');
+      if (entry.status === 'LOCKED') return entry;
+      if (entry.status !== 'CONFIRMED') {
+        throw new BadRequestException('Chưa đủ thành viên xác nhận roster để khóa đội.');
+      }
+      const [updated] = await tx
+        .update(schema.tournamentTeamEntries)
+        .set({ status: 'LOCKED', lockedAt: new Date(), updatedAt: new Date() })
+        .where(eq(schema.tournamentTeamEntries.id, entryId))
+        .returning();
+      await this.auditService.logUpdate(tx, userId, 'tournament_team_entries', entryId, entry, updated);
+      return updated;
+    });
+  }
+
   async findParticipantById(participantId: string) {
     const [participant] = await this.db
       .select()
@@ -3626,42 +3875,61 @@ export class TournamentsRepository {
   }
 
   /** Team sport: đội trưởng thêm 1 thành viên vào đội (role MAIN/RESERVE). */
-  async addRoster(participantId: string, userId: string, role: 'MAIN' | 'RESERVE') {
-    const [existing] = await this.db
-      .select()
-      .from(schema.tournamentRosters)
-      .where(
-        and(
+  async addRoster(participantId: string, userId: string, role: 'MAIN' | 'RESERVE', maxTeamSize?: number) {
+    return this.db.transaction(async (tx) => {
+      const [participant] = await tx.select({
+        id: schema.tournamentParticipants.id,
+        rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
+      }).from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .for('update')
+        .limit(1);
+      if (!participant) throw new NotFoundException('Đội thi đấu không tồn tại.');
+      if (participant.rosterLockedAt) {
+        throw new BadRequestException('Roster đội đã được khóa, không thể thêm thành viên.');
+      }
+      const existing = await tx.select({ id: schema.tournamentRosters.id })
+        .from(schema.tournamentRosters)
+        .where(and(
           eq(schema.tournamentRosters.participantId, participantId),
           eq(schema.tournamentRosters.userId, userId),
-        ),
-      )
-      .limit(1);
-    if (existing) {
-      throw new BadRequestException('Thành viên này đã có trong đội.');
-    }
-    const [row] = await this.db
-      .insert(schema.tournamentRosters)
-      .values({ participantId, userId, role })
-      .returning();
-    return row;
+        )).limit(1);
+      if (existing.length > 0) throw new BadRequestException('Thành viên này đã có trong đội.');
+      if (maxTeamSize !== undefined) {
+        const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` })
+          .from(schema.tournamentRosters)
+          .where(eq(schema.tournamentRosters.participantId, participantId));
+        if (Number(count) >= maxTeamSize) throw new BadRequestException('Đội đã đạt số thành viên tối đa.');
+      }
+      const [row] = await tx.insert(schema.tournamentRosters)
+        .values({ participantId, userId, role })
+        .returning();
+      return row;
+    });
   }
 
   /** Team sport: đội trưởng xoá thành viên khỏi đội. */
   async removeRoster(participantId: string, userId: string) {
-    const deleted = await this.db
-      .delete(schema.tournamentRosters)
-      .where(
-        and(
+    return this.db.transaction(async (tx) => {
+      const [participant] = await tx.select({
+        id: schema.tournamentParticipants.id,
+        rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
+      }).from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .for('update')
+        .limit(1);
+      if (!participant) throw new NotFoundException('Đội thi đấu không tồn tại.');
+      if (participant.rosterLockedAt) {
+        throw new BadRequestException('Roster đội đã được khóa, không thể xóa thành viên.');
+      }
+      const deleted = await tx.delete(schema.tournamentRosters)
+        .where(and(
           eq(schema.tournamentRosters.participantId, participantId),
           eq(schema.tournamentRosters.userId, userId),
-        ),
-      )
-      .returning();
-    if (deleted.length === 0) {
-      throw new BadRequestException('Không tìm thấy thành viên này trong đội.');
-    }
-    return deleted[0];
+        )).returning();
+      if (deleted.length === 0) throw new BadRequestException('Không tìm thấy thành viên này trong đội.');
+      return deleted[0];
+    });
   }
 
   async findUserByEmailOrPhone(emailOrPhone: string) {
@@ -5509,13 +5777,14 @@ export class TournamentsRepository {
           .select({
             id: schema.tournamentParticipants.id,
             teamName: schema.tournamentParticipants.teamName,
+            logoUrl: schema.tournamentParticipants.footballTeamLogoUrl,
             seed: schema.tournamentParticipants.seed,
           })
           .from(schema.tournamentParticipants)
           .where(inArray(schema.tournamentParticipants.id, participantIds))
       : [];
 
-    const participantMap = new Map(participants.map(p => [p.id, { teamName: p.teamName, seed: p.seed }]));
+    const participantMap = new Map(participants.map(p => [p.id, { teamName: p.teamName, logoUrl: p.logoUrl, seed: p.seed }]));
 
     return {
       stages: stages.map(s => ({
@@ -5534,6 +5803,7 @@ export class TournamentsRepository {
         groupId: s.groupId,
         participantId: s.participantId,
         teamName: participantMap.get(s.participantId)?.teamName || 'Unknown',
+        logoUrl: participantMap.get(s.participantId)?.logoUrl || null,
         seed: participantMap.get(s.participantId)?.seed || null,
         played: s.played,
         won: s.won,

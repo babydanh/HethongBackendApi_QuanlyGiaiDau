@@ -1,6 +1,7 @@
 import { Controller, Get, Query, Post, Body, Param, ParseUUIDPipe } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { RankingsService } from './rankings.service';
+import { FootballTeamEloService } from './football-team-elo.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
 import { UpdateEloDto } from './dto/update-elo.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -11,7 +12,17 @@ import { UserRole } from '../../common/constants/enums';
 @ApiTags('rankings')
 @Controller('rankings')
 export class RankingsController {
-  constructor(private readonly rankingsService: RankingsService) {}
+  constructor(
+    private readonly rankingsService: RankingsService,
+    private readonly footballTeamEloService: FootballTeamEloService,
+  ) {}
+
+  @Public()
+  @Get('football-teams')
+  @ApiOperation({ summary: 'Bảng xếp hạng ELO bóng đá theo đội' })
+  async getFootballTeamLeaderboard(@Query() query: QueryRankingDto) {
+    return this.footballTeamEloService.getLeaderboard(query.categoryId, query.limit, query.cursor);
+  }
 
   @Public()
   @ApiBearerAuth()

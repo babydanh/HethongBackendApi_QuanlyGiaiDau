@@ -13,6 +13,11 @@ export class RegisterTournamentDto {
   @IsUUID('4', { each: true })
   memberIds?: string[];
 
+  @ApiPropertyOptional({ description: 'Đội bóng đã tạo trước đó dùng cho nội dung bóng đá' })
+  @IsUUID('4')
+  @IsOptional()
+  footballTeamId?: string;
+
   @ApiPropertyOptional({ description: 'Email hoặc SĐT của đồng đội (cho đánh đôi)' })
   @IsString()
   @IsOptional()

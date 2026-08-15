@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { RankingsRepository } from './rankings.repository';
 import { EloEngineService } from './elo-engine.service';
@@ -9,6 +9,7 @@ import type { AppTx, AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { RedisService } from '../../providers/redis/redis.service';
 import { PG_CONNECTION } from '../../database/database.module';
+import { FootballTeamEloService } from './football-team-elo.service';
 
 type Transaction = AppTx;
 
@@ -31,6 +32,7 @@ export class RankingsService {
     private readonly rankingsRepository: RankingsRepository,
     private readonly eloEngineService: EloEngineService,
     private readonly redisService: RedisService,
+    @Optional() private readonly footballTeamEloService?: FootballTeamEloService,
   ) {}
 
   private async invalidateLeaderboardCache(categoryId: string) {
@@ -1693,6 +1695,9 @@ export class RankingsService {
    * Idempotent by design (advisory lock + unique elo_history_logs index).
    */
   async processMatchResultFromOutbox(matchId: string) {
+    const footballResult = await this.footballTeamEloService?.processCompletedMatch(matchId);
+    if (footballResult?.handled) return footballResult;
+
     const [match] = await this.db
       .select({
         winnerId: schema.matches.winnerId,

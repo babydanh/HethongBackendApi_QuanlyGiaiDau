@@ -66,7 +66,9 @@ export const footballTeamInvites = pgTable('football_team_invites', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   respondedAt: timestamp('responded_at', { withTimezone: true }),
 }, (table) => ({
-  pendingUnique: uniqueIndex('uq_football_team_invites_pending').on(table.teamId, table.userId, table.status),
+  pendingUnique: uniqueIndex('uq_football_team_invites_pending')
+    .on(table.teamId, table.userId)
+    .where(sql`${table.status} = 'PENDING'`),
   userIndex: index('idx_football_team_invites_user_status').on(table.userId, table.status, table.createdAt),
   statusCheck: check('football_team_invites_status_check', sql`${table.status} IN ('PENDING', 'ACCEPTED', 'DECLINED', 'CANCELLED', 'EXPIRED')`),
 }));
