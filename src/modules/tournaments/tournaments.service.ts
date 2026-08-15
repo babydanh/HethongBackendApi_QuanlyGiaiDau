@@ -897,7 +897,13 @@ export class TournamentsService {
 
     // Register (capacity check is inside registerParticipant's transaction, FOR UPDATE)
     const result = await this.tournamentsRepository.registerParticipant(
-      tournament.id, userId, { teamName: name }, inviteCode,
+      tournament.id,
+      userId,
+      {
+        teamName: name,
+        rankingConsent: tournament.isRanked === true,
+      },
+      inviteCode,
     );
 
     return { id: result.participant.id, name, status: result.participant.teamStatus, tournamentId: tournament.id };
