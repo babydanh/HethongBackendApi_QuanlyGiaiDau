@@ -47,7 +47,6 @@ export class CreateCommunityPostDto {
   @ApiPropertyOptional({ maxLength: 5000 })
   @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(5000)
   body?: string;
 
