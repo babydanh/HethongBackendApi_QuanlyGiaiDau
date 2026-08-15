@@ -23,6 +23,9 @@ export class ChatRepository {
         communityId: schema.chatRooms.communityId,
         clubName: schema.chatRooms.clubName,
         clubAvatar: schema.chatRooms.clubAvatar,
+        isAnnouncementOnly: schema.chatRooms.isAnnouncementOnly,
+        slowModeSeconds: schema.chatRooms.slowModeSeconds,
+        pinnedMessageId: schema.chatRooms.pinnedMessageId,
         communityName: schema.communities.name,
         communityLogo: schema.communities.logoUrl,
         createdAt: schema.chatRooms.createdAt,
@@ -41,6 +44,9 @@ export class ChatRepository {
         communityId: schema.chatRooms.communityId,
         clubName: schema.chatRooms.clubName,
         clubAvatar: schema.chatRooms.clubAvatar,
+        isAnnouncementOnly: schema.chatRooms.isAnnouncementOnly,
+        slowModeSeconds: schema.chatRooms.slowModeSeconds,
+        pinnedMessageId: schema.chatRooms.pinnedMessageId,
         communityName: schema.communities.name,
         communityLogo: schema.communities.logoUrl,
         createdAt: schema.chatRooms.createdAt,
@@ -883,4 +889,15 @@ export class ChatRepository {
         ),
       );
   }
+
+  async getLastUserMessageInRoom(roomId: string, userId: string) {
+    const [msg] = await this.db
+      .select({ createdAt: schema.chatMessages.createdAt })
+      .from(schema.chatMessages)
+      .where(and(eq(schema.chatMessages.roomId, roomId), eq(schema.chatMessages.senderId, userId)))
+      .orderBy(desc(schema.chatMessages.createdAt))
+      .limit(1);
+    return msg ?? null;
+  }
 }
+
