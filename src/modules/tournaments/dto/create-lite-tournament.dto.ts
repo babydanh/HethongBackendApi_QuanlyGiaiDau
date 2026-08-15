@@ -125,4 +125,11 @@ export class CreateLiteTournamentDto {
   @IsString()
   @IsOptional()
   recurringTimeOfDay?: string;
+
+  @ApiPropertyOptional({ example: 3, description: 'Số ngày tạo giải và mở đăng ký trước ngày thi đấu (VD: Tạo trước 1 ngày, 2 ngày, 3 ngày, 7 ngày)' })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(30)
+  recurringAdvanceDays?: number;
 }
