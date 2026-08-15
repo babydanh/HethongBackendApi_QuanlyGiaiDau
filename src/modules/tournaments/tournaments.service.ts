@@ -3014,7 +3014,14 @@ export class TournamentsService {
     return this.tournamentsRepository.lockParticipantRoster(participantId, userId);
   }
 
-  async getFootballRosterStatus(tournamentId: string, participantId: string, userId: string) {
+  async getFootballRosterStatus(
+    tournamentId: string,
+    participantId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
     const participant = await this.tournamentsRepository.findParticipantById(participantId);
     if (!participant || participant.tournamentId !== tournamentId || !participant.footballTeamId) {
       throw new NotFoundException('Đăng ký đội bóng không tồn tại.');
@@ -3023,6 +3030,10 @@ export class TournamentsService {
     if (!result?.entry) return { entry: null, roster: [] };
     const roster = await this.tournamentsRepository.getFootballEntryRoster(result.entry.id);
     const current = roster.find((member) => member.userId === userId);
+    const canManage = await this.isManager(tournament, userId, systemRoles);
+    if (!current && !canManage) {
+      throw new ForbiddenException('Bạn không có quyền xem roster của đội này.');
+    }
     return {
       entry: result.entry,
       roster,

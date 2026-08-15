@@ -879,7 +879,12 @@ export class TournamentsController {
     @Param('participantId', ParseUUIDPipe) participantId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.getFootballRosterStatus(id, participantId, user.sub);
+    return this.tournamentsService.getFootballRosterStatus(
+      id,
+      participantId,
+      user.sub,
+      this.getSystemRoles(user),
+    );
   }
 
   @Post(':id/participants/:participantId/football-roster/respond')
