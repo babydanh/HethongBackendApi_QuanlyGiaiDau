@@ -21,10 +21,15 @@ export class ChatRepository {
         name: schema.chatRooms.name,
         type: schema.chatRooms.type,
         communityId: schema.chatRooms.communityId,
+        clubName: schema.chatRooms.clubName,
+        clubAvatar: schema.chatRooms.clubAvatar,
+        communityName: schema.communities.name,
+        communityLogo: schema.communities.logoUrl,
         createdAt: schema.chatRooms.createdAt,
       })
       .from(schema.chatRoomMembers)
       .innerJoin(schema.chatRooms, eq(schema.chatRoomMembers.roomId, schema.chatRooms.id))
+      .leftJoin(schema.communities, eq(schema.chatRooms.communityId, schema.communities.id))
       .where(eq(schema.chatRoomMembers.userId, userId));
 
     // 2. Club rooms where user is a JOINED community member
@@ -34,10 +39,15 @@ export class ChatRepository {
         name: schema.chatRooms.name,
         type: schema.chatRooms.type,
         communityId: schema.chatRooms.communityId,
+        clubName: schema.chatRooms.clubName,
+        clubAvatar: schema.chatRooms.clubAvatar,
+        communityName: schema.communities.name,
+        communityLogo: schema.communities.logoUrl,
         createdAt: schema.chatRooms.createdAt,
       })
       .from(schema.communityMembers)
       .innerJoin(schema.chatRooms, and(eq(schema.chatRooms.communityId, schema.communityMembers.communityId), eq(schema.chatRooms.type, 'CLUB')))
+      .leftJoin(schema.communities, eq(schema.chatRooms.communityId, schema.communities.id))
       .where(and(eq(schema.communityMembers.userId, userId), eq(schema.communityMembers.status, 'JOINED')));
 
     // Deduplicate rooms
@@ -383,12 +393,13 @@ export class ChatRepository {
       .where(eq(schema.users.id, senderId))
       .limit(1);
 
-    const displayName = prof?.fullName?.trim() || prof?.email?.split('@')[0] || 'Sporto Player';
+    const displayName = prof?.fullName?.trim() || prof?.email?.split('@')[0] || 'Thành viên';
 
     return {
       ...record,
       senderName: displayName,
       senderAvatar: prof?.avatarUrl || null,
+      senderAvatarUrl: prof?.avatarUrl || null,
     };
   }
 
@@ -402,8 +413,9 @@ export class ChatRepository {
         attachmentsUrls: schema.chatMessages.attachmentsUrls,
         isRead: schema.chatMessages.isRead,
         createdAt: schema.chatMessages.createdAt,
-        senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Sporto Player')`,
+        senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Thành viên')`,
         senderAvatar: schema.profiles.avatarUrl,
+        senderAvatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.chatMessages)
       .innerJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
