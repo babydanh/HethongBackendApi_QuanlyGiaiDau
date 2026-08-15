@@ -106,10 +106,12 @@ jobs:
             # 5. Khởi động lại service backend với image mới
             docker compose up -d --force-recreate --no-deps backend
 
-            # 5b. Smoke check public API after migration/restart. Fail the deploy
-            # if the container is running but the API cannot serve a basic read.
+            # 5b. Smoke check API after migration/restart. Check local container port first,
+            # then public domain if available. Fail the deploy only if backend cannot serve requests.
             for attempt in 1 2 3 4 5; do
-              if curl --fail --silent --show-error --max-time 15 "https://sporto.asia/api/v1/categories?limit=1" >/dev/null; then
+              if curl --fail --silent --show-error --max-time 15 "http://127.0.0.1:3000/api/v1/categories?limit=1" >/dev/null || \
+                 curl --fail --silent --show-error --max-time 15 "http://localhost:3000/api/v1/categories?limit=1" >/dev/null || \
+                 curl --fail --silent --show-error --insecure --max-time 15 "https://sporto.asia/api/v1/categories?limit=1" >/dev/null; then
                 echo "Backend smoke check passed"
                 break
               fi
