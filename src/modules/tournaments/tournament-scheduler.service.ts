@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, lte, gte } from 'drizzle-orm';
+import { eq, and, lte, gte, sql } from 'drizzle-orm';
 
 @Injectable()
 export class TournamentSchedulerService {
@@ -103,6 +103,141 @@ export class TournamentSchedulerService {
       this.logger.error('Error in handleAutoOpenRegistration cron job:', err.message);
     }
   }
+
+  calculateNextRecurringDate(frequency: string, dayOfWeek: number, timeOfDay: string, fromDate = new Date()): Date {
+    const [hours, minutes] = (timeOfDay || '18:00').split(':').map(Number);
+    const target = new Date(fromDate);
+    target.setHours(hours, minutes, 0, 0);
+
+    if (frequency === 'DAILY') {
+      target.setDate(target.getDate() + 1);
+    } else if (frequency === 'WEEKLY') {
+      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
+      if (daysAhead === 0) daysAhead = 7;
+      target.setDate(target.getDate() + daysAhead);
+    } else if (frequency === 'BIWEEKLY') {
+      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
+      if (daysAhead === 0) daysAhead = 14;
+      else daysAhead += 7;
+      target.setDate(target.getDate() + daysAhead);
+    } else if (frequency === 'MONTHLY') {
+      target.setMonth(target.getMonth() + 1);
+    } else {
+      target.setDate(target.getDate() + 7);
+    }
+    return target;
+  }
+
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async handleRecurringLiteTournaments() {
+    this.logger.log('Running recurring lite tournaments cron job...');
+    try {
+      const now = new Date();
+      const recurringTournaments = await this.db
+        .select()
+        .from(schema.tournaments)
+        .where(
+          and(
+            eq(schema.tournaments.tournamentType, 'CLUB'),
+            sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'enabled')::boolean = true`,
+            sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt')::timestamptz <= ${now}`
+          )
+        );
+
+      if (recurringTournaments.length === 0) return;
+
+      this.logger.log(`Found ${recurringTournaments.length} recurring lite tournament template(s) to generate.`);
+
+      for (const t of recurringTournaments) {
+        const config = (t.tournamentConfig as Record<string, any>) || {};
+        const rec = config.recurring || {};
+        const frequency = rec.frequency || 'WEEKLY';
+        const dayOfWeek = rec.dayOfWeek ?? 6;
+        const timeOfDay = rec.timeOfDay || '18:00';
+
+        const nextTournamentDate = new Date(rec.nextRunAt || now);
+        const dateStr = nextTournamentDate.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const newName = `${rec.templateName || t.name} (${dateStr})`;
+
+        const [hours, minutes] = timeOfDay.split(':').map(Number);
+        nextTournamentDate.setHours(hours, minutes, 0, 0);
+
+        const newTournamentConfig = {
+          ...config,
+          recurring: {
+            ...rec,
+            enabled: false,
+          },
+        };
+
+        const newTournament = await this.db
+          .insert(schema.tournaments)
+          .values({
+            name: newName,
+            tournamentType: 'CLUB',
+            visibility: t.visibility,
+            communityId: t.communityId,
+            categoryId: t.categoryId,
+            matchType: t.matchType,
+            description: t.description,
+            maxParticipants: t.maxParticipants,
+            entryFee: t.entryFee,
+            isRanked: t.isRanked,
+            sportRules: t.sportRules,
+            tournamentConfig: newTournamentConfig,
+            startDate: nextTournamentDate,
+            registrationStartDate: now,
+            registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
+            status: 'REGISTRATION_OPEN',
+            createdBy: t.createdBy,
+          })
+          .returning();
+
+        const nextNextRun = this.calculateNextRecurringDate(frequency, dayOfWeek, timeOfDay, nextTournamentDate);
+        const updatedConfig = {
+          ...config,
+          recurring: {
+            ...rec,
+            lastGeneratedAt: now.toISOString(),
+            nextRunAt: nextNextRun.toISOString(),
+          },
+        };
+
+        await this.db
+          .update(schema.tournaments)
+          .set({
+            tournamentConfig: updatedConfig,
+            updatedAt: now,
+          })
+          .where(eq(schema.tournaments.id, t.id));
+
+        if (t.communityId) {
+          const members = await this.db
+            .select({ userId: schema.communityMembers.userId })
+            .from(schema.communityMembers)
+            .where(
+              and(
+                eq(schema.communityMembers.communityId, t.communityId),
+                eq(schema.communityMembers.status, 'JOINED')
+              )
+            );
+
+          if (members.length > 0) {
+            const notiData = members.map((m) => ({
+              receiverId: m.userId,
+              type: 'TOURNAMENT_REGISTRATION_OPEN',
+              title: `🏆 Giải đấu định kỳ mới: ${newName}`,
+              content: `Giải đấu định kỳ "${newName}" của câu lạc bộ đã được tự động tạo và mở đăng ký!`,
+              redirectUrl: `/tournaments/${newTournament[0].id}`,
+            }));
+            await this.db.insert(schema.notifications).values(notiData);
+          }
+        }
+
+        this.logger.log(`Generated recurring tournament "${newName}" (ID: ${newTournament[0]?.id})`);
+      }
+    } catch (err) {
+      this.logger.error('Error in handleRecurringLiteTournaments cron job:', err.message);
+    }
+  }
 }
-
-

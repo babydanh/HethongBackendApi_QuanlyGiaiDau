@@ -23,7 +23,7 @@ export class CreateLiteTournamentDto {
   @IsNotEmpty()
   communityId: string;
 
-  @ApiProperty({ example: 'badminton', description: 'Môn thi đấu (slug)', enum: ['badminton', 'tennis', 'pickleball', 'table_tennis'] })
+  @ApiProperty({ example: 'badminton', description: 'Môn thi đấu (slug)', enum: ['badminton', 'tennis', 'pickleball', 'table_tennis', 'football'] })
   @IsString()
   @IsIn(['badminton', 'tennis', 'pickleball', 'table_tennis', 'football'])
   sport: string;
@@ -81,8 +81,41 @@ export class CreateLiteTournamentDto {
   @IsOptional()
   startDate?: string;
 
+  @ApiPropertyOptional({ example: '18:30', description: 'Giờ bắt đầu thi đấu (HH:mm)' })
+  @IsString()
+  @IsOptional()
+  startTime?: string;
+
+  @ApiPropertyOptional({ example: '2026-10-15T22:00:00Z', description: 'Ngày giờ kết thúc' })
+  @IsDateString()
+  @IsOptional()
+  endDate?: string;
+
   @ApiPropertyOptional({ example: false, description: 'Giải đấu xếp hạng ELO (true) hay phong trào (false)' })
   @IsBoolean()
   @IsOptional()
   isRanked?: boolean;
+
+  @ApiPropertyOptional({ example: false, description: 'Tự động tạo giải lặp lại theo chu kỳ định kỳ' })
+  @IsBoolean()
+  @IsOptional()
+  isRecurring?: boolean;
+
+  @ApiPropertyOptional({ example: 'WEEKLY', description: 'Tần suất lặp lại', enum: ['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'] })
+  @IsString()
+  @IsOptional()
+  @IsIn(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'])
+  recurringFrequency?: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
+
+  @ApiPropertyOptional({ example: 6, description: 'Thứ trong tuần (0: CN, 1: T2, ..., 6: T7)' })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(6)
+  recurringDayOfWeek?: number;
+
+  @ApiPropertyOptional({ example: '18:00', description: 'Giờ thi đấu định kỳ (HH:mm)' })
+  @IsString()
+  @IsOptional()
+  recurringTimeOfDay?: string;
 }

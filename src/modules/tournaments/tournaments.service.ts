@@ -73,6 +73,31 @@ export class TournamentsService {
    * Kiểm tra quyền quản lý giải đấu: ADMIN / ORGANIZER hệ thống,
    * chủ giải (createdBy) hoặc đồng tổ chức (CO_ORGANIZER trong tournamentStaff).
    */
+  
+  calculateNextRecurringDate(frequency: string, dayOfWeek: number, timeOfDay: string, fromDate = new Date()): Date {
+    const [hours, minutes] = (timeOfDay || '18:00').split(':').map(Number);
+    const target = new Date(fromDate);
+    target.setHours(hours, minutes, 0, 0);
+
+    if (frequency === 'DAILY') {
+      target.setDate(target.getDate() + 1);
+    } else if (frequency === 'WEEKLY') {
+      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
+      if (daysAhead === 0) daysAhead = 7;
+      target.setDate(target.getDate() + daysAhead);
+    } else if (frequency === 'BIWEEKLY') {
+      let daysAhead = (dayOfWeek - target.getDay() + 7) % 7;
+      if (daysAhead === 0) daysAhead = 14;
+      else daysAhead += 7;
+      target.setDate(target.getDate() + daysAhead);
+    } else if (frequency === 'MONTHLY') {
+      target.setMonth(target.getMonth() + 1);
+    } else {
+      target.setDate(target.getDate() + 7);
+    }
+    return target;
+  }
+
   private async isManager(
     tournament: { id: string; createdBy: string | null; communityId?: string | null },
     userId: string,
@@ -568,10 +593,32 @@ export class TournamentsService {
     // 6. Build Lite tournamentConfig shared by App/Web
     const maxTeams = dto.maxTeams || 16;
     const registrationMode = dto.registrationMode || 'OPEN';
+
+    let recurringConfig: Record<string, unknown> | undefined = undefined;
+    if (dto.isRecurring) {
+      const frequency = dto.recurringFrequency || 'WEEKLY';
+      const timeOfDay = dto.recurringTimeOfDay || dto.startTime || '18:00';
+      const dayOfWeek = dto.recurringDayOfWeek ?? (dto.startDate ? new Date(dto.startDate).getDay() : 6);
+      const nextRun = this.calculateNextRecurringDate(frequency, dayOfWeek, timeOfDay);
+
+      recurringConfig = {
+        enabled: true,
+        frequency,
+        dayOfWeek,
+        timeOfDay,
+        templateName: dto.name,
+        sport,
+        format,
+        bracketType: finalBracketType,
+        maxTeams,
+        isRanked: dto.isRanked ?? false,
+        nextRunAt: nextRun.toISOString(),
+        lastGeneratedAt: new Date().toISOString(),
+      };
+    }
+
     const tournamentConfig = {
       mode: 'LITE',
-      // Cờ loại giải: giải lite thật (nhanh) — KHÁC với mode scoring LITE.
-      // mode chỉ còn mang nghĩa cách tính điểm (LITE/STRICT).
       isLite: true,
       sportPreset: litePreset.sportPreset,
       registrationMode,
@@ -582,6 +629,8 @@ export class TournamentsService {
       hideAdvancedSettings: true,
       bracketType: finalBracketType,
       maxTeams,
+      startTime: dto.startTime || undefined,
+      ...(recurringConfig ? { recurring: recurringConfig } : {}),
       ...(sport === 'football' && dto.teamSize
         ? { teamSize: dto.teamSize, minTeamSize: dto.teamSize, maxReserve: dto.maxReserve ?? 0 }
         : {}),
@@ -605,6 +654,21 @@ export class TournamentsService {
     }
 
     // 8. Tạo CreateTournamentDto từ dữ liệu Lite
+    let startDateTime: string | undefined = undefined;
+    if (dto.startDate) {
+      if (dto.startTime && dto.startTime.includes(':')) {
+        const datePart = dto.startDate.includes('T') ? dto.startDate.split('T')[0] : dto.startDate;
+        startDateTime = new Date(`${datePart}T${dto.startTime.padStart(5, '0')}:00`).toISOString();
+      } else {
+        startDateTime = new Date(dto.startDate).toISOString();
+      }
+    }
+
+    let endDateTime: string | undefined = undefined;
+    if (dto.endDate) {
+      endDateTime = new Date(dto.endDate).toISOString();
+    }
+
     const fullDto = new CreateTournamentDto();
     Object.assign(fullDto, {
       name: dto.name,
@@ -619,7 +683,10 @@ export class TournamentsService {
       isRanked: dto.isRanked ?? false,
       sportRules,
       tournamentConfig,
-      startDate: dto.startDate || undefined,
+      startDate: startDateTime || undefined,
+      endDate: endDateTime || undefined,
+      registrationStartDate: new Date().toISOString(),
+      registrationEndDate: startDateTime ? new Date(new Date(startDateTime).getTime() - 60 * 60 * 1000).toISOString() : undefined,
       city: dto.location || undefined,
     });
 
