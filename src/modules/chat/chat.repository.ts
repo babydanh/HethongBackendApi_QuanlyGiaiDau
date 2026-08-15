@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -747,6 +747,12 @@ export class ChatRepository {
     if (!msg) {
       throw new NotFoundException('Không tìm thấy tin nhắn bình chọn.');
     }
+
+    const canAccess = await this.canAccessRoom(msg.roomId, userId);
+    if (!canAccess) {
+      throw new ForbiddenException('Bạn không có quyền tham gia bình chọn trong phòng này.');
+    }
+
     if (msg.type !== 'POLL' || msg.isRevoked) {
       throw new BadRequestException('Tin nhắn này không phải là cuộc bình chọn hợp lệ.');
     }
