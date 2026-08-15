@@ -2298,6 +2298,20 @@ export class TournamentsRepository {
     return result?.count ?? 0;
   }
 
+  async findCommunitySports(communityId: string) {
+    return this.db
+      .select({
+        categoryId: schema.communitySports.categoryId,
+        categoryName: schema.categories.name,
+      })
+      .from(schema.communitySports)
+      .innerJoin(
+        schema.categories,
+        eq(schema.communitySports.categoryId, schema.categories.id),
+      )
+      .where(eq(schema.communitySports.communityId, communityId));
+  }
+
   async findCommunityById(communityId: string) {
     const [record] = await this.db
       .select({
