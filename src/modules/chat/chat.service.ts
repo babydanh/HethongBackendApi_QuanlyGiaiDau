@@ -110,6 +110,16 @@ export class ChatService {
       if (room.isAnnouncementOnly && role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
         throw new ForbiddenException('Phòng chat đang ở chế độ Chỉ Ban Quản Trị được nhắn tin.');
       }
+      if (room.slowModeSeconds && room.slowModeSeconds > 0 && role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
+        const lastUserMsg = await this.chatRepository.getLastUserMessageInRoom(data.roomId, userId);
+        if (lastUserMsg && lastUserMsg.createdAt) {
+          const elapsed = (Date.now() - new Date(lastUserMsg.createdAt).getTime()) / 1000;
+          if (elapsed < room.slowModeSeconds) {
+            const waitTime = Math.ceil(room.slowModeSeconds - elapsed);
+            throw new BadRequestException(`Chế độ làm chậm đang bật. Vui lòng chờ ${waitTime} giây trước khi gửi tiếp.`);
+          }
+        }
+      }
     } else {
       const isMember = await this.chatRepository.isMemberOfRoom(
         data.roomId,
