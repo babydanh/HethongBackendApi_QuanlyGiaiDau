@@ -24,6 +24,7 @@ import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
+import { sortFootballStandings } from './utils/football-standings';
 
 @Injectable()
 export class TournamentsRepository {
@@ -980,6 +981,7 @@ export class TournamentsRepository {
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
+        .for('update')
         .limit(1);
 
       if (!tournament) {
@@ -1424,6 +1426,7 @@ export class TournamentsRepository {
 
       let finalTeamName = (data.teamName || '').trim();
       let footballTeamMemberIds: string[] = [];
+      let footballTeamReserveMemberIds: string[] = [];
       let footballTeamLogoUrl: string | null = null;
       if (isTeamSport && data.footballTeamId) {
         const [footballTeam] = await tx.select({
@@ -1454,13 +1457,71 @@ export class TournamentsRepository {
         const requestedMemberIds = Array.isArray(data.memberIds) && data.memberIds.length > 0
           ? [...new Set([userId, ...data.memberIds])]
           : footballMembers.map((member) => member.userId);
+        const requestedReserveMemberIds = Array.isArray(data.reserveMemberIds)
+          ? [...new Set(data.reserveMemberIds)]
+          : [];
+        const teamConfig = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+        const configuredTeamSize = Number(teamConfig.teamSize ?? teamConfig.minTeamSize ?? 0);
+        const configuredMaxTeamSize = Number(
+          teamConfig.maxTeamSize ?? (configuredTeamSize > 0
+            ? configuredTeamSize + Math.max(0, Number(teamConfig.maxReserve ?? 0))
+            : Number.MAX_SAFE_INTEGER),
+        );
+        const configuredMaxReserve = Math.max(0, Number(teamConfig.maxReserve ?? 0));
+        if (requestedReserveMemberIds.includes(userId)) {
+          throw new BadRequestException('Đội trưởng phải nằm trong đội hình chính của đăng ký.');
+        }
+        if (requestedMemberIds.some((memberId) => requestedReserveMemberIds.includes(memberId))) {
+          throw new BadRequestException('Một thành viên không thể vừa là cầu thủ chính vừa là dự bị.');
+        }
         const activeMemberIds = new Set(footballMembers.map((member) => member.userId));
         if (requestedMemberIds.some((memberId) => !activeMemberIds.has(memberId))) {
           throw new BadRequestException('Đội hình đăng ký chứa thành viên không còn hoạt động trong đội bóng.');
         }
+        if (requestedReserveMemberIds.some((memberId) => !activeMemberIds.has(memberId))) {
+          throw new BadRequestException('Danh sách dự bị chứa thành viên không còn hoạt động trong đội bóng.');
+        }
+        if (configuredTeamSize > 0 && requestedMemberIds.length < configuredTeamSize) {
+          throw new BadRequestException(`Đội hình chính phải có ít nhất ${configuredTeamSize} cầu thủ.`);
+        }
+        if (configuredTeamSize > 0 && requestedMemberIds.length > configuredTeamSize) {
+          throw new BadRequestException(`Đội hình chính không được vượt quá ${configuredTeamSize} cầu thủ; hãy chuyển người dư sang danh sách dự bị.`);
+        }
+        if (requestedReserveMemberIds.length > configuredMaxReserve ||
+            requestedMemberIds.length + requestedReserveMemberIds.length > configuredMaxTeamSize) {
+          throw new BadRequestException(`Đội hình chỉ được có tối đa ${configuredMaxReserve} dự bị và ${configuredMaxTeamSize} thành viên tổng cộng.`);
+        }
         footballTeamMemberIds = requestedMemberIds;
+        footballTeamReserveMemberIds = requestedReserveMemberIds;
         finalTeamName = footballTeam.name;
         footballTeamLogoUrl = footballTeam.logoUrl ?? null;
+      }
+      if (isTeamSport && data.footballTeamId && selectedDivision) {
+        const divisionGender = (selectedDivision.genderRestriction || '').trim().toUpperCase();
+        if (divisionGender === 'MALE' || divisionGender === 'FEMALE') {
+          const rosterIds = [...footballTeamMemberIds, ...footballTeamReserveMemberIds];
+          const rosterProfiles = rosterIds.length > 0
+            ? await tx
+              .select({ userId: schema.profiles.userId, gender: schema.profiles.gender })
+              .from(schema.profiles)
+              .where(inArray(schema.profiles.userId, rosterIds))
+            : [];
+          const profileGender = new Map(rosterProfiles.map((profile) => [profile.userId, (profile.gender || '').trim().toUpperCase()]));
+          for (const rosterId of rosterIds) {
+            const rawGender = profileGender.get(rosterId);
+            const normalizedGender = rawGender === 'NAM' || rawGender === 'MALE'
+              ? 'MALE'
+              : rawGender === 'NỮ' || rawGender === 'NU' || rawGender === 'FEMALE'
+                ? 'FEMALE'
+                : null;
+            if (!normalizedGender) {
+              throw new BadRequestException('Mọi thành viên đội bóng phải cập nhật giới tính trước khi đăng ký division này.');
+            }
+            if (normalizedGender !== divisionGender) {
+              throw new BadRequestException(divisionGender === 'MALE' ? 'Division này chỉ dành cho Nam.' : 'Division này chỉ dành cho Nữ.');
+            }
+          }
+        }
       }
       if (!finalTeamName) {
         const [leaderProfile] = await tx
@@ -1523,6 +1584,14 @@ export class TournamentsRepository {
             role: 'MAIN',
           });
         }
+        for (const reserveId of [...new Set(footballTeamReserveMemberIds)]) {
+          if (reserveId === userId || uniqueMemberIds.includes(reserveId)) continue;
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: reserveId,
+            role: 'RESERVE',
+          });
+        }
       }
 
       // Keep a first-class football entry/snapshot alongside the legacy
@@ -1530,10 +1599,14 @@ export class TournamentsRepository {
       // source, while this entry tracks per-member confirmation and survives
       // later changes to the external team.
       if (isTeamSport && data.footballTeamId && selectedDivision?.id) {
-        const snapshotMemberIds = [...new Set(
+        const snapshotMainMemberIds = [...new Set(
           (footballTeamMemberIds.length > 0 ? footballTeamMemberIds : [userId])
             .filter((memberId) => memberId.trim().length > 0),
         )];
+        const snapshotReserveMemberIds = [...new Set(
+          footballTeamReserveMemberIds.filter((memberId) => memberId.trim().length > 0),
+        )];
+        const snapshotMemberIds = [...snapshotMainMemberIds, ...snapshotReserveMemberIds];
         const captainRows = await tx
           .select({ userId: schema.footballTeamMembers.userId })
           .from(schema.footballTeamMembers)
@@ -1553,7 +1626,7 @@ export class TournamentsRepository {
             tournamentId,
             divisionId: selectedDivision.id,
             teamId: data.footballTeamId,
-            status: hasPendingConfirmation ? 'PENDING_CONFIRMATION' : 'CONFIRMED',
+          status: hasPendingConfirmation ? 'PENDING_CONFIRMATION' : 'CONFIRMED',
             displayNameSnapshot: finalTeamName,
             logoUrlSnapshot: footballTeamLogoUrl,
             captainIdsSnapshot,
@@ -1567,7 +1640,7 @@ export class TournamentsRepository {
             snapshotMemberIds.map((memberId) => ({
               entryId: entry.id,
               userId: memberId,
-              role: memberId === userId ? 'MAIN' : 'MAIN',
+              role: snapshotMainMemberIds.includes(memberId) ? 'MAIN' : 'RESERVE',
               confirmationStatus: memberId === userId ? 'CONFIRMED' : 'PENDING',
             })),
           );
@@ -5770,8 +5843,41 @@ export class TournamentsRepository {
           participant_id ASC`,
       );
 
+    // Resolve the sport tie-breaks at read time from the completed fixtures.
+    // The aggregate table intentionally stays small (points/goals only), while
+    // H2H and fair-play are derived from the immutable match score snapshots.
+    const standingsByGroup = new Map<string, typeof standings>();
+    for (const standing of standings) {
+      const groupRows = standingsByGroup.get(standing.groupId) || [];
+      groupRows.push(standing);
+      standingsByGroup.set(standing.groupId, groupRows);
+    }
+    const groupMatches = await this.db
+      .select({
+        groupId: schema.matches.groupId,
+        participant1Id: schema.matches.participant1Id,
+        participant2Id: schema.matches.participant2Id,
+        winnerId: schema.matches.winnerId,
+        scoreDetails: schema.matches.scoreDetails,
+      })
+      .from(schema.matches)
+      .where(and(
+        inArray(schema.matches.groupId, groupIds),
+        eq(schema.matches.status, 'COMPLETED'),
+        isNull(schema.matches.deletedAt),
+      ));
+
+    for (const [groupId, groupRows] of standingsByGroup) {
+      const ordered = sortFootballStandings(groupRows, groupMatches);
+      groupRows.splice(0, groupRows.length, ...ordered);
+    }
+    const sortedStandings = groups.flatMap((group) => {
+      const rows = standingsByGroup.get(group.id) || [];
+      return rows;
+    });
+
     // Lấy participant info kèm seed
-    const participantIds = [...new Set(standings.map(s => s.participantId))];
+    const participantIds = [...new Set(sortedStandings.map(s => s.participantId))];
     const participants = participantIds.length > 0
       ? await this.db
           .select({
@@ -5798,7 +5904,7 @@ export class TournamentsRepository {
         name: g.name,
         stageId: g.stageId,
       })),
-      standings: standings.map(s => ({
+      standings: sortedStandings.map(s => ({
         id: s.id,
         groupId: s.groupId,
         participantId: s.participantId,

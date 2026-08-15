@@ -25,6 +25,21 @@ export class FootballTeamsRepository {
       const [creator] = await tx.select({ id: schema.users.id }).from(schema.users)
         .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt))).limit(1);
       if (!creator) throw new NotFoundException('Không tìm thấy tài khoản hoạt động.');
+
+      const [category] = await tx.select({
+        id: schema.categories.id,
+        name: schema.categories.name,
+        slug: schema.categories.slug,
+        categoryConfig: schema.categories.categoryConfig,
+      }).from(schema.categories)
+        .where(eq(schema.categories.id, dto.categoryId)).limit(1);
+      if (!category) throw new NotFoundException('Không tìm thấy danh mục bóng đá.');
+      const categoryText = `${category.name} ${category.slug}`.toLowerCase();
+      const categoryConfig = (category.categoryConfig as Record<string, unknown> | null) || {};
+      if (!/(football|soccer|bóng đá)/i.test(categoryText) || categoryConfig.isActive === false) {
+        throw new ConflictException('Chỉ được tạo đội trong danh mục bóng đá đang hoạt động.');
+      }
+
       const [{ count }] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(schema.footballTeamMembers)

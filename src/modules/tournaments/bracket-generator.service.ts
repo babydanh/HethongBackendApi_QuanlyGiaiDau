@@ -22,6 +22,7 @@ import {
   resolveRoundRobinGroupCount,
   resolveRoundsToPlay,
 } from './utils/round-robin-config';
+import { sortFootballStandings } from './utils/football-standings';
 
 @Injectable()
 export class BracketGeneratorService {
@@ -1658,6 +1659,21 @@ export class BracketGeneratorService {
         .from(schema.groupStandings)
         .where(inArray(schema.groupStandings.groupId, groupIds));
 
+      const completedGroupMatches = await tx
+        .select({
+          groupId: schema.matches.groupId,
+          participant1Id: schema.matches.participant1Id,
+          participant2Id: schema.matches.participant2Id,
+          winnerId: schema.matches.winnerId,
+          scoreDetails: schema.matches.scoreDetails,
+        })
+        .from(schema.matches)
+        .where(and(
+          inArray(schema.matches.groupId, groupIds),
+          eq(schema.matches.status, 'COMPLETED'),
+          isNull(schema.matches.deletedAt),
+        ));
+
       // 4. Rank each group
       const advancingParticipants: Array<{ participantId: string; groupIndex: number; rank: number }> = [];
 
@@ -1665,16 +1681,9 @@ export class BracketGeneratorService {
         const group = groups[gi];
         const groupStandings = allStandings.filter((s) => s.groupId === group.id);
 
-        // Sort by totalPoints DESC, then tiebreaker
-        groupStandings.sort((a, b) => {
-          if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-          const diffA = a.pointsFor - a.pointsAgainst;
-          const diffB = b.pointsFor - b.pointsAgainst;
-          if (diffB !== diffA) return diffB - diffA;
-          if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
-          if (b.won !== a.won) return b.won - a.won;
-          return a.participantId.localeCompare(b.participantId);
-        });
+        // Use the same football tie-break order as the public standings endpoint.
+        const orderedStandings = sortFootballStandings(groupStandings, completedGroupMatches);
+        groupStandings.splice(0, groupStandings.length, ...orderedStandings);
 
         // Check for ties and create playoff matches
         const pointGroups = new Map<number, typeof groupStandings>();
@@ -1684,8 +1693,13 @@ export class BracketGeneratorService {
           pointGroups.set(s.totalPoints, list);
         }
 
+        const hasFootballScore = completedGroupMatches.some((match) => {
+          const scoreDetails = match.scoreDetails;
+          return scoreDetails && typeof scoreDetails === 'object' &&
+            Boolean((scoreDetails as Record<string, unknown>).football);
+        });
         for (const [, tiedGroup] of pointGroups) {
-          if (tiedGroup.length >= 2) {
+          if (tiedGroup.length >= 2 && !hasFootballScore) {
             await this.resolveTiebreakers(
               tx,
               tournamentId,
@@ -1718,15 +1732,8 @@ export class BracketGeneratorService {
         for (let gi = 0; gi < groups.length; gi++) {
           const group = groups[gi];
           const groupStandings = allStandings.filter((s) => s.groupId === group.id);
-          groupStandings.sort((a, b) => {
-            if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-            const diffA = a.pointsFor - a.pointsAgainst;
-            const diffB = b.pointsFor - b.pointsAgainst;
-            if (diffB !== diffA) return diffB - diffA;
-            if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
-            if (b.won !== a.won) return b.won - a.won;
-            return a.participantId.localeCompare(b.participantId);
-          });
+          const orderedStandings = sortFootballStandings(groupStandings, completedGroupMatches);
+          groupStandings.splice(0, groupStandings.length, ...orderedStandings);
           if (groupStandings.length >= 3) {
             thirdPlaced.push({
               participantId: groupStandings[2].participantId,

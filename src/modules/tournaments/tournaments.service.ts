@@ -1816,18 +1816,33 @@ export class TournamentsService {
         throw new BadRequestException('Đội bóng không cùng môn thể thao với giải đấu.');
       }
       const minTeamSize = Number(tournamentConfig.minTeamSize ?? tournamentConfig.teamSize ?? 0);
-      const maxTeamSize = Number(tournamentConfig.maxTeamSize ?? tournamentConfig.teamSize ?? 99);
+      const selectedTeamSize = Number(tournamentConfig.teamSize ?? tournamentConfig.minTeamSize ?? 0);
+      const maxReserve = Math.max(0, Number(tournamentConfig.maxReserve ?? 0));
+      const maxTeamSize = Number(tournamentConfig.maxTeamSize ?? (selectedTeamSize > 0 ? selectedTeamSize + maxReserve : 99));
       const activeTeamMemberIds = new Set(footballTeam.members.map((member) => member.userId));
       const requestedMemberIds = registerTournamentDto.memberIds?.length
         ? [...new Set([userId, ...registerTournamentDto.memberIds])]
         : [...activeTeamMemberIds];
+      const reserveMemberIds = [...new Set(registerTournamentDto.reserveMemberIds ?? [])];
+      if (reserveMemberIds.includes(userId)) {
+        throw new BadRequestException('Đội trưởng phải nằm trong đội hình chính của đăng ký.');
+      }
+      if (requestedMemberIds.some((memberId) => reserveMemberIds.includes(memberId))) {
+        throw new BadRequestException('Một thành viên không thể vừa là cầu thủ chính vừa là dự bị.');
+      }
       if (requestedMemberIds.some((memberId) => !activeTeamMemberIds.has(memberId))) {
         throw new BadRequestException('Đội hình đăng ký chỉ được chọn thành viên đang hoạt động của đội bóng.');
       }
-      if (requestedMemberIds.length < minTeamSize || requestedMemberIds.length > maxTeamSize) {
-        throw new BadRequestException(`Đội hình phải có từ ${minTeamSize} đến ${maxTeamSize} thành viên.`);
+      if (reserveMemberIds.some((memberId) => !activeTeamMemberIds.has(memberId))) {
+        throw new BadRequestException('Danh sách dự bị chỉ được chọn thành viên đang hoạt động của đội bóng.');
       }
-      userIds = requestedMemberIds;
+      if (requestedMemberIds.length < minTeamSize || (selectedTeamSize > 0 && requestedMemberIds.length > selectedTeamSize)) {
+        throw new BadRequestException(`Đội hình chính phải có từ ${minTeamSize} đến ${selectedTeamSize || maxTeamSize} thành viên.`);
+      }
+      if (reserveMemberIds.length > maxReserve || requestedMemberIds.length + reserveMemberIds.length > maxTeamSize) {
+        throw new BadRequestException(`Đội hình chỉ được có tối đa ${maxReserve} cầu thủ dự bị và ${maxTeamSize} thành viên tổng cộng.`);
+      }
+      userIds = [...requestedMemberIds, ...reserveMemberIds];
     }
 
     await this.validateEloLimits(tournament, userIds, { division: requestedDivision });
@@ -1838,9 +1853,12 @@ export class TournamentsService {
 
     if (footballTeam && result.participant.tournamentDivisionId) {
       const selectedMemberIds = [...new Set(
-        registerTournamentDto.memberIds?.length
-          ? registerTournamentDto.memberIds
-          : footballTeam.members.map((member) => member.userId),
+        [
+          ...(registerTournamentDto.memberIds?.length
+            ? registerTournamentDto.memberIds
+            : footballTeam.members.map((member) => member.userId)),
+          ...(registerTournamentDto.reserveMemberIds ?? []),
+        ],
       )].filter((memberId) => memberId !== userId);
       try {
         await this.sendNotificationBatch(selectedMemberIds.map((receiverId) =>
