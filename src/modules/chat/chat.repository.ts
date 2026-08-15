@@ -398,6 +398,7 @@ export class ChatRepository {
         senderId,
         messageText: data.messageText,
         attachmentsUrls: data.attachmentsUrls || [],
+        replyToId: data.replyToId || null,
       })
       .returning();
 
@@ -412,6 +413,29 @@ export class ChatRepository {
       .where(eq(schema.users.id, senderId))
       .limit(1);
 
+    let replyTo: { id: string; senderName: string; text: string } | null = null;
+    if (data.replyToId) {
+      const [replyMsg] = await this.db
+        .select({
+          id: schema.chatMessages.id,
+          messageText: schema.chatMessages.messageText,
+          senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Thành viên')`,
+        })
+        .from(schema.chatMessages)
+        .leftJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
+        .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
+        .where(eq(schema.chatMessages.id, data.replyToId))
+        .limit(1);
+
+      if (replyMsg) {
+        replyTo = {
+          id: replyMsg.id,
+          senderName: replyMsg.senderName,
+          text: replyMsg.messageText || '',
+        };
+      }
+    }
+
     const displayName = prof?.fullName?.trim() || prof?.email?.split('@')[0] || 'Thành viên';
 
     return {
@@ -419,6 +443,8 @@ export class ChatRepository {
       senderName: displayName,
       senderAvatar: prof?.avatarUrl || null,
       senderAvatarUrl: prof?.avatarUrl || null,
+      replyTo,
+      reactions: [],
     };
   }
 
@@ -431,6 +457,9 @@ export class ChatRepository {
         messageText: schema.chatMessages.messageText,
         attachmentsUrls: schema.chatMessages.attachmentsUrls,
         isRead: schema.chatMessages.isRead,
+        isRevoked: schema.chatMessages.isRevoked,
+        isPinned: schema.chatMessages.isPinned,
+        replyToId: schema.chatMessages.replyToId,
         createdAt: schema.chatMessages.createdAt,
         senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Thành viên')`,
         senderAvatar: schema.profiles.avatarUrl,
@@ -453,18 +482,235 @@ export class ChatRepository {
       conditions.push(or(lt(schema.chatMessages.createdAt, new Date(decoded.createdAt)), and(eq(schema.chatMessages.createdAt, new Date(decoded.createdAt)), lt(schema.chatMessages.id, decoded.id))) as SQL);
     }
     const rows = await this.db.select({
-      id: schema.chatMessages.id, roomId: schema.chatMessages.roomId, senderId: schema.chatMessages.senderId,
-      messageText: schema.chatMessages.messageText, attachmentsUrls: schema.chatMessages.attachmentsUrls,
-      isRead: schema.chatMessages.isRead, createdAt: schema.chatMessages.createdAt,
+      id: schema.chatMessages.id,
+      roomId: schema.chatMessages.roomId,
+      senderId: schema.chatMessages.senderId,
+      messageText: schema.chatMessages.messageText,
+      attachmentsUrls: schema.chatMessages.attachmentsUrls,
+      isRead: schema.chatMessages.isRead,
+      isRevoked: schema.chatMessages.isRevoked,
+      isPinned: schema.chatMessages.isPinned,
+      replyToId: schema.chatMessages.replyToId,
+      createdAt: schema.chatMessages.createdAt,
       senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Sporto Player')`,
       senderAvatar: schema.profiles.avatarUrl,
+      senderAvatarUrl: schema.profiles.avatarUrl,
     }).from(schema.chatMessages).innerJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId)).where(and(...conditions))
       .orderBy(desc(schema.chatMessages.createdAt), desc(schema.chatMessages.id)).limit(limit + 1);
+
     const hasMore = rows.length > limit;
     const data = hasMore ? rows.slice(0, limit) : rows;
-    const last = data[data.length - 1];
-    return { data: data.reverse(), meta: { limit, hasMore, nextCursor: hasMore && last ? CursorPaginationHelper.encodeCursor({ id: last.id, createdAt: last.createdAt }) : null } };
+    const messageIds = data.map((m) => m.id);
+
+    // Batch load reactions for all messages in page
+    const reactionsMap = new Map<string, string[]>();
+    if (messageIds.length > 0) {
+      const rxRows = await this.db
+        .select({
+          messageId: schema.chatMessageReactions.messageId,
+          emoji: schema.chatMessageReactions.emoji,
+        })
+        .from(schema.chatMessageReactions)
+        .where(inArray(schema.chatMessageReactions.messageId, messageIds));
+
+      for (const rx of rxRows) {
+        const arr = reactionsMap.get(rx.messageId) || [];
+        arr.push(rx.emoji);
+        reactionsMap.set(rx.messageId, arr);
+      }
+    }
+
+    // Batch load replyTo metadata
+    const replyIds = data.map((m) => m.replyToId).filter(Boolean) as string[];
+    const replyMap = new Map<string, { id: string; senderName: string; text: string }>();
+    if (replyIds.length > 0) {
+      const replies = await this.db
+        .select({
+          id: schema.chatMessages.id,
+          messageText: schema.chatMessages.messageText,
+          senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Thành viên')`,
+        })
+        .from(schema.chatMessages)
+        .leftJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
+        .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
+        .where(inArray(schema.chatMessages.id, replyIds));
+
+      for (const rep of replies) {
+        replyMap.set(rep.id, {
+          id: rep.id,
+          senderName: rep.senderName,
+          text: rep.messageText || '',
+        });
+      }
+    }
+
+    const populated = data.map((msg) => ({
+      ...msg,
+      reactions: reactionsMap.get(msg.id) || [],
+      replyTo: msg.replyToId ? replyMap.get(msg.replyToId) || null : null,
+    }));
+
+    const last = populated[populated.length - 1];
+    return {
+      data: populated.reverse(),
+      meta: {
+        limit,
+        hasMore,
+        nextCursor: hasMore && last ? CursorPaginationHelper.encodeCursor({ id: last.id, createdAt: last.createdAt }) : null,
+      },
+    };
+  }
+
+  async findMessageById(messageId: string) {
+    const [msg] = await this.db
+      .select()
+      .from(schema.chatMessages)
+      .where(eq(schema.chatMessages.id, messageId))
+      .limit(1);
+    return msg ?? null;
+  }
+
+  async revokeMessage(messageId: string, revokedById: string) {
+    const now = new Date();
+    const [updated] = await this.db
+      .update(schema.chatMessages)
+      .set({
+        isRevoked: true,
+        revokedBy: revokedById,
+        revokedAt: now,
+      })
+      .where(eq(schema.chatMessages.id, messageId))
+      .returning();
+    return updated;
+  }
+
+  async pinMessage(roomId: string, messageId: string, pinnedById: string) {
+    const now = new Date();
+    await this.db
+      .update(schema.chatMessages)
+      .set({ isPinned: true, pinnedBy: pinnedById, pinnedAt: now })
+      .where(eq(schema.chatMessages.id, messageId));
+
+    await this.db
+      .update(schema.chatRooms)
+      .set({ pinnedMessageId: messageId })
+      .where(eq(schema.chatRooms.id, roomId));
+
+    return { success: true, messageId, pinnedAt: now };
+  }
+
+  async unpinMessage(roomId: string, messageId: string) {
+    await this.db
+      .update(schema.chatMessages)
+      .set({ isPinned: false, pinnedBy: null, pinnedAt: null })
+      .where(eq(schema.chatMessages.id, messageId));
+
+    const [room] = await this.db
+      .select({ pinnedMessageId: schema.chatRooms.pinnedMessageId })
+      .from(schema.chatRooms)
+      .where(eq(schema.chatRooms.id, roomId))
+      .limit(1);
+
+    if (room?.pinnedMessageId === messageId) {
+      await this.db
+        .update(schema.chatRooms)
+        .set({ pinnedMessageId: null })
+        .where(eq(schema.chatRooms.id, roomId));
+    }
+
+    return { success: true, messageId };
+  }
+
+  async getPinnedMessage(roomId: string) {
+    const [room] = await this.db
+      .select({ pinnedMessageId: schema.chatRooms.pinnedMessageId })
+      .from(schema.chatRooms)
+      .where(eq(schema.chatRooms.id, roomId))
+      .limit(1);
+
+    if (!room?.pinnedMessageId) return null;
+
+    const [pinned] = await this.db
+      .select({
+        id: schema.chatMessages.id,
+        roomId: schema.chatMessages.roomId,
+        messageText: schema.chatMessages.messageText,
+        attachmentsUrls: schema.chatMessages.attachmentsUrls,
+        createdAt: schema.chatMessages.createdAt,
+        senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Thành viên')`,
+        senderAvatar: schema.profiles.avatarUrl,
+      })
+      .from(schema.chatMessages)
+      .leftJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
+      .where(eq(schema.chatMessages.id, room.pinnedMessageId))
+      .limit(1);
+
+    return pinned ?? null;
+  }
+
+  async toggleReaction(messageId: string, userId: string, emoji: string) {
+    const [existing] = await this.db
+      .select()
+      .from(schema.chatMessageReactions)
+      .where(
+        and(
+          eq(schema.chatMessageReactions.messageId, messageId),
+          eq(schema.chatMessageReactions.userId, userId),
+          eq(schema.chatMessageReactions.emoji, emoji),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      await this.db
+        .delete(schema.chatMessageReactions)
+        .where(eq(schema.chatMessageReactions.id, existing.id));
+    } else {
+      await this.db.insert(schema.chatMessageReactions).values({
+        messageId,
+        userId,
+        emoji,
+      });
+    }
+
+    const rxRows = await this.db
+      .select({ emoji: schema.chatMessageReactions.emoji })
+      .from(schema.chatMessageReactions)
+      .where(eq(schema.chatMessageReactions.messageId, messageId));
+
+    return rxRows.map((r) => r.emoji);
+  }
+
+  async updateClubRoomSettings(roomId: string, data: { name?: string; clubAvatar?: string; isAnnouncementOnly?: boolean; slowModeSeconds?: number }) {
+    const [updated] = await this.db
+      .update(schema.chatRooms)
+      .set({
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.clubAvatar !== undefined ? { clubAvatar: data.clubAvatar } : {}),
+        ...(data.isAnnouncementOnly !== undefined ? { isAnnouncementOnly: data.isAnnouncementOnly } : {}),
+        ...(data.slowModeSeconds !== undefined ? { slowModeSeconds: data.slowModeSeconds } : {}),
+      })
+      .where(eq(schema.chatRooms.id, roomId))
+      .returning();
+    return updated;
+  }
+
+  async getCommunityRole(communityId: string, userId: string) {
+    const [member] = await this.db
+      .select({ role: schema.communityMembers.role, status: schema.communityMembers.status })
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (!member || member.status !== 'JOINED') return null;
+    return member.role as 'OWNER' | 'ADMIN' | 'MODERATOR' | 'MEMBER';
   }
 
   async countUnreadForUser(roomId: string, userId: string, lastReadAt?: Date | null) {

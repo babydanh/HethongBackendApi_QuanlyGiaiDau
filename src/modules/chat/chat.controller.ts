@@ -95,6 +95,64 @@ export class ChatController {
     return this.chatService.getMySupportConversation(user.sub);
   }
 
+  @Post('messages/:id/revoke')
+  @ApiOperation({ summary: 'Thu hồi tin nhắn' })
+  async revokeMessage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.revokeMessage(user.sub, id);
+  }
+
+  @Post('rooms/:roomId/messages/:id/pin')
+  @ApiOperation({ summary: 'Ghim tin nhắn lên đầu phòng chat' })
+  async pinMessage(
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.pinMessage(user.sub, roomId, id);
+  }
+
+  @Delete('rooms/:roomId/messages/:id/pin')
+  @ApiOperation({ summary: 'Bỏ ghim tin nhắn' })
+  async unpinMessage(
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.unpinMessage(user.sub, roomId, id);
+  }
+
+  @Get('rooms/:roomId/pinned')
+  @ApiOperation({ summary: 'Lấy tin nhắn đang được ghim trong phòng' })
+  async getPinnedMessage(
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.getPinnedMessage(user.sub, roomId);
+  }
+
+  @Post('messages/:id/reaction')
+  @ApiOperation({ summary: 'Thả hoặc bỏ cảm xúc cho tin nhắn' })
+  async toggleReaction(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { emoji: string },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.toggleReaction(user.sub, id, body.emoji);
+  }
+
+  @Put('rooms/:roomId/settings')
+  @ApiOperation({ summary: 'Cập nhật cài đặt phòng chat CLB' })
+  async updateClubRoomSettings(
+    @Param('roomId', ParseUUIDPipe) roomId: string,
+    @Body() body: { name?: string; clubAvatar?: string; isAnnouncementOnly?: boolean; slowModeSeconds?: number },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.updateClubRoomSettings(user.sub, roomId, body);
+  }
+
   @Get('blocks')
   async getBlockedUsers(@CurrentUser() user: JwtPayload) {
     return this.chatService.getBlockedUsers(user.sub);
