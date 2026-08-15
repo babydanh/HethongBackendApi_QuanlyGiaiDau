@@ -30,6 +30,7 @@ import {
 } from './utils/sport-rules/validate-sport-rules-config';
 import {
   buildOrganizerNewRegistrationNotification,
+  buildFootballRosterConfirmationNotification,
   buildOrganizerTeamCompletedNotification,
   buildParticipantKickedNotification,
   buildParticipantPendingTeammateNotification,
@@ -1351,10 +1352,16 @@ export class TournamentsService {
     // If System ADMIN, delete immediately
     if (systemRoles.includes('ADMIN')) {
       const result = await this.tournamentsRepository.softDeleteParent(id, userId);
+      // Soft-delete associated community posts
+      try {
+        await this.communitySocialRepository.softDeletePostsByTournamentId(id);
+      } catch (e) {
+        // ignore
+      }
       // Invalidate tournament list cache
       try {
         await this.redisService.delByPattern('tournaments:list:*');
-      await this.redisService.delByPattern('matches:list:*');
+        await this.redisService.delByPattern('matches:list:*');
       } catch (e) {
         // Redis down — ignore
       }
@@ -1390,7 +1397,16 @@ export class TournamentsService {
       // Redis down — ignore
     }
 
-    return this.tournamentsRepository.softDeleteParent(id, userId);
+    const deleteResult = await this.tournamentsRepository.softDeleteParent(id, userId);
+
+    // Soft-delete associated community posts & polls
+    try {
+      await this.communitySocialRepository.softDeletePostsByTournamentId(id);
+    } catch (e) {
+      // ignore
+    }
+
+    return deleteResult;
   }
 
   async generateBracket(
@@ -1811,6 +1827,28 @@ export class TournamentsService {
     await this.validateGenderRestriction(requestedDivision, userIds);
 
     const result = await this.tournamentsRepository.registerParticipant(id, userId, registerTournamentDto, inviteCode);
+
+    if (footballTeam && result.participant.tournamentDivisionId) {
+      const selectedMemberIds = [...new Set(
+        registerTournamentDto.memberIds?.length
+          ? registerTournamentDto.memberIds
+          : footballTeam.members.map((member) => member.userId),
+      )].filter((memberId) => memberId !== userId);
+      try {
+        await this.sendNotificationBatch(selectedMemberIds.map((receiverId) =>
+          this.notificationsService.sendNotification(
+            buildFootballRosterConfirmationNotification({
+              receiverId,
+              tournamentId: id,
+              tournamentName: tournament.name,
+              divisionId: result.participant.tournamentDivisionId ?? undefined,
+            }),
+          ),
+        ));
+      } catch (error) {
+        console.error('Failed to send football roster confirmation notifications:', error);
+      }
+    }
 
     try {
       const canceledLeaders = await this.tournamentsRepository.cancelPendingRegistrationsIfFull(id);
@@ -2955,7 +2993,53 @@ export class TournamentsService {
     if (!participant || participant.tournamentId !== tournamentId) {
       throw new NotFoundException('Người tham gia không tồn tại');
     }
+    const footballEntry = await this.tournamentsRepository.findFootballEntryForParticipant(participantId);
+    if (footballEntry?.entry) {
+      if (footballEntry.entry.status !== 'CONFIRMED' && footballEntry.entry.status !== 'LOCKED') {
+        throw new BadRequestException('Chưa đủ thành viên xác nhận roster để khóa đội.');
+      }
+      if (footballEntry.entry.status === 'CONFIRMED') {
+        await this.tournamentsRepository.lockFootballEntry(footballEntry.entry.id, userId);
+      }
+    }
     return this.tournamentsRepository.lockParticipantRoster(participantId, userId);
+  }
+
+  async getFootballRosterStatus(tournamentId: string, participantId: string, userId: string) {
+    const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant || participant.tournamentId !== tournamentId || !participant.footballTeamId) {
+      throw new NotFoundException('Đăng ký đội bóng không tồn tại.');
+    }
+    const result = await this.tournamentsRepository.findFootballEntryForParticipant(participantId);
+    if (!result?.entry) return { entry: null, roster: [] };
+    const roster = await this.tournamentsRepository.getFootballEntryRoster(result.entry.id);
+    const current = roster.find((member) => member.userId === userId);
+    return {
+      entry: result.entry,
+      roster,
+      currentMember: current ?? null,
+    };
+  }
+
+  async respondFootballRoster(
+    tournamentId: string,
+    participantId: string,
+    userId: string,
+    action: 'CONFIRM' | 'DECLINE',
+  ) {
+    if (action !== 'CONFIRM' && action !== 'DECLINE') {
+      throw new BadRequestException('Hành động xác nhận roster không hợp lệ.');
+    }
+    const participant = await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant || participant.tournamentId !== tournamentId || !participant.footballTeamId) {
+      throw new NotFoundException('Đăng ký đội bóng không tồn tại.');
+    }
+    const result = await this.tournamentsRepository.findFootballEntryForParticipant(participantId);
+    if (!result?.entry) throw new NotFoundException('Roster đội bóng chưa được tạo.');
+    if (result.entry.status === 'LOCKED') {
+      throw new BadRequestException('Roster đã khóa, không thể thay đổi xác nhận.');
+    }
+    return this.tournamentsRepository.respondFootballRoster(result.entry.id, userId, action);
   }
 
   async assignReservedSlot(

@@ -299,4 +299,100 @@ export class TournamentSchedulerService {
       this.logger.error('Error in handleRecurringLiteTournaments cron job:', err.message);
     }
   }
+
+  /**
+   * Tự động dọn dẹp / hủy các giải đấu:
+   * 1. Quá 2 ngày kể từ giờ thi đấu (startDate) mà không đủ người (< 2 người đăng ký) -> Hủy / Xóa & ẩn bài viết CLB
+   * 2. Giải đã bắt đầu (IN_PROGRESS) mà trong 1 tuần (7 ngày) không có hoạt động mới -> Hủy / Xóa & ẩn bài viết CLB
+   */
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async handleAutoCleanupAbandonedTournaments() {
+    this.logger.log('Running auto-cleanup abandoned tournaments cron job...');
+    try {
+      const now = new Date();
+      const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      // 1. Quá 2 ngày mà không đủ người (< 2 người) ở trạng thái REGISTRATION_OPEN / REGISTRATION_CLOSED / UPCOMING
+      const unstartedExpired = await this.db
+        .select()
+        .from(schema.tournaments)
+        .where(
+          and(
+            isNull(schema.tournaments.deletedAt),
+            ne(schema.tournaments.status, 'CANCELLED'),
+            ne(schema.tournaments.status, 'COMPLETED'),
+            ne(schema.tournaments.status, 'IN_PROGRESS'),
+            lte(schema.tournaments.startDate, twoDaysAgo)
+          )
+        );
+
+      for (const t of unstartedExpired) {
+        const [participantCount] = await this.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.tournamentParticipants)
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, t.id),
+              eq(schema.tournamentParticipants.status, 'CONFIRMED')
+            )
+          );
+
+        if (!participantCount || participantCount.count < 2) {
+          this.logger.warn(`Auto-cancelling tournament ${t.id} ("${t.name}"): past 2 days without enough participants (${participantCount?.count ?? 0}).`);
+          
+          await this.db.update(schema.tournaments)
+            .set({ status: 'CANCELLED', deletedAt: now, updatedAt: now })
+            .where(eq(schema.tournaments.id, t.id));
+
+          // Soft-delete associated community posts
+          await this.db.update(schema.communityPosts)
+            .set({ status: 'HIDDEN', deletedAt: now, updatedAt: now })
+            .where(and(eq(schema.communityPosts.tournamentId, t.id), isNull(schema.communityPosts.deletedAt)));
+        }
+      }
+
+      // 2. Đang diễn ra (IN_PROGRESS) mà quá 7 ngày không có trận đấu nào được cập nhật / hoạt động mới
+      const stalledInProgress = await this.db
+        .select()
+        .from(schema.tournaments)
+        .where(
+          and(
+            isNull(schema.tournaments.deletedAt),
+            eq(schema.tournaments.status, 'IN_PROGRESS'),
+            lte(schema.tournaments.updatedAt, sevenDaysAgo)
+          )
+        );
+
+      for (const t of stalledInProgress) {
+        // Kiểm tra xem có trận đấu nào được update trong 7 ngày qua không
+        const [recentMatch] = await this.db
+          .select({ id: schema.matches.id })
+          .from(schema.matches)
+          .where(
+            and(
+              eq(schema.matches.tournamentId, t.id),
+              gte(schema.matches.updatedAt, sevenDaysAgo)
+            )
+          )
+          .limit(1);
+
+        if (!recentMatch) {
+          this.logger.warn(`Auto-cancelling stalled IN_PROGRESS tournament ${t.id} ("${t.name}"): no match activity for 7 days.`);
+          
+          await this.db.update(schema.tournaments)
+            .set({ status: 'CANCELLED', deletedAt: now, updatedAt: now })
+            .where(eq(schema.tournaments.id, t.id));
+
+          // Soft-delete associated community posts
+          await this.db.update(schema.communityPosts)
+            .set({ status: 'HIDDEN', deletedAt: now, updatedAt: now })
+            .where(and(eq(schema.communityPosts.tournamentId, t.id), isNull(schema.communityPosts.deletedAt)));
+        }
+      }
+    } catch (err) {
+      this.logger.error('Error in handleAutoCleanupAbandonedTournaments cron job:', err.message);
+    }
+  }
+
 }
