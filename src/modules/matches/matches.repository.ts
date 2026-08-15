@@ -385,6 +385,7 @@ export class MatchesRepository {
       categoryId?: string; 
       categoryName?: string;
       venueName?: string | null;
+      venueAddress?: string | null;
       matchType?: string;
       genderRestriction?: string;
     }>();
