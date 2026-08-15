@@ -32,6 +32,7 @@ export class FootballTeamEloService {
         logoUrl: schema.footballTeams.logoUrl,
         eloPoints: schema.footballTeamRanks.eloPoints,
         tierId: schema.footballTeamRanks.tierId,
+        tierName: schema.eloTiers.name,
         matchesPlayed: schema.footballTeamRanks.matchesPlayed,
         matchesWon: schema.footballTeamRanks.matchesWon,
         winStreak: schema.footballTeamRanks.winStreak,
@@ -41,6 +42,10 @@ export class FootballTeamEloService {
       .innerJoin(
         schema.footballTeams,
         eq(schema.footballTeamRanks.teamId, schema.footballTeams.id),
+      )
+      .leftJoin(
+        schema.eloTiers,
+        eq(schema.footballTeamRanks.tierId, schema.eloTiers.id),
       )
       .where(
         and(

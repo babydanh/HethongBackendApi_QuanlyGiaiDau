@@ -65,3 +65,6 @@ tsconfig.build.tsbuildinfo
 # Scratch folder
 scratch/
 
+# Agent worktrees
+.claude/
+

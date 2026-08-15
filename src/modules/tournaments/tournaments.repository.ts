@@ -4587,20 +4587,16 @@ export class TournamentsRepository {
             })
             .returning();
 
-          await tx
-            .insert(schema.tournamentRosters)
-            .values({
-              participantId: participant.id,
-              userId: user1.id,
-              role: 'MAIN',
-            });
-          await tx
-            .insert(schema.tournamentRosters)
-            .values({
-              participantId: participant.id,
-              userId: user2.id,
-              role: 'MAIN',
-            });
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: user1.id,
+            role: 'MAIN',
+          });
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: user2.id,
+            role: 'MAIN',
+          });
 
           createdParticipants.push(participant);
         }
@@ -4631,13 +4627,11 @@ export class TournamentsRepository {
             })
             .returning();
 
-          await tx
-            .insert(schema.tournamentRosters)
-            .values({
-              participantId: participant.id,
-              userId: user.id,
-              role: 'MAIN',
-            });
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: user.id,
+            role: 'MAIN',
+          });
 
           createdParticipants.push(participant);
         }
@@ -5077,11 +5071,24 @@ export class TournamentsRepository {
       if (!entry)
         throw new NotFoundException('Đăng ký đội bóng không tồn tại.');
       if (entry.status === 'LOCKED') return entry;
-      if (entry.status !== 'CONFIRMED') {
-        throw new BadRequestException(
-          'Chưa đủ thành viên xác nhận roster để khóa đội.',
-        );
-      }
+      const snapshots = await tx
+        .select({
+          confirmationStatus:
+            schema.tournamentTeamRosterSnapshots.confirmationStatus,
+          role: schema.tournamentTeamRosterSnapshots.role,
+        })
+        .from(schema.tournamentTeamRosterSnapshots)
+        .where(eq(schema.tournamentTeamRosterSnapshots.entryId, entryId))
+        .for('update');
+      assertFootballRosterLockable({
+        entryExists: true,
+        entryStatus: entry.status,
+        confirmations: snapshots.map(
+          (row) =>
+            row.confirmationStatus as 'PENDING' | 'CONFIRMED' | 'DECLINED',
+        ),
+        mainRosterCount: snapshots.filter((row) => row.role === 'MAIN').length,
+      });
       const [updated] = await tx
         .update(schema.tournamentTeamEntries)
         .set({ status: 'LOCKED', lockedAt: new Date(), updatedAt: new Date() })
