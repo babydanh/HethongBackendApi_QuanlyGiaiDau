@@ -729,6 +729,7 @@ export class TournamentsService {
           record.id,
           record.name,
           record.bannerUrl,
+          true, // isLite
         );
       } catch (err) {
         console.error('Failed to auto-post lite tournament to community feed:', err);
