@@ -14,7 +14,8 @@ export class ChatRepository {
   ) {}
 
   async getUserRooms(userId: string) {
-    const roomsWithMembership = await this.db
+    // 1. Direct and Group rooms where user is an explicit member
+    const directAndGroupRooms = await this.db
       .select({
         id: schema.chatRooms.id,
         name: schema.chatRooms.name,
@@ -26,6 +27,25 @@ export class ChatRepository {
       .innerJoin(schema.chatRooms, eq(schema.chatRoomMembers.roomId, schema.chatRooms.id))
       .where(eq(schema.chatRoomMembers.userId, userId));
 
+    // 2. Club rooms where user is a JOINED community member
+    const clubRooms = await this.db
+      .select({
+        id: schema.chatRooms.id,
+        name: schema.chatRooms.name,
+        type: schema.chatRooms.type,
+        communityId: schema.chatRooms.communityId,
+        createdAt: schema.chatRooms.createdAt,
+      })
+      .from(schema.communityMembers)
+      .innerJoin(schema.chatRooms, and(eq(schema.chatRooms.communityId, schema.communityMembers.communityId), eq(schema.chatRooms.type, 'CLUB')))
+      .where(and(eq(schema.communityMembers.userId, userId), eq(schema.communityMembers.status, 'JOINED')));
+
+    // Deduplicate rooms
+    const allRoomMap = new Map<string, typeof directAndGroupRooms[0]>();
+    for (const r of directAndGroupRooms) allRoomMap.set(r.id, r);
+    for (const r of clubRooms) allRoomMap.set(r.id, r);
+
+    const roomsWithMembership = Array.from(allRoomMap.values());
     if (roomsWithMembership.length === 0) return [];
 
     const roomsList: {
