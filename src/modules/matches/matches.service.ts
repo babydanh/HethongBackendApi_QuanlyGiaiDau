@@ -494,8 +494,8 @@ export class MatchesService {
         if (resolvedConfig.kind === 'FOOTBALL' && !winnerId) {
           const football = scoreDetails.football;
           if (football && typeof football === 'object' && !Array.isArray(football)) {
-            const goals1 = Number((football as Record<string, unknown>).team1Goals);
-            const goals2 = Number((football as Record<string, unknown>).team2Goals);
+            const goals1 = Number(football.team1Goals);
+            const goals2 = Number(football.team2Goals);
             if (goals1 > goals2) winnerId = existing.participant1Id || undefined;
             if (goals2 > goals1) winnerId = existing.participant2Id || undefined;
           }

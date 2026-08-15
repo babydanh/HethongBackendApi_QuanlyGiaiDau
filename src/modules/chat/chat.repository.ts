@@ -108,26 +108,45 @@ export class ChatRepository {
         .orderBy(sql`${schema.chatMessages.createdAt} DESC`)
         .limit(1);
 
+      const nowIso = new Date().toISOString();
+      const lastMsgDateIso = lastMessage?.createdAt
+        ? (lastMessage.createdAt instanceof Date ? lastMessage.createdAt.toISOString() : new Date(lastMessage.createdAt).toISOString())
+        : null;
+      const roomCreatedDateIso = room.createdAt
+        ? (room.createdAt instanceof Date ? room.createdAt.toISOString() : new Date(room.createdAt).toISOString())
+        : nowIso;
+
+      let unread = 0;
+      try {
+        unread = await this.countUnreadUsingState(room.id, userId);
+      } catch {
+        unread = 0;
+      }
+
       roomsList.push({
         ...room,
-        unreadCount: await this.countUnreadUsingState(room.id, userId),
+        unreadCount: unread,
         participants,
-        lastMessage: lastMessage ? {
-          id: lastMessage.id,
-          senderId: lastMessage.senderId,
-          sender: {
-            id: lastMessage.senderId,
-            fullName: lastMessage.senderName || '',
-            avatarUrl: lastMessage.senderAvatar || undefined,
-          },
-          content: lastMessage.messageText || '',
-          createdAt: lastMessage.createdAt.toISOString(),
-        } : undefined,
-        updatedAt: lastMessage ? lastMessage.createdAt.toISOString() : room.createdAt.toISOString(),
+        lastMessage: lastMessage
+          ? {
+              id: lastMessage.id,
+              senderId: lastMessage.senderId,
+              sender: {
+                id: lastMessage.senderId,
+                fullName: lastMessage.senderName || '',
+                avatarUrl: lastMessage.senderAvatar || undefined,
+              },
+              content: lastMessage.messageText || '',
+              createdAt: lastMsgDateIso || nowIso,
+            }
+          : undefined,
+        updatedAt: lastMsgDateIso || roomCreatedDateIso,
       });
     }
 
-    roomsList.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    roomsList.sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
 
     return roomsList;
   }
@@ -476,8 +495,12 @@ export class ChatRepository {
   }
 
   async countUnreadUsingState(roomId: string, userId: string) {
-    const state = await this.getReadState(roomId, userId);
-    return this.countUnreadForUser(roomId, userId, state?.lastReadAt ?? null);
+    try {
+      const state = await this.getReadState(roomId, userId);
+      return await this.countUnreadForUser(roomId, userId, state?.lastReadAt ?? null);
+    } catch {
+      return 0;
+    }
   }
 
   async findSupportRoomForUser(userId: string) {
@@ -521,6 +544,7 @@ export class ChatRepository {
       .from(schema.chatRooms)
       .where(eq(schema.chatRooms.type, 'SUPPORT'));
 
+    const nowIso = new Date().toISOString();
     const result = await Promise.all(
       rooms.map(async (room) => {
         const participants = await this.db
@@ -563,6 +587,13 @@ export class ChatRepository {
               )
           : [{ count: 0 }];
 
+        const lastMsgDateIso = lastMessage?.createdAt
+          ? (lastMessage.createdAt instanceof Date ? lastMessage.createdAt.toISOString() : new Date(lastMessage.createdAt).toISOString())
+          : null;
+        const roomCreatedDateIso = room.createdAt
+          ? (room.createdAt instanceof Date ? room.createdAt.toISOString() : new Date(room.createdAt).toISOString())
+          : nowIso;
+
         return {
           ...room,
           participants,
@@ -573,10 +604,10 @@ export class ChatRepository {
                 senderId: lastMessage.senderId,
                 senderName: lastMessage.senderName,
                 content: lastMessage.messageText ?? '',
-                createdAt: lastMessage.createdAt.toISOString(),
+                createdAt: lastMsgDateIso || nowIso,
               }
             : null,
-          updatedAt: (lastMessage?.createdAt ?? room.createdAt).toISOString(),
+          updatedAt: lastMsgDateIso || roomCreatedDateIso,
         };
       }),
     );
