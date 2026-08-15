@@ -236,6 +236,21 @@ export class TournamentSchedulerService {
             }));
             await this.db.insert(schema.notifications).values(notiData);
           }
+
+          // Auto-post to Community Feed
+          try {
+            await this.db.insert(schema.communityPosts).values({
+              communityId: t.communityId,
+              authorId: t.createdBy,
+              tournamentId: newTournament[0].id,
+              type: 'TOURNAMENT_ANNOUNCEMENT',
+              body: `🏆 CLB vừa tự động mở giải đấu định kỳ tuần này: **${newName}**! Các thành viên hãy nhanh tay đăng ký tham gia ngay.`,
+              mediaUrls: newTournament[0].bannerUrl ? [newTournament[0].bannerUrl] : [],
+              status: 'PUBLISHED',
+            });
+          } catch (feedErr) {
+            this.logger.error('Failed to post recurring tournament to community feed:', feedErr.message);
+          }
         }
 
         this.logger.log(`Generated recurring tournament "${newName}" (ID: ${newTournament[0]?.id})`);
