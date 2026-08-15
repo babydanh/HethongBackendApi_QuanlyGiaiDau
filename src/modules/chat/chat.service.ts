@@ -10,6 +10,7 @@ import { CreateMessageDto } from './dto/create-message.dto';
 import { ChatGateway } from './chat.gateway';
 import { CreateSupportConversationDto } from './dto/create-support-conversation.dto';
 import { RoomType } from './dto/create-room.dto';
+import { extractLinkPreview } from './utils/link-preview.util';
 
 @Injectable()
 export class ChatService {
@@ -38,8 +39,7 @@ export class ChatService {
     if (!data.memberIds.includes(userId)) {
       data.memberIds.push(userId);
     }
-    
-    
+
     if (data.type === 'DIRECT' && data.memberIds.length !== 2) {
       throw new BadRequestException('Direct room must have exactly 2 members');
     }
@@ -390,6 +390,20 @@ export class ChatService {
     });
     this.chatGateway.broadcastSupportMessage(roomId, message);
     return message;
+  }
+
+  async votePoll(userId: string, messageId: string, optionId: string) {
+    const result = await this.chatRepository.votePoll(userId, messageId, optionId);
+    this.chatGateway.broadcastPollVoted(result.roomId, result.messageId, result.metadata);
+    return result;
+  }
+
+  async getLinkPreview(url: string) {
+    if (!url) {
+      throw new BadRequestException('URL không được để trống.');
+    }
+    const preview = await extractLinkPreview(url);
+    return { data: preview };
   }
 
   private async ensureSupportRoom(roomId: string) {

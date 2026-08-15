@@ -404,6 +404,8 @@ export class ChatRepository {
         senderId,
         messageText: data.messageText,
         attachmentsUrls: data.attachmentsUrls || [],
+        type: data.type || 'TEXT',
+        metadata: data.metadata || null,
         replyToId: data.replyToId || null,
       })
       .returning();
@@ -462,6 +464,8 @@ export class ChatRepository {
         senderId: schema.chatMessages.senderId,
         messageText: schema.chatMessages.messageText,
         attachmentsUrls: schema.chatMessages.attachmentsUrls,
+        type: schema.chatMessages.type,
+        metadata: schema.chatMessages.metadata,
         isRead: schema.chatMessages.isRead,
         isRevoked: schema.chatMessages.isRevoked,
         isPinned: schema.chatMessages.isPinned,
@@ -493,6 +497,8 @@ export class ChatRepository {
       senderId: schema.chatMessages.senderId,
       messageText: schema.chatMessages.messageText,
       attachmentsUrls: schema.chatMessages.attachmentsUrls,
+      type: schema.chatMessages.type,
+      metadata: schema.chatMessages.metadata,
       isRead: schema.chatMessages.isRead,
       isRevoked: schema.chatMessages.isRevoked,
       isPinned: schema.chatMessages.isPinned,
@@ -729,6 +735,73 @@ export class ChatRepository {
       .from(schema.chatMessages)
       .where(and(...conditions));
     return Number(result?.count ?? 0);
+  }
+
+  async votePoll(userId: string, messageId: string, optionId: string) {
+    const [msg] = await this.db
+      .select()
+      .from(schema.chatMessages)
+      .where(eq(schema.chatMessages.id, messageId))
+      .limit(1);
+
+    if (!msg) {
+      throw new NotFoundException('Không tìm thấy tin nhắn bình chọn.');
+    }
+    if (msg.type !== 'POLL' || msg.isRevoked) {
+      throw new BadRequestException('Tin nhắn này không phải là cuộc bình chọn hợp lệ.');
+    }
+
+    const metadata = (msg.metadata || {}) as {
+      question: string;
+      options: Array<{ id: string; text: string; voterIds: string[] }>;
+      allowMultiple?: boolean;
+      isClosed?: boolean;
+    };
+
+    if (metadata.isClosed) {
+      throw new BadRequestException('Cuộc bình chọn này đã kết thúc.');
+    }
+
+    const options = metadata.options || [];
+    const targetOption = options.find((opt) => opt.id === optionId);
+    if (!targetOption) {
+      throw new BadRequestException('Lựa chọn bình chọn không tồn tại.');
+    }
+
+    const isAlreadyVoted = (targetOption.voterIds || []).includes(userId);
+
+    const updatedOptions = options.map((opt) => {
+      let voterIds = opt.voterIds || [];
+      if (opt.id === optionId) {
+        if (isAlreadyVoted) {
+          voterIds = voterIds.filter((id) => id !== userId);
+        } else {
+          voterIds = [...voterIds.filter((id) => id !== userId), userId];
+        }
+      } else if (!metadata.allowMultiple && !isAlreadyVoted) {
+        // Single choice: remove user from other options when voting for this one
+        voterIds = voterIds.filter((id) => id !== userId);
+      }
+      return { ...opt, voterIds };
+    });
+
+    const updatedMetadata = {
+      ...metadata,
+      options: updatedOptions,
+    };
+
+    const [updated] = await this.db
+      .update(schema.chatMessages)
+      .set({ metadata: updatedMetadata })
+      .where(eq(schema.chatMessages.id, messageId))
+      .returning();
+
+    return {
+      messageId,
+      roomId: msg.roomId,
+      metadata: updatedMetadata,
+      message: updated,
+    };
   }
 
   async getReadState(roomId: string, userId: string) {

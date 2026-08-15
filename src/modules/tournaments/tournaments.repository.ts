@@ -1523,6 +1523,37 @@ export class TournamentsRepository {
           }
         }
       }
+      if (isTeamSport && data.footballTeamId) {
+        const selectedFootballMemberIds = [...new Set([
+          ...footballTeamMemberIds,
+          ...footballTeamReserveMemberIds,
+        ])];
+        if (selectedFootballMemberIds.length > 0) {
+          const existingFootballRoster = await tx
+            .select({
+              userId: schema.tournamentRosters.userId,
+              divisionId: schema.tournamentParticipants.tournamentDivisionId,
+            })
+            .from(schema.tournamentRosters)
+            .innerJoin(
+              schema.tournamentParticipants,
+              eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+            )
+            .where(and(
+              eq(schema.tournamentParticipants.tournamentId, tournamentId),
+              inArray(schema.tournamentRosters.userId, selectedFootballMemberIds),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+            ));
+          if (existingFootballRoster.length > 0) {
+            throw new BadRequestException(
+              'Một hoặc nhiều thành viên đội bóng đã đăng ký nội dung khác trong giải đấu này.',
+            );
+          }
+        }
+      }
       if (!finalTeamName) {
         const [leaderProfile] = await tx
           .select({ fullName: schema.profiles.fullName })

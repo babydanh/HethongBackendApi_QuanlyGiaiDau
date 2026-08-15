@@ -143,6 +143,22 @@ export class ChatController {
     return this.chatService.toggleReaction(user.sub, id, body.emoji);
   }
 
+  @Post('messages/:id/poll/vote')
+  @ApiOperation({ summary: 'Bình chọn cho một lựa chọn trong Poll' })
+  async votePoll(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { optionId: string },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.votePoll(user.sub, id, body.optionId);
+  }
+
+  @Get('link-preview')
+  @ApiOperation({ summary: 'Trích xuất thông tin xem trước của liên kết (OpenGraph preview)' })
+  async getLinkPreview(@Query('url') url: string) {
+    return this.chatService.getLinkPreview(url);
+  }
+
   @Put('rooms/:roomId/settings')
   @ApiOperation({ summary: 'Cập nhật cài đặt phòng chat CLB' })
   async updateClubRoomSettings(
