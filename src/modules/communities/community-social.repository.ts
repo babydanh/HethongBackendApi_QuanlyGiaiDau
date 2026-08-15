@@ -342,9 +342,13 @@ export class CommunitySocialRepository {
     tournamentId: string,
     tournamentName: string,
     bannerUrl?: string | null,
+    isLite: boolean = false,
   ) {
     const mediaUrls = bannerUrl ? [bannerUrl] : [];
-    const body = `🏆 CLB vừa công bố giải đấu mới: **${tournamentName}**! Các thành viên hãy nhanh tay đăng ký tham gia ngay.`;
+    const body = isLite
+      ? `⚡ CLB vừa mở giải đấu nhanh: **${tournamentName}**! Bình chọn tham gia ngay bên dưới hoặc quét mã QR để vào phòng đấu.`
+      : `🏆 CLB vừa công bố giải đấu mới: **${tournamentName}**! Các thành viên hãy nhanh tay đăng ký tham gia ngay.`;
+
     const [post] = await this.db.insert(schema.communityPosts)
       .values({
         communityId,
@@ -356,6 +360,26 @@ export class CommunitySocialRepository {
         status: 'PUBLISHED',
       })
       .returning();
+
+    if (post && isLite) {
+      // Tự động tạo Poll tương tác đăng ký cho giải Lite
+      try {
+        await this.createPoll(
+          communityId,
+          authorId,
+          {
+            question: `Bạn có tham gia giải "${tournamentName}" không?`,
+            options: ['✅ Có tham gia (Đăng ký ngay)', '⏳ Chưa chắc chắn', '❌ Bận / Không tham gia'],
+            allowMultipleAnswers: false,
+            allowAddOptions: false,
+          },
+          post.id,
+        );
+      } catch (pollErr) {
+        console.error('Failed to create interactive poll for lite tournament post:', pollErr);
+      }
+    }
+
     return post;
   }
 
