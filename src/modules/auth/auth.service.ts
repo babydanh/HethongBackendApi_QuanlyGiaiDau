@@ -647,7 +647,10 @@ export class AuthService {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 120 * 1000); // Hiệu lực 120 giây (2 phút)
+    // Hiệu lực 15 phút — 120 giây quá ngắn cho luồng email (queue + SMTP +
+    // thời gian người dùng mở mail), token gần như luôn hết hạn trước khi bấm.
+    const tokenTtlMinutes = 15;
+    const expiresAt = new Date(Date.now() + tokenTtlMinutes * 60 * 1000);
 
     // Lưu OTP vào DB
     await this.db.insert(schema.otpCodes).values({
@@ -663,7 +666,7 @@ export class AuthService {
     // Add job to BullMQ queue
     await this.emailQueue.add('send-verification', {
       to: user.email,
-      subject: 'Xác thực Email tài khoản Sporto (Có hiệu lực 120s)',
+      subject: `Xác thực Email tài khoản Sporto (Có hiệu lực ${tokenTtlMinutes} phút)`,
       html: `
         <div style="font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
           <h2 style="color: #2563eb; margin-bottom: 20px;">Xác thực Email tài khoản</h2>
@@ -674,15 +677,17 @@ export class AuthService {
           </div>
           <p>Hoặc sao chép đường dẫn này vào trình duyệt của bạn:</p>
           <p style="word-break: break-all; color: #4b5563;"><a href="${activationLink}">${activationLink}</a></p>
+          <p style="margin-top: 16px; font-size: 12px; color: #4b5563;">Nếu cần nhập mã thủ công trong trang Cài đặt, dùng mã:</p>
+          <p style="font-family: monospace; font-size: 11px; word-break: break-all; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; color: #1e293b;">${token}</p>
           <p style="margin-top: 30px; font-size: 12px; color: #dc2626; border-top: 1px solid #e5e7eb; padding-top: 20px; font-weight: bold;">
-            ⏱️ Đường dẫn này có hiệu lực trong vòng 120 giây (2 phút). Nếu quá 120 giây vui lòng yêu cầu gửi lại email mới.
+            ⏱️ Đường dẫn này có hiệu lực trong vòng ${tokenTtlMinutes} phút. Nếu quá hạn vui lòng yêu cầu gửi lại email mới.
           </p>
         </div>
       `,
     });
 
     return {
-      message: 'Mã xác minh email đã được gửi qua email. Có hiệu lực trong 120 giây.',
+      message: `Mã xác minh email đã được gửi qua email. Có hiệu lực trong ${tokenTtlMinutes} phút.`,
       cooldownSeconds: 120,
     };
   }
