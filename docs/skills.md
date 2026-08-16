@@ -340,3 +340,5 @@ src/database/schema/
 | npm, yarn | **pnpm** |
 | Hard Delete | **Soft Delete** (`deleted_at`) |
 | MongoDB | **PostgreSQL** |
+| Firebase Firestore / Realtime DB | **PostgreSQL + Drizzle ORM** (Firebase CHỈ ĐƯỢC DÙNG làm cổng gửi Push Notification FCM ra thiết bị) |
+
