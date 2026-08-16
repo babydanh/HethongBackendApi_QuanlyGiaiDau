@@ -37,6 +37,18 @@ export class CategoriesService {
     return result;
   }
 
+  /** Admin-only view: include inactive categories without changing the public cache contract. */
+  async findAllAdminCategories(query: QueryCategoryDto = {}) {
+    const adminQuery = { ...query, includeInactive: true };
+    const cacheKey = `${CACHE_KEY_ALL}:admin:${JSON.stringify(adminQuery)}`;
+    const cached = await this.redisService.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
+    const result = await this.categoriesRepository.findAllCategories(adminQuery);
+    await this.redisService.set(cacheKey, JSON.stringify(result), CACHE_TTL);
+    return result;
+  }
+
   async findCategoryById(id: string) {
     const cacheKey = CACHE_KEY_ONE(id);
     const cached = await this.redisService.get(cacheKey);

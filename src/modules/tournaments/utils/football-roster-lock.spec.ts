@@ -5,8 +5,9 @@ describe('assertFootballRosterLockable', () => {
   const valid = {
     entryExists: true,
     entryStatus: 'CONFIRMED',
-    confirmations: ['CONFIRMED'] as Array<'CONFIRMED'>,
-    mainRosterCount: 1,
+  confirmations: ['CONFIRMED'] as Array<'CONFIRMED'>,
+  mainRosterCount: 1,
+  requiredMainRosterCount: 1,
   };
 
   it('accepts a confirmed roster', () => {
@@ -32,5 +33,15 @@ describe('assertFootballRosterLockable', () => {
     expect(() =>
       assertFootballRosterLockable({ ...valid, entryStatus: 'LOCKED' }),
     ).not.toThrow();
+  });
+
+  it('keeps an undersized roster from being locked', () => {
+    expect(() =>
+      assertFootballRosterLockable({
+        ...valid,
+        requiredMainRosterCount: 5,
+        mainRosterCount: 4,
+      }),
+    ).toThrow(BadRequestException);
   });
 });

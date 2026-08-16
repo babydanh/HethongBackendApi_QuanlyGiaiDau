@@ -69,6 +69,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       findById: jest.fn(),
       findCategory: jest.fn(),
       findCommunityMember: jest.fn(),
+      isCoOrganizer: jest.fn(),
       hasNonDeletedStagesOrMatches: jest.fn(),
       findLitePendingPartnerParticipants: jest.fn(),
       findLiteParticipantsWithRosters: jest.fn(),
@@ -80,6 +81,13 @@ describe('TournamentsService — Lite pairing guards', () => {
       registerParticipant: jest.fn(),
       countLiteActiveRosterUsers: jest.fn(),
       update: jest.fn(),
+      findParticipantById: jest.fn(),
+      lockParticipantRoster: jest.fn(),
+      unlockParticipantRoster: jest.fn(),
+      findFootballEntryForParticipant: jest.fn(),
+      getFootballEntryRoster: jest.fn(),
+      findFootballTeamForRegistration: jest.fn(),
+      updateFootballRoster: jest.fn(),
     };
 
     mockBracketGenerator = {};
@@ -94,6 +102,9 @@ describe('TournamentsService — Lite pairing guards', () => {
         return undefined;
       }),
     };
+    const liveScoreGateway = {
+      broadcastRegistrationUpdate: jest.fn(),
+    };
 
     service = new TournamentsService(
       mockRepo as any,
@@ -103,6 +114,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRedis as any,
       mockConfig as any,
       {} as any,
+      liveScoreGateway as any,
     );
   });
 
@@ -142,6 +154,117 @@ describe('TournamentsService — Lite pairing guards', () => {
       await expect(
         (service as any).checkLiteAuthorization('tournament-1', 'other-user', []),
       ).rejects.toThrow();
+    });
+  });
+
+  describe('football registration manager matrix', () => {
+    const tournament = {
+      id: 'tournament-1',
+      createdBy: 'creator-1',
+      communityId: 'community-1',
+    };
+
+    it.each([
+      ['creator', 'creator-1', [], null, false],
+      ['admin', 'other-user', ['ADMIN'], null, false],
+      ['co-organizer', 'other-user', [], null, true],
+      ['community owner', 'other-user', [], { role: 'OWNER', status: 'JOINED' }, false],
+      ['community moderator', 'other-user', [], { role: 'MODERATOR', status: 'JOINED' }, false],
+    ])('allows %s to manage registration', async (_label, userId, roles, member, coOrganizer) => {
+      mockRepo.isCoOrganizer.mockResolvedValue(coOrganizer);
+      mockRepo.findCommunityMember.mockResolvedValue(member);
+
+      await expect(
+        (service as any).isManager(tournament, userId, roles),
+      ).resolves.toBe(true);
+    });
+
+    it.each([
+      ['global organizer', 'other-user', ['ORGANIZER'], null, false],
+      ['community player', 'other-user', [], { role: 'PLAYER', status: 'JOINED' }, false],
+      ['pending community member', 'other-user', [], { role: 'OWNER', status: 'PENDING' }, false],
+      ['unrelated user', 'other-user', [], null, false],
+    ])('rejects %s from managing registration', async (_label, userId, roles, member, coOrganizer) => {
+      mockRepo.isCoOrganizer.mockResolvedValue(coOrganizer);
+      mockRepo.findCommunityMember.mockResolvedValue(member);
+
+      await expect(
+        (service as any).isManager(tournament, userId, roles),
+      ).resolves.toBe(false);
+    });
+  });
+
+  describe('football roster lock contract', () => {
+    const tournament = {
+      id: 'tournament-1',
+      createdBy: 'creator-1',
+      communityId: null,
+      status: 'REGISTRATION_CLOSED',
+    };
+    const participant = {
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      tournamentDivisionId: 'division-1',
+      footballTeamId: 'team-1',
+    };
+
+    it('locks a football participant only through the manager boundary and broadcasts the change', async () => {
+      mockRepo.findById.mockResolvedValue(tournament);
+      mockRepo.findParticipantById.mockResolvedValue(participant);
+      mockRepo.lockParticipantRoster.mockResolvedValue({
+        ...participant,
+        rosterLockedAt: new Date(),
+      });
+
+      await expect(
+        (service as any).lockParticipantRoster(
+          'tournament-1',
+          'participant-1',
+          'creator-1',
+          [],
+        ),
+      ).resolves.toEqual(expect.objectContaining({ id: 'participant-1' }));
+      expect(mockRepo.lockParticipantRoster).toHaveBeenCalledWith(
+        'participant-1',
+        'creator-1',
+      );
+    });
+
+    it('rejects a global organizer without tournament scope', async () => {
+      mockRepo.findById.mockResolvedValue(tournament);
+      mockRepo.findParticipantById.mockResolvedValue(participant);
+
+      await expect(
+        (service as any).lockParticipantRoster(
+          'tournament-1',
+          'participant-1',
+          'other-user',
+          ['ORGANIZER'],
+        ),
+      ).rejects.toThrow();
+      expect(mockRepo.lockParticipantRoster).not.toHaveBeenCalled();
+    });
+
+    it('does not allow roster edits after the entry is locked', async () => {
+      mockRepo.findById.mockResolvedValue({
+        ...tournament,
+        status: 'REGISTRATION_OPEN',
+      });
+      mockRepo.findParticipantById.mockResolvedValue(participant);
+      mockRepo.findFootballEntryForParticipant.mockResolvedValue({
+        entry: { id: 'entry-1', status: 'LOCKED' },
+      });
+
+      await expect(
+        (service as any).updateFootballRoster(
+          'tournament-1',
+          'participant-1',
+          { memberIds: ['player-1'] },
+          'creator-1',
+          [],
+        ),
+      ).rejects.toThrow('Roster đã khóa');
+      expect(mockRepo.updateFootballRoster).not.toHaveBeenCalled();
     });
   });
 

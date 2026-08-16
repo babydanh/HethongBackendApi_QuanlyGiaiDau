@@ -1022,5 +1022,3 @@ export class ChatRepository {
     return user ?? null;
   }
 }
-
-

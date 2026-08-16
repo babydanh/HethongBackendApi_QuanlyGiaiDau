@@ -1,11 +1,15 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, gt, ilike, inArray, isNull, notExists, or, sql } from 'drizzle-orm';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, gt, ilike, inArray, isNull, ne, notExists, or, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import type { CreateFootballTeamDto } from './dto/create-football-team.dto';
 import type { UpdateFootballTeamDto } from './dto/update-football-team.dto';
 import { AuditService } from '../audit/audit.service';
+import {
+  assertCanCreateActiveFootballTeam,
+  assertCanJoinActiveFootballTeam,
+} from './football-team-limits';
 
 // `/mine` represents teams the user currently participates in. Pending invites
 // must stay in the notification/invite flow and must not affect team limits or
@@ -22,6 +26,8 @@ export class FootballTeamsRepository {
   async create(userId: string, dto: CreateFootballTeamDto) {
     return this.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('football-team-limit'))`);
+      const normalizedName = dto.name.trim();
+      if (!normalizedName) throw new BadRequestException('Tên đội không được để trống.');
       const [creator] = await tx.select({ id: schema.users.id }).from(schema.users)
         .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt))).limit(1);
       if (!creator) throw new NotFoundException('Không tìm thấy tài khoản hoạt động.');
@@ -36,9 +42,76 @@ export class FootballTeamsRepository {
       if (!category) throw new NotFoundException('Không tìm thấy danh mục bóng đá.');
       const categoryText = `${category.name} ${category.slug}`.toLowerCase();
       const categoryConfig = (category.categoryConfig as Record<string, unknown> | null) || {};
-      if (!/(football|soccer|bóng đá)/i.test(categoryText) || categoryConfig.isActive === false) {
+      if (!/(football|soccer|bóng đá)/i.test(categoryText) || categoryConfig.isActive === false || categoryConfig.isActive === 'false') {
         throw new ConflictException('Chỉ được tạo đội trong danh mục bóng đá đang hoạt động.');
       }
+
+      if (dto.communityId) {
+        // A team may be linked only from a live community the creator has
+        // actually joined. This keeps the community/team boundary explicit
+        // and prevents attaching a team to an unrelated or suspended club.
+        const [communityAccess] = await tx
+          .select({
+            id: schema.communities.id,
+            configuredCategoryId: schema.communitySports.categoryId,
+          })
+          .from(schema.communities)
+          .innerJoin(
+            schema.communityMembers,
+            and(
+              eq(schema.communityMembers.communityId, schema.communities.id),
+              eq(schema.communityMembers.userId, userId),
+              eq(schema.communityMembers.status, 'JOINED'),
+            ),
+          )
+          .leftJoin(
+            schema.communitySports,
+            eq(schema.communitySports.communityId, schema.communities.id),
+          )
+          .where(
+            and(
+              eq(schema.communities.id, dto.communityId),
+              eq(schema.communities.status, 'ACTIVE'),
+              isNull(schema.communities.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!communityAccess) {
+          throw new ForbiddenException(
+            'Bạn phải tham gia câu lạc bộ đang hoạt động trước khi gắn đội bóng vào đó.',
+          );
+        }
+        if (
+          communityAccess.configuredCategoryId &&
+          communityAccess.configuredCategoryId !== dto.categoryId
+        ) {
+          throw new ConflictException(
+            'Đội bóng phải cùng môn thể thao với câu lạc bộ đã chọn.',
+          );
+        }
+      }
+
+      const [duplicate] = await tx.select({ id: schema.footballTeams.id })
+        .from(schema.footballTeams)
+        .where(and(
+          eq(schema.footballTeams.categoryId, dto.categoryId),
+          eq(schema.footballTeams.status, 'ACTIVE'),
+          sql`lower(${schema.footballTeams.name}) = lower(${normalizedName})`,
+          dto.communityId
+            ? eq(schema.footballTeams.communityId, dto.communityId)
+            : isNull(schema.footballTeams.communityId),
+        ))
+        .limit(1);
+      if (duplicate) throw new ConflictException('Tên đội đã được dùng trong danh mục này.');
+
+      const [{ count: createdCount }] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.footballTeams)
+        .where(and(
+          eq(schema.footballTeams.createdBy, userId),
+          eq(schema.footballTeams.status, 'ACTIVE'),
+        ));
+      assertCanCreateActiveFootballTeam(Number(createdCount));
 
       const [{ count }] = await tx
         .select({ count: sql<number>`count(*)::int` })
@@ -50,10 +123,10 @@ export class FootballTeamsRepository {
           eq(schema.footballTeams.status, 'ACTIVE'),
           inArray(schema.footballTeamMembers.role, ['CAPTAIN', 'MANAGER', 'PLAYER']),
         ));
-      if (Number(count) >= 3) throw new ConflictException('Bạn đã tham gia tối đa 3 đội đang hoạt động.');
+      assertCanJoinActiveFootballTeam(Number(count));
 
       const [team] = await tx.insert(schema.footballTeams).values({
-        name: dto.name.trim(),
+        name: normalizedName,
         categoryId: dto.categoryId,
         logoUrl: dto.logoUrl?.trim() || null,
         communityId: dto.communityId,
@@ -77,6 +150,7 @@ export class FootballTeamsRepository {
       rank: schema.footballTeamRanks,
     }).from(schema.footballTeamMembers)
       .innerJoin(schema.footballTeams, eq(schema.footballTeamMembers.teamId, schema.footballTeams.id))
+      .innerJoin(schema.categories, eq(schema.categories.id, schema.footballTeams.categoryId))
       .leftJoin(schema.footballTeamRanks, and(
         eq(schema.footballTeamRanks.teamId, schema.footballTeams.id),
         eq(schema.footballTeamRanks.categoryId, schema.footballTeams.categoryId),
@@ -85,6 +159,7 @@ export class FootballTeamsRepository {
         eq(schema.footballTeamMembers.userId, userId),
         inArray(schema.footballTeamMembers.status, ACTIVE_MEMBER_STATUSES),
         eq(schema.footballTeams.status, 'ACTIVE'),
+        sql`coalesce(${schema.categories.categoryConfig}->>'isActive', 'true') <> 'false'`,
       ))
       .orderBy(desc(schema.footballTeams.updatedAt));
     return rows.map(({ team, membership, rank }) => ({ team, membership, rank }));
@@ -139,14 +214,57 @@ export class FootballTeamsRepository {
   }
 
   async update(teamId: string, dto: UpdateFootballTeamDto) {
-    const [team] = await this.db.update(schema.footballTeams).set({
-      ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-      ...(dto.logoUrl !== undefined ? { logoUrl: dto.logoUrl?.trim() || null } : {}),
-      ...(dto.status !== undefined ? { status: dto.status, archivedAt: dto.status === 'ARCHIVED' ? new Date() : null } : {}),
-      updatedAt: new Date(),
-    }).where(eq(schema.footballTeams.id, teamId)).returning();
-    if (!team) throw new NotFoundException('Không tìm thấy đội bóng.');
-    return team;
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('football-team-limit'))`);
+      const [current] = await tx.select({
+        id: schema.footballTeams.id,
+        name: schema.footballTeams.name,
+        categoryId: schema.footballTeams.categoryId,
+        communityId: schema.footballTeams.communityId,
+        createdBy: schema.footballTeams.createdBy,
+        status: schema.footballTeams.status,
+      }).from(schema.footballTeams).where(eq(schema.footballTeams.id, teamId)).limit(1);
+      if (!current) throw new NotFoundException('Không tìm thấy đội bóng.');
+
+      const normalizedName = dto.name?.trim();
+      if (dto.name !== undefined && !normalizedName) {
+        throw new BadRequestException('Tên đội không được để trống.');
+      }
+      const nextStatus = dto.status ?? current.status;
+      if (nextStatus === 'ACTIVE' && current.status !== 'ACTIVE') {
+        const [{ count: activeCreatedCount }] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.footballTeams)
+          .where(and(
+            eq(schema.footballTeams.createdBy, current.createdBy),
+            eq(schema.footballTeams.status, 'ACTIVE'),
+          ));
+        assertCanCreateActiveFootballTeam(Number(activeCreatedCount));
+      }
+      if (normalizedName && nextStatus === 'ACTIVE') {
+        const [duplicate] = await tx.select({ id: schema.footballTeams.id })
+          .from(schema.footballTeams)
+          .where(and(
+            ne(schema.footballTeams.id, teamId),
+            eq(schema.footballTeams.categoryId, current.categoryId),
+            eq(schema.footballTeams.status, 'ACTIVE'),
+            sql`lower(${schema.footballTeams.name}) = lower(${normalizedName})`,
+            current.communityId
+              ? eq(schema.footballTeams.communityId, current.communityId)
+              : isNull(schema.footballTeams.communityId),
+          ))
+          .limit(1);
+        if (duplicate) throw new ConflictException('Tên đội đã được dùng trong danh mục này.');
+      }
+
+      const [team] = await tx.update(schema.footballTeams).set({
+        ...(normalizedName !== undefined ? { name: normalizedName } : {}),
+        ...(dto.logoUrl !== undefined ? { logoUrl: dto.logoUrl?.trim() || null } : {}),
+        ...(dto.status !== undefined ? { status: dto.status, archivedAt: dto.status === 'ARCHIVED' ? new Date() : null } : {}),
+        updatedAt: new Date(),
+      }).where(eq(schema.footballTeams.id, teamId)).returning();
+      return team;
+    });
   }
 
   async invite(teamId: string, invitedBy: string, userId: string, role: string) {
@@ -156,16 +274,29 @@ export class FootballTeamsRepository {
         .from(schema.footballTeams).where(eq(schema.footballTeams.id, teamId)).limit(1);
       if (!team) throw new NotFoundException('Không tìm thấy đội bóng.');
       if (team.status !== 'ACTIVE') throw new ConflictException('Đội bóng không còn nhận thành viên.');
+      const activeBan = tx.select({ id: schema.userBans.id })
+        .from(schema.userBans)
+        .where(and(
+          eq(schema.userBans.userId, schema.users.id),
+          eq(schema.userBans.isActive, true),
+          inArray(schema.userBans.banType, ['SOFT_BAN', 'HARD_BAN']),
+          or(isNull(schema.userBans.expiresAt), gt(schema.userBans.expiresAt, new Date())),
+        ));
       const [target] = await tx.select({ id: schema.users.id }).from(schema.users)
-        .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt))).limit(1);
-      if (!target) throw new NotFoundException('Không tìm thấy tài khoản được mời.');
+        .where(and(
+          eq(schema.users.id, userId),
+          isNull(schema.users.deletedAt),
+          eq(schema.users.isMock, false),
+          notExists(activeBan),
+        )).limit(1);
+      if (!target) throw new NotFoundException('Tài khoản được mời không còn đủ điều kiện.');
       const [existing] = await tx.select().from(schema.footballTeamMembers)
         .where(and(eq(schema.footballTeamMembers.teamId, teamId), eq(schema.footballTeamMembers.userId, userId))).limit(1);
       if (existing?.status === 'ACTIVE' || existing?.status === 'INVITED') throw new ConflictException('Thành viên đã có trong đội hoặc đang chờ mời.');
       const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` }).from(schema.footballTeamMembers)
         .innerJoin(schema.footballTeams, eq(schema.footballTeamMembers.teamId, schema.footballTeams.id))
         .where(and(eq(schema.footballTeamMembers.userId, userId), eq(schema.footballTeamMembers.status, 'ACTIVE'), eq(schema.footballTeams.status, 'ACTIVE')));
-      if (Number(count) >= 3) throw new ConflictException('Người dùng đã tham gia tối đa 3 đội.');
+      assertCanJoinActiveFootballTeam(Number(count));
       if (existing) {
         const [member] = await tx.update(schema.footballTeamMembers).set({ status: 'INVITED', role, invitedBy, leftAt: null, updatedAt: new Date() }).where(eq(schema.footballTeamMembers.id, existing.id)).returning();
         await tx.insert(schema.footballTeamInvites).values({ teamId, userId, invitedBy, status: 'PENDING' });
@@ -187,10 +318,26 @@ export class FootballTeamsRepository {
       if (!team) throw new NotFoundException('Không tìm thấy đội bóng.');
       if (team.status !== 'ACTIVE' && status === 'ACCEPTED') throw new ConflictException('Đội bóng không còn nhận thành viên.');
       if (status === 'ACCEPTED') {
+        const activeBan = tx.select({ id: schema.userBans.id })
+          .from(schema.userBans)
+          .where(and(
+            eq(schema.userBans.userId, schema.users.id),
+            eq(schema.userBans.isActive, true),
+            inArray(schema.userBans.banType, ['SOFT_BAN', 'HARD_BAN']),
+            or(isNull(schema.userBans.expiresAt), gt(schema.userBans.expiresAt, new Date())),
+          ));
+        const [target] = await tx.select({ id: schema.users.id }).from(schema.users)
+          .where(and(
+            eq(schema.users.id, userId),
+            isNull(schema.users.deletedAt),
+            eq(schema.users.isMock, false),
+            notExists(activeBan),
+          )).limit(1);
+        if (!target) throw new ConflictException('Tài khoản không còn đủ điều kiện tham gia đội.');
         const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` }).from(schema.footballTeamMembers)
           .innerJoin(schema.footballTeams, eq(schema.footballTeamMembers.teamId, schema.footballTeams.id))
           .where(and(eq(schema.footballTeamMembers.userId, userId), eq(schema.footballTeamMembers.status, 'ACTIVE'), eq(schema.footballTeams.status, 'ACTIVE')));
-        if (Number(count) >= 3) throw new ConflictException('Bạn đã tham gia tối đa 3 đội đang hoạt động.');
+        assertCanJoinActiveFootballTeam(Number(count));
       }
       const [before] = await tx.select().from(schema.footballTeamMembers)
         .where(and(eq(schema.footballTeamMembers.teamId, teamId), eq(schema.footballTeamMembers.userId, userId), eq(schema.footballTeamMembers.status, 'INVITED')))

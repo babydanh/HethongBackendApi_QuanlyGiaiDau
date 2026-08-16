@@ -400,9 +400,26 @@ function validateScoringBlock(
   kind: SportRuleKind,
   sourceLabel: string,
 ) {
+  const allowedKeys = new Set(COMMON_ROOT_KEYS);
+  if (kind === 'FOOTBALL') {
+    allowedKeys.add('forfeitGoals');
+  }
+
   for (const key of Object.keys(block)) {
-    if (!COMMON_ROOT_KEYS.has(key)) {
+    if (!allowedKeys.has(key)) {
       throw new BadRequestException(`${sourceLabel}: field scoring.${key} không hợp lệ cho luật ${kind}.`);
+    }
+  }
+
+  if (kind === 'FOOTBALL' && block.forfeitGoals !== undefined) {
+    const value = block.forfeitGoals;
+    if (
+      typeof value !== 'number' ||
+      !Number.isInteger(value) ||
+      value < 1 ||
+      value > 99
+    ) {
+      throw new BadRequestException(`${sourceLabel}: forfeitGoals phải là số nguyên từ 1 đến 99.`);
     }
   }
 

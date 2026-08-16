@@ -3,6 +3,36 @@ import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
 
+export function extractWsToken(client: Socket): string | null {
+    let token = client.handshake.auth?.token;
+    if (typeof token === 'string' && token.trim()) {
+        return token.trim().replace(/^Bearer\s+/i, '').trim();
+    }
+
+    if (client.handshake.headers.cookie) {
+        const cookies = client.handshake.headers.cookie.split(';').reduce((acc, cookie) => {
+            const parts = cookie.split('=');
+            const key = parts[0]?.trim();
+            const value = parts.slice(1).join('=')?.trim();
+            if (key && value) acc[key] = decodeURIComponent(value);
+            return acc;
+        }, {} as Record<string, string>);
+        if (cookies.accessToken) return cookies.accessToken;
+    }
+
+    const queryToken = client.handshake.query?.token;
+    if (typeof queryToken === 'string' && queryToken.trim()) {
+        return queryToken.trim().replace(/^Bearer\s+/i, '').trim();
+    }
+
+    const authorization = client.handshake.headers.authorization;
+    if (typeof authorization === 'string' && authorization.trim()) {
+        return authorization.trim().replace(/^Bearer\s+/i, '').trim();
+    }
+
+    return null;
+}
+
 @Injectable()
 export class WsJwtGuard implements CanActivate {
     constructor(private readonly jwtService: JwtService) {}
@@ -12,42 +42,7 @@ export class WsJwtGuard implements CanActivate {
         try {
             const client: Socket = context.switchToWs().getClient<Socket>();
             
-            let token = client.handshake.auth?.token;
-            if (token && typeof token === 'string') {
-                if (token.startsWith('Bearer ')) {
-                    token = token.substring(7).trim();
-                } else {
-                    token = token.trim();
-                }
-            }
-            
-            if (!token && client.handshake.headers.cookie) {
-                const cookieString = client.handshake.headers.cookie;
-                const cookies = cookieString.split(';').reduce((acc, cookie) => {
-                    const parts = cookie.split('=');
-                    const key = parts[0]?.trim();
-                    const value = parts.slice(1).join('=')?.trim();
-                    if (key && value) {
-                        acc[key] = decodeURIComponent(value);
-                    }
-                    return acc;
-                }, {} as Record<string, string>);
-                token = cookies['accessToken'];
-            }
-            
-            if (!token && client.handshake.query?.token) {
-                token = client.handshake.query.token as string;
-            }
-
-            // Flutter's Socket.IO client sends bearer credentials as an
-            // Authorization handshake header. Accept it in addition to the
-            // browser auth/cookie shapes above so mobile chat is authenticated.
-            if (!token) {
-                const authorization = client.handshake.headers.authorization;
-                if (typeof authorization === 'string' && authorization.trim()) {
-                    token = authorization.trim().replace(/^Bearer\s+/i, '').trim();
-                }
-            }
+            const token = extractWsToken(client);
 
             if (!token) {
                 throw new WsException('Unauthorized');

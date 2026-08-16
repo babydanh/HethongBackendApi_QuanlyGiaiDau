@@ -20,6 +20,7 @@ import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
+import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
 import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
@@ -570,6 +571,17 @@ export class TournamentsController {
     return this.tournamentsService.lock(id, user.sub, this.getSystemRoles(user));
   }
 
+  @Post(':id/confirm-roster')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Chốt danh sách hiện tại, không tự tạo bracket' })
+  async confirmRoster(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.confirmRoster(id, user.sub, this.getSystemRoles(user));
+  }
+
   @Post(':id/register')
   @Verified()
   @ApiBearerAuth()
@@ -870,6 +882,23 @@ export class TournamentsController {
     );
   }
 
+  @Post(':id/participants/:participantId/unlock-roster')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Mở khóa roster đội trước khi giải bắt đầu' })
+  async unlockParticipantRoster(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.unlockParticipantRoster(
+      id,
+      participantId,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
   @Get(':id/participants/:participantId/football-roster')
   @Verified()
   @ApiBearerAuth()
@@ -898,6 +927,25 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.respondFootballRoster(id, participantId, user.sub, action);
+  }
+
+  @Patch(':id/participants/:participantId/football-roster')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật đội hình đăng ký bóng đá trước khi khóa roster' })
+  async updateFootballRoster(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body() dto: UpdateFootballRosterDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateFootballRoster(
+      id,
+      participantId,
+      dto,
+      user.sub,
+      this.getSystemRoles(user),
+    );
   }
 
   @Post(':id/reserve-slots')

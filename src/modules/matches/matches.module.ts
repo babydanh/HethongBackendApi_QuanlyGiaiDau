@@ -12,6 +12,6 @@ import { RedisModule } from '../../providers/redis/redis.module';
   imports: [DatabaseModule, AuthModule, RankingsModule, RedisModule],
   controllers: [MatchesController],
   providers: [MatchesService, MatchesRepository, LiveScoreGateway],
-  exports: [MatchesService],
+  exports: [MatchesService, LiveScoreGateway],
 })
 export class MatchesModule {}

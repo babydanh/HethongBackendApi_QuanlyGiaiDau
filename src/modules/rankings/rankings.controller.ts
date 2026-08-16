@@ -21,7 +21,12 @@ export class RankingsController {
   @Get('football-teams')
   @ApiOperation({ summary: 'Bảng xếp hạng ELO bóng đá theo đội' })
   async getFootballTeamLeaderboard(@Query() query: QueryRankingDto) {
-    return this.footballTeamEloService.getLeaderboard(query.categoryId, query.limit, query.cursor);
+    return this.footballTeamEloService.getLeaderboard(
+      query.categoryId,
+      query.limit,
+      query.cursor,
+      query.communityId,
+    );
   }
 
   @Public()

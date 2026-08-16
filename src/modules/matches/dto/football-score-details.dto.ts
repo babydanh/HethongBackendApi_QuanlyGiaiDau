@@ -1,11 +1,28 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsIn, IsInt, IsObject, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export const FOOTBALL_PHASES = [
-  'FIRST_HALF', 'HALFTIME', 'SECOND_HALF', 'STOPPAGE_TIME',
-  'FULL_TIME', 'EXTRA_TIME_FIRST_HALF', 'EXTRA_TIME_BREAK',
-  'EXTRA_TIME_SECOND_HALF', 'PENALTY_SHOOTOUT', 'COMPLETED',
+  'FIRST_HALF',
+  'HALFTIME',
+  'SECOND_HALF',
+  'STOPPAGE_TIME',
+  'FULL_TIME',
+  'EXTRA_TIME_FIRST_HALF',
+  'EXTRA_TIME_BREAK',
+  'EXTRA_TIME_SECOND_HALF',
+  'PENALTY_SHOOTOUT',
+  'COMPLETED',
 ] as const;
 
 export type FootballPhase = (typeof FOOTBALL_PHASES)[number];
@@ -31,7 +48,17 @@ export class FootballShootoutDto {
 
 export class FootballEventDto {
   @IsString()
-  @IsIn(['GOAL', 'OWN_GOAL', 'PENALTY_GOAL', 'YELLOW_CARD', 'RED_CARD', 'FOUL', 'SUBSTITUTION', 'VAR', 'NOTE'])
+  @IsIn([
+    'GOAL',
+    'OWN_GOAL',
+    'PENALTY_GOAL',
+    'YELLOW_CARD',
+    'RED_CARD',
+    'FOUL',
+    'SUBSTITUTION',
+    'VAR',
+    'NOTE',
+  ])
   type!: string;
 
   @IsInt()
@@ -43,6 +70,16 @@ export class FootballEventDto {
   @Min(0)
   @Max(150)
   minute?: number;
+
+  @ApiPropertyOptional({
+    example: 4,
+    description: 'Phút bù giờ của mốc sự kiện',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  addedMinute?: number;
 }
 
 export class FootballScoreDetailsDto {
@@ -57,6 +94,20 @@ export class FootballScoreDetailsDto {
   @IsString()
   @IsIn(FOOTBALL_PHASES)
   phase!: FootballPhase;
+
+  @ApiPropertyOptional({ example: 90, description: 'Phút thi đấu hiện tại' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(150)
+  minute?: number;
+
+  @ApiPropertyOptional({ example: 4, description: 'Phút bù giờ hiện tại' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  addedMinute?: number;
 
   @IsOptional()
   @IsObject()

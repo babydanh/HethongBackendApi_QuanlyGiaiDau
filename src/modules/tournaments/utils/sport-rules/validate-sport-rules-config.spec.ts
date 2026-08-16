@@ -96,6 +96,30 @@ describe('validateSportRuleConfig', () => {
     ).not.toThrow();
   });
 
+  it('accepts a football forfeit goal override in the scoring block', () => {
+    expect(() =>
+      validateSportRuleConfig(
+        {
+          kind: 'FOOTBALL',
+          scoring: { forfeitGoals: 5 },
+        },
+        { sourceLabel: 'sportRules', expectedKind: 'FOOTBALL', allowedKinds: ['FOOTBALL'] },
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects an invalid football forfeit goal override', () => {
+    expect(() =>
+      validateSportRuleConfig(
+        {
+          kind: 'FOOTBALL',
+          scoring: { forfeitGoals: 0 },
+        },
+        { sourceLabel: 'sportRules', expectedKind: 'FOOTBALL', allowedKinds: ['FOOTBALL'] },
+      ),
+    ).toThrow(BadRequestException);
+  });
+
   it('rejects group stage knockout with only one group', () => {
     expect(() =>
       validateSportRuleConfig(
