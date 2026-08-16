@@ -130,9 +130,7 @@ describe('validateScoreDetails', () => {
   it('accepts pickleball side-out with the current game still in progress', () => {
     const result = validateScoreDetails(
       {
-        sets: [
-          { team1Score: 8, team2Score: 6, isFinished: false },
-        ],
+        sets: [{ team1Score: 8, team2Score: 6, isFinished: false }],
         sideOutState: {
           servingTeam: 2,
           serverNumber: 1,
@@ -353,7 +351,13 @@ describe('validateScoreDetails', () => {
           events: [{ type: 'GOAL', team: 1, minute: 12 }],
         },
       },
-      buildResolvedConfig({ kind: 'FOOTBALL', bestOf: 1, setsToWin: 1, pointsPerSet: 1, maxPoints: 99 }),
+      buildResolvedConfig({
+        kind: 'FOOTBALL',
+        bestOf: 1,
+        setsToWin: 1,
+        pointsPerSet: 1,
+        maxPoints: 99,
+      }),
     );
 
     expect(result.p1SetsWon).toBe(1);
@@ -361,14 +365,86 @@ describe('validateScoreDetails', () => {
   });
 
   it('FOOTBALL rejects an invalid phase or event team', () => {
-    expect(() => validateScoreDetails(
-      { football: { team1Goals: 0, team2Goals: 0, phase: 'INVALID' } },
-      buildResolvedConfig({ kind: 'FOOTBALL', bestOf: 1, setsToWin: 1, pointsPerSet: 1, maxPoints: 99 }),
-    )).toThrow(BadRequestException);
+    expect(() =>
+      validateScoreDetails(
+        { football: { team1Goals: 0, team2Goals: 0, phase: 'INVALID' } },
+        buildResolvedConfig({
+          kind: 'FOOTBALL',
+          bestOf: 1,
+          setsToWin: 1,
+          pointsPerSet: 1,
+          maxPoints: 99,
+        }),
+      ),
+    ).toThrow(BadRequestException);
 
-    expect(() => validateScoreDetails(
-      { football: { team1Goals: 0, team2Goals: 0, phase: 'FULL_TIME', events: [{ type: 'GOAL', team: 3 }] } },
-      buildResolvedConfig({ kind: 'FOOTBALL', bestOf: 1, setsToWin: 1, pointsPerSet: 1, maxPoints: 99 }),
-    )).toThrow(BadRequestException);
+    expect(() =>
+      validateScoreDetails(
+        {
+          football: {
+            team1Goals: 0,
+            team2Goals: 0,
+            phase: 'FULL_TIME',
+            events: [{ type: 'GOAL', team: 3 }],
+          },
+        },
+        buildResolvedConfig({
+          kind: 'FOOTBALL',
+          bestOf: 1,
+          setsToWin: 1,
+          pointsPerSet: 1,
+          maxPoints: 99,
+        }),
+      ),
+    ).toThrow(BadRequestException);
+  });
+
+  it('FOOTBALL enforces match-clock and stoppage-time bounds', () => {
+    const config = buildResolvedConfig({
+      kind: 'FOOTBALL',
+      bestOf: 1,
+      setsToWin: 1,
+      pointsPerSet: 1,
+      maxPoints: 99,
+    });
+    expect(() =>
+      validateScoreDetails(
+        {
+          football: {
+            team1Goals: 0,
+            team2Goals: 0,
+            phase: 'SECOND_HALF',
+            minute: 151,
+          },
+        },
+        config,
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      validateScoreDetails(
+        {
+          football: {
+            team1Goals: 0,
+            team2Goals: 0,
+            phase: 'STOPPAGE_TIME',
+            addedMinute: 31,
+          },
+        },
+        config,
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      validateScoreDetails(
+        {
+          football: {
+            team1Goals: 0,
+            team2Goals: 0,
+            phase: 'SECOND_HALF',
+            events: [{ type: 'GOAL', team: 1, minute: 90, addedMinute: 31 }],
+          },
+        },
+        config,
+      ),
+    ).toThrow(BadRequestException);
   });
 });

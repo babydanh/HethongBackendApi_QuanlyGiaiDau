@@ -3,7 +3,10 @@ import { FootballTeamsService } from './football-teams.service';
 
 describe('FootballTeamsService permissions', () => {
   const repository = {
+    findById: jest.fn(),
     findMember: jest.fn(),
+    invite: jest.fn(),
+    respond: jest.fn(),
     searchMemberCandidates: jest.fn(),
     updateMember: jest.fn(),
     removeMember: jest.fn(),
@@ -45,5 +48,26 @@ describe('FootballTeamsService permissions', () => {
   it('rejects removing oneself through the manager endpoint', async () => {
     await expect(service.removeMember('actor', 'team', 'actor'))
       .rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('sends an invite only after a captain/manager permission check', async () => {
+    repository.findMember.mockResolvedValue({ status: 'ACTIVE', role: 'CAPTAIN' });
+    repository.findById.mockResolvedValue({ id: 'team', name: 'FC Test', members: [] });
+    repository.invite.mockResolvedValue({ id: 'membership', invitedBy: 'actor' });
+
+    await expect(service.invite('actor', 'team', { userId: 'target', role: 'PLAYER' }))
+      .resolves.toEqual({ id: 'membership', invitedBy: 'actor' });
+    expect(repository.invite).toHaveBeenCalledWith('team', 'actor', 'target', 'PLAYER');
+    expect(notifications.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifies the inviter after an accepted team invitation', async () => {
+    repository.findById.mockResolvedValue({ id: 'team', name: 'FC Test', members: [] });
+    repository.respond.mockResolvedValue({ invitedBy: 'captain', status: 'ACTIVE' });
+
+    await expect(service.respond('target', 'team', 'ACCEPTED'))
+      .resolves.toEqual({ invitedBy: 'captain', status: 'ACTIVE' });
+    expect(repository.respond).toHaveBeenCalledWith('team', 'target', 'ACCEPTED');
+    expect(notifications.sendNotification).toHaveBeenCalledTimes(1);
   });
 });

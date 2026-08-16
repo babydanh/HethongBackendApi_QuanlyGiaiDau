@@ -1,9 +1,29 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, or, count, SQL, inArray, notInArray, isNull, sql, gte, lte, ne, lt, desc } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  or,
+  count,
+  SQL,
+  inArray,
+  notInArray,
+  isNull,
+  sql,
+  gte,
+  lte,
+  ne,
+  lt,
+  desc,
+} from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
@@ -13,6 +33,7 @@ import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
+import { aggregateFootballTwoLegs } from './utils/football-two-leg-aggregate';
 
 /**
  * Tổng điểm ghi được của mỗi bên từ scoreDetails (sum team1Score / team2Score
@@ -49,7 +70,19 @@ export class MatchesRepository {
   ) {}
 
   async findAll(query: QueryMatchDto) {
-    const { page = 1, limit = 10, cursor, groupId, status, userId, bracketType, genderRestriction, city, isRanked, matchType } = query;
+    const {
+      page = 1,
+      limit = 10,
+      cursor,
+      groupId,
+      status,
+      userId,
+      bracketType,
+      genderRestriction,
+      city,
+      isRanked,
+      matchType,
+    } = query;
     const publicOnly = query.publicOnly ?? query.isPublicOnly;
     const catId = query.categoryId || query.category_id;
     const take = limit + 1; // Fetch 1 extra to determine hasMore
@@ -57,12 +90,17 @@ export class MatchesRepository {
     const divisionId = query.divisionId || query.division_id;
 
     const conditions: SQL[] = [];
-    
+
     // Enforce soft delete filters
     conditions.push(isNull(schema.matches.deletedAt));
 
     const isAllCategory = (val: string) => {
-      const normalized = val.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[-_]+/g, ' ');
+      const normalized = val
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[-_]+/g, ' ');
       return (
         normalized === '' ||
         normalized === 'all' ||
@@ -90,7 +128,7 @@ export class MatchesRepository {
             or c.slug = replace(${catId}, '_', '-')
             or lower(c.name) = lower(${catId})
           )
-        )`
+        )`,
       );
     }
 
@@ -113,7 +151,7 @@ export class MatchesRepository {
             and (t.visibility = 'PUBLIC' or t.visibility is null)
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
-        )`
+        )`,
       );
     }
 
@@ -123,7 +161,7 @@ export class MatchesRepository {
           select 1 from ${schema.tournaments} t
           where t.id = ${schema.matches.tournamentId}
           and t."city" = ${city}
-        )`
+        )`,
       );
     }
 
@@ -139,7 +177,12 @@ export class MatchesRepository {
       const expandedStatuses = new Set<string>();
       for (const s of rawStatuses) {
         expandedStatuses.add(s);
-        if (s === 'COMPLETED' || s === 'FINISHED' || s === 'DONE' || s === 'ENDED') {
+        if (
+          s === 'COMPLETED' ||
+          s === 'FINISHED' ||
+          s === 'DONE' ||
+          s === 'ENDED'
+        ) {
           expandedStatuses.add('COMPLETED');
           expandedStatuses.add('FINISHED');
           expandedStatuses.add('DONE');
@@ -157,9 +200,13 @@ export class MatchesRepository {
 
       const statusList = Array.from(expandedStatuses);
       if (statusList.length === 1) {
-        conditions.push(sql`upper(${schema.matches.status}) = ${statusList[0]}`);
+        conditions.push(
+          sql`upper(${schema.matches.status}) = ${statusList[0]}`,
+        );
       } else if (statusList.length > 1) {
-        conditions.push(inArray(sql`upper(${schema.matches.status})`, statusList));
+        conditions.push(
+          inArray(sql`upper(${schema.matches.status})`, statusList),
+        );
       }
     }
 
@@ -168,30 +215,43 @@ export class MatchesRepository {
         .select({ participantId: schema.tournamentRosters.participantId })
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.userId, userId));
-      const pIds = rosters.map(r => r.participantId);
+      const pIds = rosters.map((r) => r.participantId);
       if (pIds.length === 0) {
-        return { data: [], meta: { total: 0, page, limit, totalPages: 0, nextCursor: null, hasMore: false } };
+        return {
+          data: [],
+          meta: {
+            total: 0,
+            page,
+            limit,
+            totalPages: 0,
+            nextCursor: null,
+            hasMore: false,
+          },
+        };
       }
       conditions.push(
         or(
           inArray(schema.matches.participant1Id, pIds),
-          inArray(schema.matches.participant2Id, pIds)
-        ) as SQL
+          inArray(schema.matches.participant2Id, pIds),
+        ) as SQL,
       );
     }
 
     let decodedCursor: { id: string; updatedAt: string } | null = null;
     if (cursor) {
-      decodedCursor = CursorPaginationHelper.decodeCursor<{ id: string; updatedAt: string }>(cursor);
+      decodedCursor = CursorPaginationHelper.decodeCursor<{
+        id: string;
+        updatedAt: string;
+      }>(cursor);
       if (decodedCursor) {
         conditions.push(
           or(
             lt(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
             and(
               eq(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
-              lt(schema.matches.id, decodedCursor.id)
-            )
-          ) as SQL
+              lt(schema.matches.id, decodedCursor.id),
+            ),
+          ) as SQL,
         );
       }
     }
@@ -202,68 +262,124 @@ export class MatchesRepository {
     }
 
     // Stage filters (only if specific filters like matchType, genderRestriction, bracketType, isRanked are supplied)
-    const hasStageFilters = Boolean(matchType || genderRestriction || bracketType || isRanked !== undefined);
+    const hasStageFilters = Boolean(
+      matchType || genderRestriction || bracketType || isRanked !== undefined,
+    );
     if (hasStageFilters) {
-      const stageConditions: SQL[] = [isNull(schema.tournamentStages.deletedAt)];
-      if (tId) stageConditions.push(eq(schema.tournamentStages.tournamentId, tId));
-      if (divisionId) stageConditions.push(eq(schema.tournamentStages.tournamentDivisionId, divisionId));
+      const stageConditions: SQL[] = [
+        isNull(schema.tournamentStages.deletedAt),
+      ];
+      if (tId)
+        stageConditions.push(eq(schema.tournamentStages.tournamentId, tId));
+      if (divisionId)
+        stageConditions.push(
+          eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+        );
 
       const stagesQuery = this.db
-        .select({ 
-          id: schema.tournamentStages.id, 
+        .select({
+          id: schema.tournamentStages.id,
           tournamentId: schema.tournamentStages.tournamentId,
         })
         .from(schema.tournamentStages)
-        .leftJoin(schema.tournamentDivisions, eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id))
-        .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
-        .where(and(
-          ...stageConditions,
-          ...(bracketType ? [
-            sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`
-          ] : []),
-          ...(genderRestriction ? [
-            or(
-              eq(schema.tournamentDivisions.genderRestriction, genderRestriction),
-              isNull(schema.tournamentDivisions.genderRestriction),
-              and(
-                or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.genderRestriction)),
-                or(
-                  eq(schema.tournaments.genderRestriction, genderRestriction),
-                  isNull(schema.tournaments.genderRestriction)
-                )
-              )
-            )
-          ] : []),
-          ...(matchType ? [
-            or(
-              eq(schema.tournamentDivisions.matchType, matchType),
-              and(
-                or(isNull(schema.tournamentStages.tournamentDivisionId), isNull(schema.tournamentDivisions.matchType)),
-                eq(schema.tournaments.matchType, matchType)
-              )
-            )
-          ] : []),
-          ...(isRanked !== undefined ? [eq(schema.tournaments.isRanked, isRanked)] : []),
-        ));
+        .leftJoin(
+          schema.tournamentDivisions,
+          eq(
+            schema.tournamentStages.tournamentDivisionId,
+            schema.tournamentDivisions.id,
+          ),
+        )
+        .leftJoin(
+          schema.tournaments,
+          eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+        )
+        .where(
+          and(
+            ...stageConditions,
+            ...(bracketType
+              ? [
+                  sql`${schema.tournaments.tournamentConfig}->>'bracketType' = ${bracketType}`,
+                ]
+              : []),
+            ...(genderRestriction
+              ? [
+                  or(
+                    eq(
+                      schema.tournamentDivisions.genderRestriction,
+                      genderRestriction,
+                    ),
+                    isNull(schema.tournamentDivisions.genderRestriction),
+                    and(
+                      or(
+                        isNull(schema.tournamentStages.tournamentDivisionId),
+                        isNull(schema.tournamentDivisions.genderRestriction),
+                      ),
+                      or(
+                        eq(
+                          schema.tournaments.genderRestriction,
+                          genderRestriction,
+                        ),
+                        isNull(schema.tournaments.genderRestriction),
+                      ),
+                    ),
+                  ),
+                ]
+              : []),
+            ...(matchType
+              ? [
+                  or(
+                    eq(schema.tournamentDivisions.matchType, matchType),
+                    and(
+                      or(
+                        isNull(schema.tournamentStages.tournamentDivisionId),
+                        isNull(schema.tournamentDivisions.matchType),
+                      ),
+                      eq(schema.tournaments.matchType, matchType),
+                    ),
+                  ),
+                ]
+              : []),
+            ...(isRanked !== undefined
+              ? [eq(schema.tournaments.isRanked, isRanked)]
+              : []),
+          ),
+        );
 
       const stages = await stagesQuery;
-      const stageIds = stages.map(s => s.id);
-      const tournamentIds = Array.from(new Set(stages.map(s => s.tournamentId).filter(Boolean)));
-      
+      const stageIds = stages.map((s) => s.id);
+      const tournamentIds = Array.from(
+        new Set(stages.map((s) => s.tournamentId).filter(Boolean)),
+      );
+
       if (stageIds.length === 0 && tournamentIds.length === 0) {
-        return { data: [], meta: { total: 0, page, limit, totalPages: 0, nextCursor: null, hasMore: false } };
+        return {
+          data: [],
+          meta: {
+            total: 0,
+            page,
+            limit,
+            totalPages: 0,
+            nextCursor: null,
+            hasMore: false,
+          },
+        };
       }
 
-      const groups = stageIds.length > 0 ? await this.db
-        .select({ id: schema.tournamentGroups.id })
-        .from(schema.tournamentGroups)
-        .where(inArray(schema.tournamentGroups.stageId, stageIds)) : [];
-      const groupIds = groups.map(g => g.id);
+      const groups =
+        stageIds.length > 0
+          ? await this.db
+              .select({ id: schema.tournamentGroups.id })
+              .from(schema.tournamentGroups)
+              .where(inArray(schema.tournamentGroups.stageId, stageIds))
+          : [];
+      const groupIds = groups.map((g) => g.id);
 
       const matchScope: SQL[] = [];
-      if (groupIds.length > 0) matchScope.push(inArray(schema.matches.groupId, groupIds));
-      if (tournamentIds.length > 0) matchScope.push(inArray(schema.matches.tournamentId, tournamentIds));
-      
+      if (groupIds.length > 0)
+        matchScope.push(inArray(schema.matches.groupId, groupIds));
+      if (tournamentIds.length > 0)
+        matchScope.push(inArray(schema.matches.tournamentId, tournamentIds));
+
       if (matchScope.length > 0) {
         conditions.push(or(...matchScope) as SQL);
       }
@@ -289,9 +405,13 @@ export class MatchesRepository {
     const data = hasMore ? rawData.slice(0, limit) : rawData;
 
     const lastItem = data[data.length - 1];
-    const nextCursor = (hasMore && lastItem)
-      ? CursorPaginationHelper.encodeCursor({ id: lastItem.id, updatedAt: lastItem.updatedAt })
-      : null;
+    const nextCursor =
+      hasMore && lastItem
+        ? CursorPaginationHelper.encodeCursor({
+            id: lastItem.id,
+            updatedAt: lastItem.updatedAt,
+          })
+        : null;
 
     if (data.length === 0) {
       return {
@@ -317,20 +437,42 @@ export class MatchesRepository {
       if (match.tournamentId) tournamentIdsForMatches.add(match.tournamentId);
     }
 
-    const tournamentVenues = tournamentIdsForMatches.size > 0
-      ? await this.db
-        .select({ 
-          tournamentId: schema.tournaments.id, 
-          venueName: schema.tournamentVenues.name,
-          venueAddress: schema.tournamentVenues.locationAddress,
-        })
-        .from(schema.tournaments)
-        .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
-        .where(inArray(schema.tournaments.id, Array.from(tournamentIdsForMatches)))
-      : [];
-    const tournamentVenueMap = new Map(tournamentVenues.map((venue) => [venue.tournamentId, { name: venue.venueName, address: venue.venueAddress }]));
+    const tournamentVenues =
+      tournamentIdsForMatches.size > 0
+        ? await this.db
+            .select({
+              tournamentId: schema.tournaments.id,
+              venueName: schema.tournamentVenues.name,
+              venueAddress: schema.tournamentVenues.locationAddress,
+            })
+            .from(schema.tournaments)
+            .leftJoin(
+              schema.tournamentVenues,
+              eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+            )
+            .where(
+              inArray(
+                schema.tournaments.id,
+                Array.from(tournamentIdsForMatches),
+              ),
+            )
+        : [];
+    const tournamentVenueMap = new Map(
+      tournamentVenues.map((venue) => [
+        venue.tournamentId,
+        { name: venue.venueName, address: venue.venueAddress },
+      ]),
+    );
 
-    const participantsMap = new Map<string, { id: string; teamName: string; seed: number | null; members: { userId: string; fullName: string | null }[] }>();
+    const participantsMap = new Map<
+      string,
+      {
+        id: string;
+        teamName: string;
+        seed: number | null;
+        members: { userId: string; fullName: string | null }[];
+      }
+    >();
     if (participantIds.size > 0) {
       const participantsData = await this.db
         .select({
@@ -339,7 +481,9 @@ export class MatchesRepository {
           seed: schema.tournamentParticipants.seed,
         })
         .from(schema.tournamentParticipants)
-        .where(inArray(schema.tournamentParticipants.id, Array.from(participantIds)));
+        .where(
+          inArray(schema.tournamentParticipants.id, Array.from(participantIds)),
+        );
 
       const rosters = await this.db
         .select({
@@ -350,18 +494,40 @@ export class MatchesRepository {
           eloPoints: schema.userRanks.eloPoints,
         })
         .from(schema.tournamentRosters)
-        .leftJoin(schema.profiles, eq(schema.tournamentRosters.userId, schema.profiles.userId))
-        .leftJoin(schema.userRanks, eq(schema.tournamentRosters.userId, schema.userRanks.userId))
-        .where(inArray(schema.tournamentRosters.participantId, Array.from(participantIds)));
+        .leftJoin(
+          schema.profiles,
+          eq(schema.tournamentRosters.userId, schema.profiles.userId),
+        )
+        .leftJoin(
+          schema.userRanks,
+          eq(schema.tournamentRosters.userId, schema.userRanks.userId),
+        )
+        .where(
+          inArray(
+            schema.tournamentRosters.participantId,
+            Array.from(participantIds),
+          ),
+        );
 
-      const rostersMap = new Map<string, { userId: string; fullName: string | null; avatarUrl: string | null; elo?: { eloPoints: number } }[]>();
+      const rostersMap = new Map<
+        string,
+        {
+          userId: string;
+          fullName: string | null;
+          avatarUrl: string | null;
+          elo?: { eloPoints: number };
+        }[]
+      >();
       for (const r of rosters) {
         const list = rostersMap.get(r.participantId) || [];
-        list.push({ 
-          userId: r.userId, 
+        list.push({
+          userId: r.userId,
           fullName: r.fullName,
           avatarUrl: r.avatarUrl,
-          elo: r.eloPoints !== null && r.eloPoints !== undefined ? { eloPoints: r.eloPoints } : undefined
+          elo:
+            r.eloPoints !== null && r.eloPoints !== undefined
+              ? { eloPoints: r.eloPoints }
+              : undefined,
         });
         rostersMap.set(r.participantId, list);
       }
@@ -374,21 +540,24 @@ export class MatchesRepository {
       }
     }
 
-    const groupsMap = new Map<string, { 
-      id: string; 
-      name: string; 
-      stageName: string; 
-      stageType?: string;
-      stageRoundConfig?: Record<string, unknown> | null;
-      groupRoundConfig?: Record<string, unknown> | null;
-      tournamentName?: string; 
-      categoryId?: string; 
-      categoryName?: string;
-      venueName?: string | null;
-      venueAddress?: string | null;
-      matchType?: string;
-      genderRestriction?: string;
-    }>();
+    const groupsMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        stageName: string;
+        stageType?: string;
+        stageRoundConfig?: Record<string, unknown> | null;
+        groupRoundConfig?: Record<string, unknown> | null;
+        tournamentName?: string;
+        categoryId?: string;
+        categoryName?: string;
+        venueName?: string | null;
+        venueAddress?: string | null;
+        matchType?: string;
+        genderRestriction?: string;
+      }
+    >();
     if (groupIdsForMatches.size > 0) {
       const groupsData = await this.db
         .select({
@@ -418,67 +587,118 @@ export class MatchesRepository {
           matchType: schema.tournaments.matchType,
           genderRestriction: schema.tournaments.genderRestriction,
           divisionMatchType: schema.tournamentDivisions.matchType,
-          divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
+          divisionGenderRestriction:
+            schema.tournamentDivisions.genderRestriction,
         })
         .from(schema.tournamentGroups)
-        .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
-        .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+        .innerJoin(
+          schema.tournamentStages,
+          eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+        )
+        .innerJoin(
+          schema.tournaments,
+          eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+        )
         .leftJoin(
           schema.tournamentDivisions,
-          eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
+          eq(
+            schema.tournamentStages.tournamentDivisionId,
+            schema.tournamentDivisions.id,
+          ),
         )
-        .leftJoin(schema.categories, eq(schema.tournaments.categoryId, schema.categories.id))
-        .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
-        .where(inArray(schema.tournamentGroups.id, Array.from(groupIdsForMatches)));
+        .leftJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+        )
+        .where(
+          inArray(schema.tournamentGroups.id, Array.from(groupIdsForMatches)),
+        );
       for (const g of groupsData) {
         groupsMap.set(g.groupId, {
           id: g.groupId,
           name: g.groupName,
           stageName: g.stageName,
           stageType: g.stageType || undefined,
-          stageRoundConfig: g.stageRoundConfig as Record<string, unknown> | null,
-          groupRoundConfig: g.groupRoundConfig as Record<string, unknown> | null,
+          stageRoundConfig: g.stageRoundConfig as Record<
+            string,
+            unknown
+          > | null,
+          groupRoundConfig: g.groupRoundConfig as Record<
+            string,
+            unknown
+          > | null,
           tournamentName: g.tournamentName,
           categoryId: g.categoryId || undefined,
           categoryName: g.categoryName || undefined,
           venueName: g.venueName || null,
           venueAddress: g.venueAddress || null,
           matchType: g.divisionMatchType || g.matchType || undefined,
-          genderRestriction: g.divisionGenderRestriction || g.genderRestriction || undefined,
+          genderRestriction:
+            g.divisionGenderRestriction || g.genderRestriction || undefined,
         });
       }
     }
 
-    const mappedData = data.map(match => {
-      const p1 = match.participant1Id ? participantsMap.get(match.participant1Id) : null;
-      const p2 = match.participant2Id ? participantsMap.get(match.participant2Id) : null;
+    const mappedData = data.map((match) => {
+      const p1 = match.participant1Id
+        ? participantsMap.get(match.participant1Id)
+        : null;
+      const p2 = match.participant2Id
+        ? participantsMap.get(match.participant2Id)
+        : null;
       const groupStage = match.groupId ? groupsMap.get(match.groupId) : null;
 
       return {
         ...match,
         cheerCount: match.cheerCount ?? 0,
-        participant1: p1 ? { id: p1.id, teamName: p1.teamName, seed: p1.seed, members: p1.members } : null,
-        participant2: p2 ? { id: p2.id, teamName: p2.teamName, seed: p2.seed, members: p2.members } : null,
-        group: groupStage ? {
-          id: groupStage.id,
-          name: groupStage.name,
-          roundConfig: groupStage.groupRoundConfig,
-          stage: {
-            name: groupStage.stageName,
-            type: groupStage.stageType,
-            roundConfig: groupStage.stageRoundConfig,
-          }
-        } : null,
+        participant1: p1
+          ? {
+              id: p1.id,
+              teamName: p1.teamName,
+              seed: p1.seed,
+              members: p1.members,
+            }
+          : null,
+        participant2: p2
+          ? {
+              id: p2.id,
+              teamName: p2.teamName,
+              seed: p2.seed,
+              members: p2.members,
+            }
+          : null,
+        group: groupStage
+          ? {
+              id: groupStage.id,
+              name: groupStage.name,
+              roundConfig: groupStage.groupRoundConfig,
+              stage: {
+                name: groupStage.stageName,
+                type: groupStage.stageType,
+                roundConfig: groupStage.stageRoundConfig,
+              },
+            }
+          : null,
         tournament: {
           name: groupStage?.tournamentName || null,
-          venueName: groupStage?.venueName || tournamentVenueMap.get(match.tournamentId)?.name || null,
-          venueAddress: groupStage?.venueAddress || tournamentVenueMap.get(match.tournamentId)?.address || null,
+          venueName:
+            groupStage?.venueName ||
+            tournamentVenueMap.get(match.tournamentId)?.name ||
+            null,
+          venueAddress:
+            groupStage?.venueAddress ||
+            tournamentVenueMap.get(match.tournamentId)?.address ||
+            null,
           categoryId: groupStage?.categoryId,
           matchType: groupStage?.matchType,
           genderRestriction: groupStage?.genderRestriction,
           category: {
             name: groupStage?.categoryName,
-          }
+          },
         },
       };
     });
@@ -560,14 +780,29 @@ export class MatchesRepository {
         categoryConfig: schema.categories.categoryConfig,
       })
       .from(schema.tournamentStages)
-      .innerJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+      )
       .leftJoin(
         schema.tournamentDivisions,
-        eq(schema.tournamentStages.tournamentDivisionId, schema.tournamentDivisions.id),
+        eq(
+          schema.tournamentStages.tournamentDivisionId,
+          schema.tournamentDivisions.id,
+        ),
       )
-      .leftJoin(schema.categories, eq(schema.categories.id, schema.tournaments.categoryId))
-      .leftJoin(schema.tournamentVenues, eq(schema.tournaments.venueId, schema.tournamentVenues.id))
-      .leftJoin(schema.tournamentGroups, eq(schema.tournamentGroups.id, match.groupId!))
+      .leftJoin(
+        schema.categories,
+        eq(schema.categories.id, schema.tournaments.categoryId),
+      )
+      .leftJoin(
+        schema.tournamentVenues,
+        eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+      )
+      .leftJoin(
+        schema.tournamentGroups,
+        eq(schema.tournamentGroups.id, match.groupId!),
+      )
       .where(
         and(
           eq(schema.tournamentStages.id, match.stageId),
@@ -587,21 +822,28 @@ export class MatchesRepository {
       teamName: string;
       tournamentDivisionId: string | null;
       eloPoints: number | null;
-      members: { userId: string; fullName: string | null; avatarUrl: string | null; elo?: { eloPoints: number } }[];
+      members: {
+        userId: string;
+        fullName: string | null;
+        avatarUrl: string | null;
+        elo?: { eloPoints: number };
+      }[];
     };
     let participant1: ParticipantDetails | null = null;
     let participant2: ParticipantDetails | null = null;
 
     const participantIds = [match.participant1Id, match.participant2Id].filter(
-      (participantId): participantId is string => typeof participantId === 'string' && participantId.length > 0,
+      (participantId): participantId is string =>
+        typeof participantId === 'string' && participantId.length > 0,
     );
 
     if (participantIds.length > 0) {
       const participants = await this.db
-        .select({ 
-          id: schema.tournamentParticipants.id, 
+        .select({
+          id: schema.tournamentParticipants.id,
           teamName: schema.tournamentParticipants.teamName,
-          tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
+          tournamentDivisionId:
+            schema.tournamentParticipants.tournamentDivisionId,
         })
         .from(schema.tournamentParticipants)
         .where(inArray(schema.tournamentParticipants.id, participantIds));
@@ -615,7 +857,10 @@ export class MatchesRepository {
           eloPoints: schema.userRanks.eloPoints,
         })
         .from(schema.tournamentRosters)
-        .leftJoin(schema.profiles, eq(schema.tournamentRosters.userId, schema.profiles.userId))
+        .leftJoin(
+          schema.profiles,
+          eq(schema.tournamentRosters.userId, schema.profiles.userId),
+        )
         .leftJoin(
           schema.userRanks,
           and(
@@ -625,20 +870,27 @@ export class MatchesRepository {
         )
         .where(inArray(schema.tournamentRosters.participantId, participantIds));
 
-      const rostersByParticipant = new Map<string, ParticipantDetails['members']>();
+      const rostersByParticipant = new Map<
+        string,
+        ParticipantDetails['members']
+      >();
       for (const roster of rosters) {
         const list = rostersByParticipant.get(roster.participantId) ?? [];
         list.push({
           userId: roster.userId,
           fullName: roster.fullName,
           avatarUrl: roster.avatarUrl,
-          elo: roster.eloPoints == null ? undefined : { eloPoints: roster.eloPoints },
+          elo:
+            roster.eloPoints == null
+              ? undefined
+              : { eloPoints: roster.eloPoints },
         });
         rostersByParticipant.set(roster.participantId, list);
       }
 
       const matchType = group.divisionMatchType ?? group.matchType;
-      const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+      const isDoubles =
+        matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
       const userIds = rosters.map((roster) => roster.userId);
       const pairEloByKey = new Map<string, number>();
       if (isDoubles && group.categoryId && userIds.length >= 2) {
@@ -651,19 +903,29 @@ export class MatchesRepository {
             communityId: schema.pairRanks.communityId,
           })
           .from(schema.pairRanks)
-          .where(and(
-            eq(schema.pairRanks.categoryId, group.categoryId),
-            inArray(schema.pairRanks.matchType, ['DOUBLES', 'MIXED_DOUBLES']),
-            or(
-              and(inArray(schema.pairRanks.user1Id, userIds), inArray(schema.pairRanks.user2Id, userIds)),
+          .where(
+            and(
+              eq(schema.pairRanks.categoryId, group.categoryId),
+              inArray(schema.pairRanks.matchType, ['DOUBLES', 'MIXED_DOUBLES']),
+              or(
+                and(
+                  inArray(schema.pairRanks.user1Id, userIds),
+                  inArray(schema.pairRanks.user2Id, userIds),
+                ),
+              ),
             ),
-          ));
+          );
 
         // Prefer the tournament's community pair rank, then the public pair rank.
         const ordered = pairRanks.sort((a, b) => {
           const score = (row: typeof a) =>
-            group.communityId && row.scope === 'COMMUNITY' && row.communityId === group.communityId ? 2 :
-            row.scope === 'PUBLIC' && row.communityId == null ? 1 : 0;
+            group.communityId &&
+            row.scope === 'COMMUNITY' &&
+            row.communityId === group.communityId
+              ? 2
+              : row.scope === 'PUBLIC' && row.communityId == null
+                ? 1
+                : 0;
           return score(b) - score(a);
         });
         for (const row of ordered) {
@@ -672,24 +934,46 @@ export class MatchesRepository {
         }
       }
 
-      const toParticipant = (participant: typeof participants[number]): ParticipantDetails => {
+      const toParticipant = (
+        participant: (typeof participants)[number],
+      ): ParticipantDetails => {
         const members = rostersByParticipant.get(participant.id) ?? [];
-        const pairKey = members.length >= 2
-          ? members.slice(0, 2).map((member) => member.userId).sort().join(':')
-          : null;
+        const pairKey =
+          members.length >= 2
+            ? members
+                .slice(0, 2)
+                .map((member) => member.userId)
+                .sort()
+                .join(':')
+            : null;
         return {
           ...participant,
           members,
           // For doubles this is the pair rank, never a member's singles rank.
-          eloPoints: isDoubles && pairKey ? pairEloByKey.get(pairKey) ?? null : members[0]?.elo?.eloPoints ?? null,
+          eloPoints:
+            isDoubles && pairKey
+              ? (pairEloByKey.get(pairKey) ?? null)
+              : (members[0]?.elo?.eloPoints ?? null),
         };
       };
 
-      participant1 = participants.find((participant) => participant.id === match.participant1Id)
-        ? toParticipant(participants.find((participant) => participant.id === match.participant1Id)!)
+      participant1 = participants.find(
+        (participant) => participant.id === match.participant1Id,
+      )
+        ? toParticipant(
+            participants.find(
+              (participant) => participant.id === match.participant1Id,
+            )!,
+          )
         : null;
-      participant2 = participants.find((participant) => participant.id === match.participant2Id)
-        ? toParticipant(participants.find((participant) => participant.id === match.participant2Id)!)
+      participant2 = participants.find(
+        (participant) => participant.id === match.participant2Id,
+      )
+        ? toParticipant(
+            participants.find(
+              (participant) => participant.id === match.participant2Id,
+            )!,
+          )
         : null;
     }
 
@@ -712,7 +996,8 @@ export class MatchesRepository {
             categorySlug: group.categorySlug,
             categoryConfig: group.categoryConfig,
             matchType: group.divisionMatchType ?? group.matchType,
-            genderRestriction: group.divisionGenderRestriction ?? group.genderRestriction,
+            genderRestriction:
+              group.divisionGenderRestriction ?? group.genderRestriction,
             createdBy: group.createdBy,
             sportRules: group.sportRules,
             tournamentConfig: group.tournamentConfig,
@@ -720,17 +1005,21 @@ export class MatchesRepository {
             venueAddress: group.venueAddress,
           }
         : null,
-      stage: group ? {
-        id: group.stageId,
-        name: group.stageName,
-        type: group.stageType,
-        roundConfig: group.roundConfig,
-      } : null,
-      group: group?.groupId ? {
-        id: group.groupId,
-        name: group.name,
-        roundConfig: group.groupRoundConfig,
-      } : null,
+      stage: group
+        ? {
+            id: group.stageId,
+            name: group.stageName,
+            type: group.stageType,
+            roundConfig: group.roundConfig,
+          }
+        : null,
+      group: group?.groupId
+        ? {
+            id: group.groupId,
+            name: group.name,
+            roundConfig: group.groupRoundConfig,
+          }
+        : null,
       participant1,
       participant2,
     };
@@ -860,7 +1149,14 @@ export class MatchesRepository {
         status: up.status,
       };
 
-      await this.auditService.logUpdate(tx, userId, 'matches', id, oldValues, newValues);
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'matches',
+        id,
+        oldValues,
+        newValues,
+      );
       return [up];
     });
 
@@ -895,6 +1191,28 @@ export class MatchesRepository {
     return await this.findById(updated.id);
   }
 
+  /**
+   * Return the already completed leg of a two-legged football tie. Keeping
+   * this query in the repository makes aggregate resolution deterministic and
+   * avoids letting the service scan arbitrary matches from another tie.
+   */
+  async findCompletedTieLeg(tieId: string, currentMatchId: string) {
+    const [leg] = await this.db
+      .select()
+      .from(schema.matches)
+      .where(
+        and(
+          eq(schema.matches.tieId, tieId),
+          ne(schema.matches.id, currentMatchId),
+          eq(schema.matches.status, 'COMPLETED'),
+          isNull(schema.matches.deletedAt),
+        ),
+      )
+      .orderBy(schema.matches.leg)
+      .limit(1);
+    return leg ?? null;
+  }
+
   async completeMatch(
     id: string,
     winnerId: string | null,
@@ -911,7 +1229,7 @@ export class MatchesRepository {
       scoreDetails: Record<string, unknown> | null | undefined;
       auditUserId?: string | null;
       expectedRevision?: number;
-    }
+    },
   ) {
     return await this.db.transaction(async (tx) => {
       const updated = await this.completeMatchInTx(tx, id, winnerId, {
@@ -936,7 +1254,10 @@ export class MatchesRepository {
             tournamentId: schema.tournamentStages.tournamentId,
           })
           .from(schema.tournamentGroups)
-          .innerJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+          .innerJoin(
+            schema.tournamentStages,
+            eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
+          )
           .where(eq(schema.tournamentGroups.id, updated.groupId))
           .limit(1);
 
@@ -955,10 +1276,14 @@ export class MatchesRepository {
 
           if (tournament && tournament.sportRules) {
             const rules = tournament.sportRules as Record<string, unknown>;
-            const scoring = (rules.scoring as Record<string, unknown> | undefined) ?? rules;
-            if (typeof scoring.winPoints === 'number') winPoints = scoring.winPoints;
-            if (typeof scoring.drawPoints === 'number') drawPoints = scoring.drawPoints;
-            if (typeof scoring.lossPoints === 'number') lossPoints = scoring.lossPoints;
+            const scoring =
+              (rules.scoring as Record<string, unknown> | undefined) ?? rules;
+            if (typeof scoring.winPoints === 'number')
+              winPoints = scoring.winPoints;
+            if (typeof scoring.drawPoints === 'number')
+              drawPoints = scoring.drawPoints;
+            if (typeof scoring.lossPoints === 'number')
+              lossPoints = scoring.lossPoints;
           }
         }
 
@@ -969,12 +1294,18 @@ export class MatchesRepository {
 
         // points_for/points_against = TỔNG điểm ghi được qua các set (chuẩn
         // hiệu số điểm), không phải số set thắng. totalPoints giữ nguyên 3/1/0.
-        const { p1: team1Total, p2: team2Total } = sumSetPoints(matchDetails.scoreDetails);
+        const { p1: team1Total, p2: team2Total } = sumSetPoints(
+          matchDetails.scoreDetails,
+        );
 
         for (const pId of participants) {
           if (!pId) continue;
           const isWinner = pId === winnerId;
-          const pointsEarned = isDraw ? drawPoints : (isWinner ? winPoints : lossPoints);
+          const pointsEarned = isDraw
+            ? drawPoints
+            : isWinner
+              ? winPoints
+              : lossPoints;
           const pointsFor = pId === p1Id ? team1Total : team2Total;
           const pointsAgainst = pId === p1Id ? team2Total : team1Total;
 
@@ -988,7 +1319,7 @@ export class MatchesRepository {
               participantId: pId,
               played: 1,
               won: isWinner ? 1 : 0,
-              lost: (!isWinner && !isDraw) ? 1 : 0,
+              lost: !isWinner && !isDraw ? 1 : 0,
               draws: isDraw ? 1 : 0,
               pointsFor: pointsFor,
               pointsAgainst: pointsAgainst,
@@ -996,11 +1327,14 @@ export class MatchesRepository {
               updatedAt: new Date(),
             })
             .onConflictDoUpdate({
-              target: [schema.groupStandings.groupId, schema.groupStandings.participantId],
+              target: [
+                schema.groupStandings.groupId,
+                schema.groupStandings.participantId,
+              ],
               set: {
                 played: sql`${schema.groupStandings.played} + 1`,
                 won: sql`${schema.groupStandings.won} + ${isWinner ? 1 : 0}`,
-                lost: sql`${schema.groupStandings.lost} + ${(!isWinner && !isDraw) ? 1 : 0}`,
+                lost: sql`${schema.groupStandings.lost} + ${!isWinner && !isDraw ? 1 : 0}`,
                 draws: sql`${schema.groupStandings.draws} + ${isDraw ? 1 : 0}`,
                 pointsFor: sql`${schema.groupStandings.pointsFor} + ${pointsFor}`,
                 pointsAgainst: sql`${schema.groupStandings.pointsAgainst} + ${pointsAgainst}`,
@@ -1026,7 +1360,7 @@ export class MatchesRepository {
       auditUserId?: string | null;
       isBye?: boolean;
       expectedRevision?: number;
-    }
+    },
   ) {
     const [existing] = await tx
       .select()
@@ -1094,7 +1428,14 @@ export class MatchesRepository {
       winnerId: updated.winnerId,
       status: updated.status,
     };
-    await this.auditService.logUpdate(tx, details.auditUserId ?? null, 'matches', id, oldValues, newValues);
+    await this.auditService.logUpdate(
+      tx,
+      details.auditUserId ?? null,
+      'matches',
+      id,
+      oldValues,
+      newValues,
+    );
 
     // 1b. ELO transactional outbox (NOTE-3, T12): enqueue ONLY from the winning
     // transaction, and ONLY for ranked tournaments. Ranked determination is done
@@ -1106,12 +1447,17 @@ export class MatchesRepository {
       .where(eq(schema.tournaments.id, existing.tournamentId))
       .limit(1);
 
-    const participantIds = [existing.participant1Id, existing.participant2Id].filter(
-      (participantId): participantId is string => Boolean(participantId),
+    const participantIds = [
+      existing.participant1Id,
+      existing.participant2Id,
+    ].filter((participantId): participantId is string =>
+      Boolean(participantId),
     );
     const consentRows = participantIds.length
       ? await tx
-          .select({ rankingConsent: schema.tournamentParticipants.rankingConsent })
+          .select({
+            rankingConsent: schema.tournamentParticipants.rankingConsent,
+          })
           .from(schema.tournamentParticipants)
           .where(inArray(schema.tournamentParticipants.id, participantIds))
       : [];
@@ -1121,17 +1467,24 @@ export class MatchesRepository {
 
     const footballTeamRows = participantIds.length
       ? await tx
-          .select({ footballTeamId: schema.tournamentParticipants.footballTeamId })
+          .select({
+            footballTeamId: schema.tournamentParticipants.footballTeamId,
+          })
           .from(schema.tournamentParticipants)
           .where(inArray(schema.tournamentParticipants.id, participantIds))
       : [];
-    const isFootballTeamMatch = footballTeamRows.length === participantIds.length
-      && footballTeamRows.length === 2
-      && footballTeamRows.every((row) => Boolean(row.footballTeamId));
+    const isFootballTeamMatch =
+      footballTeamRows.length === participantIds.length &&
+      footballTeamRows.length === 2 &&
+      footballTeamRows.every((row) => Boolean(row.footballTeamId));
 
     // Football group-stage draws have no winner, but still produce a team-ELO
     // event. Individual/pair ELO keeps the historical winner-only contract.
-    if (eloTournament?.isRanked && (winnerId || isFootballTeamMatch) && allParticipantsConsented) {
+    if (
+      eloTournament?.isRanked &&
+      (winnerId || isFootballTeamMatch) &&
+      allParticipantsConsented
+    ) {
       await tx
         .insert(schema.matchEloOutbox)
         .values({
@@ -1164,48 +1517,34 @@ export class MatchesRepository {
       const otherDone = otherLeg && otherLeg.status === 'COMPLETED';
       const thisDone = updated.status === 'COMPLETED';
       if (otherDone && thisDone && updated.nextMatchId) {
-        // Aggregate: leg1 p1 vs p2, leg2 p1 vs p2 (vai home/away đã đổi ở generator)
+        // Aggregate by participant identity (the generated second leg may swap
+        // home/away slots), using football goals rather than set counters.
         const leg1 = updated.leg === 1 ? updated : otherLeg!;
         const leg2 = updated.leg === 2 ? updated : otherLeg!;
-        const participantIds = [leg1.participant1Id, leg1.participant2Id].filter((value): value is string => Boolean(value));
-        const scoreFor = (leg: typeof leg1, participantId: string): number => {
-          const football = leg.scoreDetails?.football;
-          if (football && typeof football === 'object' && !Array.isArray(football)) {
-            const value = football as Record<string, unknown>;
-            const team1Goals = Number(value.team1Goals);
-            const team2Goals = Number(value.team2Goals);
-            if (Number.isFinite(team1Goals) && Number.isFinite(team2Goals)) {
-              return participantId === leg.participant1Id ? team1Goals : team2Goals;
-            }
-          }
-          return participantId === leg.participant1Id ? (leg.p1SetsWon || 0) : (leg.p2SetsWon || 0);
-        };
-        const totalP1 = participantIds[0] ? scoreFor(leg1, participantIds[0]) + scoreFor(leg2, participantIds[0]) : 0;
-        const totalP2 = participantIds[1] ? scoreFor(leg1, participantIds[1]) + scoreFor(leg2, participantIds[1]) : 0;
-
-        if (totalP1 > totalP2) {
-          effectiveWinnerId = participantIds[0] ?? null;
-        } else if (totalP2 > totalP1) {
-          effectiveWinnerId = participantIds[1] ?? null;
-        } else {
-          // Hòa aggregate → luân lưu: lấy từ scoreDetails.shootout của leg cuối
-          const updatedDetails = updated.scoreDetails as Record<string, unknown> | null;
-          const shootout = (updatedDetails?.shootout ?? (updatedDetails?.football as Record<string, unknown> | undefined)?.shootout) as
-            | Record<string, unknown>
-            | undefined;
-          const shootoutWinnerId = shootout?.winnerId as string | undefined;
-          if (shootoutWinnerId) {
-            effectiveWinnerId = shootoutWinnerId;
-          }
-          // Nếu không có luân lưu → không advance (chờ BTC xử lý)
-        }
+        const updatedDetails = updated.scoreDetails as Record<
+          string,
+          unknown
+        > | null;
+        const shootout = (updatedDetails?.shootout ??
+          (updatedDetails?.football as Record<string, unknown> | undefined)
+            ?.shootout) as Record<string, unknown> | undefined;
+        const shootoutWinnerId =
+          typeof shootout?.winnerId === 'string' ? shootout.winnerId : null;
+        effectiveWinnerId = aggregateFootballTwoLegs(
+          leg1,
+          leg2,
+          shootoutWinnerId,
+        ).winnerId;
       }
     } else if (!effectiveWinnerId && updated.tieId && updated.nextMatchId) {
       // Knockout hòa + penaltyShootout: dùng shootout từ scoreDetails
-      const updatedDetails = updated.scoreDetails as Record<string, unknown> | null;
-      const shootout = (updatedDetails?.shootout ?? (updatedDetails?.football as Record<string, unknown> | undefined)?.shootout) as
-        | Record<string, unknown>
-        | undefined;
+      const updatedDetails = updated.scoreDetails as Record<
+        string,
+        unknown
+      > | null;
+      const shootout = (updatedDetails?.shootout ??
+        (updatedDetails?.football as Record<string, unknown> | undefined)
+          ?.shootout) as Record<string, unknown> | undefined;
       effectiveWinnerId = (shootout?.winnerId as string | undefined) ?? null;
     }
 
@@ -1232,7 +1571,11 @@ export class MatchesRepository {
           .where(eq(schema.matches.id, existing.nextMatchId));
 
         // Check if target match should auto-complete as a bye
-        await this.autoCompleteIfByeMatch(tx, existing.nextMatchId, details.auditUserId);
+        await this.autoCompleteIfByeMatch(
+          tx,
+          existing.nextMatchId,
+          details.auditUserId,
+        );
       }
     }
 
@@ -1245,9 +1588,10 @@ export class MatchesRepository {
         .limit(1);
 
       if (loserNextMatch) {
-        const loserId = (winnerId === existing.participant1Id)
-          ? existing.participant2Id
-          : existing.participant1Id;
+        const loserId =
+          winnerId === existing.participant1Id
+            ? existing.participant2Id
+            : existing.participant1Id;
 
         const targetSlot = resolveLoserTargetSlot({
           sourceRoundNumber: existing.roundNumber,
@@ -1261,12 +1605,19 @@ export class MatchesRepository {
           .where(eq(schema.matches.id, existing.loserNextMatchId));
 
         // Check if target match should auto-complete as a bye
-        await this.autoCompleteIfByeMatch(tx, existing.loserNextMatchId, details.auditUserId);
+        await this.autoCompleteIfByeMatch(
+          tx,
+          existing.loserNextMatchId,
+          details.auditUserId,
+        );
       }
     }
 
     // 4. Double Elimination — Grand Finals Reset
-    if (existing.bracketBranch === 'GRAND_FINALS' && existing.roundNumber === 1) {
+    if (
+      existing.bracketBranch === 'GRAND_FINALS' &&
+      existing.roundNumber === 1
+    ) {
       if (winnerId === existing.participant2Id) {
         const [gf2Exists] = await tx
           .select()
@@ -1274,8 +1625,8 @@ export class MatchesRepository {
           .where(
             and(
               eq(schema.matches.groupId, existing.groupId),
-              eq(schema.matches.roundNumber, 2)
-            )
+              eq(schema.matches.roundNumber, 2),
+            ),
           )
           .limit(1);
 
@@ -1313,7 +1664,11 @@ export class MatchesRepository {
     return updated;
   }
 
-  private async autoCompleteIfByeMatch(tx: any, targetId: string, auditUserId?: string | null) {
+  private async autoCompleteIfByeMatch(
+    tx: any,
+    targetId: string,
+    auditUserId?: string | null,
+  ) {
     const [targetMatch] = await tx
       .select()
       .from(schema.matches)
@@ -1331,9 +1686,9 @@ export class MatchesRepository {
           eq(schema.matches.tournamentId, targetMatch.tournamentId),
           or(
             eq(schema.matches.nextMatchId, targetId),
-            eq(schema.matches.loserNextMatchId, targetId)
-          )
-        )
+            eq(schema.matches.loserNextMatchId, targetId),
+          ),
+        ),
       );
 
     let p1Fed = false;
@@ -1344,17 +1699,23 @@ export class MatchesRepository {
     for (const fm of feedingMatches) {
       let targetSlot: 'p1' | 'p2' | null = null;
       if (fm.nextMatchId === targetId) {
-        targetSlot = resolveWinnerTargetSlot({
-          sourceBranch: fm.bracketBranch,
-          sourceRoundNumber: fm.roundNumber,
-          sourceMatchOrder: fm.matchOrder,
-          targetBranch: targetMatch.bracketBranch,
-        }) === 'participant1Id' ? 'p1' : 'p2';
+        targetSlot =
+          resolveWinnerTargetSlot({
+            sourceBranch: fm.bracketBranch,
+            sourceRoundNumber: fm.roundNumber,
+            sourceMatchOrder: fm.matchOrder,
+            targetBranch: targetMatch.bracketBranch,
+          }) === 'participant1Id'
+            ? 'p1'
+            : 'p2';
       } else if (fm.loserNextMatchId === targetId) {
-        targetSlot = resolveLoserTargetSlot({
-          sourceRoundNumber: fm.roundNumber,
-          sourceMatchOrder: fm.matchOrder,
-        }) === 'participant1Id' ? 'p1' : 'p2';
+        targetSlot =
+          resolveLoserTargetSlot({
+            sourceRoundNumber: fm.roundNumber,
+            sourceMatchOrder: fm.matchOrder,
+          }) === 'participant1Id'
+            ? 'p1'
+            : 'p2';
       }
 
       if (targetSlot === 'p1') {
@@ -1366,8 +1727,10 @@ export class MatchesRepository {
       }
     }
 
-    const p1PermanentlyEmpty = !p1Fed || (p1FedCompleted && !targetMatch.participant1Id);
-    const p2PermanentlyEmpty = !p2Fed || (p2FedCompleted && !targetMatch.participant2Id);
+    const p1PermanentlyEmpty =
+      !p1Fed || (p1FedCompleted && !targetMatch.participant1Id);
+    const p2PermanentlyEmpty =
+      !p2Fed || (p2FedCompleted && !targetMatch.participant2Id);
 
     if (targetMatch.participant1Id && p2PermanentlyEmpty) {
       await this.completeMatchInTx(tx, targetId, targetMatch.participant1Id, {
@@ -1402,7 +1765,13 @@ export class MatchesRepository {
   async updateSchedule(
     id: string,
     userId: string | null,
-    data: { courtName?: string | null; courtAddress?: string | null; refereeId?: string | null; scheduledAt?: string | null; matchConfig?: Record<string, unknown> | null },
+    data: {
+      courtName?: string | null;
+      courtAddress?: string | null;
+      refereeId?: string | null;
+      scheduledAt?: string | null;
+      matchConfig?: Record<string, unknown> | null;
+    },
   ) {
     return this.db.transaction(async (tx) => {
       const [existing] = await tx
@@ -1411,42 +1780,130 @@ export class MatchesRepository {
         .where(eq(schema.matches.id, id))
         .limit(1);
 
-      // Kiểm tra scheduling conflict: cùng sân, cùng giải, trong khung ±2h
-      if (data.courtName && data.scheduledAt && existing) {
-        const scheduledDate = new Date(data.scheduledAt);
-        const conflictStart = new Date(scheduledDate.getTime() - 2 * 60 * 60 * 1000);
-        const conflictEnd = new Date(scheduledDate.getTime() + 2 * 60 * 60 * 1000);
+      if (!existing) return undefined;
 
-        const conflict = await tx
-          .select({ id: schema.matches.id })
-          .from(schema.matches)
-          .where(
-            and(
-              eq(schema.matches.courtName, data.courtName),
-              eq(schema.matches.tournamentId, existing.tournamentId),
-              ne(schema.matches.id, id),
-              isNull(schema.matches.deletedAt),
-              gte(schema.matches.scheduledAt, conflictStart),
-              lte(schema.matches.scheduledAt, conflictEnd),
-            ),
-          )
-          .limit(1);
+      // Serialize schedule writes per tournament. Without this lock, two
+      // organizers can pass the same conflict query concurrently and assign
+      // the same court/time (or the same participant) twice.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`match-schedule:${existing.tournamentId}`}))`,
+      );
 
-        if (conflict.length > 0) {
-          throw new BadRequestException(
-            `Sân ${data.courtName} đã có trận đấu khác trong khung giờ này (${conflictStart.toLocaleTimeString('vi-VN')} - ${conflictEnd.toLocaleTimeString('vi-VN')}).`,
-          );
+      const effectiveCourtName =
+        data.courtName !== undefined
+          ? data.courtName?.trim() || null
+          : existing.courtName;
+      const effectiveScheduledAt =
+        data.scheduledAt !== undefined
+          ? data.scheduledAt
+            ? new Date(data.scheduledAt)
+            : null
+          : existing.scheduledAt;
+
+      if (
+        effectiveScheduledAt &&
+        Number.isNaN(effectiveScheduledAt.getTime())
+      ) {
+        throw new BadRequestException('Thời gian thi đấu không hợp lệ.');
+      }
+
+      // Kiểm tra scheduling conflict: cùng sân, cùng giải, trong khung ±2h.
+      // Use effective values so partial edits (only time or only court) are
+      // checked against the existing schedule as well.
+      if (effectiveScheduledAt) {
+        const scheduledDate = effectiveScheduledAt;
+        const conflictStart = new Date(
+          scheduledDate.getTime() - 2 * 60 * 60 * 1000,
+        );
+        const conflictEnd = new Date(
+          scheduledDate.getTime() + 2 * 60 * 60 * 1000,
+        );
+        // Only live reservations occupy a court/time slot. Historical
+        // completed matches and cancelled fixtures must not block a later
+        // reschedule (especially when a tournament reuses the same courts).
+        const activeScheduledStatuses = inArray(schema.matches.status, [
+          'SCHEDULED',
+          'ONGOING',
+        ]);
+
+        if (effectiveCourtName) {
+          const conflict = await tx
+            .select({ id: schema.matches.id })
+            .from(schema.matches)
+            .where(
+              and(
+                eq(schema.matches.courtName, effectiveCourtName),
+                eq(schema.matches.tournamentId, existing.tournamentId),
+                ne(schema.matches.id, id),
+                isNull(schema.matches.deletedAt),
+                activeScheduledStatuses,
+                gte(schema.matches.scheduledAt, conflictStart),
+                lte(schema.matches.scheduledAt, conflictEnd),
+              ),
+            )
+            .limit(1);
+
+          if (conflict.length > 0) {
+            throw new BadRequestException(
+              `Sân ${effectiveCourtName} đã có trận đấu khác trong khung giờ này (${conflictStart.toLocaleTimeString('vi-VN')} - ${conflictEnd.toLocaleTimeString('vi-VN')}).`,
+            );
+          }
+        }
+
+        const participantIds = [
+          existing.participant1Id,
+          existing.participant2Id,
+        ].filter((participantId): participantId is string =>
+          Boolean(participantId),
+        );
+        if (participantIds.length > 0) {
+          const participantConflict = await tx
+            .select({
+              id: schema.matches.id,
+              participant1Id: schema.matches.participant1Id,
+              participant2Id: schema.matches.participant2Id,
+            })
+            .from(schema.matches)
+            .where(
+              and(
+                eq(schema.matches.tournamentId, existing.tournamentId),
+                ne(schema.matches.id, id),
+                isNull(schema.matches.deletedAt),
+                activeScheduledStatuses,
+                gte(schema.matches.scheduledAt, conflictStart),
+                lte(schema.matches.scheduledAt, conflictEnd),
+                or(
+                  inArray(schema.matches.participant1Id, participantIds),
+                  inArray(schema.matches.participant2Id, participantIds),
+                ),
+              ),
+            )
+            .limit(1);
+
+          if (participantConflict.length > 0) {
+            throw new BadRequestException(
+              'Một đội đã có trận đấu khác trong khung giờ này.',
+            );
+          }
         }
       }
 
       const [updated] = await tx
         .update(schema.matches)
         .set({
-          courtName: data.courtName || null,
-          courtAddress: data.courtAddress || null,
-          refereeId: data.refereeId || null,
-          scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
-          ...(data.matchConfig !== undefined && { matchConfig: data.matchConfig || {} }),
+          courtName: effectiveCourtName,
+          courtAddress:
+            data.courtAddress !== undefined
+              ? data.courtAddress?.trim() || null
+              : existing.courtAddress,
+          refereeId:
+            data.refereeId !== undefined
+              ? data.refereeId || null
+              : existing.refereeId,
+          scheduledAt: effectiveScheduledAt,
+          ...(data.matchConfig !== undefined && {
+            matchConfig: data.matchConfig || {},
+          }),
           updatedAt: new Date(),
           revision: sql`${schema.matches.revision} + 1`,
         })
@@ -1454,11 +1911,95 @@ export class MatchesRepository {
         .returning();
 
       if (existing && updated) {
-        await this.auditService.logUpdate(tx, userId, 'matches', id, existing, updated);
+        await this.auditService.logUpdate(
+          tx,
+          userId,
+          'matches',
+          id,
+          existing,
+          updated,
+        );
       }
 
       return updated;
     });
+  }
+
+  /**
+   * Record a non-final operational decision without entering the completion
+   * pipeline. POSTPONE returns a fixture to SCHEDULED so the organizer can
+   * assign a new time; ABANDON uses DISPUTED so standings, bracket promotion,
+   * and ELO remain blocked until a human resolves the fixture.
+   */
+  async recordNonFinalOperation(
+    id: string,
+    userId: string,
+    data: {
+      status: 'SCHEDULED' | 'DISPUTED';
+      scoreDetails: Record<string, unknown>;
+      p1SetsWon?: number;
+      p2SetsWon?: number;
+      scheduledAt?: Date | null;
+      startedAt?: Date | null;
+      winnerId?: string | null;
+    },
+  ) {
+    const updated = await this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.matches)
+        .where(eq(schema.matches.id, id))
+        .limit(1);
+
+      if (!existing) {
+        throw new NotFoundException('Match not found');
+      }
+
+      const [next] = await tx
+        .update(schema.matches)
+        .set({
+          status: data.status,
+          scoreDetails: data.scoreDetails,
+          ...(data.p1SetsWon !== undefined && { p1SetsWon: data.p1SetsWon }),
+          ...(data.p2SetsWon !== undefined && { p2SetsWon: data.p2SetsWon }),
+          scheduledAt:
+            data.scheduledAt !== undefined
+              ? data.scheduledAt
+              : existing.scheduledAt,
+          startedAt:
+            data.startedAt !== undefined ? data.startedAt : existing.startedAt,
+          winnerId:
+            data.winnerId !== undefined ? data.winnerId : existing.winnerId,
+          updatedAt: new Date(),
+          revision: sql`${schema.matches.revision} + 1`,
+        })
+        .where(
+          and(
+            eq(schema.matches.id, id),
+            ne(schema.matches.status, 'COMPLETED'),
+          ),
+        )
+        .returning();
+
+      if (!next) {
+        throw new BadRequestException(
+          'Trận đấu đã kết thúc hoặc vừa được cập nhật bởi người khác.',
+        );
+      }
+
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'matches',
+        id,
+        existing,
+        next,
+      );
+
+      return next;
+    });
+
+    return this.findById(updated.id);
   }
 
   async checkAllMatchesCompleted(tournamentId: string): Promise<boolean> {
@@ -1469,8 +2010,8 @@ export class MatchesRepository {
         and(
           eq(schema.matches.tournamentId, tournamentId),
           sql`${schema.matches.status} != 'COMPLETED'`,
-          isNull(schema.matches.deletedAt)
-        )
+          isNull(schema.matches.deletedAt),
+        ),
       );
     return Number(activeMatches[0]?.count || 0) === 0;
   }
@@ -1482,7 +2023,10 @@ export class MatchesRepository {
       .where(eq(schema.tournaments.id, tournamentId));
   }
 
-  async isRefereeAccepted(tournamentId: string, refereeId: string): Promise<boolean> {
+  async isRefereeAccepted(
+    tournamentId: string,
+    refereeId: string,
+  ): Promise<boolean> {
     const result = await this.db
       .select({ count: count() })
       .from(schema.tournamentReferees)
@@ -1490,10 +2034,45 @@ export class MatchesRepository {
         and(
           eq(schema.tournamentReferees.tournamentId, tournamentId),
           eq(schema.tournamentReferees.userId, refereeId),
-          eq(schema.tournamentReferees.status, 'ACCEPTED')
-        )
+          eq(schema.tournamentReferees.status, 'ACCEPTED'),
+        ),
       );
     return Number(result[0]?.count || 0) > 0;
+  }
+
+  /**
+   * Object-level tournament authority. A global ORGANIZER role is not enough
+   * to operate an arbitrary match; the user must own the tournament or be an
+   * accepted CO_ORGANIZER assignment for that tournament.
+   */
+  async isTournamentManager(
+    tournamentId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: schema.tournaments.id })
+      .from(schema.tournaments)
+      .leftJoin(
+        schema.tournamentStaff,
+        and(
+          eq(schema.tournamentStaff.tournamentId, schema.tournaments.id),
+          eq(schema.tournamentStaff.userId, userId),
+          eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.tournaments.id, tournamentId),
+          isNull(schema.tournaments.deletedAt),
+          or(
+            eq(schema.tournaments.createdBy, userId),
+            eq(schema.tournamentStaff.userId, userId),
+          ),
+        ),
+      )
+      .limit(1);
+
+    return Boolean(row);
   }
 
   // ──────── Mute / Ban comment users ────────
@@ -1520,7 +2099,10 @@ export class MatchesRepository {
         avatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.matchMutedUsers)
-      .leftJoin(schema.profiles, eq(schema.matchMutedUsers.userId, schema.profiles.userId))
+      .leftJoin(
+        schema.profiles,
+        eq(schema.matchMutedUsers.userId, schema.profiles.userId),
+      )
       .where(eq(schema.matchMutedUsers.matchId, matchId));
   }
 
@@ -1577,7 +2159,7 @@ export class MatchesRepository {
       .select({ userId: schema.tournamentFollows.userId })
       .from(schema.tournamentFollows)
       .where(eq(schema.tournamentFollows.tournamentId, tournamentId));
-    return rows.map(r => r.userId);
+    return rows.map((r) => r.userId);
   }
 
   async incrementCheerCount(id: string) {
@@ -1588,7 +2170,10 @@ export class MatchesRepository {
         updatedAt: new Date(),
       })
       .where(eq(schema.matches.id, id))
-      .returning({ id: schema.matches.id, cheerCount: schema.matches.cheerCount });
+      .returning({
+        id: schema.matches.id,
+        cheerCount: schema.matches.cheerCount,
+      });
     return updated ?? null;
   }
 
@@ -1598,10 +2183,7 @@ export class MatchesRepository {
       const [updated] = await tx
         .update(schema.matches)
         .set({ refereeId, updatedAt: new Date() })
-        .where(and(
-          eq(schema.matches.id, id),
-          isNull(schema.matches.refereeId),
-        ))
+        .where(and(eq(schema.matches.id, id), isNull(schema.matches.refereeId)))
         .returning();
 
       if (!updated) {

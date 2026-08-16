@@ -213,6 +213,18 @@ export class LiveScoreGateway
       this.server.to(`tournament:${tournamentId}`).emit('match:update', rawPayload);
     }
   }
+
+  broadcastRegistrationUpdate(
+    tournamentId: string,
+    payload: { participantId?: string; divisionId?: string | null; action: string },
+  ) {
+    if (!this.server) return;
+    this.server.to(`tournament:${tournamentId}`).emit('registration:update', JSON.stringify({
+      tournamentId,
+      ...payload,
+      occurredAt: new Date().toISOString(),
+    }));
+  }
   // Định kỳ phát viewer count từ hàng chờ gộp tin
   private flushViewerCounts() {
     if (this.pendingViewerUpdates.size === 0 || !this.server) return;

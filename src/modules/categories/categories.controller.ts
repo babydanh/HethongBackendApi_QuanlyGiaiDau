@@ -37,6 +37,15 @@ export class CategoriesController {
     return await this.categoriesService.findAllCategories(query);
   }
 
+  @Get('admin/all')
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy toàn bộ môn thể thao cho admin, gồm cả môn đã tắt' })
+  @ApiResponse({ status: 200, description: 'Danh sách toàn bộ môn thể thao' })
+  async findAllForAdmin(@Query() query: QueryCategoryDto) {
+    return await this.categoriesService.findAllAdminCategories(query);
+  }
+
   @Public()
   @SkipThrottle()
   @Get(':id')

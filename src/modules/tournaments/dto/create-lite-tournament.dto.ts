@@ -14,7 +14,10 @@ import {
 } from 'class-validator';
 
 export class CreateLiteTournamentDto {
-  @ApiProperty({ example: 'Giải Cầu lông Cuối Tuần', description: 'Tên giải đấu' })
+  @ApiProperty({
+    example: 'Giải Cầu lông Cuối Tuần',
+    description: 'Tên giải đấu',
+  })
   @IsString()
   @IsNotEmpty()
   name: string;
@@ -24,21 +27,55 @@ export class CreateLiteTournamentDto {
   @IsNotEmpty()
   communityId: string;
 
-  @ApiProperty({ example: 'badminton', description: 'Môn thi đấu (slug)', enum: ['badminton', 'tennis', 'pickleball', 'table_tennis', 'football'] })
+  @ApiProperty({
+    example: 'badminton',
+    description: 'Môn thi đấu (slug)',
+    enum: ['badminton', 'tennis', 'pickleball', 'table_tennis', 'football'],
+  })
   @IsString()
   @IsIn(['badminton', 'tennis', 'pickleball', 'table_tennis', 'football'])
   sport: string;
 
-  @ApiPropertyOptional({ example: 'singles', description: 'Hình thức: đánh đơn hoặc đôi', enum: ['singles', 'doubles'] })
+  @ApiPropertyOptional({
+    example: 'singles',
+    description: 'Hình thức: đánh đơn hoặc đôi',
+    enum: ['singles', 'doubles'],
+  })
   @IsString()
   @IsOptional()
   @IsIn(['singles', 'doubles'])
   format?: string;
 
-  @ApiPropertyOptional({ example: 'single_elimination', description: 'Thể thức thi đấu. Chỉ hỗ trợ: single_elimination, double_elimination, round_robin, group_stage_knockout.', enum: ['single_elimination', 'double_elimination', 'round_robin', 'group_stage_knockout'] })
+  @ApiPropertyOptional({
+    example: 'MALE',
+    description:
+      'Giới hạn giới tính cho giải bóng đá Lite; bỏ trống là không ràng buộc',
+    enum: ['MALE', 'FEMALE'],
+  })
   @IsString()
   @IsOptional()
-  @IsIn(['single_elimination', 'double_elimination', 'round_robin', 'group_stage_knockout'])
+  @IsIn(['MALE', 'FEMALE'])
+  genderRestriction?: 'MALE' | 'FEMALE';
+
+  @ApiPropertyOptional({
+    example: 'single_elimination',
+    description:
+      'Thể thức thi đấu. Chỉ hỗ trợ: single_elimination, double_elimination, round_robin, group_stage_knockout.',
+    enum: [
+      'single_elimination',
+      'double_elimination',
+      'round_robin',
+      'group_stage_knockout',
+    ],
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn([
+    'single_elimination',
+    'double_elimination',
+    'round_robin',
+    'group_stage_knockout',
+  ])
   bracketType?: string;
 
   @ApiPropertyOptional({ example: 16, description: 'Số đội tối đa (2-32)' })
@@ -61,72 +98,114 @@ export class CreateLiteTournamentDto {
   @Max(20)
   maxReserve?: number;
 
-  @ApiPropertyOptional({ example: 'Giải đấu giao lưu cuối tuần', description: 'Mô tả giải đấu' })
+  @ApiPropertyOptional({
+    example: 'Giải đấu giao lưu cuối tuần',
+    description: 'Mô tả giải đấu',
+  })
   @IsString()
   @IsOptional()
   description?: string;
 
-  @ApiPropertyOptional({ example: 'OPEN', description: 'Chế độ đăng ký', enum: ['OPEN', 'APPROVAL', 'INVITE_ONLY'] })
+  @ApiPropertyOptional({
+    example: 'OPEN',
+    description: 'Chế độ đăng ký',
+    enum: ['OPEN', 'APPROVAL', 'INVITE_ONLY'],
+  })
   @IsString()
   @IsOptional()
   @IsIn(['OPEN', 'APPROVAL', 'INVITE_ONLY'])
   registrationMode?: string;
 
-  @ApiPropertyOptional({ example: 'Hải Dương', description: 'Địa điểm tổ chức' })
+  @ApiPropertyOptional({
+    example: 'Hải Dương',
+    description: 'Địa điểm tổ chức',
+  })
   @IsString()
   @IsOptional()
   location?: string;
 
-  @ApiPropertyOptional({ example: '2026-10-15T00:00:00Z', description: 'Ngày bắt đầu' })
+  @ApiPropertyOptional({
+    example: '2026-10-15T00:00:00Z',
+    description: 'Ngày bắt đầu',
+  })
   @IsDateString()
   @IsOptional()
   startDate?: string;
 
-  @ApiPropertyOptional({ example: '18:30', description: 'Giờ bắt đầu thi đấu (HH:mm)' })
+  @ApiPropertyOptional({
+    example: '18:30',
+    description: 'Giờ bắt đầu thi đấu (HH:mm)',
+  })
   @IsString()
   @IsOptional()
   startTime?: string;
 
-  @ApiPropertyOptional({ example: '2026-10-15T22:00:00Z', description: 'Ngày giờ kết thúc' })
+  @ApiPropertyOptional({
+    example: '2026-10-15T22:00:00Z',
+    description: 'Ngày giờ kết thúc',
+  })
   @IsDateString()
   @IsOptional()
   endDate?: string;
 
-  @ApiPropertyOptional({ example: false, description: 'Giải đấu xếp hạng ELO (true) hay phong trào (false)' })
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Giải đấu xếp hạng ELO (true) hay phong trào (false)',
+  })
   @IsBoolean()
   @IsOptional()
   isRanked?: boolean;
 
-  @ApiPropertyOptional({ example: false, description: 'Tự động tạo giải lặp lại theo chu kỳ định kỳ' })
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Tự động tạo giải lặp lại theo chu kỳ định kỳ',
+  })
   @IsBoolean()
   @IsOptional()
   isRecurring?: boolean;
 
-  @ApiPropertyOptional({ example: 'WEEKLY', description: 'Tần suất lặp lại', enum: ['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'] })
+  @ApiPropertyOptional({
+    example: 'WEEKLY',
+    description: 'Tần suất lặp lại',
+    enum: ['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'],
+  })
   @IsString()
   @IsOptional()
   @IsIn(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'])
   recurringFrequency?: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
 
-  @ApiPropertyOptional({ example: 6, description: 'Thứ trong tuần (0: CN, 1: T2, ..., 6: T7)' })
+  @ApiPropertyOptional({
+    example: 6,
+    description: 'Thứ trong tuần (0: CN, 1: T2, ..., 6: T7)',
+  })
   @IsNumber()
   @IsOptional()
   @Min(0)
   @Max(6)
   recurringDayOfWeek?: number;
 
-  @ApiPropertyOptional({ example: [2, 4, 6], description: 'Danh sách các thứ trong tuần (0: CN, 1: T2, ..., 6: T7)' })
+  @ApiPropertyOptional({
+    example: [2, 4, 6],
+    description: 'Danh sách các thứ trong tuần (0: CN, 1: T2, ..., 6: T7)',
+  })
   @IsArray()
   @IsOptional()
   @IsNumber({}, { each: true })
   recurringDaysOfWeek?: number[];
 
-  @ApiPropertyOptional({ example: '18:00', description: 'Giờ thi đấu định kỳ (HH:mm)' })
+  @ApiPropertyOptional({
+    example: '18:00',
+    description: 'Giờ thi đấu định kỳ (HH:mm)',
+  })
   @IsString()
   @IsOptional()
   recurringTimeOfDay?: string;
 
-  @ApiPropertyOptional({ example: 3, description: 'Số ngày tạo giải và mở đăng ký trước ngày thi đấu (VD: Tạo trước 1 ngày, 2 ngày, 3 ngày, 7 ngày)' })
+  @ApiPropertyOptional({
+    example: 3,
+    description:
+      'Số ngày tạo giải và mở đăng ký trước ngày thi đấu (VD: Tạo trước 1 ngày, 2 ngày, 3 ngày, 7 ngày)',
+  })
   @IsNumber()
   @IsOptional()
   @Min(0)

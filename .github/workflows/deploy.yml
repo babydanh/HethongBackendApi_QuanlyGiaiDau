@@ -11,10 +11,65 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  schema-smoke:
+    name: Verify football schema on clean PostgreSQL
+    runs-on: ubuntu-latest
+    # Values are scoped to this disposable CI database only. Production
+    # credentials remain in the VPS .env and are never exposed here.
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: tournament_db
+      DB_SSL: 'false'
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tournament_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d tournament_db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to disposable database
+        run: node run-prod-migration.js
+
+      - name: Re-run migrations to verify idempotency
+        run: node run-prod-migration.js
+
+      - name: Verify football schema
+        run: pnpm verify:football-schema
+
   # Job 1: Build Docker Image cho Backend trên GitHub và Push lên GHCR
   build-and-push:
     name: Build & Push Backend Image
     runs-on: ubuntu-latest
+    needs: schema-smoke
     permissions:
       contents: read
       packages: write
@@ -94,6 +149,16 @@ jobs:
             # .env.production file baked into the image.
             sed -i 's#giaidau\.vnvar\.com#sporto.asia#g' .env
 
+            # Fail before migration if the VPS app key is missing or rejected.
+            # Do not print the secret; only the request result is surfaced.
+            app_api_key="$(sed -n 's/^APP_API_KEY=//p' .env | head -n 1)"
+            if [ -z "${app_api_key}" ]; then
+              echo "APP_API_KEY is missing from the VPS .env"
+              exit 1
+            fi
+            curl --fail --silent --show-error --max-time 15 \
+              -H "x-app-key: ${app_api_key}" \
+              "https://sporto.asia/api/v1/categories" > /dev/null
             # 2. Đăng nhập GHCR trên VPS
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -101,10 +166,29 @@ jobs:
             docker pull ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest
 
             # 4. Chạy migration cơ sở dữ liệu
+            docker compose run --rm migrate node run-prod-migration.js --dry-run
             docker compose run --rm migrate
 
             # 5. Khởi động lại service backend với image mới
             docker compose up -d --force-recreate --no-deps backend
 
-            # 6. Dọn dẹp các Docker Image cũ
+            # 6. Smoke check public API after the new container is healthy.
+            for attempt in 1 2 3 4 5 6; do
+              if curl --fail --silent --show-error --max-time 15 \
+                -H "x-app-key: ${app_api_key}" \
+                "https://sporto.asia/api/v1/categories" > /dev/null; then
+                echo "API smoke check passed on attempt ${attempt}"
+                unset app_api_key
+                break
+              fi
+              if [ "${attempt}" -eq 6 ]; then
+                echo "API smoke check failed after restart"
+                docker compose logs --tail=120 backend
+                unset app_api_key
+                exit 1
+              fi
+              sleep 5
+            done
+
+            # 7. Dọn dẹp các Docker Image cũ
             docker image prune -f

@@ -3,7 +3,11 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, lte, gte, ne, isNull, sql } from 'drizzle-orm';
+import { eq, and, lte, ne, isNull, sql } from 'drizzle-orm';
+import {
+  evaluateTournamentCleanup,
+  TOURNAMENT_CLEANUP_GRACE_DAYS,
+} from './utils/tournament-cleanup-policy';
 
 @Injectable()
 export class TournamentSchedulerService {
@@ -156,7 +160,6 @@ export class TournamentSchedulerService {
         .from(schema.tournaments)
         .where(
           and(
-            eq(schema.tournaments.tournamentType, 'CLUB'),
             isNull(schema.tournaments.deletedAt),
             ne(schema.tournaments.status, 'CANCELLED'),
             sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'enabled')::boolean = true`,
@@ -300,96 +303,181 @@ export class TournamentSchedulerService {
     }
   }
 
-  /**
-   * Tự động dọn dẹp / hủy các giải đấu:
-   * 1. Quá 2 ngày kể từ giờ thi đấu (startDate) mà không đủ người (< 2 người đăng ký) -> Hủy / Xóa & ẩn bài viết CLB
-   * 2. Giải đã bắt đầu (IN_PROGRESS) mà trong 1 tuần (7 ngày) không có hoạt động mới -> Hủy / Xóa & ẩn bài viết CLB
-   */
+  /** Tự động hủy các giải đã hết hạn đăng ký và hoàn toàn không có dữ liệu cần bảo vệ. */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async handleAutoCleanupAbandonedTournaments() {
     this.logger.log('Running auto-cleanup abandoned tournaments cron job...');
     try {
       const now = new Date();
-      const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-      // 1. Quá 2 ngày mà không đủ người (< 2 người) ở trạng thái REGISTRATION_OPEN / REGISTRATION_CLOSED / UPCOMING
-      const unstartedExpired = await this.db
+      const cleanupCutoff = new Date(
+        now.getTime() - TOURNAMENT_CLEANUP_GRACE_DAYS * 24 * 60 * 60 * 1000,
+      );
+      const candidates = await this.db
         .select()
         .from(schema.tournaments)
         .where(
           and(
+            eq(schema.tournaments.tournamentType, 'CLUB'),
             isNull(schema.tournaments.deletedAt),
-            ne(schema.tournaments.status, 'CANCELLED'),
-            ne(schema.tournaments.status, 'COMPLETED'),
-            ne(schema.tournaments.status, 'IN_PROGRESS'),
-            lte(schema.tournaments.startDate, twoDaysAgo)
-          )
+            ne(schema.tournaments.visibility, 'PUBLIC'),
+            sql`${schema.tournaments.status} IN ('REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'UPCOMING')`,
+            lte(schema.tournaments.registrationEndDate, cleanupCutoff),
+          ),
         );
 
-      for (const t of unstartedExpired) {
-        const [participantCount] = await this.db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(schema.tournamentParticipants.tournamentId, t.id),
-              // Đếm tất cả đội/VĐV hợp lệ đã đăng ký (COMPLETE hoặc đang chờ ghép đôi PENDING_PARTNER)
-              sql`${schema.tournamentParticipants.teamStatus} IN ('COMPLETE', 'PENDING_PARTNER', 'PENDING_APPROVAL')`
+      for (const candidate of candidates) {
+        await this.db.transaction(async (tx) => {
+          const [tournament] = await tx
+            .select()
+            .from(schema.tournaments)
+            .where(
+              and(
+                eq(schema.tournaments.id, candidate.id),
+                isNull(schema.tournaments.deletedAt),
+                ne(schema.tournaments.visibility, 'PUBLIC'),
+                sql`${schema.tournaments.status} IN ('REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'UPCOMING')`,
+                lte(schema.tournaments.registrationEndDate, cleanupCutoff),
+              ),
             )
+            .for('update');
+
+          if (!tournament) return;
+
+          const [activeRegistration] = await tx
+            .select({ count: sql<number>`count(*)::int` })
+            .from(schema.tournamentParticipants)
+            .where(
+              and(
+                eq(schema.tournamentParticipants.tournamentId, tournament.id),
+                sql`(${schema.tournamentParticipants.teamStatus} IS NULL OR ${schema.tournamentParticipants.teamStatus} NOT IN ('WITHDRAWN', 'REJECTED', 'KICKED', 'EXPIRED'))`,
+              ),
+            );
+
+          const [protectedPayment] = await tx
+            .select({ count: sql<number>`count(*)::int` })
+            .from(schema.payments)
+            .where(
+              and(
+                eq(schema.payments.tournamentId, tournament.id),
+                sql`(
+                  ${schema.payments.status} IS NULL
+                  OR ${schema.payments.status} NOT IN ('FAILED', 'CANCELLED', 'EXPIRED', 'REFUNDED', 'COMPLETED')
+                  OR (
+                    ${schema.payments.status} = 'COMPLETED'
+                    AND ${schema.payments.refundStatus} IS DISTINCT FROM 'REFUNDED'
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM ${schema.paymentRefunds}
+                    WHERE ${schema.paymentRefunds.paymentId} = ${schema.payments.id}
+                      AND ${schema.paymentRefunds.status} IN ('REQUESTED', 'UNDER_REVIEW', 'APPROVED', 'PROCESSING')
+                  )
+                )`,
+              ),
+            );
+
+          const [protectedMatch] = await tx
+            .select({ count: sql<number>`count(*)::int` })
+            .from(schema.matches)
+            .where(
+              and(
+                eq(schema.matches.tournamentId, tournament.id),
+                isNull(schema.matches.deletedAt),
+              ),
+            );
+
+          const [bracketData] = await tx
+            .select({ id: schema.tournamentStages.id })
+            .from(schema.tournamentStages)
+            .where(
+              and(
+                eq(schema.tournamentStages.tournamentId, tournament.id),
+                isNull(schema.tournamentStages.deletedAt),
+              ),
+            )
+            .limit(1);
+
+          const decision = evaluateTournamentCleanup(
+            {
+              status: tournament.status,
+              registrationEndDate: tournament.registrationEndDate,
+              registrationStartDate: tournament.registrationStartDate,
+              startDate: tournament.startDate,
+              activeRegistrationCount: activeRegistration?.count,
+              protectedPaymentCount: protectedPayment?.count,
+              protectedMatchCount: protectedMatch?.count,
+              hasBracketData: Boolean(bracketData),
+            },
+            now,
           );
 
-        if (!participantCount || participantCount.count < 2) {
-          this.logger.warn(`Auto-cancelling tournament ${t.id} ("${t.name}"): past 2 days without enough participants (${participantCount?.count ?? 0}).`);
-          
-          await this.db.update(schema.tournaments)
-            .set({ status: 'CANCELLED', deletedAt: now, updatedAt: now })
-            .where(eq(schema.tournaments.id, t.id));
+          if (!decision.eligible) {
+            this.logger.log(`Skipped cleanup for tournament ${tournament.id}: ${decision.reason}`);
+            return;
+          }
 
-          // Soft-delete associated community posts
-          await this.db.update(schema.communityPosts)
-            .set({ status: 'HIDDEN', deletedAt: now, updatedAt: now })
-            .where(and(eq(schema.communityPosts.tournamentId, t.id), isNull(schema.communityPosts.deletedAt)));
-        }
-      }
-
-      // 2. Đang diễn ra (IN_PROGRESS) mà quá 7 ngày không có trận đấu nào được cập nhật / hoạt động mới
-      const stalledInProgress = await this.db
-        .select()
-        .from(schema.tournaments)
-        .where(
-          and(
-            isNull(schema.tournaments.deletedAt),
-            eq(schema.tournaments.status, 'IN_PROGRESS'),
-            lte(schema.tournaments.updatedAt, sevenDaysAgo)
-          )
-        );
-
-      for (const t of stalledInProgress) {
-        // Kiểm tra xem có trận đấu nào được update trong 7 ngày qua không
-        const [recentMatch] = await this.db
-          .select({ id: schema.matches.id })
-          .from(schema.matches)
-          .where(
-            and(
-              eq(schema.matches.tournamentId, t.id),
-              gte(schema.matches.updatedAt, sevenDaysAgo)
+          const [cancelledTournament] = await tx
+            .update(schema.tournaments)
+            .set({ status: 'CANCELLED', updatedAt: now })
+            .where(
+              and(
+                eq(schema.tournaments.id, tournament.id),
+                isNull(schema.tournaments.deletedAt),
+                ne(schema.tournaments.visibility, 'PUBLIC'),
+                sql`${schema.tournaments.status} IN ('REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'UPCOMING')`,
+                lte(schema.tournaments.registrationEndDate, cleanupCutoff),
+                lte(schema.tournaments.startDate, now),
+                sql`NOT EXISTS (
+                  SELECT 1 FROM ${schema.tournamentParticipants}
+                  WHERE ${schema.tournamentParticipants.tournamentId} = ${schema.tournaments.id}
+                    AND (${schema.tournamentParticipants.teamStatus} IS NULL OR ${schema.tournamentParticipants.teamStatus} NOT IN ('WITHDRAWN', 'REJECTED', 'KICKED', 'EXPIRED'))
+                )`,
+                sql`NOT EXISTS (
+                  SELECT 1 FROM ${schema.payments}
+                  WHERE ${schema.payments.tournamentId} = ${schema.tournaments.id}
+                    AND (
+                      ${schema.payments.status} IS NULL
+                      OR ${schema.payments.status} NOT IN ('FAILED', 'CANCELLED', 'EXPIRED', 'REFUNDED', 'COMPLETED')
+                      OR (${schema.payments.status} = 'COMPLETED' AND ${schema.payments.refundStatus} IS DISTINCT FROM 'REFUNDED')
+                      OR EXISTS (
+                        SELECT 1 FROM ${schema.paymentRefunds}
+                        WHERE ${schema.paymentRefunds.paymentId} = ${schema.payments.id}
+                          AND ${schema.paymentRefunds.status} IN ('REQUESTED', 'UNDER_REVIEW', 'APPROVED', 'PROCESSING')
+                      )
+                    )
+                )`,
+                sql`NOT EXISTS (
+                  SELECT 1 FROM ${schema.matches}
+                  WHERE ${schema.matches.tournamentId} = ${schema.tournaments.id}
+                    AND ${schema.matches.deletedAt} IS NULL
+                )`,
+                sql`NOT EXISTS (
+                  SELECT 1 FROM ${schema.tournamentStages}
+                  WHERE ${schema.tournamentStages.tournamentId} = ${schema.tournaments.id}
+                    AND ${schema.tournamentStages.deletedAt} IS NULL
+                )`,
+              ),
             )
-          )
-          .limit(1);
+            .returning({ id: schema.tournaments.id });
 
-        if (!recentMatch) {
-          this.logger.warn(`Auto-cancelling stalled IN_PROGRESS tournament ${t.id} ("${t.name}"): no match activity for 7 days.`);
-          
-          await this.db.update(schema.tournaments)
-            .set({ status: 'CANCELLED', deletedAt: now, updatedAt: now })
-            .where(eq(schema.tournaments.id, t.id));
+          if (!cancelledTournament) return;
 
-          // Soft-delete associated community posts
-          await this.db.update(schema.communityPosts)
-            .set({ status: 'HIDDEN', deletedAt: now, updatedAt: now })
-            .where(and(eq(schema.communityPosts.tournamentId, t.id), isNull(schema.communityPosts.deletedAt)));
-        }
+          if (tournament.tournamentType === 'CLUB' && tournament.communityId) {
+            await tx
+              .update(schema.communityPosts)
+              .set({ status: 'HIDDEN', updatedAt: now })
+              .where(
+                and(
+                  eq(schema.communityPosts.tournamentId, tournament.id),
+                  isNull(schema.communityPosts.deletedAt),
+                ),
+              );
+          }
+
+          this.logger.warn(
+            `Auto-cancelled empty ${tournament.tournamentType} tournament ${tournament.id} after registration grace period.`,
+          );
+        });
       }
     } catch (err) {
       this.logger.error('Error in handleAutoCleanupAbandonedTournaments cron job:', err.message);

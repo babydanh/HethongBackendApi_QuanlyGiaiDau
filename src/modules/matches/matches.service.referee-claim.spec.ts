@@ -39,6 +39,7 @@ describe('MatchesService — referee claim via roles array (NOTE-6)', () => {
       findById: jest.fn().mockImplementation(() =>
         Promise.resolve({ ...scheduledMatch, refereeId: null }),
       ),
+      isTournamentManager: jest.fn().mockResolvedValue(false),
       isRefereeAccepted: jest.fn().mockResolvedValue(true),
       updateRefereeId: jest.fn().mockResolvedValue({ refereeId: 'referee-1' }),
       updateStatus: jest.fn().mockImplementation((id: string) =>
@@ -100,6 +101,7 @@ describe('MatchesService — referee claim via roles array (NOTE-6)', () => {
 
   it('non-referee without admin cannot start match', async () => {
     const viewer = { sub: 'viewer-1', email: 'v@example.com', roles: ['PLAYER'] };
+    mockRepo.isRefereeAccepted = jest.fn().mockResolvedValue(false);
     await expect(
       service.updateStatus('match-1', viewer as never, { status: 'ONGOING' } as never),
     ).rejects.toThrow(ForbiddenException);

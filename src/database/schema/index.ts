@@ -21,4 +21,3 @@ export * from './community_social.schema';
 export * from './community_tag_presets.schema';
 export * from './football.schema';
 export * from './user-devices.schema';
-

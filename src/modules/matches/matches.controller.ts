@@ -71,7 +71,6 @@ export class MatchesController {
   @Patch(':id/score')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.REFEREE, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
   async updateScore(
     @Param('id', ParseUUIDPipe) id: string,
@@ -84,7 +83,6 @@ export class MatchesController {
   @Patch(':id/status')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.REFEREE, UserRole.ADMIN, UserRole.ORGANIZER)
   @ApiOperation({
     summary: 'Cập nhật trạng thái trận đấu (ONGOING, COMPLETED)',
   })
@@ -99,7 +97,6 @@ export class MatchesController {
   @Patch(':id/schedule')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Cập nhật lịch thi đấu, sân đấu và trọng tài' })
   async updateSchedule(
     @Param('id', ParseUUIDPipe) id: string,
@@ -112,7 +109,6 @@ export class MatchesController {
   @Patch(':id/operation')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
   async operateMatch(
     @Param('id', ParseUUIDPipe) id: string,
@@ -125,7 +121,6 @@ export class MatchesController {
   @Patch(':id/assign-referee')
   @Verified()
   @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Phân công trọng tài cho trận đấu' })
   async assignReferee(
     @Param('id', ParseUUIDPipe) id: string,

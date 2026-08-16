@@ -20,6 +20,7 @@ if (fs.existsSync(envFile)) {
 }
 
 const postgres = require('postgres');
+const DRY_RUN = process.argv.includes('--dry-run');
 
 const isSSL = process.env.DB_SSL === 'true';
 
@@ -101,8 +102,73 @@ async function markMigrationApplied(hash) {
   `;
 }
 
+function discoverMigrationFiles(migrationsDir) {
+  const journalPath = path.join(migrationsDir, 'meta', '_journal.json');
+  if (!fs.existsSync(journalPath)) {
+    return fs
+      .readdirSync(migrationsDir)
+      .filter((file) => file.endsWith('.sql'))
+      .sort()
+      .map((file) => ({
+        tag: file.replace('.sql', ''),
+        file: path.join(migrationsDir, file),
+        hash: file.replace('.sql', ''),
+      }));
+  }
+
+  const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
+  const migrationFiles = journal.entries.map((entry) => ({
+    tag: entry.tag,
+    file: path.join(migrationsDir, `${entry.tag}.sql`),
+    hash: entry.tag,
+  }));
+
+  // Keep hand-authored operational migrations in the same production
+  // pipeline, even when Drizzle's journal does not include them.
+  const journalTags = new Set(migrationFiles.map((migration) => migration.tag));
+  const standaloneMigrations = fs
+    .readdirSync(migrationsDir)
+    .filter((file) => file.endsWith('.sql') && !file.startsWith('meta'))
+    .map((file) => file.replace(/\.sql$/, ''))
+    .filter((tag) => !journalTags.has(tag))
+    .sort()
+    .map((tag) => ({
+      tag,
+      file: path.join(migrationsDir, `${tag}.sql`),
+      hash: tag,
+    }));
+
+  return migrationFiles.concat(standaloneMigrations);
+}
+
+function runDryRun(migrationsDir) {
+  const migrationFiles = discoverMigrationFiles(migrationsDir);
+  console.log(`[dry-run] Found ${migrationFiles.length} migration files in ${migrationsDir}`);
+  let totalStatements = 0;
+  for (const migration of migrationFiles) {
+    if (!fs.existsSync(migration.file)) {
+      throw new Error(`[dry-run] Missing migration file: ${migration.file}`);
+    }
+    const statementCount = fs
+      .readFileSync(migration.file, 'utf8')
+      .split('--> statement-breakpoint')
+      .map((statement) => statement.trim())
+      .filter(Boolean).length;
+    totalStatements += statementCount;
+    console.log(`  → ${migration.tag} (${statementCount} statements)`);
+  }
+  console.log(`[dry-run] OK: ${migrationFiles.length} files, ${totalStatements} statements; database unchanged.`);
+}
+
 async function run() {
+  const migrationsDir = path.resolve(__dirname, 'src/database/migrations');
+  if (DRY_RUN) {
+    runDryRun(migrationsDir);
+    return;
+  }
+
   console.log('◇ Starting custom migration runner...');
+  let fkTriggersDisabled = false;
 
   try {
     // Step 1: Enable PostGIS
@@ -113,6 +179,7 @@ async function run() {
     // Step 2: Disable FK triggers for the session to avoid ordering issues
     console.log('\n[2/4] Disabling FK constraint triggers...');
     await sql`SET session_replication_role = 'replica'`;
+    fkTriggersDisabled = true;
     console.log('  ✓ FK triggers disabled');
 
     // Step 3: Ensure migrations tracking table exists
@@ -120,51 +187,8 @@ async function run() {
     const applied = await getAppliedMigrations();
 
     // Step 4: Read migration files
-    const migrationsDir = path.resolve(__dirname, 'src/database/migrations');
     console.log(`\n[3/4] Reading migrations from: ${migrationsDir}`);
-
-    // Read journal to get the correct order
-    const journalPath = path.join(migrationsDir, 'meta', '_journal.json');
-    let migrationFiles = [];
-
-    if (fs.existsSync(journalPath)) {
-      const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
-      migrationFiles = journal.entries.map(e => ({
-        tag: e.tag,
-        file: path.join(migrationsDir, `${e.tag}.sql`),
-        hash: e.tag,
-      }));
-
-      // Keep hand-authored operational migrations (for example files named
-      // with a date) in the same production pipeline. Drizzle's journal does
-      // not include those files, which previously left the running schema
-      // behind the application schema without failing the deploy.
-      const journalTags = new Set(migrationFiles.map((migration) => migration.tag));
-      const standaloneMigrations = fs
-        .readdirSync(migrationsDir)
-        .filter((file) => file.endsWith('.sql') && !file.startsWith('meta'))
-        .map((file) => file.replace(/\.sql$/, ''))
-        .filter((tag) => !journalTags.has(tag))
-        .sort()
-        .map((tag) => ({
-          tag,
-          file: path.join(migrationsDir, `${tag}.sql`),
-          hash: tag,
-        }));
-
-      migrationFiles.push(...standaloneMigrations);
-    } else {
-      // Fallback: read all .sql files alphabetically
-      migrationFiles = fs
-        .readdirSync(migrationsDir)
-        .filter(f => f.endsWith('.sql'))
-        .sort()
-        .map(f => ({
-          tag: f.replace('.sql', ''),
-          file: path.join(migrationsDir, f),
-          hash: f.replace('.sql', ''),
-        }));
-    }
+    const migrationFiles = discoverMigrationFiles(migrationsDir);
 
     console.log(`  Found ${migrationFiles.length} migration files`);
 
@@ -198,8 +222,18 @@ async function run() {
     console.log(`\n✅ Migration complete! Ran: ${ran}, Skipped (already applied): ${skipped}`);
   } catch (err) {
     console.error('\n✗ Fatal migration error:', err);
-    process.exit(1);
+    // Set the exit status but let finally restore session state and close the
+    // connection before Node exits.
+    process.exitCode = 1;
   } finally {
+    if (fkTriggersDisabled) {
+      try {
+        await sql`SET session_replication_role = 'origin'`;
+        console.log('  ✓ FK triggers restored after migration failure');
+      } catch (restoreError) {
+        console.error('  ✗ Failed to restore FK triggers before closing migration session:', restoreError);
+      }
+    }
     await sql.end();
   }
 }

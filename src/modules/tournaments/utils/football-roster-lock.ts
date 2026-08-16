@@ -5,6 +5,7 @@ export interface FootballRosterLockState {
   entryStatus?: string | null;
   confirmations: Array<'PENDING' | 'CONFIRMED' | 'DECLINED'>;
   mainRosterCount: number;
+  requiredMainRosterCount?: number;
 }
 
 /** Guard the final transition from a football registration to a locked roster. */
@@ -19,9 +20,13 @@ export function assertFootballRosterLockable(
       'Chưa đủ thành viên xác nhận roster để khóa đội.',
     );
   }
-  if (state.mainRosterCount < 1) {
+  const requiredMainRosterCount = Math.max(
+    1,
+    state.requiredMainRosterCount ?? 1,
+  );
+  if (state.mainRosterCount < requiredMainRosterCount) {
     throw new BadRequestException(
-      'Roster đội bóng phải có ít nhất một cầu thủ chính.',
+      `Roster đội bóng cần đủ ${requiredMainRosterCount} cầu thủ chính để khóa.`,
     );
   }
   if (state.confirmations.some((status) => status !== 'CONFIRMED')) {

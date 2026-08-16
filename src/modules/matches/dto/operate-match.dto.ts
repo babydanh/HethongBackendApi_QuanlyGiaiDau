@@ -3,9 +3,12 @@ import { IsIn, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 
 export const MATCH_OPERATION_ACTIONS = [
   'WALKOVER',
+  'NO_SHOW',
   'RETIREMENT',
   'DISQUALIFICATION',
   'OVERRIDE_RESULT',
+  'POSTPONE',
+  'ABANDON',
 ] as const;
 
 export type MatchOperationAction = (typeof MATCH_OPERATION_ACTIONS)[number];

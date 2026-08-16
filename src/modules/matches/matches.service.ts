@@ -1,6 +1,16 @@
-import { ConflictException, Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { MatchesRepository } from './matches.repository';
-import { MATCH_OPERATION_ACTIONS, MatchOperationAction, OperateMatchDto } from './dto/operate-match.dto';
+import {
+  MATCH_OPERATION_ACTIONS,
+  MatchOperationAction,
+  OperateMatchDto,
+} from './dto/operate-match.dto';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
@@ -18,12 +28,11 @@ import { RedisService } from '../../providers/redis/redis.service';
 import { resolveEffectiveSportRules } from '../tournaments/utils/sport-rules/resolve-effective-sport-rules';
 import { validateSportRuleConfig } from '../tournaments/utils/sport-rules/validate-sport-rules-config';
 import { validateScoreDetails } from './utils/score-validation/validate-score-details';
+import { aggregateFootballTwoLegs } from './utils/football-two-leg-aggregate';
 import {
-  hasRole,
   isAdminUser,
   isMatchOwnerOrAdmin,
 } from '../../common/helpers/role.helper';
-import { UserRole } from '../../common/constants/enums';
 
 @Injectable()
 export class MatchesService {
@@ -39,6 +48,20 @@ export class MatchesService {
     return isAdminUser(user);
   }
 
+  private async isTournamentManager(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+    user: JwtPayload,
+  ) {
+    if (!match) return false;
+    if (this.isAdmin(user) || match.tournament?.createdBy === user.sub) {
+      return true;
+    }
+    return this.matchesRepository.isTournamentManager(
+      match.tournamentId,
+      user.sub,
+    );
+  }
+
   private resolveOperationalWinner(
     match: Awaited<ReturnType<MatchesRepository['findById']>>,
     winnerId?: string,
@@ -47,10 +70,17 @@ export class MatchesService {
       throw new NotFoundException('Match not found');
     }
     if (!winnerId) {
-      throw new BadRequestException('Phải chỉ định đội thắng cho quyết định nghiệp vụ này.');
+      throw new BadRequestException(
+        'Phải chỉ định đội thắng cho quyết định nghiệp vụ này.',
+      );
     }
-    if (winnerId !== match.participant1Id && winnerId !== match.participant2Id) {
-      throw new BadRequestException('Người thắng phải thuộc một trong hai participant của trận.');
+    if (
+      winnerId !== match.participant1Id &&
+      winnerId !== match.participant2Id
+    ) {
+      throw new BadRequestException(
+        'Người thắng phải thuộc một trong hai participant của trận.',
+      );
     }
     return winnerId;
   }
@@ -73,32 +103,41 @@ export class MatchesService {
 
     const isRoundRobin = existing.stage?.type === 'ROUND_ROBIN';
 
-    const updatedMatch = await this.matchesRepository.completeMatch(matchId, winnerId, {
-      nextMatchId: existing.nextMatchId,
-      loserNextMatchId: existing.loserNextMatchId,
-      matchOrder: existing.matchOrder,
-      participant1Id: existing.participant1Id,
-      participant2Id: existing.participant2Id,
-      groupId: existing.groupId,
-      isRoundRobin,
-      p1SetsWon: overrideOutcome?.p1SetsWon ?? existing.p1SetsWon,
-      p2SetsWon: overrideOutcome?.p2SetsWon ?? existing.p2SetsWon,
-      scoreDetails:
-        overrideOutcome?.scoreDetails ??
-        (existing.scoreDetails as Record<string, unknown> | null | undefined),
-      auditUserId,
-      expectedRevision: overrideOutcome?.expectedRevision,
-    });
+    const updatedMatch = await this.matchesRepository.completeMatch(
+      matchId,
+      winnerId,
+      {
+        nextMatchId: existing.nextMatchId,
+        loserNextMatchId: existing.loserNextMatchId,
+        matchOrder: existing.matchOrder,
+        participant1Id: existing.participant1Id,
+        participant2Id: existing.participant2Id,
+        groupId: existing.groupId,
+        isRoundRobin,
+        p1SetsWon: overrideOutcome?.p1SetsWon ?? existing.p1SetsWon,
+        p2SetsWon: overrideOutcome?.p2SetsWon ?? existing.p2SetsWon,
+        scoreDetails:
+          overrideOutcome?.scoreDetails ??
+          (existing.scoreDetails as Record<string, unknown> | null | undefined),
+        auditUserId,
+        expectedRevision: overrideOutcome?.expectedRevision,
+      },
+    );
 
     // Stale-revision completion conflict (D3): another device already changed
     // the match — surface as 409 so the client refetches before retrying.
-    if (updatedMatch && typeof updatedMatch === 'object' && 'conflict' in updatedMatch) {
+    if (
+      updatedMatch &&
+      typeof updatedMatch === 'object' &&
+      'conflict' in updatedMatch
+    ) {
       const conflict = updatedMatch as unknown as {
         conflict: true;
         currentMatch: { revision: number };
       };
       throw new ConflictException({
-        message: 'Điểm đã thay đổi từ thiết bị khác. Vui lòng làm mới trước khi chốt kết quả.',
+        message:
+          'Điểm đã thay đổi từ thiết bị khác. Vui lòng làm mới trước khi chốt kết quả.',
         currentRevision: conflict.currentMatch.revision,
       });
     }
@@ -127,17 +166,31 @@ export class MatchesService {
 
     if (existing.tournamentId) {
       try {
-        const allCompleted = await this.matchesRepository.checkAllMatchesCompleted(existing.tournamentId);
+        const allCompleted =
+          await this.matchesRepository.checkAllMatchesCompleted(
+            existing.tournamentId,
+          );
         if (allCompleted) {
-          await this.matchesRepository.updateTournamentStatus(existing.tournamentId, 'COMPLETED');
+          await this.matchesRepository.updateTournamentStatus(
+            existing.tournamentId,
+            'COMPLETED',
+          );
         }
       } catch (err) {
         console.error('Failed to auto-complete tournament:', err.message);
       }
     }
 
-    this.liveScoreGateway.broadcastMatchStatus(matchId, updatedMatch, existing.tournamentId);
-    this.liveScoreGateway.broadcastScoreUpdate(matchId, updatedMatch, existing.tournamentId);
+    this.liveScoreGateway.broadcastMatchStatus(
+      matchId,
+      updatedMatch,
+      existing.tournamentId,
+    );
+    this.liveScoreGateway.broadcastScoreUpdate(
+      matchId,
+      updatedMatch,
+      existing.tournamentId,
+    );
 
     try {
       const participantIds: string[] = [];
@@ -145,7 +198,10 @@ export class MatchesService {
       if (existing.participant2Id) participantIds.push(existing.participant2Id);
 
       if (participantIds.length > 0) {
-        const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+        const rosters =
+          await this.matchesRepository.getRostersForParticipants(
+            participantIds,
+          );
         for (const roster of rosters) {
           await this.notificationsService.sendNotification(
             buildMatchCompletedNotification({
@@ -167,7 +223,9 @@ export class MatchesService {
     // Gửi thông báo cho người theo dõi giải đấu
     if (existing.tournamentId) {
       try {
-        const followers = await this.matchesRepository.getFollowerUserIds(existing.tournamentId);
+        const followers = await this.matchesRepository.getFollowerUserIds(
+          existing.tournamentId,
+        );
         for (const fid of followers) {
           await this.notificationsService.sendNotification({
             receiverId: fid,
@@ -187,49 +245,122 @@ export class MatchesService {
     return updatedMatch;
   }
 
-  private resolveMatchConfig(match: Awaited<ReturnType<MatchesRepository['findById']>>) {
+  private resolveMatchConfig(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+  ) {
     if (!match) {
       throw new NotFoundException('Match not found');
     }
 
     return resolveEffectiveSportRules({
-      tournamentSportRules: match.tournament?.sportRules as Record<string, unknown> | null | undefined,
-      categoryConfig: match.tournament?.categoryConfig as Record<string, unknown> | null | undefined,
+      tournamentSportRules: match.tournament?.sportRules as
+        | Record<string, unknown>
+        | null
+        | undefined,
+      categoryConfig: match.tournament?.categoryConfig as
+        | Record<string, unknown>
+        | null
+        | undefined,
       categoryName: match.tournament?.categoryName,
       categorySlug: match.tournament?.categorySlug,
-      stageRoundConfig: match.stage?.roundConfig as Record<string, unknown> | null | undefined,
-      groupConfig: match.group?.roundConfig as Record<string, unknown> | null | undefined,
+      stageRoundConfig: match.stage?.roundConfig as
+        | Record<string, unknown>
+        | null
+        | undefined,
+      groupConfig: match.group?.roundConfig as
+        | Record<string, unknown>
+        | null
+        | undefined,
       roundNumber: match.roundNumber,
-      matchConfig: match.matchConfig as Record<string, unknown> | null | undefined,
+      matchConfig: match.matchConfig as
+        | Record<string, unknown>
+        | null
+        | undefined,
     });
+  }
+
+  private resolveFootballForfeitGoals(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+  ): number {
+    const rules = match?.tournament?.sportRules;
+    const source =
+      rules && typeof rules === 'object' && !Array.isArray(rules)
+        ? (rules as Record<string, unknown>)
+        : {};
+    const scoring =
+      source.scoring &&
+      typeof source.scoring === 'object' &&
+      !Array.isArray(source.scoring)
+        ? (source.scoring as Record<string, unknown>)
+        : source;
+    const configured = scoring.forfeitGoals;
+    return typeof configured === 'number' &&
+      Number.isInteger(configured) &&
+      configured > 0 &&
+      configured <= 99
+      ? configured
+      : 3;
   }
 
   private validateFootballShootout(
     match: Awaited<ReturnType<MatchesRepository['findById']>>,
     scoreDetails: Record<string, unknown> | null | undefined,
+    options?: { aggregateTie?: boolean },
   ): string {
     if (!match || !scoreDetails) {
-      throw new BadRequestException('Trận bóng đá loại trực tiếp hòa cần tỷ số luân lưu hợp lệ.');
+      throw new BadRequestException(
+        'Trận bóng đá loại trực tiếp hòa cần tỷ số luân lưu hợp lệ.',
+      );
     }
     const config = this.resolveMatchConfig(match);
-    const tournamentConfig = match.tournament?.tournamentConfig as Record<string, unknown> | undefined;
-    if (config.kind !== 'FOOTBALL' || tournamentConfig?.penaltyShootout !== true || match.stage?.type === 'ROUND_ROBIN') {
-      throw new BadRequestException('Luân lưu chỉ được dùng cho trận bóng đá loại trực tiếp khi giải đã bật luân lưu.');
+    const tournamentConfig = match.tournament?.tournamentConfig as
+      | Record<string, unknown>
+      | undefined;
+    if (
+      config.kind !== 'FOOTBALL' ||
+      tournamentConfig?.penaltyShootout !== true ||
+      match.stage?.type === 'ROUND_ROBIN'
+    ) {
+      throw new BadRequestException(
+        'Luân lưu chỉ được dùng cho trận bóng đá loại trực tiếp khi giải đã bật luân lưu.',
+      );
     }
-    const football = scoreDetails.football as Record<string, unknown> | undefined;
+    const football = scoreDetails.football as
+      | Record<string, unknown>
+      | undefined;
     const regulation1 = football?.team1Goals;
     const regulation2 = football?.team2Goals;
-    const shootout = (scoreDetails.shootout ?? football?.shootout) as Record<string, unknown> | undefined;
+    const shootout = (scoreDetails.shootout ?? football?.shootout) as
+      | Record<string, unknown>
+      | undefined;
     const team1Goals = shootout?.team1Goals;
     const team2Goals = shootout?.team2Goals;
-    if (!football || !Number.isInteger(regulation1) || !Number.isInteger(regulation2) || regulation1 !== regulation2 ||
-      !shootout || !Number.isInteger(team1Goals) || !Number.isInteger(team2Goals) ||
-      (team1Goals as number) < 0 || (team2Goals as number) < 0 || team1Goals === team2Goals) {
-      throw new BadRequestException('Luân lưu chỉ hợp lệ khi tỷ số chính hòa và có hai số nguyên khác nhau.');
+    if (
+      !football ||
+      !Number.isInteger(regulation1) ||
+      !Number.isInteger(regulation2) ||
+      (regulation1 as number) < 0 ||
+      (regulation2 as number) < 0 ||
+      (!options?.aggregateTie && regulation1 !== regulation2) ||
+      !shootout ||
+      !Number.isInteger(team1Goals) ||
+      !Number.isInteger(team2Goals) ||
+      (team1Goals as number) < 0 ||
+      (team2Goals as number) < 0 ||
+      team1Goals === team2Goals
+    ) {
+      throw new BadRequestException(
+        'Luân lưu chỉ hợp lệ khi tỷ số chính hòa và có hai số nguyên khác nhau.',
+      );
     }
-    const winnerId = (team1Goals as number) > (team2Goals as number) ? match.participant1Id : match.participant2Id;
+    const winnerId =
+      (team1Goals as number) > (team2Goals as number)
+        ? match.participant1Id
+        : match.participant2Id;
     if (!winnerId || shootout.winnerId !== winnerId) {
-      throw new BadRequestException('WinnerId phải khớp với đội thắng luân lưu.');
+      throw new BadRequestException(
+        'WinnerId phải khớp với đội thắng luân lưu.',
+      );
     }
     return winnerId;
   }
@@ -241,35 +372,63 @@ export class MatchesService {
   ) {
     const config = this.resolveMatchConfig(match);
     if (config.kind !== 'FOOTBALL') return;
-    const previous = previousScoreDetails && typeof previousScoreDetails === 'object'
-      ? (previousScoreDetails as Record<string, unknown>).football
-      : undefined;
+    const previous =
+      previousScoreDetails && typeof previousScoreDetails === 'object'
+        ? (previousScoreDetails as Record<string, unknown>).football
+        : undefined;
     const next = nextScoreDetails.football;
-    if (!previous || typeof previous !== 'object' || !next || typeof next !== 'object' || Array.isArray(next)) return;
+    if (
+      !previous ||
+      typeof previous !== 'object' ||
+      !next ||
+      typeof next !== 'object' ||
+      Array.isArray(next)
+    )
+      return;
 
     const previousPhase = (previous as Record<string, unknown>).phase;
     const nextPhase = (next as Record<string, unknown>).phase;
-    if (typeof previousPhase !== 'string' || typeof nextPhase !== 'string' || previousPhase === nextPhase) return;
+    if (
+      typeof previousPhase !== 'string' ||
+      typeof nextPhase !== 'string' ||
+      previousPhase === nextPhase
+    )
+      return;
     const phases = [
-      'FIRST_HALF', 'HALFTIME', 'SECOND_HALF', 'STOPPAGE_TIME', 'FULL_TIME',
-      'EXTRA_TIME_FIRST_HALF', 'EXTRA_TIME_BREAK', 'EXTRA_TIME_SECOND_HALF',
-      'PENALTY_SHOOTOUT', 'COMPLETED',
+      'FIRST_HALF',
+      'HALFTIME',
+      'SECOND_HALF',
+      'STOPPAGE_TIME',
+      'FULL_TIME',
+      'EXTRA_TIME_FIRST_HALF',
+      'EXTRA_TIME_BREAK',
+      'EXTRA_TIME_SECOND_HALF',
+      'PENALTY_SHOOTOUT',
+      'COMPLETED',
     ];
     const previousIndex = phases.indexOf(previousPhase);
     const nextIndex = phases.indexOf(nextPhase);
     if (previousIndex < 0 || nextIndex < 0 || nextIndex < previousIndex) {
-      throw new BadRequestException(`football.phase không thể chuyển từ ${previousPhase} sang ${nextPhase}.`);
+      throw new BadRequestException(
+        `football.phase không thể chuyển từ ${previousPhase} sang ${nextPhase}.`,
+      );
     }
   }
 
-  private validateBasicOverrideScoreDetails(scoreDetails: Record<string, unknown>) {
+  private validateBasicOverrideScoreDetails(
+    scoreDetails: Record<string, unknown>,
+  ) {
     const rawSets = scoreDetails.sets;
     if (!Array.isArray(rawSets)) {
-      throw new BadRequestException('Override score yêu cầu scoreDetails.sets là một mảng hợp lệ.');
+      throw new BadRequestException(
+        'Override score yêu cầu scoreDetails.sets là một mảng hợp lệ.',
+      );
     }
     // Lite is free-form, but keep a bounded payload and sane integer scores.
     if (rawSets.length === 0 || rawSets.length > 99) {
-      throw new BadRequestException('Số set của giải Lite phải nằm trong khoảng từ 1 đến 99.');
+      throw new BadRequestException(
+        'Số set của giải Lite phải nằm trong khoảng từ 1 đến 99.',
+      );
     }
 
     let p1SetsWon = 0;
@@ -277,7 +436,11 @@ export class MatchesService {
     const lastSetIndex = rawSets.length - 1;
 
     rawSets.forEach((setValue, index) => {
-      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) {
+      if (
+        !setValue ||
+        typeof setValue !== 'object' ||
+        Array.isArray(setValue)
+      ) {
         throw new BadRequestException(`set ${index + 1} không hợp lệ.`);
       }
 
@@ -293,12 +456,16 @@ export class MatchesService {
         team1Score < 0 ||
         team2Score < 0
       ) {
-        throw new BadRequestException(`set ${index + 1} có điểm số không hợp lệ.`);
+        throw new BadRequestException(
+          `set ${index + 1} có điểm số không hợp lệ.`,
+        );
       }
 
       const isFinished = setRecord.isFinished !== false;
       if (!isFinished && index !== lastSetIndex) {
-        throw new BadRequestException(`set ${index + 1} đang diễn ra nhưng không phải set cuối cùng.`);
+        throw new BadRequestException(
+          `set ${index + 1} đang diễn ra nhưng không phải set cuối cùng.`,
+        );
       }
 
       if (!isFinished) {
@@ -306,7 +473,9 @@ export class MatchesService {
       }
 
       if (team1Score === team2Score) {
-        throw new BadRequestException(`set ${index + 1} không được phép hòa khi chốt ngoại lệ.`);
+        throw new BadRequestException(
+          `set ${index + 1} không được phép hòa khi chốt ngoại lệ.`,
+        );
       }
 
       if (team1Score > team2Score) {
@@ -333,57 +502,84 @@ export class MatchesService {
     }
 
     const existingDetails =
-      existingScoreDetails && typeof existingScoreDetails === 'object' && !Array.isArray(existingScoreDetails)
+      existingScoreDetails &&
+      typeof existingScoreDetails === 'object' &&
+      !Array.isArray(existingScoreDetails)
         ? (existingScoreDetails as Record<string, unknown>)
         : {};
-    const existingSets = Array.isArray(existingDetails.sets) ? existingDetails.sets : [];
+    const existingSets = Array.isArray(existingDetails.sets)
+      ? existingDetails.sets
+      : [];
     let overrideTargetIndex = -1;
 
     if (overrideReason) {
       scoreDetails.sets.forEach((setValue, index) => {
-        if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return;
+        if (
+          !setValue ||
+          typeof setValue !== 'object' ||
+          Array.isArray(setValue)
+        )
+          return;
 
         const existingSet = existingSets[index];
         const wasFinished =
-          existingSet && typeof existingSet === 'object' && !Array.isArray(existingSet)
+          existingSet &&
+          typeof existingSet === 'object' &&
+          !Array.isArray(existingSet)
             ? (existingSet as Record<string, unknown>).isFinished === true
             : false;
-        if ((setValue as Record<string, unknown>).isFinished === true && !wasFinished) {
+        if (
+          (setValue as Record<string, unknown>).isFinished === true &&
+          !wasFinished
+        ) {
           overrideTargetIndex = index;
         }
       });
-
     }
 
     const hasPerSetOverride = existingSets.some((setValue) => {
-      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return false;
+      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue))
+        return false;
       const setOverride = (setValue as Record<string, unknown>).scoreOverride;
-      return !!setOverride && typeof setOverride === 'object' && !Array.isArray(setOverride);
+      return (
+        !!setOverride &&
+        typeof setOverride === 'object' &&
+        !Array.isArray(setOverride)
+      );
     });
     const legacyOverride =
       !hasPerSetOverride &&
       existingDetails.scoreOverride &&
       typeof existingDetails.scoreOverride === 'object' &&
       !Array.isArray(existingDetails.scoreOverride) &&
-      typeof (existingDetails.scoreOverride as Record<string, unknown>).reason === 'string'
+      typeof (existingDetails.scoreOverride as Record<string, unknown>)
+        .reason === 'string'
         ? existingDetails.scoreOverride
         : undefined;
     const legacyOverrideTargetIndex = legacyOverride
       ? existingSets.findLastIndex((setValue) => {
-          if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return false;
+          if (
+            !setValue ||
+            typeof setValue !== 'object' ||
+            Array.isArray(setValue)
+          )
+            return false;
           const setRecord = setValue as Record<string, unknown>;
           return setRecord.isFinished === true && !setRecord.scoreOverride;
         })
       : -1;
 
     const sets = scoreDetails.sets.map((setValue, index) => {
-      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue)) return setValue;
+      if (!setValue || typeof setValue !== 'object' || Array.isArray(setValue))
+        return setValue;
 
       const safeSet = { ...(setValue as Record<string, unknown>) };
       delete safeSet.scoreOverride;
       const existingSet = existingSets[index];
       const existingOverride =
-        existingSet && typeof existingSet === 'object' && !Array.isArray(existingSet)
+        existingSet &&
+        typeof existingSet === 'object' &&
+        !Array.isArray(existingSet)
           ? (existingSet as Record<string, unknown>).scoreOverride
           : undefined;
 
@@ -439,9 +635,14 @@ export class MatchesService {
     if (
       t &&
       (t.visibility !== 'PUBLIC' ||
-        ['DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete'].includes(
-          t.status,
-        ))
+        [
+          'DRAFT',
+          'PENDING_APPROVAL',
+          'SUSPENDED',
+          'CANCELLED',
+          'PENDING_DELETE',
+          'pending_delete',
+        ].includes(t.status))
     ) {
       throw new NotFoundException('Match not found');
     }
@@ -449,9 +650,12 @@ export class MatchesService {
       try {
         const live = await this.redisService.hgetall(`match:live:${id}`);
         if (live && Object.keys(live).length > 0) {
-          if (live.p1SetsWon !== undefined) match.p1SetsWon = Number(live.p1SetsWon);
-          if (live.p2SetsWon !== undefined) match.p2SetsWon = Number(live.p2SetsWon);
-          if (live.scoreDetails) match.scoreDetails = JSON.parse(live.scoreDetails);
+          if (live.p1SetsWon !== undefined)
+            match.p1SetsWon = Number(live.p1SetsWon);
+          if (live.p2SetsWon !== undefined)
+            match.p2SetsWon = Number(live.p2SetsWon);
+          if (live.scoreDetails)
+            match.scoreDetails = JSON.parse(live.scoreDetails);
           if (live.winnerId) match.winnerId = live.winnerId;
         }
       } catch (err) {
@@ -469,21 +673,29 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
     if (existing.status === 'COMPLETED') {
-      throw new BadRequestException('Trận đấu đã kết thúc, không thể nhập điểm nữa.');
+      throw new BadRequestException(
+        'Trận đấu đã kết thúc, không thể nhập điểm nữa.',
+      );
     }
 
     if (existing.status !== 'ONGOING') {
-      throw new BadRequestException('Chỉ có thể nhập điểm khi trận đấu đang diễn ra. Hãy bắt đầu trận trước.');
+      throw new BadRequestException(
+        'Chỉ có thể nhập điểm khi trận đấu đang diễn ra. Hãy bắt đầu trận trước.',
+      );
     }
 
     const isReferee = existing.refereeId === user.sub;
-    const isAdmin = this.isAdmin(user);
-    if (!isAdmin && !isReferee) {
-      throw new ForbiddenException('Bạn không có quyền nhập điểm cho trận đấu này');
+    const isTournamentManager = await this.isTournamentManager(existing, user);
+    if (!isTournamentManager && !isReferee) {
+      throw new ForbiddenException(
+        'Bạn không có quyền nhập điểm cho trận đấu này',
+      );
     }
 
     if (!existing.participant1Id || !existing.participant2Id) {
-      throw new BadRequestException('Trận đấu chưa xác định đủ đối thủ, không thể nhập điểm.');
+      throw new BadRequestException(
+        'Trận đấu chưa xác định đủ đối thủ, không thể nhập điểm.',
+      );
     }
 
     let p1SetsWon = updateMatchScoreDto.p1SetsWon;
@@ -491,6 +703,27 @@ export class MatchesService {
     let scoreDetails = updateMatchScoreDto.scoreDetails;
     let winnerId = updateMatchScoreDto.winnerId;
     const overrideReason = updateMatchScoreDto.overrideReason?.trim();
+    const resolvedMatchConfig = this.resolveMatchConfig(existing);
+    const isFootballMatch = resolvedMatchConfig.kind === 'FOOTBALL';
+    let twoLegAggregate: ReturnType<typeof aggregateFootballTwoLegs> | null =
+      null;
+
+    // Football's p1/p2 fields are a derived 1-0/0-1 summary, not the goal
+    // score. Requiring the typed football payload here prevents a caller from
+    // finalizing a fixture with arbitrary set counters and losing the goals,
+    // phase, events or shootout decision that drive standings/brackets.
+    if (isFootballMatch) {
+      const football = scoreDetails?.football;
+      if (
+        !football ||
+        typeof football !== 'object' ||
+        Array.isArray(football)
+      ) {
+        throw new BadRequestException(
+          'Trận bóng đá bắt buộc phải gửi scoreDetails.football.',
+        );
+      }
+    }
 
     if (scoreDetails) {
       scoreDetails = this.mergeTrustedSetOverrides(
@@ -499,7 +732,11 @@ export class MatchesService {
         overrideReason,
         user.sub,
       );
-      this.validateFootballPhaseTransition(existing, existing.scoreDetails, scoreDetails);
+      this.validateFootballPhaseTransition(
+        existing,
+        existing.scoreDetails,
+        scoreDetails,
+      );
     }
 
     // 1. Validate score details if provided
@@ -508,37 +745,58 @@ export class MatchesService {
         // An override records an exceptional rule decision; it must never
         // bypass the sport validator. Football draws and shootouts are valid
         // domain outcomes and are therefore validated with football rules.
-        const resolvedConfig = this.resolveMatchConfig(existing);
-        const tournamentConfig = existing.tournament?.tournamentConfig as Record<string, unknown> | undefined;
-        const sportRules = existing.tournament?.sportRules as Record<string, unknown> | undefined;
-        const matchConfig = existing.matchConfig as Record<string, unknown> | undefined;
-        resolvedConfig.mode = (tournamentConfig?.mode as string | undefined)
-          || (sportRules?.mode as string | undefined)
-          || (matchConfig?.mode as string | undefined);
-        const validation = resolvedConfig.kind === 'FOOTBALL'
-          ? validateScoreDetails(scoreDetails, resolvedConfig)
-          : this.validateBasicOverrideScoreDetails(scoreDetails);
+        const resolvedConfig = resolvedMatchConfig;
+        const tournamentConfig = existing.tournament?.tournamentConfig as
+          | Record<string, unknown>
+          | undefined;
+        const sportRules = existing.tournament?.sportRules as
+          | Record<string, unknown>
+          | undefined;
+        const matchConfig = existing.matchConfig as
+          | Record<string, unknown>
+          | undefined;
+        resolvedConfig.mode =
+          (tournamentConfig?.mode as string | undefined) ||
+          (sportRules?.mode as string | undefined) ||
+          (matchConfig?.mode as string | undefined);
+        const validation =
+          resolvedConfig.kind === 'FOOTBALL'
+            ? validateScoreDetails(scoreDetails, resolvedConfig)
+            : this.validateBasicOverrideScoreDetails(scoreDetails);
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
         if (resolvedConfig.kind === 'FOOTBALL' && !winnerId) {
           const football = scoreDetails.football;
-          if (football && typeof football === 'object' && !Array.isArray(football)) {
+          if (
+            football &&
+            typeof football === 'object' &&
+            !Array.isArray(football)
+          ) {
             const goals1 = Number(football.team1Goals);
             const goals2 = Number(football.team2Goals);
-            if (goals1 > goals2) winnerId = existing.participant1Id || undefined;
-            if (goals2 > goals1) winnerId = existing.participant2Id || undefined;
+            if (goals1 > goals2)
+              winnerId = existing.participant1Id || undefined;
+            if (goals2 > goals1)
+              winnerId = existing.participant2Id || undefined;
           }
         }
       } else {
         // Resolve config hierarchy (Stage -> Round -> Match)
-        const resolvedConfig = this.resolveMatchConfig(existing);
-        const tournamentConfig = existing.tournament?.tournamentConfig as Record<string, unknown> | undefined;
-        const sportRules = existing.tournament?.sportRules as Record<string, unknown> | undefined;
-        const matchConfig = existing.matchConfig as Record<string, unknown> | undefined;
+        const resolvedConfig = resolvedMatchConfig;
+        const tournamentConfig = existing.tournament?.tournamentConfig as
+          | Record<string, unknown>
+          | undefined;
+        const sportRules = existing.tournament?.sportRules as
+          | Record<string, unknown>
+          | undefined;
+        const matchConfig = existing.matchConfig as
+          | Record<string, unknown>
+          | undefined;
 
-        resolvedConfig.mode = (tournamentConfig?.mode as string | undefined)
-          || (sportRules?.mode as string | undefined)
-          || (matchConfig?.mode as string | undefined);
+        resolvedConfig.mode =
+          (tournamentConfig?.mode as string | undefined) ||
+          (sportRules?.mode as string | undefined) ||
+          (matchConfig?.mode as string | undefined);
         const validation = validateScoreDetails(scoreDetails, resolvedConfig);
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
@@ -546,45 +804,108 @@ export class MatchesService {
         // Suggest winner automatically
         if (p1SetsWon >= validation.setsToWin) {
           if (winnerId && winnerId !== existing.participant1Id) {
-            throw new BadRequestException('WinnerId không khớp với kết quả set thắng.');
+            throw new BadRequestException(
+              'WinnerId không khớp với kết quả set thắng.',
+            );
           }
           winnerId = existing.participant1Id || undefined;
         } else if (p2SetsWon >= validation.setsToWin) {
           if (winnerId && winnerId !== existing.participant2Id) {
-            throw new BadRequestException('WinnerId không khớp với kết quả set thắng.');
+            throw new BadRequestException(
+              'WinnerId không khớp với kết quả set thắng.',
+            );
           }
           winnerId = existing.participant2Id || undefined;
         }
       }
     }
 
+    // Do not finalize a two-legged tie from the current-leg winner alone. If
+    // the aggregate is level, keep the match editable until a valid shootout
+    // is submitted; otherwise the repository would mark the leg complete but
+    // leave the tie without an advancing participant.
+    if (isFootballMatch && existing.tieId && existing.leg && scoreDetails) {
+      const otherLeg = await this.matchesRepository.findCompletedTieLeg(
+        existing.tieId,
+        existing.id,
+      );
+      if (otherLeg) {
+        const currentLeg = { ...existing, scoreDetails, status: 'COMPLETED' };
+        const leg1 = existing.leg === 1 ? currentLeg : otherLeg;
+        const leg2 = existing.leg === 2 ? currentLeg : otherLeg;
+        twoLegAggregate = aggregateFootballTwoLegs(leg1, leg2);
+        if (!twoLegAggregate.winnerId && winnerId) {
+          const scorePayload = scoreDetails as Record<string, unknown>;
+          const footballPayload = scorePayload.football as
+            | Record<string, unknown>
+            | undefined;
+          const shootout = (scorePayload.shootout ??
+            footballPayload?.shootout) as Record<string, unknown> | undefined;
+          if (shootout?.winnerId) {
+            winnerId = this.validateFootballShootout(existing, scoreDetails, {
+              aggregateTie: true,
+            });
+          } else {
+            winnerId = undefined;
+          }
+        }
+      }
+    }
+
     if (winnerId) {
-      if (winnerId !== existing.participant1Id && winnerId !== existing.participant2Id) {
-        throw new BadRequestException('WinnerId không thuộc một trong hai participant của trận.');
+      if (
+        winnerId !== existing.participant1Id &&
+        winnerId !== existing.participant2Id
+      ) {
+        throw new BadRequestException(
+          'WinnerId không thuộc một trong hai participant của trận.',
+        );
       }
 
       // Bóng đá knockout hòa → phân định bằng luân lưu: winner từ scoreDetails.shootout,
       // tỷ số chính vẫn hòa (2-2) nên bỏ qua check "winner phải có set cao hơn".
       const scorePayload = scoreDetails as Record<string, unknown> | null;
-      const footballPayload = scorePayload?.football as Record<string, unknown> | undefined;
+      const footballPayload = scorePayload?.football as
+        | Record<string, unknown>
+        | undefined;
       const shootout = (scorePayload?.shootout ?? footballPayload?.shootout) as
         | Record<string, unknown>
         | undefined;
       const isShootoutDecided = shootout?.winnerId === winnerId;
 
       if (shootout) {
-        const shootoutWinner = this.validateFootballShootout(existing, scoreDetails);
+        const shootoutWinner = this.validateFootballShootout(
+          existing,
+          scoreDetails,
+          {
+            aggregateTie: Boolean(twoLegAggregate && !twoLegAggregate.winnerId),
+          },
+        );
         if (shootout.winnerId !== shootoutWinner) {
-          throw new BadRequestException('WinnerId phải khớp với tỷ số luân lưu cao hơn.');
+          throw new BadRequestException(
+            'WinnerId phải khớp với tỷ số luân lưu cao hơn.',
+          );
         }
       }
 
-      if (!isShootoutDecided && winnerId === existing.participant1Id && p1SetsWon <= p2SetsWon) {
-        throw new BadRequestException('Đội 1 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.');
+      if (
+        !isShootoutDecided &&
+        winnerId === existing.participant1Id &&
+        p1SetsWon <= p2SetsWon
+      ) {
+        throw new BadRequestException(
+          'Đội 1 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.',
+        );
       }
 
-      if (!isShootoutDecided && winnerId === existing.participant2Id && p2SetsWon <= p1SetsWon) {
-        throw new BadRequestException('Đội 2 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.');
+      if (
+        !isShootoutDecided &&
+        winnerId === existing.participant2Id &&
+        p2SetsWon <= p1SetsWon
+      ) {
+        throw new BadRequestException(
+          'Đội 2 chỉ có thể được chốt thắng khi số set/game thắng cao hơn.',
+        );
       }
     }
 
@@ -607,29 +928,44 @@ export class MatchesService {
     // Nếu trận đấu đã xác định được đội thắng, tiến hành chốt kết quả và tự động đi tiếp (advancement logic)
     */
     if (winnerId) {
-      return await this.finalizeCompletedMatch(existing, id, winnerId, user.sub, {
+      return await this.finalizeCompletedMatch(
+        existing,
+        id,
+        winnerId,
+        user.sub,
+        {
+          p1SetsWon,
+          p2SetsWon,
+          scoreDetails: nextScoreDetails,
+          expectedRevision: updateMatchScoreDto.expectedRevision,
+        },
+      );
+    }
+
+    const updatedMatch = await this.matchesRepository.updateScore(
+      id,
+      user.sub,
+      {
         p1SetsWon,
         p2SetsWon,
         scoreDetails: nextScoreDetails,
         expectedRevision: updateMatchScoreDto.expectedRevision,
-      });
-    }
-
-    const updatedMatch = await this.matchesRepository.updateScore(id, user.sub, {
-      p1SetsWon,
-      p2SetsWon,
-      scoreDetails: nextScoreDetails,
-      expectedRevision: updateMatchScoreDto.expectedRevision,
-    });
+      },
+    );
 
     // Optimistic-lock conflict (D3): another device wrote first → 409 + currentRevision.
-    if (updatedMatch && typeof updatedMatch === 'object' && 'conflict' in updatedMatch) {
+    if (
+      updatedMatch &&
+      typeof updatedMatch === 'object' &&
+      'conflict' in updatedMatch
+    ) {
       const conflict = updatedMatch as unknown as {
         conflict: true;
         currentMatch: { revision: number };
       };
       throw new ConflictException({
-        message: 'Điểm đã thay đổi từ thiết bị khác. Vui lòng làm mới trước khi nhập tiếp.',
+        message:
+          'Điểm đã thay đổi từ thiết bị khác. Vui lòng làm mới trước khi nhập tiếp.',
         currentRevision: conflict.currentMatch.revision,
       });
     }
@@ -642,10 +978,26 @@ export class MatchesService {
     if (existing.status === 'ONGOING' || existing.status === 'SCHEDULED') {
       try {
         const cacheKey = `match:live:${id}`;
-        if (p1SetsWon !== undefined) await this.redisService.hset(cacheKey, 'p1SetsWon', String(p1SetsWon));
-        if (p2SetsWon !== undefined) await this.redisService.hset(cacheKey, 'p2SetsWon', String(p2SetsWon));
-        if (nextScoreDetails) await this.redisService.hset(cacheKey, 'scoreDetails', JSON.stringify(nextScoreDetails));
-        if (winnerId) await this.redisService.hset(cacheKey, 'winnerId', winnerId);
+        if (p1SetsWon !== undefined)
+          await this.redisService.hset(
+            cacheKey,
+            'p1SetsWon',
+            String(p1SetsWon),
+          );
+        if (p2SetsWon !== undefined)
+          await this.redisService.hset(
+            cacheKey,
+            'p2SetsWon',
+            String(p2SetsWon),
+          );
+        if (nextScoreDetails)
+          await this.redisService.hset(
+            cacheKey,
+            'scoreDetails',
+            JSON.stringify(nextScoreDetails),
+          );
+        if (winnerId)
+          await this.redisService.hset(cacheKey, 'winnerId', winnerId);
 
         // TTL 24 hours
         await this.redisService.getClient().expire(cacheKey, 86400);
@@ -655,7 +1007,11 @@ export class MatchesService {
     }
 
     // Broadcast score real-time
-    this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch, existing.tournamentId);
+    this.liveScoreGateway.broadcastScoreUpdate(
+      id,
+      updatedMatch,
+      existing.tournamentId,
+    );
 
     // Invalidate matches list cache
     try {
@@ -675,28 +1031,40 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
     if (existing.status === 'COMPLETED') {
-      throw new BadRequestException('Trận đấu đã kết thúc, không thể đổi trạng thái nữa.');
+      throw new BadRequestException(
+        'Trận đấu đã kết thúc, không thể đổi trạng thái nữa.',
+      );
     }
 
     const nextStatus = updateMatchStatusDto.status;
     if (nextStatus === 'ONGOING' && existing.status !== 'SCHEDULED') {
-      throw new BadRequestException('A match must be scheduled before it can start.');
+      throw new BadRequestException(
+        'A match must be scheduled before it can start.',
+      );
     }
     if (nextStatus === 'COMPLETED' && existing.status !== 'ONGOING') {
-      throw new BadRequestException('A match must be ongoing before it can be completed.');
+      throw new BadRequestException(
+        'A match must be ongoing before it can be completed.',
+      );
     }
     if (nextStatus === 'SCHEDULED' && existing.status !== 'SCHEDULED') {
-      throw new BadRequestException('An ongoing match cannot return to scheduled.');
+      throw new BadRequestException(
+        'An ongoing match cannot return to scheduled.',
+      );
     }
 
     const isReferee = existing.refereeId === user.sub;
-    const isAdmin = this.isAdmin(user);
-
+    const isTournamentManager = await this.isTournamentManager(existing, user);
+    const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
+      existing.tournamentId,
+      user.sub,
+    );
     const canClaimAsReferee =
-      updateMatchStatusDto.status === 'ONGOING' && hasRole(user, UserRole.REFEREE);
-    const isOrganizer = hasRole(user, UserRole.ORGANIZER);
-    if (!isAdmin && !isOrganizer && !isReferee && !canClaimAsReferee) {
-      throw new ForbiddenException('Bạn không có quyền thay đổi trạng thái trận đấu này');
+      updateMatchStatusDto.status === 'ONGOING' && acceptedReferee;
+    if (!isTournamentManager && !isReferee && !canClaimAsReferee) {
+      throw new ForbiddenException(
+        'Bạn không có quyền thay đổi trạng thái trận đấu này',
+      );
     }
 
     if (updateMatchStatusDto.status === 'ONGOING') {
@@ -704,18 +1072,23 @@ export class MatchesService {
         throw new BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
       }
 
-      if (hasRole(user, UserRole.REFEREE) && existing.refereeId && existing.refereeId !== user.sub) {
-        throw new ForbiddenException('This match is assigned to another referee.');
+      if (
+        acceptedReferee &&
+        existing.refereeId &&
+        existing.refereeId !== user.sub
+      ) {
+        throw new ForbiddenException(
+          'This match is assigned to another referee.',
+        );
       }
 
       // A referee may claim an unassigned match only after the tournament accepts them.
-      if (!existing.refereeId && hasRole(user, UserRole.REFEREE)) {
-        const accepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, user.sub);
-        if (!accepted) {
-          throw new ForbiddenException('Only an accepted tournament referee can claim this match.');
-        }
-
-        const updated = await this.matchesRepository.updateRefereeId(id, user.sub, user.sub);
+      if (!existing.refereeId && acceptedReferee) {
+        const updated = await this.matchesRepository.updateRefereeId(
+          id,
+          user.sub,
+          user.sub,
+        );
         if (!updated) {
           throw new ConflictException('Another referee claimed this match.');
         }
@@ -728,11 +1101,144 @@ export class MatchesService {
         return existing;
       }
 
-      // Validate that we have a winner
+      // Football completion must be derived from the canonical goal payload;
+      // never infer a result from the generic p1/p2 set summary.
+      const resolvedConfig = this.resolveMatchConfig(existing);
+      if (resolvedConfig.kind === 'FOOTBALL') {
+        const scoreDetails = existing.scoreDetails as
+          | Record<string, unknown>
+          | null
+          | undefined;
+        const football = scoreDetails?.football as
+          | Record<string, unknown>
+          | undefined;
+        const phase = football?.phase;
+        const team1Goals = football?.team1Goals;
+        const team2Goals = football?.team2Goals;
+        const terminalPhase = [
+          'FULL_TIME',
+          'PENALTY_SHOOTOUT',
+          'COMPLETED',
+        ].includes(String(phase));
+        if (
+          !football ||
+          !terminalPhase ||
+          !Number.isInteger(team1Goals) ||
+          !Number.isInteger(team2Goals) ||
+          (team1Goals as number) < 0 ||
+          (team2Goals as number) < 0
+        ) {
+          throw new BadRequestException(
+            'Chỉ có thể chốt trận bóng đá sau khi có tỷ số hợp lệ ở trạng thái toàn thời gian.',
+          );
+        }
+
+        const isRoundRobin = existing.stage?.type === 'ROUND_ROBIN';
+        const tournamentConfig = existing.tournament?.tournamentConfig as
+          | Record<string, unknown>
+          | undefined;
+        const isDraw = team1Goals === team2Goals;
+
+        // A two-legged football tie is decided only after both legs. A draw
+        // in leg 1 is a valid completed leg (no shootout yet); on leg 2 the
+        // aggregate, not the individual leg score, decides whether a
+        // shootout is required.
+        const isTwoLegTie = Boolean(existing.tieId && existing.leg);
+        if (isTwoLegTie) {
+          const currentLeg = {
+            ...existing,
+            scoreDetails,
+            status: 'COMPLETED',
+          };
+          const otherLeg = await this.matchesRepository.findCompletedTieLeg(
+            existing.tieId!,
+            existing.id,
+          );
+
+          const currentLegWinner = isDraw
+            ? null
+            : (team1Goals as number) > (team2Goals as number)
+              ? existing.participant1Id
+              : existing.participant2Id;
+
+          if (!otherLeg) {
+            return this.finalizeCompletedMatch(
+              existing,
+              id,
+              currentLegWinner,
+              user.sub,
+            );
+          }
+
+          const leg1 = existing.leg === 1 ? currentLeg : otherLeg;
+          const leg2 = existing.leg === 2 ? currentLeg : otherLeg;
+          const aggregate = aggregateFootballTwoLegs(leg1, leg2);
+          if (aggregate.winnerId) {
+            return this.finalizeCompletedMatch(
+              existing,
+              id,
+              currentLegWinner,
+              user.sub,
+            );
+          }
+
+          if (tournamentConfig?.penaltyShootout !== true) {
+            throw new BadRequestException(
+              'Tổng tỷ số hai lượt đang hòa; giải chưa bật luân lưu.',
+            );
+          }
+          const shootoutWinner = this.validateFootballShootout(
+            existing,
+            scoreDetails,
+            {
+              aggregateTie: true,
+            },
+          );
+          return this.finalizeCompletedMatch(
+            existing,
+            id,
+            shootoutWinner,
+            user.sub,
+          );
+        }
+
+        if (isDraw) {
+          if (isRoundRobin) {
+            return this.finalizeCompletedMatch(existing, id, null, user.sub);
+          }
+          if (tournamentConfig?.penaltyShootout !== true) {
+            throw new BadRequestException(
+              'Trận bóng đá loại trực tiếp đang hòa; giải chưa bật luân lưu.',
+            );
+          }
+          const shootoutWinner = this.validateFootballShootout(
+            existing,
+            scoreDetails,
+          );
+          return this.finalizeCompletedMatch(
+            existing,
+            id,
+            shootoutWinner,
+            user.sub,
+          );
+        }
+
+        const winnerId =
+          (team1Goals as number) > (team2Goals as number)
+            ? existing.participant1Id
+            : existing.participant2Id;
+        if (!winnerId) {
+          throw new BadRequestException(
+            'Trận bóng đá chưa xác định đủ đội thắng.',
+          );
+        }
+        return this.finalizeCompletedMatch(existing, id, winnerId, user.sub);
+      }
+
+      // Validate that we have a winner for non-football formats.
       let winnerId = existing.winnerId;
       if (!winnerId) {
         // Try to determine winner based on sets won
-        const resolvedConfig = this.resolveMatchConfig(existing);
         const setsToWin = resolvedConfig.setsToWin;
 
         if (existing.p1SetsWon >= setsToWin) {
@@ -740,27 +1246,12 @@ export class MatchesService {
         } else if (existing.p2SetsWon >= setsToWin) {
           winnerId = existing.participant2Id;
         }
-
-        // Bóng đá: cho phép TRẬN HÒA ở vòng bảng (winnerId null) — standings ghi draws.
-        const isFootball = resolvedConfig.kind === 'FOOTBALL';
-        const isDraw = existing.p1SetsWon === existing.p2SetsWon;
-        if (isFootball && isDraw) {
-          const isRoundRobin = existing.stage?.type === 'ROUND_ROBIN';
-          const tournamentConfig = existing.tournament?.tournamentConfig as Record<string, unknown> | undefined;
-          const shootoutEnabled = tournamentConfig?.penaltyShootout === true;
-          if (!isRoundRobin) {
-            if (!shootoutEnabled) {
-              throw new BadRequestException('Trận bóng đá loại trực tiếp đang hòa; giải chưa bật luân lưu.');
-            }
-            const shootoutWinner = this.validateFootballShootout(existing, existing.scoreDetails as Record<string, unknown> | null | undefined);
-            return this.finalizeCompletedMatch(existing, id, shootoutWinner, user.sub);
-          }
-          return this.finalizeCompletedMatch(existing, id, null, user.sub);
-        }
       }
 
       if (!winnerId) {
-        throw new BadRequestException('Chưa xác định được người chiến thắng. Vui lòng cập nhật tỉ số trước.');
+        throw new BadRequestException(
+          'Chưa xác định được người chiến thắng. Vui lòng cập nhật tỉ số trước.',
+        );
       }
 
       return this.finalizeCompletedMatch(existing, id, winnerId, user.sub);
@@ -775,7 +1266,11 @@ export class MatchesService {
       }
 
       // Broadcast status real-time
-      this.liveScoreGateway.broadcastMatchStatus(id, updatedMatch, existing.tournamentId);
+      this.liveScoreGateway.broadcastMatchStatus(
+        id,
+        updatedMatch,
+        existing.tournamentId,
+      );
 
       // Invalidate matches list cache
       try {
@@ -788,22 +1283,143 @@ export class MatchesService {
     }
   }
 
-  async operateMatch(
-    id: string,
-    user: JwtPayload,
-    data: OperateMatchDto,
-  ) {
+  async operateMatch(id: string, user: JwtPayload, data: OperateMatchDto) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
     if (existing.status === 'COMPLETED') {
-      throw new BadRequestException('Trận đấu đã kết thúc, không thể áp dụng quyết định lần nữa.');
+      throw new BadRequestException(
+        'Trận đấu đã kết thúc, không thể áp dụng quyết định lần nữa.',
+      );
     }
 
-    const isCreator = existing.tournament?.createdBy === user.sub;
-    const isAdmin = this.isAdmin(user);
-    if (!isAdmin && !isCreator) {
-      throw new ForbiddenException('Bạn không có quyền áp dụng quyết định nghiệp vụ cho trận này');
+    if (!(await this.isTournamentManager(existing, user))) {
+      throw new ForbiddenException(
+        'Bạn không có quyền áp dụng quyết định nghiệp vụ cho trận này',
+      );
     }
+
+    if (
+      !MATCH_OPERATION_ACTIONS.includes(data.action as MatchOperationAction)
+    ) {
+      throw new BadRequestException('Hành động nghiệp vụ không hợp lệ.');
+    }
+
+    // A postponed fixture is returned to the scheduling queue. It must not
+    // enter completion, standings, bracket advancement, or ELO processing.
+    // An abandoned fixture is marked DISPUTED so a manager/admin must resolve
+    // it before the tournament can advance; it likewise never creates a rank
+    // result by itself.
+    if (data.action === 'POSTPONE' || data.action === 'ABANDON') {
+      if (
+        data.action === 'POSTPONE' &&
+        existing.status !== 'SCHEDULED'
+      ) {
+        throw new BadRequestException(
+          'Chỉ có thể hoãn trận chưa bắt đầu. Trận đang diễn ra cần xử lý bỏ trận hoặc chốt kết quả.',
+        );
+      }
+      if (
+        data.action === 'ABANDON' &&
+        existing.status !== 'SCHEDULED' &&
+        existing.status !== 'ONGOING'
+      ) {
+        throw new BadRequestException(
+          'Chỉ có thể bỏ trận khi trận đang chờ hoặc đang diễn ra.',
+        );
+      }
+
+      const currentScoreDetails =
+        existing.scoreDetails && typeof existing.scoreDetails === 'object'
+          ? (existing.scoreDetails as Record<string, unknown>)
+          : {};
+      const specialResult = {
+        action: data.action,
+        reason: data.reason.trim(),
+        decidedAt: new Date().toISOString(),
+        decidedBy: user.sub,
+        ...(data.action === 'POSTPONE'
+          ? { requiresReschedule: true }
+          : { requiresResolution: true }),
+      };
+      const updated = await this.matchesRepository.recordNonFinalOperation(
+        id,
+        user.sub,
+        {
+          status: data.action === 'POSTPONE' ? 'SCHEDULED' : 'DISPUTED',
+          scoreDetails:
+            data.action === 'POSTPONE'
+              ? { specialResult }
+              : { ...currentScoreDetails, specialResult },
+          ...(data.action === 'POSTPONE'
+            ? { p1SetsWon: 0, p2SetsWon: 0 }
+            : {}),
+          scheduledAt: null,
+          startedAt: null,
+          winnerId: null,
+        },
+      );
+      if (!updated) {
+        throw new NotFoundException('Không tìm thấy trận sau khi ghi quyết định.');
+      }
+
+      this.liveScoreGateway.broadcastMatchStatus(
+        id,
+        updated,
+        existing.tournamentId,
+      );
+      this.liveScoreGateway.broadcastScoreUpdate(
+        id,
+        updated,
+        existing.tournamentId,
+      );
+      try {
+        const participantIds = [
+          existing.participant1Id,
+          existing.participant2Id,
+        ].filter((participantId): participantId is string => Boolean(participantId));
+        if (participantIds.length > 0) {
+          const rosters =
+            await this.matchesRepository.getRostersForParticipants(participantIds);
+          for (const roster of rosters) {
+            await this.notificationsService.sendNotification(
+              data.action === 'POSTPONE'
+                ? buildMatchScheduledNotification({
+                    receiverId: roster.userId,
+                    tournamentId: existing.tournamentId,
+                    tournamentName: existing.tournament?.name || 'giải đấu',
+                    scheduledTime: 'chưa xác định',
+                    court: 'Chưa xếp sân',
+                    divisionId:
+                      existing.participant1?.tournamentDivisionId ||
+                      existing.participant2?.tournamentDivisionId ||
+                      undefined,
+                  })
+                : {
+                    receiverId: roster.userId,
+                    type: 'MATCH_DISPUTED',
+                    title: 'Trận đấu cần được xử lý',
+                    content: `Trận đấu trong giải ${existing.tournament?.name || 'giải đấu'} đã bị bỏ và đang chờ BTC phân xử.`,
+                    redirectUrl: `/tournaments/${existing.tournamentId}`,
+                  },
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Failed to send match operation notifications:', err);
+      }
+      try {
+        await this.redisService.del(`match:live:${id}`);
+        await this.redisService.delByPattern('matches:list:*');
+      } catch (err) {
+        console.error('Failed to invalidate match operation cache:', err);
+      }
+
+      return updated;
+    }
+
+    const winnerId = this.resolveOperationalWinner(existing, data.winnerId);
+    const isParticipant1Winner = winnerId === existing.participant1Id;
+    const resolvedConfig = this.resolveMatchConfig(existing);
 
     const reason = data.reason.trim();
     const specialResult = {
@@ -818,24 +1434,69 @@ export class MatchesService {
         ? (existing.scoreDetails as Record<string, unknown>)
         : {};
 
-    const scoreDetails = {
+    const isFootball = resolvedConfig.kind === 'FOOTBALL';
+    const usesFootballForfeitScore =
+      isFootball &&
+      ['WALKOVER', 'NO_SHOW', 'DISQUALIFICATION'].includes(data.action);
+    const currentFootball =
+      currentScoreDetails.football &&
+      typeof currentScoreDetails.football === 'object' &&
+      !Array.isArray(currentScoreDetails.football)
+        ? (currentScoreDetails.football as Record<string, unknown>)
+        : {};
+    const footballForfeitGoals = usesFootballForfeitScore
+      ? this.resolveFootballForfeitGoals(existing)
+      : null;
+
+    let scoreDetails: Record<string, unknown> = {
       ...currentScoreDetails,
+      ...(usesFootballForfeitScore
+        ? {
+            football: {
+              ...currentFootball,
+              team1Goals: isParticipant1Winner ? footballForfeitGoals : 0,
+              team2Goals: isParticipant1Winner ? 0 : footballForfeitGoals,
+              phase: 'COMPLETED',
+            },
+          }
+        : {}),
       specialResult,
     };
 
-    if (!MATCH_OPERATION_ACTIONS.includes(data.action as MatchOperationAction)) {
-      throw new BadRequestException('Hành động nghiệp vụ không hợp lệ.');
-    }
-
-    const winnerId = this.resolveOperationalWinner(existing, data.winnerId);
-    const isParticipant1Winner = winnerId === existing.participant1Id;
-    const resolvedConfig = this.resolveMatchConfig(existing);
-    const nextP1SetsWon = isParticipant1Winner
+    let nextP1SetsWon = isParticipant1Winner
       ? Math.max(existing.p1SetsWon, resolvedConfig.setsToWin)
       : 0;
-    const nextP2SetsWon = isParticipant1Winner
+    let nextP2SetsWon = isParticipant1Winner
       ? 0
       : Math.max(existing.p2SetsWon, resolvedConfig.setsToWin);
+
+    // Operational football decisions must retain a canonical goal payload.
+    // WALKOVER/NO_SHOW/DISQUALIFICATION synthesize the configured score above;
+    // RETIREMENT/OVERRIDE_RESULT must validate the score already recorded by
+    // the live scorer instead of finalizing with generic set counters. Mark
+    // the retained regulation score terminal so standings/brackets consume a
+    // completed football snapshot consistently.
+    if (isFootball && !usesFootballForfeitScore) {
+      if (
+        !currentFootball ||
+        typeof currentFootball.team1Goals !== 'number' ||
+        typeof currentFootball.team2Goals !== 'number'
+      ) {
+        throw new BadRequestException(
+          'Quyết định bóng đá này cần scoreDetails.football hợp lệ trước khi chốt trận.',
+        );
+      }
+      scoreDetails = {
+        ...scoreDetails,
+        football: {
+          ...currentFootball,
+          phase: 'COMPLETED',
+        },
+      };
+      const validation = validateScoreDetails(scoreDetails, resolvedConfig);
+      nextP1SetsWon = validation.p1SetsWon;
+      nextP2SetsWon = validation.p2SetsWon;
+    }
 
     return this.finalizeCompletedMatch(existing, id, winnerId, user.sub, {
       p1SetsWon: nextP1SetsWon,
@@ -879,32 +1540,52 @@ export class MatchesService {
   async updateSchedule(
     id: string,
     user: JwtPayload,
-    data: { courtName?: string; courtAddress?: string; refereeId?: string; scheduledAt?: string; matchConfig?: Record<string, unknown> },
+    data: {
+      courtName?: string;
+      courtAddress?: string;
+      refereeId?: string;
+      scheduledAt?: string;
+      matchConfig?: Record<string, unknown>;
+    },
   ) {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
-    // Object-level authorization: admin or tournament creator only (NOTE-5)
-    const isCreator = existing.tournament?.createdBy === user.sub;
-    const isAdmin = this.isAdmin(user);
-    if (!isAdmin && !isCreator) {
-      throw new ForbiddenException('Bạn không có quyền chỉnh lịch thi đấu của giải này');
+    // Object-level authorization: tournament manager or admin only.
+    if (!(await this.isTournamentManager(existing, user))) {
+      throw new ForbiddenException(
+        'Bạn không có quyền chỉnh lịch thi đấu của giải này',
+      );
     }
 
     if (data.refereeId) {
-      const isAccepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, data.refereeId);
+      const isAccepted = await this.matchesRepository.isRefereeAccepted(
+        existing.tournamentId,
+        data.refereeId,
+      );
       if (!isAccepted) {
-        throw new BadRequestException('Trọng tài được chọn chưa xác nhận tham gia giải đấu này (status ACCEPTED)');
+        throw new BadRequestException(
+          'Trọng tài được chọn chưa xác nhận tham gia giải đấu này (status ACCEPTED)',
+        );
       }
     }
 
     if (data.matchConfig) {
       const expectedKind = resolveEffectiveSportRules({
-        tournamentSportRules: existing.tournament?.sportRules as Record<string, unknown> | null | undefined,
+        tournamentSportRules: existing.tournament?.sportRules as
+          | Record<string, unknown>
+          | null
+          | undefined,
         categoryName: existing.tournament?.categoryName,
         categorySlug: existing.tournament?.categorySlug,
-        stageRoundConfig: existing.stage?.roundConfig as Record<string, unknown> | null | undefined,
-        groupConfig: existing.group?.roundConfig as Record<string, unknown> | null | undefined,
+        stageRoundConfig: existing.stage?.roundConfig as
+          | Record<string, unknown>
+          | null
+          | undefined,
+        groupConfig: existing.group?.roundConfig as
+          | Record<string, unknown>
+          | null
+          | undefined,
         roundNumber: existing.roundNumber,
       }).kind;
 
@@ -915,9 +1596,17 @@ export class MatchesService {
       });
     }
 
-    const updatedMatch = await this.matchesRepository.updateSchedule(id, user.sub, data);
+    const updatedMatch = await this.matchesRepository.updateSchedule(
+      id,
+      user.sub,
+      data,
+    );
     if (updatedMatch) {
-      this.liveScoreGateway.broadcastScoreUpdate(id, updatedMatch, existing.tournamentId);
+      this.liveScoreGateway.broadcastScoreUpdate(
+        id,
+        updatedMatch,
+        existing.tournamentId,
+      );
     }
 
     if (data.refereeId && data.refereeId !== existing.refereeId) {
@@ -925,7 +1614,9 @@ export class MatchesService {
         const matchName = `${existing.participant1?.teamName || 'TBD'} vs ${existing.participant2?.teamName || 'TBD'}`;
         const scheduledTime = data.scheduledAt
           ? new Date(data.scheduledAt).toLocaleString('vi-VN')
-          : (existing.scheduledAt ? new Date(existing.scheduledAt).toLocaleString('vi-VN') : 'chưa xác định');
+          : existing.scheduledAt
+            ? new Date(existing.scheduledAt).toLocaleString('vi-VN')
+            : 'chưa xác định';
 
         await this.notificationsService.sendNotification(
           buildRefereeAssignedNotification({
@@ -944,25 +1635,37 @@ export class MatchesService {
       }
     }
 
-    // Trigger notification when scheduling/updating time or court info
+    // Compare the persisted before/after values rather than truthy request
+    // fields. Clearing a court or time is a real schedule change and must
+    // notify participants just like assigning one.
+    const toIsoOrNull = (value: Date | string | null | undefined) =>
+      value ? new Date(value).toISOString() : null;
     const isScheduleChanged =
-      (data.scheduledAt && data.scheduledAt !== (existing.scheduledAt ? new Date(existing.scheduledAt).toISOString() : null)) ||
-      (data.courtName && data.courtName !== existing.courtName) ||
-      (data.courtAddress && data.courtAddress !== existing.courtAddress);
+      Boolean(updatedMatch) &&
+      (toIsoOrNull(updatedMatch?.scheduledAt) !==
+        toIsoOrNull(existing.scheduledAt) ||
+        (updatedMatch?.courtName ?? null) !== (existing.courtName ?? null) ||
+        (updatedMatch?.courtAddress ?? null) !==
+          (existing.courtAddress ?? null));
 
     if (isScheduleChanged) {
       try {
         const participantIds: string[] = [];
-        if (existing.participant1Id) participantIds.push(existing.participant1Id);
-        if (existing.participant2Id) participantIds.push(existing.participant2Id);
+        if (existing.participant1Id)
+          participantIds.push(existing.participant1Id);
+        if (existing.participant2Id)
+          participantIds.push(existing.participant2Id);
 
         if (participantIds.length > 0) {
-          const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+          const rosters =
+            await this.matchesRepository.getRostersForParticipants(
+              participantIds,
+            );
 
-          const scheduledTime = data.scheduledAt
-            ? new Date(data.scheduledAt).toLocaleString('vi-VN')
-            : (existing.scheduledAt ? new Date(existing.scheduledAt).toLocaleString('vi-VN') : 'chưa xác định');
-          const court = data.courtName || existing.courtName || 'Chưa xếp sân';
+          const scheduledTime = updatedMatch?.scheduledAt
+            ? new Date(updatedMatch.scheduledAt).toLocaleString('vi-VN')
+            : 'chưa xác định';
+          const court = updatedMatch?.courtName || 'Chưa xếp sân';
 
           for (const roster of rosters) {
             await this.notificationsService.sendNotification(
@@ -999,17 +1702,21 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
-    const isCreator = existing.tournament?.createdBy === user.sub;
-    const isAdmin = this.isAdmin(user);
-
-    if (!isAdmin && !isCreator) {
-      throw new ForbiddenException('Bạn không có quyền phân công trọng tài cho trận đấu này');
+    if (!(await this.isTournamentManager(existing, user))) {
+      throw new ForbiddenException(
+        'Bạn không có quyền phân công trọng tài cho trận đấu này',
+      );
     }
 
     if (refereeId) {
-      const isAccepted = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, refereeId);
+      const isAccepted = await this.matchesRepository.isRefereeAccepted(
+        existing.tournamentId,
+        refereeId,
+      );
       if (!isAccepted) {
-        throw new BadRequestException('Trọng tài được chọn chưa xác nhận tham gia giải đấu này (status ACCEPTED)');
+        throw new BadRequestException(
+          'Trọng tài được chọn chưa xác nhận tham gia giải đấu này (status ACCEPTED)',
+        );
       }
     }
 
@@ -1029,17 +1736,28 @@ export class MatchesService {
     const isCreator = existing.tournament?.createdBy === user.sub;
     const isAdmin = this.isAdmin(user);
     if (!isAdmin && !isCreator) {
-      throw new ForbiddenException('Bạn không có quyền quản lý bình luận trận đấu này');
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý bình luận trận đấu này',
+      );
     }
 
-    await this.matchesRepository.muteUser(id, targetUserId, type, reason ?? null, user.sub);
+    await this.matchesRepository.muteUser(
+      id,
+      targetUserId,
+      type,
+      reason ?? null,
+      user.sub,
+    );
     this.liveScoreGateway.broadcastComment(id, {
       type: 'MUTE_UPDATE',
       userId: targetUserId,
       action: type,
     });
 
-    return { message: type === 'BAN' ? 'Đã cấm người dùng này' : 'Đã mute người dùng này' };
+    return {
+      message:
+        type === 'BAN' ? 'Đã cấm người dùng này' : 'Đã mute người dùng này',
+    };
   }
 
   async unmuteUser(id: string, targetUserId: string, user: JwtPayload) {
@@ -1050,7 +1768,9 @@ export class MatchesService {
     const isCreator = existing.tournament?.createdBy === user.sub;
     const isAdmin = this.isAdmin(user);
     if (!isAdmin && !isCreator) {
-      throw new ForbiddenException('Bạn không có quyền quản lý bình luận trận đấu này');
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý bình luận trận đấu này',
+      );
     }
 
     await this.matchesRepository.unmuteUser(id, targetUserId);
@@ -1067,7 +1787,9 @@ export class MatchesService {
     if (!existing) throw new NotFoundException('Match not found');
 
     if (!isMatchOwnerOrAdmin(user, existing.tournament?.createdBy)) {
-      throw new ForbiddenException('Bạn không có quyền xem danh sách người dùng bị hạn chế');
+      throw new ForbiddenException(
+        'Bạn không có quyền xem danh sách người dùng bị hạn chế',
+      );
     }
 
     return this.matchesRepository.getMutedUsers(id);
