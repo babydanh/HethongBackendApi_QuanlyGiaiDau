@@ -273,6 +273,18 @@ export class AuthService {
         .where(eq(schema.users.id, existingProvider.userId))
         .limit(1);
 
+      // Đăng nhập bằng OAuth là đã chứng minh sở hữu email → tự động xác minh
+      // cho tài khoản liên kết từ trước (trước khi có logic auto-verify ở nhánh
+      // dưới), nếu không những tài khoản này bị kẹt "Chưa xác minh" vĩnh viễn.
+      // Bỏ qua email ảo @vndcsport.vn vì không phải email thật.
+      const isVirtualOAuthEmail = (oauthProfile.email || '').endsWith('@vndcsport.vn');
+      if (existingUser && !existingUser.isEmailVerified && !isVirtualOAuthEmail) {
+        await this.db.update(schema.users)
+          .set({ isEmailVerified: true })
+          .where(eq(schema.users.id, existingProvider.userId));
+        existingUser.isEmailVerified = true;
+      }
+
       return this.generateTokens(
         existingProvider.userId,
         oauthProfile.email || '',
