@@ -180,6 +180,7 @@ export class AuthService {
                 id: oldSession.userId,
                 email: userRecord?.email || '',
                 roles,
+                isEmailVerified: userRecord?.isEmailVerified ?? false,
               },
             };
           }
@@ -469,6 +470,8 @@ export class AuthService {
         id: userId,
         email,
         roles,
+        // Client (web store) dựa vào đây để hiển thị trạng thái xác minh email.
+        isEmailVerified: isEmailVerified ?? false,
       },
     };
   }
