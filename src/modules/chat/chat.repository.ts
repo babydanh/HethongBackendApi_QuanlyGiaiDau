@@ -991,5 +991,36 @@ export class ChatRepository {
       .limit(1);
     return msg ?? null;
   }
+
+  async getCommunityMemberUserIds(communityId: string, excludeUserId?: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: schema.communityMembers.userId })
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.status, 'JOINED'),
+        ),
+      );
+
+    return rows
+      .map((r) => r.userId)
+      .filter((uid) => !excludeUserId || uid !== excludeUserId);
+  }
+
+  async findUserById(userId: string) {
+    const [user] = await this.db
+      .select({
+        id: schema.users.id,
+        fullName: schema.profiles.fullName,
+      })
+      .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    return user ?? null;
+  }
 }
+
 

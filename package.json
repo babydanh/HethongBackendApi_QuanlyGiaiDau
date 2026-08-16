@@ -28,7 +28,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "verify:football-schema": "node scripts/verify-football-schema.js"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.4",
@@ -54,6 +55,7 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "firebase-admin": "^13.10.0",
     "google-auth-library": "^10.7.0",
     "helmet": "^8.2.0",
     "ioredis": "^5.11.1",

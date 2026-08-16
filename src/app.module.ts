@@ -42,6 +42,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { LivestreamModule } from './modules/livestream/livestream.module';
 import { AppVersionModule } from './modules/app-version/app-version.module';
 import { FootballTeamsModule } from './modules/football-teams/football-teams.module';
+import { FirebaseModule } from './modules/firebase/firebase.module';
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { FootballTeamsModule } from './modules/football-teams/football-teams.mod
     LivestreamModule,
     AppVersionModule,
     FootballTeamsModule,
+    FirebaseModule,
   ],
   controllers: [AppController],
   providers: [
