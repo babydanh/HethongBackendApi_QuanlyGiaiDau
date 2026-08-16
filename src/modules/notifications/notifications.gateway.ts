@@ -9,7 +9,9 @@ import {
   WsException,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { JwtService } from '@nestjs/jwt';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
+import { extractWsToken } from '../../common/guards/ws-jwt.guard';
 import { corsOptions } from '../../config/cors.config';
 import * as schema from '../../database/schema';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -23,8 +25,16 @@ export class NotificationsGateway implements OnGatewayConnection {
   @WebSocketServer()
   server: Server;
 
+  constructor(private readonly jwtService: JwtService) {}
+
   handleConnection(client: Socket) {
     try {
+      // Ws guards run for message handlers, not reliably before the gateway
+      // connection lifecycle. Authenticate here before joining the user room
+      // so mobile/browser clients are not disconnected immediately.
+      const token = extractWsToken(client);
+      if (!token) throw new WsException('Unauthorized');
+      client.data.user = this.jwtService.verify<JwtPayload>(token);
       const userId = this.getAuthenticatedUserId(client);
       client.join(this.getUserRoom(userId));
     } catch (error) {

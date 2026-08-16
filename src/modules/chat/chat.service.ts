@@ -12,11 +12,14 @@ import { CreateSupportConversationDto } from './dto/create-support-conversation.
 import { RoomType } from './dto/create-room.dto';
 import { extractLinkPreview } from './utils/link-preview.util';
 
+import { FirebaseService } from '../firebase/firebase.service';
+
 @Injectable()
 export class ChatService {
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly chatGateway: ChatGateway,
+    private readonly firebaseService: FirebaseService,
   ) {}
 
   async getUserRooms(userId: string) {
@@ -159,6 +162,38 @@ export class ChatService {
     } else {
       this.chatGateway.broadcastMessage(data.roomId, message);
     }
+
+    // Dispatch FCM Push Notification in background
+    void (async () => {
+      try {
+        let recipientIds: string[] = [];
+        if (roomType === RoomType.DIRECT || roomType === RoomType.SUPPORT) {
+          const members = await this.chatRepository.getRoomMemberIds(data.roomId);
+          recipientIds = members.filter((m) => m !== userId);
+        } else if (roomType === RoomType.CLUB && room.communityId) {
+          recipientIds = await this.chatRepository.getCommunityMemberUserIds(room.communityId, userId);
+        }
+
+        if (recipientIds.length > 0) {
+          const senderUser = await this.chatRepository.findUserById(userId);
+          const senderName = senderUser?.fullName || 'Một thành viên';
+          const title = room.name ? `${senderName} (${room.name})` : senderName;
+          const body = messageText || (attachmentsUrls.length > 0 ? '📷 Đã gửi hình ảnh' : 'Tin nhắn mới');
+
+          await this.firebaseService.sendPushToUsers(recipientIds, {
+            title,
+            body,
+            data: {
+              type: 'CHAT',
+              roomId: data.roomId,
+              messageId: message.id,
+            },
+          });
+        }
+      } catch {
+        // Fire-and-forget push error handling
+      }
+    })();
 
     return message;
   }

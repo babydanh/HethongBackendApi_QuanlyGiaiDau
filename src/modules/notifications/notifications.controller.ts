@@ -2,6 +2,9 @@ import {
   Controller,
   Get,
   Patch,
+  Post,
+  Delete,
+  Body,
   Param,
   ParseUUIDPipe,
   Query,
@@ -10,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
+import { RegisterDeviceTokenDto, RemoveDeviceTokenDto } from './dto/register-device-token.dto';
 import { NotificationsService } from './notifications.service';
 
 @ApiTags('notifications')
@@ -46,5 +50,24 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Đánh dấu tất cả thông báo là đã đọc' })
   async markAllAsRead(@CurrentUser() user: JwtPayload) {
     return this.notificationsService.markAllAsRead(user.sub);
+  }
+
+  @Post('device-token')
+  @ApiOperation({ summary: 'Đăng ký FCM Device Token để nhận Push Notification' })
+  async registerDeviceToken(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: RegisterDeviceTokenDto,
+  ) {
+    return this.notificationsService.registerDeviceToken(user.sub, body);
+  }
+
+  @Delete('device-token')
+  @ApiOperation({ summary: 'Hủy FCM Device Token khi đăng xuất' })
+  async removeDeviceToken(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: RemoveDeviceTokenDto,
+  ) {
+    await this.notificationsService.removeDeviceToken(user.sub, body);
+    return { success: true };
   }
 }

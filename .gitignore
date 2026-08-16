@@ -68,3 +68,9 @@ scratch/
 # Agent worktrees
 .claude/
 
+# Firebase & Secrets (Do NOT commit to git)
+secrets/
+*firebase*.json
+*adminsdk*.json
+*service-account*.json
+
