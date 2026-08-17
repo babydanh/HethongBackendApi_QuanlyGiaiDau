@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -42,7 +42,13 @@ export class RegionsRepository {
 
   async findWards(query: QueryWardDto) {
     let conditions: SQL | undefined = undefined;
-    const filters: SQL[] = [eq(schema.wards.districtCode, query.districtCode)];
+    const filters: SQL[] = [];
+
+    if (query.provinceCode) {
+      filters.push(eq(schema.wards.provinceCode, query.provinceCode));
+    } else if (query.districtCode) {
+      filters.push(eq(schema.wards.districtCode, query.districtCode));
+    }
     
     if (query.search) {
       filters.push(
@@ -55,7 +61,7 @@ export class RegionsRepository {
     
     conditions = filters.length > 1 ? and(...filters) : filters[0];
 
-    return this.db.select().from(schema.wards).where(conditions).orderBy(schema.wards.code);
+    return this.db.select().from(schema.wards).where(conditions).orderBy(schema.wards.name);
   }
 }
 

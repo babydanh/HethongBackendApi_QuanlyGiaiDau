@@ -180,17 +180,16 @@ async function main() {
     }
   }
 
-  // 4. Setup Tỉnh/Thành phố/Quận/Huyện/Xã Việt Nam từ Open API
-  console.log('\n4. Đang tải và khởi tạo dữ liệu hành chính Việt Nam (Provinces/Districts/Wards)...');
+  // 4. Setup Tỉnh/Thành phố/Phường/Xã Việt Nam từ Open API v2 (2 cấp)
+  console.log('\n4. Đang tải và khởi tạo dữ liệu hành chính Việt Nam v2 (Provinces/Wards)...');
   try {
-    const res = await fetch('https://provinces.open-api.vn/api/?depth=3');
-    const provincesData: any = await res.json();
+    const res = await fetch('https://provinces.open-api.vn/api/v2/p/');
+    const provincesList: any = await res.json();
     
     const provincesToInsert: any[] = [];
-    const districtsToInsert: any[] = [];
     const wardsToInsert: any[] = [];
     
-    for (const p of provincesData) {
+    for (const p of provincesList) {
       provincesToInsert.push({
         code: String(p.code),
         name: p.name,
@@ -199,21 +198,13 @@ async function main() {
         fullNameEn: p.name_en || null,
         codeName: p.codename,
       });
-      
-      if (p.districts) {
-        for (const d of p.districts) {
-          districtsToInsert.push({
-            code: String(d.code),
-            name: d.name,
-            nameEn: d.name_en || null,
-            fullName: d.name,
-            fullNameEn: d.name_en || null,
-            codeName: d.codename,
-            provinceCode: String(p.code),
-          });
-          
-          if (d.wards) {
-            for (const w of d.wards) {
+
+      try {
+        const detailRes = await fetch(`https://provinces.open-api.vn/api/v2/p/${p.code}?depth=2`);
+        if (detailRes.ok) {
+          const detailData: any = await detailRes.json();
+          if (detailData.wards && Array.isArray(detailData.wards)) {
+            for (const w of detailData.wards) {
               wardsToInsert.push({
                 code: String(w.code),
                 name: w.name,
@@ -221,11 +212,14 @@ async function main() {
                 fullName: w.name,
                 fullNameEn: w.name_en || null,
                 codeName: w.codename,
-                districtCode: String(d.code),
+                provinceCode: String(p.code),
+                districtCode: null,
               });
             }
           }
         }
+      } catch (err) {
+        console.warn(`   ⚠️ Không thể lấy xã/phường của tỉnh ${p.name}:`, err);
       }
     }
 
@@ -258,22 +252,6 @@ async function main() {
       100,
     );
 
-    console.log(`   ➜ Đang lưu/cập nhật ${districtsToInsert.length} Quận/Huyện...`);
-    await upsertInChunks(
-      schema.districts,
-      districtsToInsert,
-      schema.districts.code,
-      {
-        name: dsql`EXCLUDED.name`,
-        nameEn: dsql`EXCLUDED.name_en`,
-        fullName: dsql`EXCLUDED.full_name`,
-        fullNameEn: dsql`EXCLUDED.full_name_en`,
-        codeName: dsql`EXCLUDED.code_name`,
-        provinceCode: dsql`EXCLUDED.province_code`,
-      },
-      200,
-    );
-
     console.log(`   ➜ Đang lưu/cập nhật ${wardsToInsert.length} Phường/Xã...`);
     await upsertInChunks(
       schema.wards,
@@ -285,14 +263,14 @@ async function main() {
         fullName: dsql`EXCLUDED.full_name`,
         fullNameEn: dsql`EXCLUDED.full_name_en`,
         codeName: dsql`EXCLUDED.code_name`,
-        districtCode: dsql`EXCLUDED.district_code`,
+        provinceCode: dsql`EXCLUDED.province_code`,
       },
       300,
     );
 
-    console.log('   ➜ Đã hoàn tất đồng bộ địa giới hành chính Việt Nam mới nhất.');
+    console.log('   ➜ Đã hoàn tất nạp địa giới hành chính Việt Nam v2 (Tỉnh -> Phường/Xã).');
   } catch (error) {
-    console.error('   ❌ Lỗi khi tải dữ liệu địa giới từ API:', error);
+    console.error('   ❌ Lỗi khi tải dữ liệu địa giới từ API v2:', error);
   }
 
   // 5. Gán quyền ADMIN cho 2 tài khoản OAuth2 của hệ thống

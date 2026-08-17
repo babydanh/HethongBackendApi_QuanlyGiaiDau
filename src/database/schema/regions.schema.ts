@@ -37,9 +37,10 @@ export const wards = pgTable('wards', {
   fullName: varchar('full_name', { length: 255 }),
   fullNameEn: varchar('full_name_en', { length: 255 }),
   codeName: varchar('code_name', { length: 255 }),
+  provinceCode: varchar('province_code', { length: 20 })
+    .references(() => provinces.code, { onDelete: 'cascade' }),
   districtCode: varchar('district_code', { length: 20 })
-    .references(() => districts.code, { onDelete: 'cascade' })
-    .notNull(),
+    .references(() => districts.code, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
