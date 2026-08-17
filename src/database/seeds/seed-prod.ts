@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql as dsql } from 'drizzle-orm';
 import { createPostgresClientFromEnv } from '../postgres-client';
 
 const sql = createPostgresClientFromEnv({
@@ -229,24 +229,68 @@ async function main() {
       }
     }
 
-    // Tiện ích bulk insert theo chunk tránh quá tải query parameter
-    async function insertInChunks(table: any, data: any[], chunkSize = 300) {
+    // Tiện ích bulk upsert theo chunk
+    async function upsertInChunks(table: any, data: any[], targetCol: any, updateSet: any, chunkSize = 200) {
       for (let i = 0; i < data.length; i += chunkSize) {
         const chunk = data.slice(i, i + chunkSize);
-        await db.insert(table).values(chunk).onConflictDoNothing();
+        await db
+          .insert(table)
+          .values(chunk)
+          .onConflictDoUpdate({
+            target: targetCol,
+            set: updateSet,
+          });
       }
     }
 
-    console.log(`   ➜ Đang lưu ${provincesToInsert.length} Tỉnh/Thành phố...`);
-    await insertInChunks(schema.provinces, provincesToInsert, 100);
+    console.log(`   ➜ Đang lưu/cập nhật ${provincesToInsert.length} Tỉnh/Thành phố...`);
+    await upsertInChunks(
+      schema.provinces,
+      provincesToInsert,
+      schema.provinces.code,
+      {
+        name: dsql`EXCLUDED.name`,
+        nameEn: dsql`EXCLUDED.name_en`,
+        fullName: dsql`EXCLUDED.full_name`,
+        fullNameEn: dsql`EXCLUDED.full_name_en`,
+        codeName: dsql`EXCLUDED.code_name`,
+      },
+      100,
+    );
 
-    console.log(`   ➜ Đang lưu ${districtsToInsert.length} Quận/Huyện...`);
-    await insertInChunks(schema.districts, districtsToInsert, 300);
+    console.log(`   ➜ Đang lưu/cập nhật ${districtsToInsert.length} Quận/Huyện...`);
+    await upsertInChunks(
+      schema.districts,
+      districtsToInsert,
+      schema.districts.code,
+      {
+        name: dsql`EXCLUDED.name`,
+        nameEn: dsql`EXCLUDED.name_en`,
+        fullName: dsql`EXCLUDED.full_name`,
+        fullNameEn: dsql`EXCLUDED.full_name_en`,
+        codeName: dsql`EXCLUDED.code_name`,
+        provinceCode: dsql`EXCLUDED.province_code`,
+      },
+      200,
+    );
 
-    console.log(`   ➜ Đang lưu ${wardsToInsert.length} Phường/Xã...`);
-    await insertInChunks(schema.wards, wardsToInsert, 500);
+    console.log(`   ➜ Đang lưu/cập nhật ${wardsToInsert.length} Phường/Xã...`);
+    await upsertInChunks(
+      schema.wards,
+      wardsToInsert,
+      schema.wards.code,
+      {
+        name: dsql`EXCLUDED.name`,
+        nameEn: dsql`EXCLUDED.name_en`,
+        fullName: dsql`EXCLUDED.full_name`,
+        fullNameEn: dsql`EXCLUDED.full_name_en`,
+        codeName: dsql`EXCLUDED.code_name`,
+        districtCode: dsql`EXCLUDED.district_code`,
+      },
+      300,
+    );
 
-    console.log('   ➜ Đã hoàn tất nạp địa giới hành chính Việt Nam.');
+    console.log('   ➜ Đã hoàn tất đồng bộ địa giới hành chính Việt Nam mới nhất.');
   } catch (error) {
     console.error('   ❌ Lỗi khi tải dữ liệu địa giới từ API:', error);
   }
