@@ -27,6 +27,16 @@ export class CreateLiteTournamentDto {
   @IsOptional()
   communityId?: string;
 
+  @ApiPropertyOptional({
+    example: 'PUBLIC',
+    description: 'Phạm vi giải: PUBLIC là giải mở rộng, CLUB là giải nội bộ câu lạc bộ',
+    enum: ['CLUB', 'PUBLIC'],
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn(['CLUB', 'PUBLIC'])
+  tournamentType?: 'CLUB' | 'PUBLIC';
+
   @ApiPropertyOptional({ example: 'https://cdn.../banner.jpg', description: 'Ảnh bìa tùy chọn' })
   @IsString()
   @IsOptional()
