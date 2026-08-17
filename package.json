@@ -14,6 +14,8 @@
     "start:prod": "node dist/main",
     "seed:roles": "npx ts-node src/database/seeds/roles.seed.ts",
     "seed:categories": "npx ts-node src/database/seeds/categories.seed.ts",
+    "seed:regions": "npx ts-node src/database/seeds/seed-regions.ts",
+    "sync:regions": "npx ts-node src/database/seeds/seed-regions.ts",
     "seed:admin": "npx ts-node src/database/seeds/admin.seed.ts",
     "seed:test": "npx ts-node src/database/seeds/seed-test.ts",
     "seed:brackets": "npx ts-node src/database/seeds/generate-brackets.ts",

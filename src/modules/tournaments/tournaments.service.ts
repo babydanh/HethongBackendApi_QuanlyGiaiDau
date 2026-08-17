@@ -883,7 +883,25 @@ export class TournamentsService {
     }
 
     // 5. Build Lite sport preset + rules
-    const litePreset = this.buildLiteSportPreset(sport);
+    const builtInLitePreset = this.buildLiteSportPreset(sport);
+    const categoryDefaults =
+      category.categoryConfig &&
+      typeof category.categoryConfig === 'object' &&
+      category.categoryConfig.defaultSportRules &&
+      typeof category.categoryConfig.defaultSportRules === 'object'
+        ? (category.categoryConfig.defaultSportRules as Record<string, unknown>)
+        : null;
+    // Category preset is the shared, editable source of defaults. Keep the
+    // built-in sport preset only as a backwards-compatible fallback for old
+    // categories that do not yet have defaultSportRules.
+    const litePreset = {
+      sportPreset: categoryDefaults ? `CATEGORY_${sport.toUpperCase()}` : builtInLitePreset.sportPreset,
+      sportRules: {
+        ...builtInLitePreset.sportRules,
+        ...(categoryDefaults ?? {}),
+        kind: builtInLitePreset.sportRules.kind,
+      },
+    };
     const sportRules = {
       ...litePreset.sportRules,
       ...(sport === 'football'
