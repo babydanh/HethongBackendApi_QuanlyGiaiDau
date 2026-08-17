@@ -8,6 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { SKIP_APP_KEY } from '../decorators/skip-app-key.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
 export class AppKeyGuard implements CanActivate {
@@ -17,12 +18,17 @@ export class AppKeyGuard implements CanActivate {
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
     const skipAppKey = this.reflector.getAllAndOverride<boolean>(SKIP_APP_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    if (skipAppKey) {
+    if (isPublic || skipAppKey) {
       return true;
     }
 

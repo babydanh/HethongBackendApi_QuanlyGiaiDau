@@ -14,6 +14,7 @@ const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
 const config_1 = require("@nestjs/config");
 const skip_app_key_decorator_1 = require("../decorators/skip-app-key.decorator");
+const public_decorator_1 = require("../decorators/public.decorator");
 let AppKeyGuard = class AppKeyGuard {
     reflector;
     configService;
@@ -22,11 +23,15 @@ let AppKeyGuard = class AppKeyGuard {
         this.configService = configService;
     }
     canActivate(context) {
+        const isPublic = this.reflector.getAllAndOverride(public_decorator_1.IS_PUBLIC_KEY, [
+            context.getHandler(),
+            context.getClass(),
+        ]);
         const skipAppKey = this.reflector.getAllAndOverride(skip_app_key_decorator_1.SKIP_APP_KEY, [
             context.getHandler(),
             context.getClass(),
         ]);
-        if (skipAppKey) {
+        if (isPublic || skipAppKey) {
             return true;
         }
         const request = context.switchToHttp().getRequest();
