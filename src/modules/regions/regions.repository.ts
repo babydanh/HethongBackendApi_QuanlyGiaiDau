@@ -44,10 +44,13 @@ export class RegionsRepository {
     let conditions: SQL | undefined = undefined;
     const filters: SQL[] = [];
 
-    if (query.provinceCode) {
-      filters.push(eq(schema.wards.provinceCode, query.provinceCode));
-    } else if (query.districtCode) {
-      filters.push(eq(schema.wards.districtCode, query.districtCode));
+    const provCode = query.provinceCode || query.province_code;
+    const distCode = query.districtCode || query.district_code;
+
+    if (provCode) {
+      filters.push(eq(schema.wards.provinceCode, provCode));
+    } else if (distCode) {
+      filters.push(eq(schema.wards.districtCode, distCode));
     }
     
     if (query.search) {

@@ -178,7 +178,6 @@ jobs:
                 -H "x-app-key: ${app_api_key}" \
                 "https://sporto.asia/api/v1/categories" > /dev/null; then
                 echo "API smoke check passed on attempt ${attempt}"
-                unset app_api_key
                 break
               fi
               if [ "${attempt}" -eq 6 ]; then
@@ -189,6 +188,25 @@ jobs:
               fi
               sleep 5
             done
+
+            # Contract smoke check: production must expose the v2 address API
+            # used by web/mobile (Province -> Ward/Commune). This prevents an
+            # old container/DTO from appearing healthy while the clients get
+            # 400 responses for provinceCode.
+            wards_probe="$(curl --fail --silent --show-error --max-time 15 \
+              -H "x-app-key: ${app_api_key}" \
+              "https://sporto.asia/api/v1/regions/wards?provinceCode=30")" || {
+              echo "Address v2 smoke check failed: /regions/wards rejected provinceCode"
+              docker compose logs --tail=120 backend
+              unset app_api_key
+              exit 1
+            }
+            if ! printf '%s' "${wards_probe}" | grep -q '"data"'; then
+              echo "Address v2 smoke check failed: unexpected response shape"
+              unset app_api_key
+              exit 1
+            fi
+            unset wards_probe
 
             # 7. Dọn dẹp các Docker Image cũ
             docker image prune -f
