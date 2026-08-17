@@ -994,7 +994,9 @@ export class TournamentsService {
       liteVisibility,
       bracketSetupMode: 'RANDOM',
       allowPlayerReferee: true,
-      hideAdvancedSettings: true,
+      // Quick creation only relaxes the initial form. The organizer still
+      // receives the complete advanced management workspace afterwards.
+      hideAdvancedSettings: false,
       scoringMode: 'FREE',
       bracketType: finalBracketType,
       maxTeams,

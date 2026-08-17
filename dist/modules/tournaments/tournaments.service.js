@@ -643,7 +643,7 @@ let TournamentsService = class TournamentsService {
             liteVisibility,
             bracketSetupMode: 'RANDOM',
             allowPlayerReferee: true,
-            hideAdvancedSettings: true,
+            hideAdvancedSettings: false,
             scoringMode: 'FREE',
             bracketType: finalBracketType,
             maxTeams,
