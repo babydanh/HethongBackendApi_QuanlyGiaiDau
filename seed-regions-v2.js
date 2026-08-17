@@ -83,6 +83,19 @@ async function main() {
       ADD COLUMN IF NOT EXISTS "province_code" varchar(20);
     `;
 
+    // Gỡ bỏ hoàn toàn ràng buộc NOT NULL của district_code cũ
+    await sql`
+      DO $$ 
+      BEGIN 
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name='wards' AND column_name='district_code'
+        ) THEN 
+          ALTER TABLE "wards" ALTER COLUMN "district_code" DROP NOT NULL;
+        END IF; 
+      END $$;
+    `;
+
     // 3. Bổ sung cột allow_stranger_messages cho profiles nếu thiếu
     await sql`
       ALTER TABLE "profiles" 
@@ -130,6 +143,7 @@ async function main() {
                 full_name_en: w.name_en || null,
                 code_name: w.codename,
                 province_code: String(p.code),
+                district_code: null,
               });
             }
           }
@@ -139,7 +153,7 @@ async function main() {
 
     console.log(`📊 Chuẩn bị nạp: ${provincesToInsert.length} Tỉnh/Thành, ${wardsToInsert.length} Phường/Xã...`);
 
-    // Nạp provinces theo batch với ON CONFLICT DO UPDATE (không xóa để tránh xung đột Foreign Key)
+    // Nạp provinces theo batch với ON CONFLICT DO UPDATE
     const BATCH_SIZE = 500;
     for (let i = 0; i < provincesToInsert.length; i += BATCH_SIZE) {
       const chunk = provincesToInsert.slice(i, i + BATCH_SIZE);
