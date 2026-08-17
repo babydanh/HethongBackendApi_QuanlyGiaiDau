@@ -71,7 +71,6 @@ async function seed() {
                 fullNameEn: w.name_en || null,
                 codeName: w.codename,
                 provinceCode: String(p.code),
-                districtCode: null,
               });
             }
           }

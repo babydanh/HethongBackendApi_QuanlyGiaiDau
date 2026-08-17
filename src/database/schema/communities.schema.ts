@@ -18,7 +18,7 @@ const geography = customType<{ data: string }>({
 });
 import { users } from './users.schema';
 import { categories } from './categories.schema';
-import { provinces, districts, wards } from './regions.schema';
+import { provinces, wards } from './regions.schema';
 import { tournaments } from './tournaments.schema';
 
 export const communities = pgTable('communities', {
@@ -32,8 +32,7 @@ export const communities = pgTable('communities', {
     .notNull(),
   provinceCode: varchar('province_code', { length: 20 })
     .references(() => provinces.code),
-  districtCode: varchar('district_code', { length: 20 })
-    .references(() => districts.code),
+  districtCode: varchar('district_code', { length: 20 }),
   wardCode: varchar('ward_code', { length: 20 })
     .references(() => wards.code),
   visibility: varchar('visibility', { length: 50 }).default('PUBLIC').notNull(),

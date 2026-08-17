@@ -13,7 +13,7 @@ export const provinces = pgTable('provinces', {
     .notNull(),
 });
 
-export const districts = pgTable('districts', {
+export const wards = pgTable('wards', {
   id: uuid('id').primaryKey().defaultRandom(),
   code: varchar('code', { length: 20 }).notNull().unique(),
   name: varchar('name', { length: 255 }).notNull(),
@@ -24,23 +24,6 @@ export const districts = pgTable('districts', {
   provinceCode: varchar('province_code', { length: 20 })
     .references(() => provinces.code, { onDelete: 'cascade' })
     .notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
-
-export const wards = pgTable('wards', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  code: varchar('code', { length: 20 }).notNull().unique(),
-  name: varchar('name', { length: 255 }).notNull(),
-  nameEn: varchar('name_en', { length: 255 }),
-  fullName: varchar('full_name', { length: 255 }),
-  fullNameEn: varchar('full_name_en', { length: 255 }),
-  codeName: varchar('code_name', { length: 255 }),
-  provinceCode: varchar('province_code', { length: 20 })
-    .references(() => provinces.code, { onDelete: 'cascade' }),
-  districtCode: varchar('district_code', { length: 20 })
-    .references(() => districts.code, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

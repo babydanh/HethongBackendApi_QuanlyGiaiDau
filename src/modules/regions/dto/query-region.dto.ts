@@ -1,5 +1,5 @@
-import { IsOptional, IsString, IsNotEmpty } from 'class-validator';
-import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class QueryRegionDto {
   @ApiPropertyOptional({ description: 'Từ khóa tìm kiếm theo tên' })
@@ -8,31 +8,9 @@ export class QueryRegionDto {
   search?: string;
 }
 
-export class QueryDistrictDto extends QueryRegionDto {
-  @ApiProperty({ description: 'Mã tỉnh/thành phố' })
-  @IsNotEmpty()
-  @IsString()
-  provinceCode: string;
-}
-
 export class QueryWardDto extends QueryRegionDto {
-  @ApiPropertyOptional({ description: 'Mã tỉnh/thành phố (chuẩn v2)' })
+  @ApiPropertyOptional({ description: 'Mã tỉnh/thành phố' })
   @IsOptional()
   @IsString()
   provinceCode?: string;
-
-  @ApiPropertyOptional({ description: 'Mã tỉnh/thành phố (snake_case)' })
-  @IsOptional()
-  @IsString()
-  province_code?: string;
-
-  @ApiPropertyOptional({ description: 'Mã quận/huyện (legacy v1)' })
-  @IsOptional()
-  @IsString()
-  districtCode?: string;
-
-  @ApiPropertyOptional({ description: 'Mã quận/huyện (snake_case)' })
-  @IsOptional()
-  @IsString()
-  district_code?: string;
 }
