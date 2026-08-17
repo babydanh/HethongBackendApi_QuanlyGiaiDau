@@ -16,8 +16,13 @@ export class QueryDistrictDto extends QueryRegionDto {
 }
 
 export class QueryWardDto extends QueryRegionDto {
-  @ApiProperty({ description: 'Mã quận/huyện' })
-  @IsNotEmpty()
+  @ApiPropertyOptional({ description: 'Mã tỉnh/thành phố (chuẩn v2)' })
+  @IsOptional()
   @IsString()
-  districtCode: string;
+  provinceCode?: string;
+
+  @ApiPropertyOptional({ description: 'Mã quận/huyện (legacy v1)' })
+  @IsOptional()
+  @IsString()
+  districtCode?: string;
 }

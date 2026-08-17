@@ -11,22 +11,21 @@ const sql = createPostgresClientFromEnv();
 const db = drizzle(sql, { schema });
 
 async function seed() {
-  console.log('🔄 Đang kết nối https://provinces.open-api.vn/api/?depth=3 để lấy dữ liệu địa giới hành chính mới nhất...');
+  console.log('🔄 Đang kết nối https://provinces.open-api.vn/api/v2/ để lấy dữ liệu địa giới hành chính chuẩn mới (2 cấp: Tỉnh/Thành -> Phường/Xã)...');
 
   try {
-    const res = await fetch('https://provinces.open-api.vn/api/?depth=3');
+    const res = await fetch('https://provinces.open-api.vn/api/v2/p/');
     if (!res.ok) {
       throw new Error(`HTTP error! status: ${res.status}`);
     }
 
-    const provincesData: any = await res.json();
-    console.log(`✅ Đã tải về thành công dữ liệu ${provincesData.length} Tỉnh/Thành phố.`);
+    const provincesList: any = await res.json();
+    console.log(`✅ Đã tải về danh sách ${provincesList.length} Tỉnh/Thành phố.`);
 
     const provincesToInsert: any[] = [];
-    const districtsToInsert: any[] = [];
     const wardsToInsert: any[] = [];
 
-    for (const p of provincesData) {
+    for (const p of provincesList) {
       provincesToInsert.push({
         code: String(p.code),
         name: p.name,
@@ -36,20 +35,13 @@ async function seed() {
         codeName: p.codename,
       });
 
-      if (p.districts && Array.isArray(p.districts)) {
-        for (const d of p.districts) {
-          districtsToInsert.push({
-            code: String(d.code),
-            name: d.name,
-            nameEn: d.name_en || null,
-            fullName: d.name,
-            fullNameEn: d.name_en || null,
-            codeName: d.codename,
-            provinceCode: String(p.code),
-          });
-
-          if (d.wards && Array.isArray(d.wards)) {
-            for (const w of d.wards) {
+      // Tải danh sách phường/xã trực thuộc từng tỉnh/thành phố theo chuẩn v2
+      try {
+        const detailRes = await fetch(`https://provinces.open-api.vn/api/v2/p/${p.code}?depth=2`);
+        if (detailRes.ok) {
+          const detailData: any = await detailRes.json();
+          if (detailData.wards && Array.isArray(detailData.wards)) {
+            for (const w of detailData.wards) {
               wardsToInsert.push({
                 code: String(w.code),
                 name: w.name,
@@ -57,11 +49,14 @@ async function seed() {
                 fullName: w.name,
                 fullNameEn: w.name_en || null,
                 codeName: w.codename,
-                districtCode: String(d.code),
+                provinceCode: String(p.code),
+                districtCode: null,
               });
             }
           }
         }
+      } catch (err) {
+        console.warn(`⚠️ Không thể lấy danh sách xã/phường của tỉnh ${p.name}:`, err);
       }
     }
 
@@ -94,23 +89,7 @@ async function seed() {
       100,
     );
 
-    console.log(`🚀 Đang cập nhật ${districtsToInsert.length} Quận/Huyện...`);
-    await upsertInChunks(
-      schema.districts,
-      districtsToInsert,
-      schema.districts.code,
-      {
-        name: dsql`EXCLUDED.name`,
-        nameEn: dsql`EXCLUDED.name_en`,
-        fullName: dsql`EXCLUDED.full_name`,
-        fullNameEn: dsql`EXCLUDED.full_name_en`,
-        codeName: dsql`EXCLUDED.code_name`,
-        provinceCode: dsql`EXCLUDED.province_code`,
-      },
-      200,
-    );
-
-    console.log(`🚀 Đang cập nhật ${wardsToInsert.length} Phường/Xã...`);
+    console.log(`🚀 Đang cập nhật ${wardsToInsert.length} Phường/Xã trực thuộc...`);
     await upsertInChunks(
       schema.wards,
       wardsToInsert,
@@ -121,18 +100,17 @@ async function seed() {
         fullName: dsql`EXCLUDED.full_name`,
         fullNameEn: dsql`EXCLUDED.full_name_en`,
         codeName: dsql`EXCLUDED.code_name`,
-        districtCode: dsql`EXCLUDED.district_code`,
+        provinceCode: dsql`EXCLUDED.province_code`,
       },
       300,
     );
 
-    console.log('🎉 Đồng bộ dữ liệu địa giới hành chính thành công 100%!');
+    console.log('🎉 Đồng bộ dữ liệu địa giới hành chính v2 (Tỉnh -> Phường/Xã) thành công 100%!');
   } catch (error) {
-    console.error('❌ Lỗi khi đồng bộ địa giới hành chính:', error);
+    console.error('❌ Lỗi khi đồng bộ địa giới hành chính v2:', error);
   } finally {
     await sql.end();
   }
 }
 
 seed();
-
