@@ -3,10 +3,8 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { RegionsService } from './regions.service';
 import { QueryRegionDto, QueryWardDto } from './dto/query-region.dto';
 import { Public } from '../../common/decorators/public.decorator';
-import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
 
 @ApiTags('regions')
-@SkipAppKey()
 @Controller('regions')
 export class RegionsController {
   constructor(private readonly regionsService: RegionsService) {}
