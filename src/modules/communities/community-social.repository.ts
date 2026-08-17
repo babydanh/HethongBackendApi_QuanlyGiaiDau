@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';

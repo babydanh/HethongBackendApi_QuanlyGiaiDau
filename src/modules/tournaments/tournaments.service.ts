@@ -884,36 +884,38 @@ export class TournamentsService {
 
     // 5. Build Lite sport preset + rules
     const builtInLitePreset = this.buildLiteSportPreset(sport);
+    const rawCategoryConfig = category.categoryConfig as Record<string, unknown> | null;
     const categoryDefaults =
-      category.categoryConfig &&
-      typeof category.categoryConfig === 'object' &&
-      category.categoryConfig.defaultSportRules &&
-      typeof category.categoryConfig.defaultSportRules === 'object'
-        ? (category.categoryConfig.defaultSportRules as Record<string, unknown>)
+      rawCategoryConfig &&
+      typeof rawCategoryConfig === 'object' &&
+      rawCategoryConfig.defaultSportRules &&
+      typeof rawCategoryConfig.defaultSportRules === 'object'
+        ? (rawCategoryConfig.defaultSportRules as Record<string, unknown>)
         : null;
     // Category preset is the shared, editable source of defaults. Keep the
     // built-in sport preset only as a backwards-compatible fallback for old
     // categories that do not yet have defaultSportRules.
+    const presetRules = builtInLitePreset.sportRules as Record<string, unknown>;
     const litePreset = {
       sportPreset: categoryDefaults ? `CATEGORY_${sport.toUpperCase()}` : builtInLitePreset.sportPreset,
       sportRules: {
-        ...builtInLitePreset.sportRules,
+        ...presetRules,
         ...(categoryDefaults ?? {}),
-        kind: builtInLitePreset.sportRules.kind,
+        kind: presetRules.kind,
       },
     };
     const sportRules = {
       ...litePreset.sportRules,
       ...(sport === 'football'
         ? {
-            halvesCount: dto.footballHalvesCount ?? litePreset.sportRules.halvesCount,
-            halfDuration: dto.footballHalfDuration ?? litePreset.sportRules.halfDuration,
-            allowDraw: dto.footballAllowDraw ?? litePreset.sportRules.allowDraw,
+            halvesCount: dto.footballHalvesCount ?? (litePreset.sportRules as any).halvesCount,
+            halfDuration: dto.footballHalfDuration ?? (litePreset.sportRules as any).halfDuration,
+            allowDraw: dto.footballAllowDraw ?? (litePreset.sportRules as any).allowDraw,
           }
         : {
-            setsToWin: dto.setsToWin ?? litePreset.sportRules.setsToWin,
-            pointsPerSet: dto.pointsPerSet ?? litePreset.sportRules.pointsPerSet,
-            winByTwo: dto.winByTwo ?? litePreset.sportRules.winByTwo,
+            setsToWin: dto.setsToWin ?? (litePreset.sportRules as any).setsToWin,
+            pointsPerSet: dto.pointsPerSet ?? (litePreset.sportRules as any).pointsPerSet,
+            winByTwo: dto.winByTwo ?? (litePreset.sportRules as any).winByTwo,
             ...(dto.maxPoints !== undefined ? { maxPoints: dto.maxPoints } : {}),
           }),
     };
