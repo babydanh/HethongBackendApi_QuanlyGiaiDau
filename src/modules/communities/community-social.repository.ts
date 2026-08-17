@@ -439,7 +439,18 @@ export class CommunitySocialRepository {
       .select()
       .from(schema.communityPollOptions)
       .where(eq(schema.communityPollOptions.pollId, pollId))
-      .orderBy(schema.communityPollOptions.createdAt);
+      .orderBy(asc(schema.communityPollOptions.id));
+
+    // Prioritize affirmative option (e.g. 'Có tham gia') at the top
+    options.sort((a, b) => {
+      const score = (text: string) => {
+        if (text.includes('Có tham gia') || text.includes('Đăng ký') || text.includes('✅')) return 1;
+        if (text.includes('Chưa chắc chắn') || text.includes('suy nghĩ') || text.includes('⏳')) return 2;
+        if (text.includes('Không') || text.includes('Bận') || text.includes('❌')) return 3;
+        return 2;
+      };
+      return score(a.optionText) - score(b.optionText);
+    });
 
     const optionIds = options.map((o) => o.id);
     let votes: {
