@@ -922,16 +922,13 @@ export class TournamentsService {
 
     // 6. Build Lite tournamentConfig shared by App/Web
     const maxTeams = dto.maxTeams || 16;
-    // Lite registrations are direct participation.  Keep INVITE_ONLY for
-    // community links, but never allow the advanced approval workflow here.
-    if ((dto.registrationMode as string | undefined) === 'APPROVAL') {
-      throw new BadRequestException(
-        'Giải Lite chỉ hỗ trợ đăng ký mở hoặc chỉ nhận lời mời.',
-      );
-    }
+    // Lite starts with approval by default, but the organizer can change it
+    // later in the management screen. Keep invite-only semantics intact.
     const registrationMode = dto.registrationMode === 'INVITE_ONLY'
       ? 'INVITE_ONLY'
-      : 'OPEN';
+      : dto.registrationMode === 'OPEN'
+        ? 'OPEN'
+        : 'APPROVAL';
     const requestedPublic = dto.visibility === 'PUBLIC';
     const liteVisibility = requestedPublic
       ? 'PUBLIC'
