@@ -14,8 +14,6 @@ jobs:
   schema-smoke:
     name: Verify football schema on clean PostgreSQL
     runs-on: ubuntu-latest
-    # Values are scoped to this disposable CI database only. Production
-    # credentials remain in the VPS .env and are never exposed here.
     env:
       DB_HOST: 127.0.0.1
       DB_PORT: 5432
@@ -42,19 +40,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          pnpm install --frozen-lockfile
 
       - name: Apply migrations to disposable database
         run: node run-prod-migration.js
@@ -78,52 +73,27 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
 
       - name: Install dependencies and run tests
         run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
           pnpm install --frozen-lockfile
           pnpm test --runInBand --passWithNoTests
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=raw,value=latest
-
       - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest,ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker build \
+            -t ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest \
+            -t ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:${{ github.sha }} \
+            .
+          docker push ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest
+          docker push ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:${{ github.sha }}
 
   # Job 2: Chỉ kéo bản build Backend về chạy trên VPS và chạy migration
   deploy:
@@ -132,81 +102,62 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: 203.167.15.81
-          port: 36789
-          username: root
-          key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 15m
-          script: |
-            # 1. Đi tới thư mục chứa docker-compose.yml trên VPS
+      - name: Deploy to VPS via native SSH
+        env:
+          VPS_KEY: ${{ secrets.VPS_SSH_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$VPS_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p 36789 203.167.15.81 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -p 36789 -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@203.167.15.81 bash -c "'
+            set -euo pipefail
             cd /usr/local/lsws/sporto.asia
+            sed -i \"s#giaidau\.vnvar\.com#sporto.asia#g\" .env
 
-            # Keep the VPS runtime environment aligned with the public domain.
-            # docker-compose reads this persisted .env file, not the repository's
-            # .env.production file baked into the image.
-            sed -i 's#giaidau\.vnvar\.com#sporto.asia#g' .env
-
-            # Fail before migration if the VPS app key is missing or rejected.
-            # Do not print the secret; only the request result is surfaced.
-            app_api_key="$(sed -n 's/^APP_API_KEY=//p' .env | head -n 1)"
-            if [ -z "${app_api_key}" ]; then
-              echo "APP_API_KEY is missing from the VPS .env"
+            app_api_key=\"\$(sed -n \"s/^APP_API_KEY=//p\" .env | head -n 1)\"
+            if [ -z \"\${app_api_key}\" ]; then
+              echo \"APP_API_KEY is missing from the VPS .env\"
               exit 1
             fi
             curl --fail --silent --show-error --max-time 15 \
-              -H "x-app-key: ${app_api_key}" \
-              "https://sporto.asia/api/v1/categories" > /dev/null
-            # 2. Đăng nhập GHCR trên VPS
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+              -H \"x-app-key: \${app_api_key}\" \
+              \"https://sporto.asia/api/v1/categories\" > /dev/null
 
-            # 3. Pull image backend mới nhất từ Registry về
+            echo \"$GITHUB_TOKEN\" | docker login ghcr.io -u $ACTOR --password-stdin
             docker pull ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest
-
-            # 4. Chạy migration cơ sở dữ liệu
             docker compose run --rm migrate node run-prod-migration.js --dry-run
             docker compose run --rm migrate
-
-            # 5. Khởi động lại service backend với image mới
             docker compose up -d --force-recreate --no-deps backend
 
-            # 6. Smoke check public API after the new container is healthy.
             for attempt in 1 2 3 4 5 6; do
               if curl --fail --silent --show-error --max-time 15 \
-                -H "x-app-key: ${app_api_key}" \
-                "https://sporto.asia/api/v1/categories" > /dev/null; then
-                echo "API smoke check passed on attempt ${attempt}"
+                -H \"x-app-key: \${app_api_key}\" \
+                \"https://sporto.asia/api/v1/categories\" > /dev/null; then
+                echo \"API smoke check passed on attempt \${attempt}\"
                 break
               fi
-              if [ "${attempt}" -eq 6 ]; then
-                echo "API smoke check failed after restart"
+              if [ \"\${attempt}\" -eq 6 ]; then
+                echo \"API smoke check failed after restart\"
                 docker compose logs --tail=120 backend
-                unset app_api_key
                 exit 1
               fi
               sleep 5
             done
 
-            # Contract smoke check: production must expose the v2 address API
-            # used by web/mobile (Province -> Ward/Commune). This prevents an
-            # old container/DTO from appearing healthy while the clients get
-            # 400 responses for provinceCode.
-            wards_probe="$(curl --fail --silent --show-error --max-time 15 \
-              -H "x-app-key: ${app_api_key}" \
-              "https://sporto.asia/api/v1/regions/wards?provinceCode=30")" || {
-              echo "Address v2 smoke check failed: /regions/wards rejected provinceCode"
+            wards_probe=\"\$(curl --fail --silent --show-error --max-time 15 \
+              -H \"x-app-key: \${app_api_key}\" \
+              \"https://sporto.asia/api/v1/regions/wards?provinceCode=30\")\" || {
+              echo \"Address v2 smoke check failed: /regions/wards rejected provinceCode\"
               docker compose logs --tail=120 backend
-              unset app_api_key
               exit 1
             }
-            if ! printf '%s' "${wards_probe}" | grep -q '"data"'; then
-              echo "Address v2 smoke check failed: unexpected response shape"
-              unset app_api_key
+            if ! printf '%s' \"\${wards_probe}\" | grep -q '\"data\"'; then
+              echo \"Address v2 smoke check failed: unexpected response shape\"
               exit 1
             fi
-            unset wards_probe
 
-            # 7. Dọn dẹp các Docker Image cũ
             docker image prune -f
+          '"
