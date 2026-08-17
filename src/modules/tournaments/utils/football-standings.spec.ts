@@ -1,4 +1,4 @@
-import { sortFootballStandings, FootballStandingMatch, FootballStandingRow } from './football-standings';
+import { hasFootballScoreSnapshot, sortFootballStandings, FootballStandingMatch, FootballStandingRow } from './football-standings';
 
 const row = (participantId: string, overrides: Partial<FootballStandingRow> = {}): FootballStandingRow => ({
   participantId,
@@ -46,5 +46,19 @@ describe('sortFootballStandings', () => {
     const standings = [row('team-c'), row('team-a'), row('team-b')];
 
     expect(sortFootballStandings(standings, []).map((item) => item.participantId)).toEqual(['team-a', 'team-b', 'team-c']);
+  });
+});
+
+describe('hasFootballScoreSnapshot', () => {
+  it('detects the canonical football score wrapper', () => {
+    expect(hasFootballScoreSnapshot([
+      { scoreDetails: { football: { team1Goals: 2, team2Goals: 1 } } },
+    ])).toBe(true);
+  });
+
+  it('does not classify racket-sport score snapshots as football', () => {
+    expect(hasFootballScoreSnapshot([
+      { scoreDetails: { sets: [{ score1: 21, score2: 18 }] } },
+    ])).toBe(false);
   });
 });

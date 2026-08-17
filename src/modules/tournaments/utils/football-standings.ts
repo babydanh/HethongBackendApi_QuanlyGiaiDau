@@ -16,6 +16,24 @@ export interface FootballStandingMatch {
 }
 
 /**
+ * The round-robin endpoint serves every sport.  Only apply the football
+ * ordering chain when the completed fixture actually carries the canonical
+ * football score snapshot; tennis/pickleball/badminton must keep their own
+ * aggregate ordering and must not inherit football fair-play rules.
+ */
+export function hasFootballScoreSnapshot(
+  matches: readonly Pick<FootballStandingMatch, 'scoreDetails'>[],
+): boolean {
+  return matches.some((match) => {
+    if (!match.scoreDetails || typeof match.scoreDetails !== 'object' || Array.isArray(match.scoreDetails)) {
+      return false;
+    }
+    const football = (match.scoreDetails as Record<string, unknown>).football;
+    return Boolean(football && typeof football === 'object' && !Array.isArray(football));
+  });
+}
+
+/**
  * Stable football table ordering shared by the read endpoint and bracket
  * advancement.  The database aggregate stores the inexpensive totals; H2H
  * and fair-play are derived from completed immutable match snapshots here.

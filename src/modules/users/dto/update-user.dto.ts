@@ -1,4 +1,4 @@
-import { IsString, IsOptional, Matches, IsDateString } from 'class-validator';
+import { IsString, IsOptional, Matches, IsDateString, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateUserDto {
@@ -64,4 +64,12 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   bankAccountName?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Cho phép người lạ (không cùng CLB, không là bạn bè) nhắn tin riêng. Mặc định true.',
+  })
+  @IsBoolean()
+  @IsOptional()
+  allowStrangerMessages?: boolean;
 }

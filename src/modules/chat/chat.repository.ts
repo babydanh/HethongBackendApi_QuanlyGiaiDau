@@ -150,11 +150,44 @@ export class ChatRepository {
       });
     }
 
-    roomsList.sort(
+    // Legacy data may contain more than one DIRECT room for the same pair.
+    // Collapse those rows at the API boundary so every client renders one
+    // conversation, while preserving the freshest preview and unread state.
+    const canonicalRooms = new Map<string, (typeof roomsList)[number]>();
+    for (const room of roomsList) {
+      const participantKey = room.type === 'DIRECT'
+        ? room.participants
+          .filter((participant) => participant.id !== userId)
+          .map((participant) => participant.id)
+          .sort()
+          .join(',')
+        : '';
+      const key = room.type === 'DIRECT' && participantKey
+        ? `DIRECT:${participantKey}`
+        : `${room.type}:${room.id}`;
+      const existing = canonicalRooms.get(key);
+      if (!existing) {
+        canonicalRooms.set(key, room);
+        continue;
+      }
+      const isFresh = new Date(room.updatedAt).getTime() >= new Date(existing.updatedAt).getTime();
+      canonicalRooms.set(key, {
+        ...(isFresh ? room : existing),
+        unreadCount: Math.max(existing.unreadCount, room.unreadCount),
+      });
+    }
+
+    const visibleRooms = Array.from(canonicalRooms.values());
+    visibleRooms.sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     );
 
-    return roomsList;
+    return visibleRooms;
+  }
+
+  async getUserRoomById(userId: string, roomId: string) {
+    const rooms = await this.getUserRooms(userId);
+    return rooms.find((room) => room.id === roomId) ?? null;
   }
 
   async createRoomWithMembers(data: CreateRoomDto) {
@@ -175,6 +208,77 @@ export class ChatRepository {
         await tx.insert(schema.chatRoomMembers).values(membersData);
       }
 
+      return room;
+    });
+  }
+
+  async findDirectRoomBetween(firstUserId: string, secondUserId: string) {
+    const memberRows = await this.db
+      .select({ roomId: schema.chatRoomMembers.roomId, userId: schema.chatRoomMembers.userId })
+      .from(schema.chatRoomMembers)
+      .where(inArray(schema.chatRoomMembers.userId, [firstUserId, secondUserId]));
+
+    const requestedUsers = new Set([firstUserId, secondUserId]);
+    const roomUsers = new Map<string, Set<string>>();
+    for (const row of memberRows) {
+      const users = roomUsers.get(row.roomId) ?? new Set<string>();
+      users.add(row.userId);
+      roomUsers.set(row.roomId, users);
+    }
+
+    const roomIds = Array.from(roomUsers.entries())
+      .filter(([, users]) => users.size === requestedUsers.size && [...requestedUsers].every((id) => users.has(id)))
+      .map(([roomId]) => roomId);
+    if (roomIds.length === 0) return null;
+
+    const [room] = await this.db
+      .select()
+      .from(schema.chatRooms)
+      .where(and(inArray(schema.chatRooms.id, roomIds), eq(schema.chatRooms.type, 'DIRECT')))
+      .limit(1);
+    return room ?? null;
+  }
+
+  async getOrCreateDirectRoom(firstUserId: string, secondUserId: string) {
+    const pairKey = [firstUserId, secondUserId].sort().join(':');
+
+    return this.db.transaction(async (tx) => {
+      // Serialize creation for this pair. The existing schema has no unique
+      // constraint that can represent an unordered two-user relationship.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${pairKey}, 0))`);
+
+      const memberRows = await tx
+        .select({ roomId: schema.chatRoomMembers.roomId, userId: schema.chatRoomMembers.userId })
+        .from(schema.chatRoomMembers)
+        .where(inArray(schema.chatRoomMembers.userId, [firstUserId, secondUserId]));
+      const requestedUsers = new Set([firstUserId, secondUserId]);
+      const roomUsers = new Map<string, Set<string>>();
+      for (const row of memberRows) {
+        const users = roomUsers.get(row.roomId) ?? new Set<string>();
+        users.add(row.userId);
+        roomUsers.set(row.roomId, users);
+      }
+      const roomIds = Array.from(roomUsers.entries())
+        .filter(([, users]) => users.size === 2 && [...requestedUsers].every((id) => users.has(id)))
+        .map(([roomId]) => roomId);
+
+      if (roomIds.length > 0) {
+        const [existingRoom] = await tx
+          .select()
+          .from(schema.chatRooms)
+          .where(and(inArray(schema.chatRooms.id, roomIds), eq(schema.chatRooms.type, 'DIRECT')))
+          .limit(1);
+        if (existingRoom) return existingRoom;
+      }
+
+      const [room] = await tx
+        .insert(schema.chatRooms)
+        .values({ type: 'DIRECT' })
+        .returning();
+      await tx.insert(schema.chatRoomMembers).values([
+        { roomId: room.id, userId: firstUserId },
+        { roomId: room.id, userId: secondUserId },
+      ]);
       return room;
     });
   }
@@ -218,6 +322,49 @@ export class ChatRepository {
       ))
       .limit(1);
     return !!record;
+  }
+
+  /// Cài đặt riêng tư của người nhận: cho phép người lạ nhắn tin (mặc định true).
+  async getAllowStrangerMessages(userId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ allow: schema.profiles.allowStrangerMessages })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+    return row?.allow ?? true;
+  }
+
+  /// Hai người "quen nhau" nếu cùng là thành viên JOINED của ít nhất 1 CLB
+  /// hoặc đã là bạn bè (friendship ACCEPTED). Ngược lại là người lạ.
+  async isAcquainted(firstUserId: string, secondUserId: string): Promise<boolean> {
+    const [sharedCommunity] = await this.db
+      .select({ one: sql<number>`1` })
+      .from(schema.communityMembers)
+      .where(and(
+        eq(schema.communityMembers.userId, firstUserId),
+        eq(schema.communityMembers.status, 'JOINED'),
+        sql`EXISTS (
+          SELECT 1 FROM ${schema.communityMembers} cm2
+          WHERE cm2.community_id = ${schema.communityMembers.communityId}
+            AND cm2.user_id = ${secondUserId}
+            AND cm2.status = 'JOINED'
+        )`,
+      ))
+      .limit(1);
+    if (sharedCommunity) return true;
+
+    const [friend] = await this.db
+      .select({ id: schema.friendships.id })
+      .from(schema.friendships)
+      .where(and(
+        eq(schema.friendships.status, 'ACCEPTED'),
+        or(
+          and(eq(schema.friendships.senderId, firstUserId), eq(schema.friendships.receiverId, secondUserId)),
+          and(eq(schema.friendships.senderId, secondUserId), eq(schema.friendships.receiverId, firstUserId)),
+        ),
+      ))
+      .limit(1);
+    return !!friend;
   }
 
   async createBlock(blockerId: string, blockedId: string) {
@@ -602,7 +749,10 @@ export class ChatRepository {
     await this.db
       .update(schema.chatMessages)
       .set({ isPinned: true, pinnedBy: pinnedById, pinnedAt: now })
-      .where(eq(schema.chatMessages.id, messageId));
+      .where(and(
+        eq(schema.chatMessages.id, messageId),
+        eq(schema.chatMessages.roomId, roomId),
+      ));
 
     await this.db
       .update(schema.chatRooms)
@@ -616,7 +766,10 @@ export class ChatRepository {
     await this.db
       .update(schema.chatMessages)
       .set({ isPinned: false, pinnedBy: null, pinnedAt: null })
-      .where(eq(schema.chatMessages.id, messageId));
+      .where(and(
+        eq(schema.chatMessages.id, messageId),
+        eq(schema.chatMessages.roomId, roomId),
+      ));
 
     const [room] = await this.db
       .select({ pinnedMessageId: schema.chatRooms.pinnedMessageId })

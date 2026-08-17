@@ -9,6 +9,7 @@ describe('CommunitiesService mentionable member search', () => {
   it('forces JOINED and bounds the result to 20', async () => {
     const communitiesRepository = {
       findById: jest.fn().mockResolvedValue({ id: COMMUNITY_ID }),
+      findMember: jest.fn().mockResolvedValue({ status: 'JOINED', role: 'MEMBER' }),
       getMembers: jest.fn().mockResolvedValue({ data: [], meta: {} }),
       getCommunityMemberStreaks: jest.fn().mockResolvedValue([]),
     };
@@ -23,7 +24,7 @@ describe('CommunitiesService mentionable member search', () => {
       status: 'PENDING',
       limit: 200,
       search: 'Nguyen Van A',
-    });
+    }, { id: '22222222-2222-4222-8222-222222222222', roles: [] });
 
     expect(communitiesRepository.getMembers).toHaveBeenCalledWith(
       COMMUNITY_ID,
