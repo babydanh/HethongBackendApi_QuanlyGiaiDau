@@ -33,6 +33,7 @@ import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
 import {
   CreateDivisionDto,
   GenderRestriction,
+  MatchType,
 } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { resolveEffectiveSportRules } from './utils/sport-rules/resolve-effective-sport-rules';
@@ -1130,6 +1131,70 @@ export class TournamentsService {
 
     // 9. Gọi repository.create() — dùng chung logic insert
     const record = await this.tournamentsRepository.create(userId, fullDto);
+
+    // 9b. Tự động tạo các nội dung thi đấu (divisions) tương ứng cho giải Lite
+    const formatsToCreate = (dto.selectedFormats && dto.selectedFormats.length > 0)
+      ? dto.selectedFormats
+      : [
+          sport === 'football'
+            ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
+            : (dto.format === 'doubles'
+                ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
+                : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES'))
+        ];
+
+    const mapFormatToDivision = (fmt: string) => {
+      switch (fmt) {
+        case 'MALE_SINGLES':
+        case 'SINGLES_MALE':
+          return { name: 'Đơn Nam', matchType: MatchType.SINGLES, genderRestriction: GenderRestriction.MALE };
+        case 'FEMALE_SINGLES':
+        case 'SINGLES_FEMALE':
+          return { name: 'Đơn Nữ', matchType: MatchType.SINGLES, genderRestriction: GenderRestriction.FEMALE };
+        case 'MALE_DOUBLES':
+        case 'DOUBLES_MALE':
+          return { name: 'Đôi Nam', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.MALE };
+        case 'FEMALE_DOUBLES':
+        case 'DOUBLES_FEMALE':
+          return { name: 'Đôi Nữ', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.FEMALE };
+        case 'MIXED_DOUBLES':
+        case 'DOUBLES_MIXED':
+          return { name: 'Đôi Nam Nữ', matchType: MatchType.MIXED_DOUBLES, genderRestriction: GenderRestriction.MIXED };
+        case 'FOOTBALL_MALE':
+          return { name: 'Đội nam', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.MALE };
+        case 'FOOTBALL_FEMALE':
+          return { name: 'Đội nữ', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.FEMALE };
+        case 'FOOTBALL_MIXED':
+        default:
+          return {
+            name: sport === 'football' ? 'Không giới hạn' : 'Đôi Nam',
+            matchType: dto.format === 'singles' ? MatchType.SINGLES : MatchType.DOUBLES,
+            genderRestriction: undefined,
+          };
+      }
+    };
+
+    for (const fmt of formatsToCreate) {
+      const divInfo = mapFormatToDivision(fmt);
+      try {
+        await this.tournamentsRepository.createDivision(
+          {
+            tournamentId: record.id,
+            name: divInfo.name,
+            matchType: divInfo.matchType,
+            genderRestriction: divInfo.genderRestriction,
+            maxParticipants: maxTeams,
+            entryFee: 0,
+            bracketType: finalBracketType as any,
+            startDate: startDateTime ? new Date(startDateTime).toISOString() : undefined,
+            registrationEndDate: registrationEndDate ? registrationEndDate.toISOString() : undefined,
+          },
+          userId,
+        );
+      } catch (divErr) {
+        console.warn('Failed to auto-create division for tournament:', divErr);
+      }
+    }
 
     // 10. Auto-publish: set status REGISTRATION_OPEN để đăng ký & bracket được luôn
     const updated = await this.tournamentsRepository.update(record.id, userId, {
