@@ -876,7 +876,12 @@ export class TournamentsService {
       round_robin: 'ROUND_ROBIN',
       group_stage_knockout: 'GROUP_STAGE_KNOCKOUT',
     };
-    const finalBracketType = bracketTypeMap[bracketType];
+    const finalBracketType = bracketTypeMap[bracketType] as
+      | 'SINGLE_ELIMINATION'
+      | 'DOUBLE_ELIMINATION'
+      | 'ROUND_ROBIN'
+      | 'GROUP_STAGE_KNOCKOUT'
+      | undefined;
     if (!finalBracketType) {
       throw new BadRequestException(
         `Thể thức "${bracketType}" không được hỗ trợ. Chấp nhận: ${Object.keys(bracketTypeMap).join(', ')}.`,
@@ -909,27 +914,27 @@ export class TournamentsService {
       ...litePreset.sportRules,
       ...(sport === 'football'
         ? {
-            halvesCount: dto.footballHalvesCount ?? (litePreset.sportRules as any).halvesCount,
-            halfDuration: dto.footballHalfDuration ?? (litePreset.sportRules as any).halfDuration,
-            allowDraw: dto.footballAllowDraw ?? (litePreset.sportRules as any).allowDraw,
+            halvesCount: dto.footballHalvesCount ?? (litePreset.sportRules.halvesCount as number | undefined),
+            halfDuration: dto.footballHalfDuration ?? (litePreset.sportRules.halfDuration as number | undefined),
+            allowDraw: dto.footballAllowDraw ?? (litePreset.sportRules.allowDraw as boolean | undefined),
           }
         : {
-            setsToWin: dto.setsToWin ?? (litePreset.sportRules as any).setsToWin,
-            pointsPerSet: dto.pointsPerSet ?? (litePreset.sportRules as any).pointsPerSet,
-            winByTwo: dto.winByTwo ?? (litePreset.sportRules as any).winByTwo,
+            setsToWin: dto.setsToWin ?? (litePreset.sportRules.setsToWin as number | undefined),
+            pointsPerSet: dto.pointsPerSet ?? (litePreset.sportRules.pointsPerSet as number | undefined),
+            winByTwo: dto.winByTwo ?? (litePreset.sportRules.winByTwo as boolean | undefined),
             ...(dto.maxPoints !== undefined ? { maxPoints: dto.maxPoints } : {}),
           }),
     };
 
     // 6. Build Lite tournamentConfig shared by App/Web
     const maxTeams = dto.maxTeams || 16;
-    // Lite starts with approval by default, but the organizer can change it
-    // later in the management screen. Keep invite-only semantics intact.
+    // Lite is intentionally frictionless: internal Club Lite starts open to
+    // members. Public/advanced flows can explicitly request approval or invite-only.
     const registrationMode = dto.registrationMode === 'INVITE_ONLY'
       ? 'INVITE_ONLY'
       : dto.registrationMode === 'OPEN'
         ? 'OPEN'
-        : 'APPROVAL';
+        : 'OPEN';
     const requestedPublic = dto.visibility === 'PUBLIC';
     // Community quick-create is always an internal club tournament. For a
     // standalone quick-create, preserve the organizer's explicit scope and
@@ -1197,7 +1202,7 @@ export class TournamentsService {
             genderRestriction: divInfo.genderRestriction,
             maxParticipants: maxTeams,
             entryFee: 0,
-            bracketType: finalBracketType as any,
+            bracketType: finalBracketType,
             startDate: startDateTime ? new Date(startDateTime).toISOString() : undefined,
             registrationEndDate: registrationEndDate ? registrationEndDate.toISOString() : undefined,
           },
