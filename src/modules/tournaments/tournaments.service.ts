@@ -1113,8 +1113,7 @@ export class TournamentsService {
       ...(dto.communityId ? { communityId: dto.communityId } : {}),
       categoryId: category.id,
       matchType,
-      genderRestriction:
-        sport === 'football' ? (dto.genderRestriction ?? null) : null,
+      genderRestriction: dto.genderRestriction ?? null,
       description: dto.description || '',
       maxParticipants: maxTeams,
       entryFee: 0,
