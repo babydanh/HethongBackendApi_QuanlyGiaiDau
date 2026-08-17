@@ -124,6 +124,15 @@ export class ChatGateway {
       if (otherUserId && await this.chatRepository.isBlockedBetween(user.sub, otherUserId)) {
         return { event: 'chat:error', data: 'Blocked' };
       }
+      // Người nhận không nhận tin nhắn người lạ và người gửi không quen nhau.
+      // (Dùng repository trực tiếp — tránh vòng DI ChatService ↔ ChatGateway.)
+      if (otherUserId) {
+        const allowStrangers = await this.chatRepository.getAllowStrangerMessages(otherUserId);
+        const acquainted = allowStrangers || await this.chatRepository.isAcquainted(user.sub, otherUserId);
+        if (!acquainted) {
+          return { event: 'chat:error', data: 'Người dùng này không nhận tin nhắn từ người lạ.' };
+        }
+      }
     }
     const persisted = await this.chatRepository.saveMessage(user.sub, { roomId: payload.roomId, messageText: payload.content.trim() });
     const messagePayload = { ...persisted, content: persisted.messageText, timestamp: persisted.createdAt.toISOString() };

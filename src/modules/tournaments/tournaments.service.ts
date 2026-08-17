@@ -887,7 +887,11 @@ export class TournamentsService {
 
     // 6. Build Lite tournamentConfig shared by App/Web
     const maxTeams = dto.maxTeams || 16;
-    const registrationMode = dto.registrationMode || 'OPEN';
+    // Lite registrations are direct participation.  Keep INVITE_ONLY for
+    // community links, but never allow the advanced approval workflow here.
+    const registrationMode = dto.registrationMode === 'INVITE_ONLY'
+      ? 'INVITE_ONLY'
+      : 'OPEN';
     const footballTeamSize = sport === 'football' ? (dto.teamSize ?? 7) : undefined;
     const footballMaxReserve = sport === 'football' ? (dto.maxReserve ?? 0) : undefined;
     if (sport === 'football') {
@@ -5734,7 +5738,9 @@ export class TournamentsService {
       );
     }
 
-    const registrationMode = (config.registrationMode as string) || 'OPEN';
+    const registrationMode = config.registrationMode === 'INVITE_ONLY'
+      ? 'INVITE_ONLY'
+      : 'OPEN';
 
     // Build teamName from profiles
     const p1Profile = await this.tournamentsRepository.findUserBasicById(

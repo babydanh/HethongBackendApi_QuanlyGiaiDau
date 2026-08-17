@@ -26,6 +26,28 @@ export class ChatService {
     return this.chatRepository.getUserRooms(userId);
   }
 
+  private async assertDirectRoomAccess(userId: string, roomId: string) {
+    if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
+      throw new ForbiddenException('Bạn không có quyền truy cập phòng chat này.');
+    }
+
+    const otherUserId = (await this.chatRepository.getRoomMemberIds(roomId))
+      .find((memberId) => memberId !== userId);
+    if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
+      throw new ForbiddenException('Bạn không thể tương tác trong cuộc trò chuyện này vì đã bị chặn.');
+    }
+  }
+
+  /// Người nhận bật "không nhận tin nhắn người lạ" và người gửi không quen
+  /// (không cùng CLB, không là bạn bè) → chặn nhắn tin riêng.
+  async assertCanDirectMessage(fromUserId: string, toUserId: string) {
+    if (fromUserId === toUserId) return;
+    const allowed = await this.chatRepository.getAllowStrangerMessages(toUserId);
+    if (allowed) return;
+    if (await this.chatRepository.isAcquainted(fromUserId, toUserId)) return;
+    throw new ForbiddenException('Người dùng này không nhận tin nhắn từ người lạ.');
+  }
+
   async createRoom(userId: string, data: CreateRoomDto) {
     if (data.type === RoomType.SUPPORT) {
       throw new ForbiddenException(
@@ -39,22 +61,26 @@ export class ChatService {
       );
     }
 
-    if (!data.memberIds.includes(userId)) {
-      data.memberIds.push(userId);
-    }
+    const memberIds = Array.from(new Set([...data.memberIds, userId]));
 
-    if (data.type === 'DIRECT' && data.memberIds.length !== 2) {
+    if (data.type === 'DIRECT' && memberIds.length !== 2) {
       throw new BadRequestException('Direct room must have exactly 2 members');
     }
 
     if (data.type === 'DIRECT') {
-      const otherUserId = data.memberIds.find((memberId) => memberId !== userId);
+      const otherUserId = memberIds.find((memberId) => memberId !== userId);
+      if (!otherUserId || !(await this.chatRepository.isActiveUser(otherUserId))) {
+        throw new NotFoundException('Không tìm thấy người dùng để nhắn tin.');
+      }
       if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
         throw new ForbiddenException('Không thể mở chat vì một trong hai người đã chặn nhau.');
       }
+      await this.assertCanDirectMessage(userId, otherUserId);
+      const room = await this.chatRepository.getOrCreateDirectRoom(userId, otherUserId);
+      return (await this.chatRepository.getUserRoomById(userId, room.id)) ?? room;
     }
 
-    return this.chatRepository.createRoomWithMembers(data);
+    return this.chatRepository.createRoomWithMembers({ ...data, memberIds });
   }
 
   /**
@@ -138,6 +164,9 @@ export class ChatService {
         .find((memberId) => memberId !== userId);
       if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
         throw new ForbiddenException('Không thể gửi tin nhắn vì một trong hai người đã chặn nhau.');
+      }
+      if (otherUserId) {
+        await this.assertCanDirectMessage(userId, otherUserId);
       }
     }
 
@@ -257,12 +286,20 @@ export class ChatService {
   async pinMessage(userId: string, roomId: string, messageId: string) {
     const room = await this.chatRepository.findRoomById(roomId);
     if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
+    const message = await this.chatRepository.findMessageById(messageId);
+    if (!message || message.roomId !== roomId) {
+      throw new NotFoundException('Tin nhắn không thuộc phòng chat này.');
+    }
 
     if (room.type === 'CLUB' && room.communityId) {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
         throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền ghim tin nhắn.');
       }
+    } else if (room.type === RoomType.DIRECT) {
+      await this.assertDirectRoomAccess(userId, roomId);
+    } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
+      throw new ForbiddenException('Bạn không có quyền ghim tin nhắn trong phòng này.');
     }
 
     const res = await this.chatRepository.pinMessage(roomId, messageId, userId);
@@ -274,12 +311,20 @@ export class ChatService {
   async unpinMessage(userId: string, roomId: string, messageId: string) {
     const room = await this.chatRepository.findRoomById(roomId);
     if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
+    const message = await this.chatRepository.findMessageById(messageId);
+    if (!message || message.roomId !== roomId) {
+      throw new NotFoundException('Tin nhắn không thuộc phòng chat này.');
+    }
 
     if (room.type === 'CLUB' && room.communityId) {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
         throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền bỏ ghim tin nhắn.');
       }
+    } else if (room.type === RoomType.DIRECT) {
+      await this.assertDirectRoomAccess(userId, roomId);
+    } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
+      throw new ForbiddenException('Bạn không có quyền bỏ ghim tin nhắn trong phòng này.');
     }
 
     const res = await this.chatRepository.unpinMessage(roomId, messageId);
@@ -293,6 +338,10 @@ export class ChatService {
 
     if (room.type === 'CLUB' && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
+    } else if (room.type === RoomType.DIRECT) {
+      await this.assertDirectRoomAccess(userId, roomId);
+    } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
+      throw new ForbiddenException('Bạn không có quyền xem tin nhắn được ghim.');
     }
 
     return this.chatRepository.getPinnedMessage(roomId);
@@ -307,6 +356,10 @@ export class ChatService {
 
     if (room.type === 'CLUB' && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
+    } else if (room.type === RoomType.DIRECT) {
+      await this.assertDirectRoomAccess(userId, message.roomId);
+    } else if (!(await this.chatRepository.isMemberOfRoom(message.roomId, userId))) {
+      throw new ForbiddenException('Bạn không có quyền thả cảm xúc trong phòng này.');
     }
 
     const reactions = await this.chatRepository.toggleReaction(messageId, userId, emoji);

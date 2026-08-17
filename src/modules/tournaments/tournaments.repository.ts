@@ -52,7 +52,7 @@ import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
-import { sortFootballStandings } from './utils/football-standings';
+import { hasFootballScoreSnapshot, sortFootballStandings } from './utils/football-standings';
 import { validateFootballRosterSelection } from './utils/football-roster-validation';
 import { assertFootballRosterLockable } from './utils/football-roster-lock';
 import { resolveFootballTeamConfig } from './utils/football-team-config';
@@ -1301,7 +1301,10 @@ export class TournamentsRepository {
         string,
         any
       >;
-      const regMode = tConfig.registrationMode || 'OPEN';
+      const rawRegMode = tConfig.registrationMode || 'OPEN';
+      const regMode = tConfig.isLite === true && rawRegMode === 'APPROVAL'
+        ? 'OPEN'
+        : rawRegMode;
 
       if (regMode === 'INVITE_ONLY' || tournament.visibility === 'PRIVATE') {
         if (!inviteCode || tournament.inviteCode !== inviteCode) {
@@ -2327,11 +2330,13 @@ export class TournamentsRepository {
         });
       }
 
+      const partnerConfig = (tournament?.tournamentConfig || {}) as Record<string, unknown>;
       const targetStatus =
-        ((tournament?.tournamentConfig || {}) as Record<string, unknown>)
-          .registrationMode === 'APPROVAL'
-          ? 'PENDING_APPROVAL'
-          : 'COMPLETE';
+        partnerConfig.isLite === true
+          ? 'COMPLETE'
+          : partnerConfig.registrationMode === 'APPROVAL'
+            ? 'PENDING_APPROVAL'
+            : 'COMPLETE';
 
       const [updated] = await tx
         .update(schema.tournamentParticipants)
@@ -2703,7 +2708,10 @@ export class TournamentsRepository {
       const isPaid = entryFeeAmount === 0;
 
       const tCfg = (tournament.tournamentConfig || {}) as Record<string, any>;
-      const regMode = tCfg.registrationMode || 'OPEN';
+      const rawRegMode = tCfg.registrationMode || 'OPEN';
+      const regMode = tCfg.isLite === true && rawRegMode === 'APPROVAL'
+        ? 'OPEN'
+        : rawRegMode;
       const targetStatus =
         regMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
 
@@ -6071,9 +6079,10 @@ export class TournamentsRepository {
         { entryFee: tournament?.entryFee ?? null },
         nextWaitlisted.tournamentDivisionId,
       );
-      const regMode =
-        ((tournament?.tournamentConfig || {}) as Record<string, unknown>)
-          .registrationMode === 'APPROVAL'
+      const promotionConfig = (tournament?.tournamentConfig || {}) as Record<string, unknown>;
+      const regMode = promotionConfig.isLite === true
+        ? 'OPEN'
+        : promotionConfig.registrationMode === 'APPROVAL'
           ? 'APPROVAL'
           : 'OPEN';
       const promotedStatus =
@@ -7115,8 +7124,8 @@ export class TournamentsRepository {
       .where(eq(schema.tournamentRosters.id, p2Roster.id));
 
     // Update p1
-    const targetStatus =
-      registrationMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
+    // Lite pairing is always finalized immediately; there is no approval queue.
+    const targetStatus = 'COMPLETE';
     const [updatedP1] = await tx
       .update(schema.tournamentParticipants)
       .set({
@@ -7396,9 +7405,12 @@ export class TournamentsRepository {
     return await this.db.transaction(async (tx) => {
       // Lock tournament and validate
       const tournament = await this.assertLitePairableInTx(tx, tournamentId);
-      const registrationMode =
+      const rawRegistrationMode =
         (((tournament.tournamentConfig || {}) as Record<string, unknown>)
           .registrationMode as string) || 'OPEN';
+      const registrationMode = rawRegistrationMode === 'APPROVAL'
+        ? 'OPEN'
+        : rawRegistrationMode;
 
       // Query pending participants INSIDE the transaction with FOR UPDATE (fixes TOCTOU + no lock outside tx)
       const pendingParticipants = await tx
@@ -7629,7 +7641,14 @@ export class TournamentsRepository {
         ),
       );
 
+    const footballGroupIds = new Set(
+      groupMatches
+        .filter((match) => hasFootballScoreSnapshot([match]))
+        .map((match) => match.groupId)
+        .filter((groupId): groupId is string => Boolean(groupId)),
+    );
     for (const [groupId, groupRows] of standingsByGroup) {
+      if (!footballGroupIds.has(groupId)) continue;
       const ordered = sortFootballStandings(groupRows, groupMatches);
       groupRows.splice(0, groupRows.length, ...ordered);
     }

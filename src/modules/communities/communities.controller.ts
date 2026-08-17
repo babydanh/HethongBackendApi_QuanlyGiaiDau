@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   ParseUUIDPipe,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -35,6 +36,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
 import { Throttle } from '@nestjs/throttler';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 
 @ApiTags('communities')
 @Controller('communities')
@@ -92,12 +94,16 @@ export class CommunitiesController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/dashboard')
   @ApiOperation({ summary: 'Lấy dữ liệu tổng quan (dashboard) của cộng đồng' })
   @ApiResponse({ status: 200, description: 'Dashboard tổng quan cộng đồng' })
-  async getDashboard(@Param('id', ParseUUIDPipe) id: string) {
-    return await this.communitiesService.getDashboard(id);
+  async getDashboard(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user?: { id: string; roles?: string[] },
+  ) {
+    return await this.communitiesService.getDashboard(id, user);
   }
 
   @Get(':id/my-membership')
@@ -113,6 +119,7 @@ export class CommunitiesController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết 1 cộng đồng' })
@@ -120,7 +127,7 @@ export class CommunitiesController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user?: { id: string; roles: string[] },
   ) {
-    return await this.communitiesService.findById(id, user);
+    return await this.communitiesService.getPublicView(id, user);
   }
 
   @Post()
@@ -174,14 +181,16 @@ export class CommunitiesController {
   // --- MEMBERS ---
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/members')
   @ApiOperation({ summary: 'Lấy danh sách thành viên cộng đồng' })
   async getMembers(
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: QueryMembersDto,
+    @CurrentUser() user?: { id: string; roles?: string[] },
   ) {
-    return await this.communitiesService.getMembers(id, query);
+    return await this.communitiesService.getMembers(id, query, user);
   }
 
   @Post(':id/members')
@@ -400,11 +409,15 @@ export class CommunitiesController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/gallery')
   @ApiOperation({ summary: 'Lấy gallery ảnh' })
-  async getGallery(@Param('id', ParseUUIDPipe) id: string) {
-    return await this.communitiesService.getGallery(id);
+  async getGallery(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user?: { id: string; roles?: string[] },
+  ) {
+    return await this.communitiesService.getGallery(id, user);
   }
 
   @Post(':id/gallery')
@@ -430,24 +443,28 @@ export class CommunitiesController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/tournaments')
   @ApiOperation({ summary: 'Lấy giải đấu trong cộng đồng' })
   async getTournaments(
     @Param('id', ParseUUIDPipe) id: string,
-    @Query('status') status?: string
+    @Query('status') status?: string,
+    @CurrentUser() user?: { id: string; roles?: string[] },
   ) {
-    return await this.communitiesService.getTournaments(id, status);
+    return await this.communitiesService.getTournaments(id, status, user);
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Get(':id/rankings')
   @ApiOperation({ summary: 'Lấy bảng xếp hạng trong cộng đồng' })
   async getRankings(
     @Param('id', ParseUUIDPipe) id: string,
-    @Query('limit') limit?: number
+    @Query('limit') limit?: number,
+    @CurrentUser() user?: { id: string; roles?: string[] },
   ) {
-    return await this.communitiesService.getRankings(id, limit ? Number(limit) : undefined);
+    return await this.communitiesService.getRankings(id, limit ? Number(limit) : undefined, user);
   }
 }

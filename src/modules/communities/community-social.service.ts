@@ -34,7 +34,7 @@ export class CommunitySocialService {
     if (!settings.publicFeed) {
       await this.requireJoined(communityId, viewer?.id);
     }
-    if (community.visibility === 'PRIVATE') {
+    if (community.visibility !== 'PUBLIC') {
       await this.requireJoined(communityId, viewer?.id);
     }
     return this.socialRepository.listPosts(communityId, limit, cursor, viewer?.id);
@@ -138,7 +138,7 @@ export class CommunitySocialService {
   async listComments(communityId: string, postId: string, limit: number, cursor?: string, viewer?: SocialUser) {
     const community = await this.ensureCommunity(communityId);
     const settings = await this.socialRepository.getSettings(communityId);
-    if (!settings.publicFeed || community.visibility === 'PRIVATE') {
+    if (!settings.publicFeed || community.visibility !== 'PUBLIC') {
       await this.requireJoined(communityId, viewer?.id);
     }
     const post = await this.socialRepository.findPost(postId);
