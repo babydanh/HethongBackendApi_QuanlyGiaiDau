@@ -1302,9 +1302,7 @@ export class TournamentsRepository {
         any
       >;
       const rawRegMode = tConfig.registrationMode || 'OPEN';
-      const regMode = tConfig.isLite === true && rawRegMode === 'APPROVAL'
-        ? 'OPEN'
-        : rawRegMode;
+      const regMode = rawRegMode;
 
       if (regMode === 'INVITE_ONLY' || tournament.visibility === 'PRIVATE') {
         if (!inviteCode || tournament.inviteCode !== inviteCode) {
@@ -2709,9 +2707,7 @@ export class TournamentsRepository {
 
       const tCfg = (tournament.tournamentConfig || {}) as Record<string, any>;
       const rawRegMode = tCfg.registrationMode || 'OPEN';
-      const regMode = tCfg.isLite === true && rawRegMode === 'APPROVAL'
-        ? 'OPEN'
-        : rawRegMode;
+      const regMode = rawRegMode;
       const targetStatus =
         regMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
 

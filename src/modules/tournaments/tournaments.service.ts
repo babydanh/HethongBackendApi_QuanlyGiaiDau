@@ -995,7 +995,9 @@ export class TournamentsService {
       mode: 'LITE',
       isLite: true,
       sportPreset: litePreset.sportPreset,
-      registrationMode: requestedPublic || dto.communityId ? registrationMode : 'INVITE_ONLY',
+      // Visibility controls discoverability; registrationMode independently
+      // controls whether the organizer must approve each application.
+      registrationMode,
       liteJoinPolicy: requestedPublic ? 'PUBLIC' : dto.communityId ? 'COMMUNITY_MEMBERS' : 'INVITE_ONLY',
       liteVisibility,
       bracketSetupMode: 'RANDOM',
@@ -1141,15 +1143,16 @@ export class TournamentsService {
     const record = await this.tournamentsRepository.create(userId, fullDto);
 
     // 9b. Tự động tạo các nội dung thi đấu (divisions) tương ứng cho giải Lite
-    const formatsToCreate = (dto.selectedFormats && dto.selectedFormats.length > 0)
-      ? dto.selectedFormats
-      : [
-          sport === 'football'
-            ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
-            : (dto.format === 'doubles'
-                ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
-                : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES'))
-        ];
+    // Lite creates one safe default division. Additional divisions are
+    // materialized explicitly by the typed frontend division API, so wizard
+    // fields such as selectedFormats never cross this API boundary.
+    const formatsToCreate = [
+      sport === 'football'
+        ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
+        : (dto.format === 'doubles'
+            ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
+            : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES')),
+    ];
 
     const mapFormatToDivision = (fmt: string) => {
       switch (fmt) {

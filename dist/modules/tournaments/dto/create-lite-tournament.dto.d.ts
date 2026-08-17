@@ -9,7 +9,6 @@ export declare class CreateLiteTournamentDto {
     sport: string;
     format?: string;
     genderRestriction?: 'MALE' | 'FEMALE' | 'MIXED';
-    selectedFormats?: string[];
     bracketType?: string;
     maxTeams?: number;
     teamSize?: 5 | 7 | 11;
