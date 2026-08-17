@@ -4,10 +4,13 @@ import {
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
-import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
+import { WsJwtGuard, extractWsToken } from '../../common/guards/ws-jwt.guard';
+import { JwtService } from '@nestjs/jwt';
 import { SendChatMessageDto } from './dto/send-chat-message.dto';
 import { ChatMessagePayload } from './interfaces/chat-message-payload.interface';
 import { corsOptions } from '../../config/cors.config';
@@ -27,13 +30,66 @@ interface ClubTypingPayload { roomId: string; isTyping: boolean; }
   namespace: '/chat',
 })
 @UseGuards(WsJwtGuard)
-export class ChatGateway {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly supportStaffRoom = 'support:staff';
+  private static readonly onlineUsers = new Map<string, Set<string>>();
 
-  constructor(private readonly chatRepository: ChatRepository) {}
+  constructor(
+    private readonly chatRepository: ChatRepository,
+    private readonly jwtService: JwtService,
+  ) {}
 
   @WebSocketServer()
   server: Server;
+
+  async handleConnection(client: Socket) {
+    try {
+      const token = extractWsToken(client);
+      if (token) {
+        const payload = this.jwtService.verify(token) as JwtPayload;
+        if (payload?.sub) {
+          client.data.user = payload;
+          const sockets = ChatGateway.onlineUsers.get(payload.sub) || new Set<string>();
+          const wasOffline = sockets.size === 0;
+          sockets.add(client.id);
+          ChatGateway.onlineUsers.set(payload.sub, sockets);
+          if (wasOffline) {
+            this.server.emit('chat:user:status', { userId: payload.sub, isOnline: true });
+          }
+        }
+      }
+    } catch {
+      // Ignored for unauthenticated socket before login
+    }
+  }
+
+  handleDisconnect(client: Socket) {
+    const user = client.data.user as JwtPayload | undefined;
+    if (user?.sub) {
+      const sockets = ChatGateway.onlineUsers.get(user.sub);
+      if (sockets) {
+        sockets.delete(client.id);
+        if (sockets.size === 0) {
+          ChatGateway.onlineUsers.delete(user.sub);
+          this.server.emit('chat:user:status', {
+            userId: user.sub,
+            isOnline: false,
+            lastActiveAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  }
+
+  @SubscribeMessage('checkOnlineUsers')
+  handleCheckOnlineUsers(@MessageBody() userIds: string[]) {
+    if (!Array.isArray(userIds)) return {};
+    const result: Record<string, boolean> = {};
+    for (const id of userIds) {
+      result[id] = ChatGateway.onlineUsers.has(id);
+    }
+    return result;
+  }
 
   @SubscribeMessage('joinChatRoom')
   async handleJoinRoom(
@@ -237,5 +293,9 @@ export class ChatGateway {
 
   broadcastPollVoted(roomId: string, messageId: string, metadata: unknown) {
     this.server.to(`chat:${roomId}`).emit('chat:poll:voted', { roomId, messageId, metadata });
+  }
+
+  broadcastRoomRead(roomId: string, userId: string, readAt: string) {
+    this.server.to(`chat:${roomId}`).emit('chat:room:read', { roomId, userId, readAt });
   }
 }
