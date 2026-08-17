@@ -83,7 +83,13 @@ async function main() {
       ADD COLUMN IF NOT EXISTS "province_code" varchar(20);
     `;
 
-    console.log('✅ Đã kiểm tra và đồng bộ 100% tất cả các cột của bảng provinces, wards trong database chính.');
+    // 3. Bổ sung cột allow_stranger_messages cho profiles nếu thiếu
+    await sql`
+      ALTER TABLE "profiles" 
+      ADD COLUMN IF NOT EXISTS "allow_stranger_messages" boolean DEFAULT true;
+    `;
+
+    console.log('✅ Đã kiểm tra và đồng bộ 100% tất cả các cột của bảng provinces, wards, profiles thành công.');
   } catch (tableErr) {
     console.warn('⚠️ Lỗi kiểm tra bảng:', tableErr.message);
   }
@@ -133,27 +139,34 @@ async function main() {
 
     console.log(`📊 Chuẩn bị nạp: ${provincesToInsert.length} Tỉnh/Thành, ${wardsToInsert.length} Phường/Xã...`);
 
-    // Dọn dẹp dữ liệu cũ
-    await sql`DELETE FROM "wards"`;
-    await sql`DELETE FROM "provinces"`;
-
-    // Nạp provinces theo batch
+    // Nạp provinces theo batch với ON CONFLICT DO UPDATE (không xóa để tránh xung đột Foreign Key)
     const BATCH_SIZE = 500;
     for (let i = 0; i < provincesToInsert.length; i += BATCH_SIZE) {
       const chunk = provincesToInsert.slice(i, i + BATCH_SIZE);
       await sql`
         INSERT INTO "provinces" ${sql(chunk, 'code', 'name', 'name_en', 'full_name', 'full_name_en', 'code_name')}
-        ON CONFLICT ("code") DO NOTHING
+        ON CONFLICT ("code") DO UPDATE SET
+          "name" = EXCLUDED.name,
+          "name_en" = EXCLUDED.name_en,
+          "full_name" = EXCLUDED.full_name,
+          "full_name_en" = EXCLUDED.full_name_en,
+          "code_name" = EXCLUDED.code_name
       `;
     }
     console.log(`✅ Đã nạp thành công ${provincesToInsert.length} Tỉnh/Thành phố.`);
 
-    // Nạp wards theo batch
+    // Nạp wards theo batch với ON CONFLICT DO UPDATE
     for (let i = 0; i < wardsToInsert.length; i += BATCH_SIZE) {
       const chunk = wardsToInsert.slice(i, i + BATCH_SIZE);
       await sql`
         INSERT INTO "wards" ${sql(chunk, 'code', 'name', 'name_en', 'full_name', 'full_name_en', 'code_name', 'province_code')}
-        ON CONFLICT ("code") DO NOTHING
+        ON CONFLICT ("code") DO UPDATE SET
+          "name" = EXCLUDED.name,
+          "name_en" = EXCLUDED.name_en,
+          "full_name" = EXCLUDED.full_name,
+          "full_name_en" = EXCLUDED.full_name_en,
+          "code_name" = EXCLUDED.code_name,
+          "province_code" = EXCLUDED.province_code
       `;
     }
     console.log(`✅ Đã nạp thành công ${wardsToInsert.length} Phường/Xã trực thuộc Tỉnh/Thành vào database chính!`);
