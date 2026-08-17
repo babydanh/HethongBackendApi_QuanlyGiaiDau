@@ -416,7 +416,10 @@ export class ChatService {
 
   async markRoomRead(userId: string, roomId: string) {
     await this.getMessages(userId, roomId, 1);
-    return this.chatRepository.markRead(roomId, userId);
+    const state = await this.chatRepository.markRead(roomId, userId);
+    const readAt = state?.lastReadAt ? new Date(state.lastReadAt).toISOString() : new Date().toISOString();
+    this.chatGateway.broadcastRoomRead(roomId, userId, readAt);
+    return state;
   }
 
   async getUnreadCount(userId: string, roomId: string) {
