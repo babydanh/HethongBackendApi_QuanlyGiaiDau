@@ -40,7 +40,7 @@ export class AppKeyGuard implements CanActivate {
 
     const expectedKey = this.configService.get<string>('APP_API_KEY');
     if (!expectedKey) {
-      // If no key configured, we allow it (or we could deny, but safer to allow in dev)
+      // If no key configured, allow all
       return true;
     }
 
@@ -49,14 +49,26 @@ export class AppKeyGuard implements CanActivate {
       return true;
     }
 
-    // Allow requests originating from official Web domain (FRONTEND_URL or local dev)
+    // Allow requests originating from official Web domain (sporto.asia, www.sporto.asia, localhost, etc.)
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://sporto.asia';
-    const origin = request.headers['origin'] as string;
-    const referer = request.headers['referer'] as string;
+    const origin = (request.headers['origin'] as string) || '';
+    const referer = (request.headers['referer'] as string) || '';
+    const host = (request.headers['host'] as string) || '';
+
+    const isAllowedDomain = (urlStr: string) => {
+      if (!urlStr) return false;
+      return (
+        urlStr.includes('sporto.asia') ||
+        urlStr.includes('localhost') ||
+        urlStr.includes('127.0.0.1') ||
+        urlStr.startsWith(frontendUrl)
+      );
+    };
 
     if (
-      (origin && (origin === frontendUrl || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'))) ||
-      (referer && (referer.startsWith(frontendUrl) || referer.startsWith('http://localhost') || referer.startsWith('http://127.0.0.1')))
+      isAllowedDomain(origin) ||
+      isAllowedDomain(referer) ||
+      isAllowedDomain(host)
     ) {
       return true;
     }
