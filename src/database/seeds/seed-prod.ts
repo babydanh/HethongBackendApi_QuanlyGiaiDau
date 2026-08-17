@@ -183,11 +183,15 @@ async function main() {
   // 4. Setup Tỉnh/Thành phố/Phường/Xã Việt Nam từ Open API v2 (2 cấp)
   console.log('\n4. Đang tải và khởi tạo dữ liệu hành chính Việt Nam v2 (Provinces/Wards)...');
   try {
+    interface ApiProv { code: number | string; name: string; name_en?: string; codename?: string; }
+    interface ApiWrd { code: number | string; name: string; name_en?: string; codename?: string; }
+    interface ApiProvDetail extends ApiProv { wards?: ApiWrd[]; }
+
     const res = await fetch('https://provinces.open-api.vn/api/v2/p/');
-    const provincesList: any = await res.json();
+    const provincesList = (await res.json()) as ApiProv[];
     
-    const provincesToInsert: any[] = [];
-    const wardsToInsert: any[] = [];
+    const provincesToInsert: (typeof schema.provinces.$inferInsert)[] = [];
+    const wardsToInsert: (typeof schema.wards.$inferInsert)[] = [];
     
     for (const p of provincesList) {
       provincesToInsert.push({
@@ -202,7 +206,7 @@ async function main() {
       try {
         const detailRes = await fetch(`https://provinces.open-api.vn/api/v2/p/${p.code}?depth=2`);
         if (detailRes.ok) {
-          const detailData: any = await detailRes.json();
+          const detailData = (await detailRes.json()) as ApiProvDetail;
           if (detailData.wards && Array.isArray(detailData.wards)) {
             for (const w of detailData.wards) {
               wardsToInsert.push({
@@ -218,7 +222,7 @@ async function main() {
             }
           }
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.warn(`   ⚠️ Không thể lấy xã/phường của tỉnh ${p.name}:`, err);
       }
     }
@@ -230,57 +234,58 @@ async function main() {
       await db.execute(dsql`DELETE FROM "wards" WHERE "district_code" IS NOT NULL`);
       await db.execute(dsql`DELETE FROM "districts"`);
       console.log('   ✅ Đã xóa sạch dữ liệu Quận/Huyện cũ thành công.');
-    } catch (cleanErr) {
+    } catch (cleanErr: unknown) {
       console.warn('   ⚠️ Ghi chú làm sạch dữ liệu cũ:', cleanErr);
     }
 
-    // 2. Tiện ích bulk upsert theo chunk
-    async function upsertInChunks(table: any, data: any[], targetCol: any, updateSet: any, chunkSize = 200) {
+    // 2. Type-safe bulk upsert cho Tỉnh/Thành và Phường/Xã
+    async function upsertProvinces(data: (typeof schema.provinces.$inferInsert)[], chunkSize = 100) {
       for (let i = 0; i < data.length; i += chunkSize) {
         const chunk = data.slice(i, i + chunkSize);
         await db
-          .insert(table)
+          .insert(schema.provinces)
           .values(chunk)
           .onConflictDoUpdate({
-            target: targetCol,
-            set: updateSet,
+            target: schema.provinces.code,
+            set: {
+              name: dsql`EXCLUDED.name`,
+              nameEn: dsql`EXCLUDED.name_en`,
+              fullName: dsql`EXCLUDED.full_name`,
+              fullNameEn: dsql`EXCLUDED.full_name_en`,
+              codeName: dsql`EXCLUDED.code_name`,
+            },
+          });
+      }
+    }
+
+    async function upsertWards(data: (typeof schema.wards.$inferInsert)[], chunkSize = 300) {
+      for (let i = 0; i < data.length; i += chunkSize) {
+        const chunk = data.slice(i, i + chunkSize);
+        await db
+          .insert(schema.wards)
+          .values(chunk)
+          .onConflictDoUpdate({
+            target: schema.wards.code,
+            set: {
+              name: dsql`EXCLUDED.name`,
+              nameEn: dsql`EXCLUDED.name_en`,
+              fullName: dsql`EXCLUDED.full_name`,
+              fullNameEn: dsql`EXCLUDED.full_name_en`,
+              codeName: dsql`EXCLUDED.code_name`,
+              provinceCode: dsql`EXCLUDED.province_code`,
+            },
           });
       }
     }
 
     console.log(`   ➜ Đang lưu/cập nhật ${provincesToInsert.length} Tỉnh/Thành phố...`);
-    await upsertInChunks(
-      schema.provinces,
-      provincesToInsert,
-      schema.provinces.code,
-      {
-        name: dsql`EXCLUDED.name`,
-        nameEn: dsql`EXCLUDED.name_en`,
-        fullName: dsql`EXCLUDED.full_name`,
-        fullNameEn: dsql`EXCLUDED.full_name_en`,
-        codeName: dsql`EXCLUDED.code_name`,
-      },
-      100,
-    );
+    await upsertProvinces(provincesToInsert, 100);
 
     console.log(`   ➜ Đang lưu/cập nhật ${wardsToInsert.length} Phường/Xã...`);
-    await upsertInChunks(
-      schema.wards,
-      wardsToInsert,
-      schema.wards.code,
-      {
-        name: dsql`EXCLUDED.name`,
-        nameEn: dsql`EXCLUDED.name_en`,
-        fullName: dsql`EXCLUDED.full_name`,
-        fullNameEn: dsql`EXCLUDED.full_name_en`,
-        codeName: dsql`EXCLUDED.code_name`,
-        provinceCode: dsql`EXCLUDED.province_code`,
-      },
-      300,
-    );
+    await upsertWards(wardsToInsert, 300);
 
     console.log('   ➜ Đã hoàn tất nạp địa giới hành chính Việt Nam v2 (Tỉnh -> Phường/Xã).');
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('   ❌ Lỗi khi tải dữ liệu địa giới từ API v2:', error);
   }
 
