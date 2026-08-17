@@ -98,9 +98,9 @@ export declare class CommunitySocialController {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+        type: string;
         status: string;
         communityId: string;
-        type: string;
         tournamentId: string | null;
         idempotencyKey: string | null;
         authorId: string | null;
@@ -310,8 +310,8 @@ export declare class CommunitySocialController {
     }, dto: UpdateCommunityPreferencesDto): Promise<{
         id: string;
         updatedAt: Date;
-        communityId: string;
         userId: string;
+        communityId: string;
         muted: boolean;
         notificationsEnabled: boolean;
     }>;

@@ -39,6 +39,17 @@ export declare class ChatService {
     createRoom(userId: string, data: CreateRoomDto): Promise<{
         id: string;
         name: string | null;
+        createdAt: Date;
+        type: string;
+        communityId: string | null;
+        clubName: string | null;
+        clubAvatar: string | null;
+        isAnnouncementOnly: boolean;
+        slowModeSeconds: number;
+        pinnedMessageId: string | null;
+    } | {
+        id: string;
+        name: string | null;
         type: string;
         createdAt: Date;
         participants: {
@@ -60,17 +71,6 @@ export declare class ChatService {
         updatedAt: string;
         unreadCount: number;
         communityId: string | null;
-    } | {
-        id: string;
-        name: string | null;
-        createdAt: Date;
-        communityId: string | null;
-        type: string;
-        clubName: string | null;
-        clubAvatar: string | null;
-        isAnnouncementOnly: boolean;
-        slowModeSeconds: number;
-        pinnedMessageId: string | null;
     }>;
     getOrCreateClubRoom(communityId: string, userId: string): Promise<{
         members: {
@@ -83,8 +83,8 @@ export declare class ChatService {
         id: string;
         name: string | null;
         createdAt: Date;
-        communityId: string | null;
         type: string;
+        communityId: string | null;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;

@@ -25,9 +25,9 @@ export declare class CommunitySocialRepository {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+        type: string;
         status: string;
         communityId: string;
-        type: string;
         tournamentId: string | null;
         idempotencyKey: string | null;
         authorId: string | null;
@@ -263,8 +263,8 @@ export declare class CommunitySocialRepository {
     }): Promise<{
         id: string;
         updatedAt: Date;
-        communityId: string;
         userId: string;
+        communityId: string;
         muted: boolean;
         notificationsEnabled: boolean;
     }>;
@@ -310,9 +310,9 @@ export declare class CommunitySocialRepository {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+        type: string;
         status: string;
         communityId: string;
-        type: string;
         tournamentId: string | null;
         idempotencyKey: string | null;
         authorId: string | null;

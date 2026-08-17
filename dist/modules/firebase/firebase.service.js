@@ -49,7 +49,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.FirebaseService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
-const admin = __importStar(require("firebase-admin"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const database_module_1 = require("../../database/database.module");
@@ -59,6 +58,7 @@ let FirebaseService = FirebaseService_1 = class FirebaseService {
     configService;
     db;
     logger = new common_1.Logger(FirebaseService_1.name);
+    firebaseAdmin = null;
     firebaseApp = null;
     isInitialized = false;
     constructor(configService, db) {
@@ -66,11 +66,20 @@ let FirebaseService = FirebaseService_1 = class FirebaseService {
         this.db = db;
     }
     onModuleInit() {
+        try {
+            this.firebaseAdmin = require('firebase-admin');
+        }
+        catch {
+            this.logger.warn('[FirebaseService] firebase-admin package is not installed. Push notifications will be disabled.');
+            return;
+        }
         this.initFirebase();
     }
     initFirebase() {
-        if (admin.apps.length > 0) {
-            this.firebaseApp = admin.apps[0];
+        if (!this.firebaseAdmin)
+            return;
+        if (this.firebaseAdmin.apps?.length > 0) {
+            this.firebaseApp = this.firebaseAdmin.apps[0];
             this.isInitialized = true;
             return;
         }
@@ -98,8 +107,8 @@ let FirebaseService = FirebaseService_1 = class FirebaseService {
                 }
             }
             if (serviceAccount && serviceAccount.project_id && serviceAccount.private_key) {
-                this.firebaseApp = admin.initializeApp({
-                    credential: admin.credential.cert(serviceAccount),
+                this.firebaseApp = this.firebaseAdmin.initializeApp({
+                    credential: this.firebaseAdmin.credential.cert(serviceAccount),
                 });
                 this.isInitialized = true;
                 this.logger.log(`[FirebaseService] Firebase Admin SDK initialized successfully for project: ${serviceAccount.project_id}`);
@@ -156,7 +165,7 @@ let FirebaseService = FirebaseService_1 = class FirebaseService {
         return this.sendPushToUsers([userId], payload);
     }
     async sendPushToUsers(userIds, payload) {
-        if (!this.isInitialized || !this.firebaseApp || userIds.length === 0) {
+        if (!this.isInitialized || !this.firebaseApp || !this.firebaseAdmin || userIds.length === 0) {
             return { successCount: 0, failureCount: 0 };
         }
         try {
@@ -207,7 +216,7 @@ let FirebaseService = FirebaseService_1 = class FirebaseService {
                     },
                 },
             };
-            const response = await admin.messaging().sendEachForMulticast(multicastMessage);
+            const response = await this.firebaseAdmin.messaging().sendEachForMulticast(multicastMessage);
             const expiredTokenIds = [];
             response.responses.forEach((res, idx) => {
                 if (!res.success && res.error) {

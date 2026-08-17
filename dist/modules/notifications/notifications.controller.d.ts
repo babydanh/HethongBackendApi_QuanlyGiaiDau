@@ -56,10 +56,10 @@ export declare class NotificationsController {
         createdAt: Date;
         updatedAt: Date;
         userId: string;
-        isActive: boolean;
         token: string;
         platform: string;
         deviceInfo: string | null;
+        isActive: boolean;
     } | null>;
     removeDeviceToken(user: JwtPayload, body: RemoveDeviceTokenDto): Promise<{
         success: boolean;

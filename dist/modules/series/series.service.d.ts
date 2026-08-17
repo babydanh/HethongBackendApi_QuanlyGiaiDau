@@ -9,16 +9,16 @@ export declare class SeriesService {
     create(userId: string, data: CreateSeriesDto): Promise<{
         id: string;
         name: string;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+        description: string | null;
+        slug: string;
+        logoUrl: string | null;
+        bannerUrl: string | null;
         visibility: string;
         rules: unknown;
         status: string;
-        slug: string;
         startDate: Date | null;
         endDate: Date | null;
         organizerId: string;

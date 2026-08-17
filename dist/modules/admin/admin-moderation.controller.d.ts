@@ -8,9 +8,9 @@ export declare class AdminModerationController {
         id: string;
         createdAt: Date;
         userId: string;
-        expiresAt: Date | null;
-        reason: string;
         isActive: boolean;
+        reason: string;
+        expiresAt: Date | null;
         bannedBy: string;
         banType: string;
     }>;

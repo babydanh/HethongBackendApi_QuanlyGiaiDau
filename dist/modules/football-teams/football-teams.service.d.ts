@@ -13,12 +13,12 @@ export declare class FootballTeamsService {
     create(userId: string, dto: CreateFootballTeamDto): Promise<{
         id: string;
         name: string;
-        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
+        categoryId: string;
+        logoUrl: string | null;
         status: string;
         communityId: string | null;
-        categoryId: string;
         createdBy: string;
         archivedAt: Date | null;
     }>;
@@ -108,8 +108,8 @@ export declare class FootballTeamsService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         userId: string;
+        status: string;
         role: string;
         invitedBy: string | null;
         joinedAt: Date | null;

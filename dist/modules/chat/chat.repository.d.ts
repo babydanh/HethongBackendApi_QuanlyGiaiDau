@@ -58,8 +58,8 @@ export declare class ChatRepository {
         id: string;
         name: string | null;
         createdAt: Date;
-        communityId: string | null;
         type: string;
+        communityId: string | null;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -82,8 +82,8 @@ export declare class ChatRepository {
         id: string;
         name: string | null;
         createdAt: Date;
-        communityId: string | null;
         type: string;
+        communityId: string | null;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -130,8 +130,8 @@ export declare class ChatRepository {
         id: string;
         name: string | null;
         createdAt: Date;
-        communityId: string | null;
         type: string;
+        communityId: string | null;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -295,7 +295,7 @@ export declare class ChatRepository {
         pinnedMessageId: string | null;
         createdAt: Date;
     }>;
-    getCommunityRole(communityId: string, userId: string): Promise<"MEMBER" | "ADMIN" | "MODERATOR" | "OWNER" | null>;
+    getCommunityRole(communityId: string, userId: string): Promise<"MEMBER" | "MODERATOR" | "ADMIN" | "OWNER" | null>;
     countUnreadForUser(roomId: string, userId: string, lastReadAt?: Date | null): Promise<number>;
     votePoll(userId: string, messageId: string, optionId: string): Promise<{
         messageId: string;

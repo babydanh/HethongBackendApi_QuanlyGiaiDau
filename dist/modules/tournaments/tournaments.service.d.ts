@@ -292,12 +292,12 @@ export declare class TournamentsService {
         parent: {
             id: string;
             name: string;
-            description: string | null;
-            logoUrl: string | null;
-            bannerUrl: string | null;
             createdAt: Date;
             updatedAt: Date;
             deletedAt: Date | null;
+            description: string | null;
+            logoUrl: string | null;
+            bannerUrl: string | null;
             sports: string[];
             createdBy: string;
         } | null;
@@ -356,19 +356,20 @@ export declare class TournamentsService {
     create(userId: string, createTournamentDto: CreateTournamentDto, systemRoles?: string[]): Promise<{
         id: string;
         name: string;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+        description: string | null;
+        categoryId: string;
+        logoUrl: string | null;
+        bannerUrl: string | null;
         visibility: string;
         status: string;
         communityId: string | null;
-        categoryId: string;
+        matchType: string;
+        genderRestriction: string | null;
         createdBy: string;
         parentId: string | null;
-        matchType: string;
         sportRules: unknown;
         tournamentConfig: unknown;
         entryFee: string;
@@ -384,7 +385,6 @@ export declare class TournamentsService {
         prizeDescription: string | null;
         prizes: unknown;
         inviteCode: string | null;
-        genderRestriction: string | null;
         contactInfo: unknown;
         city: string | null;
         reservedSlotsCount: number;
@@ -725,16 +725,16 @@ export declare class TournamentsService {
     }>;
     addTeamMember(participantId: string, userId: string, memberUserId: string, role: 'MAIN' | 'RESERVE'): Promise<{
         id: string;
-        status: string;
         userId: string;
+        status: string;
         role: string;
         joinedAt: Date;
         participantId: string;
     }>;
     removeTeamMember(participantId: string, userId: string, memberUserId: string): Promise<{
         id: string;
-        status: string;
         userId: string;
+        status: string;
         role: string;
         joinedAt: Date;
         participantId: string;
@@ -1196,12 +1196,12 @@ export declare class TournamentsService {
     createParent(userId: string, data: CreateParentTournamentDto, systemRoles?: string[]): Promise<{
         id: string;
         name: string;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+        description: string | null;
+        logoUrl: string | null;
+        bannerUrl: string | null;
         sports: string[];
         createdBy: string;
     }>;
@@ -1312,8 +1312,8 @@ export declare class TournamentsService {
         updatedAt: Date;
         deletedAt: Date | null;
         status: string;
-        scheduledAt: Date | null;
         tournamentId: string;
+        scheduledAt: Date | null;
         courtName: string | null;
         stageId: string;
         groupId: string | null;
@@ -1585,17 +1585,17 @@ export declare class TournamentsService {
         id: string;
         createdAt: Date;
         userId: string;
+        tournamentId: string;
         role: string;
         createdBy: string | null;
-        tournamentId: string;
     }>;
     removeStaffMember(id: string, staffUserId: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         createdAt: Date;
         userId: string;
+        tournamentId: string;
         role: string;
         createdBy: string | null;
-        tournamentId: string;
     }>;
     findReferees(id: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
@@ -1662,18 +1662,18 @@ export declare class TournamentsService {
         id: string;
         name: string;
         createdAt: Date;
+        minElo: number | null;
+        maxElo: number | null;
         status: string;
         matchType: string;
+        genderRestriction: string | null;
+        tournamentId: string;
         entryFee: string;
         registrationEndDate: Date | null;
         maxParticipants: number | null;
         startDate: Date | null;
         venueId: string | null;
         prizeDescription: string | null;
-        genderRestriction: string | null;
-        tournamentId: string;
-        minElo: number | null;
-        maxElo: number | null;
         isConfigOverride: boolean;
         bracketType: string | null;
         roundConfig: unknown;
@@ -1885,11 +1885,11 @@ export declare class TournamentsService {
     addReferee(id: string, email: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         createdAt: Date;
-        status: string;
         userId: string;
+        status: string;
         tournamentId: string;
-        assignedAt: Date;
         assignedBy: string | null;
+        assignedAt: Date;
     }>;
     respondToRefereeInvite(tournamentId: string, refereeId: string, userId: string, action: 'ACCEPT' | 'DECLINE'): Promise<{
         id: string;
@@ -1903,11 +1903,11 @@ export declare class TournamentsService {
     revokeRefereeInvite(tournamentId: string, refereeId: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         createdAt: Date;
-        status: string;
         userId: string;
+        status: string;
         tournamentId: string;
-        assignedAt: Date;
         assignedBy: string | null;
+        assignedAt: Date;
     }>;
     private checkLiteAuthorization;
     getLiteParticipants(id: string, userId: string, systemRoles?: string[]): Promise<{

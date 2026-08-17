@@ -80,8 +80,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         userId: string;
+        status: string;
         evidenceUrls: string[];
         contactPhone: string;
         rejectReason: string | null;
@@ -141,9 +141,9 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         userId: string;
-        expiresAt: Date | null;
-        reason: string;
         isActive: boolean;
+        reason: string;
+        expiresAt: Date | null;
         bannedBy: string;
         banType: string;
     }>;

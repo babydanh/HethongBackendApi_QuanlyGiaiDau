@@ -458,14 +458,14 @@ export declare class CommunitiesController {
     }, createCommunityDto: CreateCommunityDto): Promise<{
         id: string;
         name: string;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        creatorId: string;
+        description: string | null;
         provinceCode: string | null;
+        logoUrl: string | null;
+        bannerUrl: string | null;
+        creatorId: string;
         districtCode: string | null;
         wardCode: string | null;
         visibility: string;
@@ -628,10 +628,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, addMemberDto: AddMemberDto): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
@@ -709,10 +709,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, userId: string): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
@@ -743,10 +743,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, userId: string): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
@@ -759,10 +759,10 @@ export declare class CommunitiesController {
         id: string;
     }, id: string, body: JoinCommunityDto): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
@@ -793,36 +793,36 @@ export declare class CommunitiesController {
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        communityId: string;
         userId: string;
         type: string;
+        communityId: string;
     }>;
     unfollowCommunity(user: {
         id: string;
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        communityId: string;
         userId: string;
         type: string;
+        communityId: string;
     }>;
     favoriteCommunity(user: {
         id: string;
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        communityId: string;
         userId: string;
         type: string;
+        communityId: string;
     }>;
     unfavoriteCommunity(user: {
         id: string;
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        communityId: string;
         userId: string;
         type: string;
+        communityId: string;
     }>;
     getJoinRequests(user: {
         id: string;
@@ -863,10 +863,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, body: InviteMemberDto): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
@@ -879,10 +879,10 @@ export declare class CommunitiesController {
         id: string;
     }, id: string, action: 'accept' | 'decline'): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
