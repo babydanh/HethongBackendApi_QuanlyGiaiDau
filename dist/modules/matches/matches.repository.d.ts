@@ -634,22 +634,22 @@ export declare class MatchesRepository {
     muteUser(matchId: string, userId: string, type: 'MUTE' | 'BAN', reason: string | null, mutedBy: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         type: string;
+        userId: string;
         matchId: string;
+        mutedBy: string | null;
         reason: string | null;
         expiresAt: Date | null;
-        mutedBy: string | null;
     }>;
     unmuteUser(matchId: string, userId: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         type: string;
+        userId: string;
         matchId: string;
+        mutedBy: string | null;
         reason: string | null;
         expiresAt: Date | null;
-        mutedBy: string | null;
     }>;
     getFollowerUserIds(tournamentId: string): Promise<string[]>;
     incrementCheerCount(id: string): Promise<{
