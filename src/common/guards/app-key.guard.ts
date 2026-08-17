@@ -34,6 +34,11 @@ export class AppKeyGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     
+    // Always allow public master geographic data (regions)
+    if (request.path.includes('/regions')) {
+      return true;
+    }
+    
     // Only apply for /api/ routes
     if (!request.path.startsWith('/api/')) {
       return true;

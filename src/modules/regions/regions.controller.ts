@@ -5,6 +5,7 @@ import { QueryRegionDto, QueryWardDto } from './dto/query-region.dto';
 import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('regions')
+@Public()
 @Controller('regions')
 export class RegionsController {
   constructor(private readonly regionsService: RegionsService) {}
