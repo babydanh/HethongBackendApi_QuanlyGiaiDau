@@ -1,4 +1,4 @@
-// seed-regions-v2.js - Standalone vanilla JS seed for Vietnam Administrative Units (API v2: Province -> Ward)
+// seed-regions-v2.js - Standalone seed for 2-Level Administrative Units (Province -> Ward)
 require('dotenv').config();
 const postgres = require('postgres');
 
@@ -33,9 +33,10 @@ const sql = process.env.DATABASE_URL
 async function main() {
   console.log(`🔌 Đang kết nối Database (${host}:${port}/${database})...`);
 
-  // Đảm bảo bảng provinces và wards tồn tại
   try {
     await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`;
+    
+    // 1. Tạo hoặc cập nhật cấu trúc bảng provinces
     await sql`
       CREATE TABLE IF NOT EXISTS "provinces" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,6 +49,8 @@ async function main() {
         "created_at" timestamp with time zone DEFAULT now() NOT NULL
       )
     `;
+
+    // 2. Tạo hoặc cập nhật cấu trúc bảng wards
     await sql`
       CREATE TABLE IF NOT EXISTS "wards" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -58,11 +61,11 @@ async function main() {
         "full_name_en" varchar(255),
         "code_name" varchar(255),
         "province_code" varchar(20) REFERENCES "provinces"("code") ON DELETE CASCADE,
-        "district_code" varchar(20),
         "created_at" timestamp with time zone DEFAULT now() NOT NULL
       )
     `;
-    // Thêm cột province_code vào wards nếu bảng cũ chưa có
+
+    // 3. Đảm bảo cột province_code tồn tại trong bảng wards
     await sql`
       DO $$ 
       BEGIN 
@@ -74,25 +77,26 @@ async function main() {
         END IF; 
       END $$;
     `;
+    console.log('✅ Đã kiểm tra và đảm bảo cấu trúc bảng provinces, wards thành công.');
   } catch (tableErr) {
-    console.warn('⚠️ Ghi chú tạo bảng:', tableErr.message);
+    console.warn('⚠️ Lỗi kiểm tra bảng:', tableErr.message);
   }
 
-  console.log('🔄 Đang kết nối https://provinces.open-api.vn/api/v2/ để lấy dữ liệu địa giới hành chính chuẩn mới (2 cấp: Tỉnh/Thành -> Phường/Xã)...');
+  console.log('🔄 Đang tải toàn bộ dữ liệu địa giới từ https://provinces.open-api.vn/api/?depth=3 ...');
 
   try {
-    const res = await fetch('https://provinces.open-api.vn/api/v2/p/');
+    const res = await fetch('https://provinces.open-api.vn/api/?depth=3');
     if (!res.ok) {
       throw new Error(`HTTP error! status: ${res.status}`);
     }
 
-    const provincesList = await res.json();
-    console.log(`✅ Đã tải về danh sách ${provincesList.length} Tỉnh/Thành phố.`);
+    const allData = await res.json();
+    console.log(`✅ Đã tải về ${allData.length} Tỉnh/Thành phố.`);
 
     const provincesToInsert = [];
     const wardsToInsert = [];
 
-    for (const p of provincesList) {
+    for (const p of allData) {
       provincesToInsert.push({
         code: String(p.code),
         name: p.name,
@@ -102,13 +106,10 @@ async function main() {
         code_name: p.codename,
       });
 
-      // Tải danh sách phường/xã trực thuộc từng tỉnh/thành phố theo chuẩn v2
-      try {
-        const detailRes = await fetch(`https://provinces.open-api.vn/api/v2/p/${p.code}?depth=2`);
-        if (detailRes.ok) {
-          const detailData = await detailRes.json();
-          if (detailData.wards && Array.isArray(detailData.wards)) {
-            for (const w of detailData.wards) {
+      if (p.districts && Array.isArray(p.districts)) {
+        for (const d of p.districts) {
+          if (d.wards && Array.isArray(d.wards)) {
+            for (const w of d.wards) {
               wardsToInsert.push({
                 code: String(w.code),
                 name: w.name,
@@ -117,73 +118,46 @@ async function main() {
                 full_name_en: w.name_en || null,
                 code_name: w.codename,
                 province_code: String(p.code),
-                district_code: null,
               });
             }
           }
         }
-      } catch (err) {
-        console.warn(`⚠️ Không thể lấy danh sách xã/phường của tỉnh ${p.name}:`, err.message);
       }
     }
 
-    // 1. Dọn dẹp dữ liệu v1 cũ (xóa quận/huyện và phường thuộc huyện cũ)
-    console.log('🧹 Đang làm sạch dữ liệu đơn vị hành chính cũ v1 (Quận/Huyện)...');
-    try {
-      await sql`
-        DO $$ 
-        BEGIN 
-          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='communities') THEN 
-            UPDATE "communities" SET "district_code" = NULL WHERE "district_code" IS NOT NULL; 
-          END IF; 
-        END $$;
-      `;
-      await sql`DELETE FROM "wards" WHERE "district_code" IS NOT NULL`;
-      await sql`DROP TABLE IF EXISTS "districts" CASCADE`;
-      console.log('✅ Đã xóa sạch dữ liệu Quận/Huyện cũ thành công.');
-    } catch (cleanErr) {
-      console.warn('⚠️ Ghi chú làm sạch dữ liệu cũ:', cleanErr.message);
-    }
+    console.log(`📊 Chuẩn bị nạp: ${provincesToInsert.length} Tỉnh/Thành, ${wardsToInsert.length} Phường/Xã...`);
 
-    // 2. Bulk upsert Tỉnh/Thành phố
-    console.log(`🚀 Đang cập nhật ${provincesToInsert.length} Tỉnh/Thành phố...`);
-    const chunkSize = 100;
-    for (let i = 0; i < provincesToInsert.length; i += chunkSize) {
-      const chunk = provincesToInsert.slice(i, i + chunkSize);
+    // Dọn dẹp dữ liệu cũ
+    await sql`DELETE FROM "wards"`;
+    await sql`DELETE FROM "provinces"`;
+
+    // Nạp provinces theo batch
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < provincesToInsert.length; i += BATCH_SIZE) {
+      const chunk = provincesToInsert.slice(i, i + BATCH_SIZE);
       await sql`
         INSERT INTO "provinces" ${sql(chunk, 'code', 'name', 'name_en', 'full_name', 'full_name_en', 'code_name')}
-        ON CONFLICT ("code") DO UPDATE SET
-          "name" = EXCLUDED.name,
-          "name_en" = EXCLUDED.name_en,
-          "full_name" = EXCLUDED.full_name,
-          "full_name_en" = EXCLUDED.full_name_en,
-          "code_name" = EXCLUDED.code_name
+        ON CONFLICT ("code") DO NOTHING
       `;
     }
+    console.log(`✅ Đã nạp thành công ${provincesToInsert.length} Tỉnh/Thành phố.`);
 
-    // 3. Bulk upsert Phường/Xã
-    console.log(`🚀 Đang cập nhật ${wardsToInsert.length} Phường/Xã trực thuộc...`);
-    const wardChunkSize = 300;
-    for (let i = 0; i < wardsToInsert.length; i += wardChunkSize) {
-      const chunk = wardsToInsert.slice(i, i + wardChunkSize);
+    // Nạp wards theo batch
+    for (let i = 0; i < wardsToInsert.length; i += BATCH_SIZE) {
+      const chunk = wardsToInsert.slice(i, i + BATCH_SIZE);
       await sql`
-        INSERT INTO "wards" ${sql(chunk, 'code', 'name', 'name_en', 'full_name', 'full_name_en', 'code_name', 'province_code', 'district_code')}
-        ON CONFLICT ("code") DO UPDATE SET
-          "name" = EXCLUDED.name,
-          "name_en" = EXCLUDED.name_en,
-          "full_name" = EXCLUDED.full_name,
-          "full_name_en" = EXCLUDED.full_name_en,
-          "code_name" = EXCLUDED.code_name,
-          "province_code" = EXCLUDED.province_code
+        INSERT INTO "wards" ${sql(chunk, 'code', 'name', 'name_en', 'full_name', 'full_name_en', 'code_name', 'province_code')}
+        ON CONFLICT ("code") DO NOTHING
       `;
     }
+    console.log(`✅ Đã nạp thành công ${wardsToInsert.length} Phường/Xã trực thuộc Tỉnh/Thành!`);
 
-    console.log('🎉 Đồng bộ dữ liệu địa giới hành chính v2 (Tỉnh -> Phường/Xã) thành công 100%!');
-  } catch (error) {
-    console.error('❌ Lỗi khi đồng bộ địa giới hành chính v2:', error);
+  } catch (seedErr) {
+    console.error('❌ Lỗi nạp dữ liệu:', seedErr.message);
   } finally {
     await sql.end();
+    console.log('🎉 Hoàn tất quá trình seed địa giới hành chính!');
   }
 }
 
-main();
+main().catch(console.error);
