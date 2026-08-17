@@ -801,7 +801,8 @@ export class TournamentsService {
           sportRules: {
             kind: 'TENNIS',
             setsToWin: 1,
-            pointsPerSet: 10,
+            pointsPerSet: 6,
+            maxPoints: 7,
             winByTwo: true,
           },
         };
@@ -903,6 +904,11 @@ export class TournamentsService {
     const maxTeams = dto.maxTeams || 16;
     // Lite registrations are direct participation.  Keep INVITE_ONLY for
     // community links, but never allow the advanced approval workflow here.
+    if ((dto.registrationMode as string | undefined) === 'APPROVAL') {
+      throw new BadRequestException(
+        'Giải Lite chỉ hỗ trợ đăng ký mở hoặc chỉ nhận lời mời.',
+      );
+    }
     const registrationMode = dto.registrationMode === 'INVITE_ONLY'
       ? 'INVITE_ONLY'
       : 'OPEN';
@@ -1028,6 +1034,45 @@ export class TournamentsService {
       endDateTime = new Date(dto.endDate).toISOString();
     }
 
+    const registrationStartDate = dto.registrationStartDate
+      ? new Date(dto.registrationStartDate)
+      : new Date();
+    const registrationEndDate = dto.registrationEndDate
+      ? new Date(dto.registrationEndDate)
+      : startDateTime
+        ? new Date(new Date(startDateTime).getTime() - 60 * 60 * 1000)
+        : undefined;
+    if (
+      Number.isNaN(registrationStartDate.getTime()) ||
+      (registrationEndDate && Number.isNaN(registrationEndDate.getTime()))
+    ) {
+      throw new BadRequestException('Thời gian đăng ký không hợp lệ.');
+    }
+    if (registrationEndDate && registrationStartDate >= registrationEndDate) {
+      throw new BadRequestException('Thời gian mở đăng ký phải trước thời gian đóng.');
+    }
+    if (startDateTime && registrationEndDate && registrationEndDate >= new Date(startDateTime)) {
+      throw new BadRequestException('Thời gian đóng đăng ký phải trước giờ bắt đầu giải.');
+    }
+    const locationParts = [dto.venueName, dto.locationAddress, dto.ward, dto.district, dto.province]
+      .map((part) => part?.trim())
+      .filter((part): part is string => Boolean(part));
+    const tournamentConfigWithLocation = {
+      ...tournamentConfig,
+      ...(locationParts.length
+        ? {
+            location: {
+              ...(dto.venueName ? { venueName: dto.venueName.trim() } : {}),
+              ...(dto.locationAddress ? { address: dto.locationAddress.trim() } : {}),
+              ...(dto.province ? { province: dto.province.trim() } : {}),
+              ...(dto.district ? { district: dto.district.trim() } : {}),
+              ...(dto.ward ? { ward: dto.ward.trim() } : {}),
+              display: locationParts.join(', '),
+            },
+          }
+        : {}),
+    };
+
     const fullDto = new CreateTournamentDto();
     Object.assign(fullDto, {
       name: dto.name,
@@ -1043,16 +1088,12 @@ export class TournamentsService {
       entryFee: 0,
       isRanked: dto.isRanked ?? false,
       sportRules,
-      tournamentConfig,
+      tournamentConfig: tournamentConfigWithLocation,
       startDate: startDateTime || undefined,
       endDate: endDateTime || undefined,
-      registrationStartDate: new Date().toISOString(),
-      registrationEndDate: startDateTime
-        ? new Date(
-            new Date(startDateTime).getTime() - 60 * 60 * 1000,
-          ).toISOString()
-        : undefined,
-      city: dto.location || undefined,
+      registrationStartDate: registrationStartDate.toISOString(),
+      registrationEndDate: registrationEndDate?.toISOString(),
+      city: dto.province || dto.location || undefined,
     });
 
     // 9. Gọi repository.create() — dùng chung logic insert

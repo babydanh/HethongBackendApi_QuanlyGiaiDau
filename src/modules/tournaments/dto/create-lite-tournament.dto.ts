@@ -154,12 +154,47 @@ export class CreateLiteTournamentDto {
   @ApiPropertyOptional({
     example: 'OPEN',
     description: 'Chế độ đăng ký',
-    enum: ['OPEN', 'APPROVAL', 'INVITE_ONLY'],
+    enum: ['OPEN', 'INVITE_ONLY'],
   })
   @IsString()
   @IsOptional()
-  @IsIn(['OPEN', 'APPROVAL', 'INVITE_ONLY'])
-  registrationMode?: string;
+  @IsIn(['OPEN', 'INVITE_ONLY'])
+  registrationMode?: 'OPEN' | 'INVITE_ONLY';
+
+  @ApiPropertyOptional({ example: 'Sân Pickleball Trung tâm', description: 'Tên sân/địa điểm hiển thị' })
+  @IsString()
+  @IsOptional()
+  venueName?: string;
+
+  @ApiPropertyOptional({ example: 'Số 12 đường ABC, phường X', description: 'Địa chỉ chi tiết địa điểm' })
+  @IsString()
+  @IsOptional()
+  locationAddress?: string;
+
+  @ApiPropertyOptional({ example: 'Hà Nội', description: 'Tỉnh/thành phố' })
+  @IsString()
+  @IsOptional()
+  province?: string;
+
+  @ApiPropertyOptional({ example: 'Nam Từ Liêm', description: 'Quận/huyện' })
+  @IsString()
+  @IsOptional()
+  district?: string;
+
+  @ApiPropertyOptional({ example: 'Mỹ Đình', description: 'Phường/xã' })
+  @IsString()
+  @IsOptional()
+  ward?: string;
+
+  @ApiPropertyOptional({ example: '2026-10-01T09:00:00Z', description: 'Ngày giờ mở đăng ký; mặc định hiện tại' })
+  @IsDateString()
+  @IsOptional()
+  registrationStartDate?: string;
+
+  @ApiPropertyOptional({ example: '2026-10-14T23:59:00Z', description: 'Ngày giờ đóng đăng ký; phải trước giờ thi đấu' })
+  @IsDateString()
+  @IsOptional()
+  registrationEndDate?: string;
 
   @ApiPropertyOptional({
     example: 'Hải Dương',
