@@ -32,6 +32,52 @@ const sql = process.env.DATABASE_URL
 
 async function main() {
   console.log(`🔌 Đang kết nối Database (${host}:${port}/${database})...`);
+
+  // Đảm bảo bảng provinces và wards tồn tại
+  try {
+    await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS "provinces" (
+        "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        "code" varchar(20) NOT NULL UNIQUE,
+        "name" varchar(255) NOT NULL,
+        "name_en" varchar(255),
+        "full_name" varchar(255),
+        "full_name_en" varchar(255),
+        "code_name" varchar(255),
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+      )
+    `;
+    await sql`
+      CREATE TABLE IF NOT EXISTS "wards" (
+        "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        "code" varchar(20) NOT NULL UNIQUE,
+        "name" varchar(255) NOT NULL,
+        "name_en" varchar(255),
+        "full_name" varchar(255),
+        "full_name_en" varchar(255),
+        "code_name" varchar(255),
+        "province_code" varchar(20) REFERENCES "provinces"("code") ON DELETE CASCADE,
+        "district_code" varchar(20),
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+      )
+    `;
+    // Thêm cột province_code vào wards nếu bảng cũ chưa có
+    await sql`
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name='wards' AND column_name='province_code'
+        ) THEN 
+          ALTER TABLE "wards" ADD COLUMN "province_code" varchar(20) REFERENCES "provinces"("code") ON DELETE CASCADE; 
+        END IF; 
+      END $$;
+    `;
+  } catch (tableErr) {
+    console.warn('⚠️ Ghi chú tạo bảng:', tableErr.message);
+  }
+
   console.log('🔄 Đang kết nối https://provinces.open-api.vn/api/v2/ để lấy dữ liệu địa giới hành chính chuẩn mới (2 cấp: Tỉnh/Thành -> Phường/Xã)...');
 
   try {
@@ -84,9 +130,16 @@ async function main() {
     // 1. Dọn dẹp dữ liệu v1 cũ (xóa quận/huyện và phường thuộc huyện cũ)
     console.log('🧹 Đang làm sạch dữ liệu đơn vị hành chính cũ v1 (Quận/Huyện)...');
     try {
-      await sql`UPDATE "communities" SET "district_code" = NULL WHERE "district_code" IS NOT NULL`;
+      await sql`
+        DO $$ 
+        BEGIN 
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='communities') THEN 
+            UPDATE "communities" SET "district_code" = NULL WHERE "district_code" IS NOT NULL; 
+          END IF; 
+        END $$;
+      `;
       await sql`DELETE FROM "wards" WHERE "district_code" IS NOT NULL`;
-      await sql`DELETE FROM "districts"`;
+      await sql`DROP TABLE IF EXISTS "districts" CASCADE`;
       console.log('✅ Đã xóa sạch dữ liệu Quận/Huyện cũ thành công.');
     } catch (cleanErr) {
       console.warn('⚠️ Ghi chú làm sạch dữ liệu cũ:', cleanErr.message);
