@@ -53,6 +53,7 @@ __decorate([
 ], RegionsController.prototype, "getWards", null);
 exports.RegionsController = RegionsController = __decorate([
     (0, swagger_1.ApiTags)('regions'),
+    (0, public_decorator_1.Public)(),
     (0, common_1.Controller)('regions'),
     __metadata("design:paramtypes", [regions_service_1.RegionsService])
 ], RegionsController);

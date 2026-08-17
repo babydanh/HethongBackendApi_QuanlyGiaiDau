@@ -35,6 +35,9 @@ let AppKeyGuard = class AppKeyGuard {
             return true;
         }
         const request = context.switchToHttp().getRequest();
+        if (request.path.includes('/regions')) {
+            return true;
+        }
         if (!request.path.startsWith('/api/')) {
             return true;
         }
