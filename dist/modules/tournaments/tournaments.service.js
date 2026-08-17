@@ -588,6 +588,9 @@ let TournamentsService = class TournamentsService {
                 ? 'OPEN'
                 : 'APPROVAL';
         const requestedPublic = dto.visibility === 'PUBLIC';
+        const tournamentType = dto.communityId
+            ? 'CLUB'
+            : (dto.tournamentType ?? 'PUBLIC');
         const liteVisibility = requestedPublic
             ? 'PUBLIC'
             : dto.communityId
@@ -732,7 +735,7 @@ let TournamentsService = class TournamentsService {
         const fullDto = new create_tournament_dto_1.CreateTournamentDto();
         Object.assign(fullDto, {
             name: dto.name,
-            tournamentType: 'CLUB',
+            tournamentType,
             visibility: requestedPublic ? 'PUBLIC' : 'PRIVATE',
             ...(dto.bannerUrl ? { bannerUrl: dto.bannerUrl } : {}),
             ...(dto.logoUrl ? { logoUrl: dto.logoUrl } : {}),
@@ -3135,13 +3138,18 @@ let TournamentsService = class TournamentsService {
             const divisionEntryFee = createDivisionDto.entryFee ??
                 (tournament.entryFee ? Number(tournament.entryFee) : 0);
             await this.assertEntryFeeAllowed(divisionEntryFee);
-            if (tournament.status === 'REGISTRATION_OPEN' ||
-                tournament.status === 'REGISTRATION_CLOSED') {
-                throw new common_1.BadRequestException('Không thể thêm hình thức thi đấu khi giải đấu đang mở đăng ký');
-            }
             const category = await this.tournamentsRepository.findCategory(tournament.categoryId);
             if (!category) {
                 throw new common_1.NotFoundException('Hạng đấu không tồn tại');
+            }
+            if (tournament.isRegistrationLocked || ['REGISTRATION_CLOSED', 'UPCOMING', 'IN_PROGRESS', 'ONGOING', 'COMPLETED', 'CANCELLED'].includes(tournament.status)) {
+                throw new common_1.BadRequestException('Không thể thêm hình thức sau khi danh sách hoặc giải đấu đã được chốt.');
+            }
+            if (tournament.status === 'REGISTRATION_OPEN') {
+                const participants = await this.tournamentsRepository.findParticipants(tournamentId, tournament.categoryId);
+                if (participants.length > 0) {
+                    throw new common_1.BadRequestException('Không thể thêm hình thức sau khi đã có người đăng ký.');
+                }
             }
             const categoryConfig = category.categoryConfig;
             this.validateMatchTypeAgainstCategory(categoryConfig, createDivisionDto.matchType, 'division');

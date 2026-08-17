@@ -1,6 +1,7 @@
 export declare class CreateLiteTournamentDto {
     name: string;
     communityId?: string;
+    tournamentType?: 'CLUB' | 'PUBLIC';
     bannerUrl?: string;
     logoUrl?: string;
     prizeDescription?: string;

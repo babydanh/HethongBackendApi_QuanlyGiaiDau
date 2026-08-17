@@ -931,6 +931,12 @@ export class TournamentsService {
         ? 'OPEN'
         : 'APPROVAL';
     const requestedPublic = dto.visibility === 'PUBLIC';
+    // Community quick-create is always an internal club tournament. For a
+    // standalone quick-create, preserve the organizer's explicit scope and
+    // default to the expanded/public tournament type.
+    const tournamentType = dto.communityId
+      ? 'CLUB'
+      : (dto.tournamentType ?? 'PUBLIC');
     const liteVisibility = requestedPublic
       ? 'PUBLIC'
       : dto.communityId
@@ -1108,7 +1114,7 @@ export class TournamentsService {
     const fullDto = new CreateTournamentDto();
     Object.assign(fullDto, {
       name: dto.name,
-      tournamentType: 'CLUB',
+      tournamentType,
       visibility: requestedPublic ? 'PUBLIC' : 'PRIVATE',
       ...(dto.bannerUrl ? { bannerUrl: dto.bannerUrl } : {}),
       ...(dto.logoUrl ? { logoUrl: dto.logoUrl } : {}),
@@ -5001,21 +5007,24 @@ export class TournamentsService {
         (tournament.entryFee ? Number(tournament.entryFee) : 0);
       await this.assertEntryFeeAllowed(divisionEntryFee);
 
-      // Không cho phép thêm hình thức mới khi đang mở đăng ký
-      if (
-        tournament.status === 'REGISTRATION_OPEN' ||
-        tournament.status === 'REGISTRATION_CLOSED'
-      ) {
-        throw new BadRequestException(
-          'Không thể thêm hình thức thi đấu khi giải đấu đang mở đăng ký',
-        );
-      }
-
       const category = await this.tournamentsRepository.findCategory(
         tournament.categoryId,
       );
       if (!category) {
         throw new NotFoundException('Hạng đấu không tồn tại');
+      }
+
+      // A quick-created tournament may already be open with zero participants.
+      // Allow completing its formats in that safe window; once registration is
+      // locked/closed or a participant exists, the division structure is fixed.
+      if (tournament.isRegistrationLocked || ['REGISTRATION_CLOSED', 'UPCOMING', 'IN_PROGRESS', 'ONGOING', 'COMPLETED', 'CANCELLED'].includes(tournament.status)) {
+        throw new BadRequestException('Không thể thêm hình thức sau khi danh sách hoặc giải đấu đã được chốt.');
+      }
+      if (tournament.status === 'REGISTRATION_OPEN') {
+        const participants = await this.tournamentsRepository.findParticipants(tournamentId, tournament.categoryId);
+        if (participants.length > 0) {
+          throw new BadRequestException('Không thể thêm hình thức sau khi đã có người đăng ký.');
+        }
       }
 
       const categoryConfig = category.categoryConfig as

@@ -15,6 +15,7 @@ const class_validator_1 = require("class-validator");
 class CreateLiteTournamentDto {
     name;
     communityId;
+    tournamentType;
     bannerUrl;
     logoUrl;
     prizeDescription;
@@ -72,6 +73,17 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
 ], CreateLiteTournamentDto.prototype, "communityId", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({
+        example: 'PUBLIC',
+        description: 'Phạm vi giải: PUBLIC là giải mở rộng, CLUB là giải nội bộ câu lạc bộ',
+        enum: ['CLUB', 'PUBLIC'],
+    }),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsIn)(['CLUB', 'PUBLIC']),
+    __metadata("design:type", String)
+], CreateLiteTournamentDto.prototype, "tournamentType", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({ example: 'https://cdn.../banner.jpg', description: 'Ảnh bìa tùy chọn' }),
     (0, class_validator_1.IsString)(),
