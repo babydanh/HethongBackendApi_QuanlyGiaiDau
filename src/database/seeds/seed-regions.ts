@@ -60,7 +60,18 @@ async function seed() {
       }
     }
 
-    // Bulk upsert theo chunk
+    // 1. Dọn dẹp dữ liệu v1 cũ (xóa quận/huyện và phường thuộc huyện cũ)
+    console.log('🧹 Đang làm sạch dữ liệu đơn vị hành chính cũ v1 (Quận/Huyện)...');
+    try {
+      await db.execute(dsql`UPDATE "communities" SET "district_code" = NULL WHERE "district_code" IS NOT NULL`);
+      await db.execute(dsql`DELETE FROM "wards" WHERE "district_code" IS NOT NULL`);
+      await db.execute(dsql`DELETE FROM "districts"`);
+      console.log('✅ Đã xóa sạch dữ liệu Quận/Huyện cũ thành công.');
+    } catch (cleanErr) {
+      console.warn('⚠️ Ghi chú làm sạch dữ liệu cũ:', cleanErr);
+    }
+
+    // 2. Bulk upsert theo chunk
     async function upsertInChunks(table: any, data: any[], targetCol: any, updateSet: any, chunkSize = 200) {
       for (let i = 0; i < data.length; i += chunkSize) {
         const chunk = data.slice(i, i + chunkSize);
