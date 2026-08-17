@@ -65,10 +65,10 @@ export declare class PaymentsService {
         bankName: string | null;
         bankAccountNumber: string | null;
         bankAccountName: string | null;
-        organizerId: string;
-        processedAt: Date | null;
         transactionProofUrl: string | null;
         processedBy: string | null;
+        processedAt: Date | null;
+        organizerId: string;
         totalCollected: string;
         amountRequested: string;
         platformFeeRetained: string;

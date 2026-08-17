@@ -876,9 +876,7 @@ let TournamentsRepository = class TournamentsRepository {
             }
             const tConfig = (tournament.tournamentConfig || {});
             const rawRegMode = tConfig.registrationMode || 'OPEN';
-            const regMode = tConfig.isLite === true && rawRegMode === 'APPROVAL'
-                ? 'OPEN'
-                : rawRegMode;
+            const regMode = rawRegMode;
             if (regMode === 'INVITE_ONLY' || tournament.visibility === 'PRIVATE') {
                 if (!inviteCode || tournament.inviteCode !== inviteCode) {
                     throw new common_1.BadRequestException('Mã mời giải đấu không hợp lệ hoặc thiếu.');
@@ -1771,9 +1769,7 @@ let TournamentsRepository = class TournamentsRepository {
             const isPaid = entryFeeAmount === 0;
             const tCfg = (tournament.tournamentConfig || {});
             const rawRegMode = tCfg.registrationMode || 'OPEN';
-            const regMode = tCfg.isLite === true && rawRegMode === 'APPROVAL'
-                ? 'OPEN'
-                : rawRegMode;
+            const regMode = rawRegMode;
             const targetStatus = regMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
             const [updatedParticipant] = await tx
                 .update(schema.tournamentParticipants)

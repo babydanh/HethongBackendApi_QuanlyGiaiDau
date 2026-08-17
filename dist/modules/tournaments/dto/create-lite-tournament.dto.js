@@ -23,7 +23,6 @@ class CreateLiteTournamentDto {
     sport;
     format;
     genderRestriction;
-    selectedFormats;
     bracketType;
     maxTeams;
     teamSize;
@@ -139,17 +138,6 @@ __decorate([
     (0, class_validator_1.IsIn)(['MALE', 'FEMALE', 'MIXED']),
     __metadata("design:type", String)
 ], CreateLiteTournamentDto.prototype, "genderRestriction", void 0);
-__decorate([
-    (0, swagger_1.ApiPropertyOptional)({
-        example: ['MALE_SINGLES', 'MALE_DOUBLES'],
-        description: 'Danh sách các nội dung thi đấu được chọn (hỗ trợ chọn nhiều)',
-        type: [String],
-    }),
-    (0, class_validator_1.IsArray)(),
-    (0, class_validator_1.IsString)({ each: true }),
-    (0, class_validator_1.IsOptional)(),
-    __metadata("design:type", Array)
-], CreateLiteTournamentDto.prototype, "selectedFormats", void 0);
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({
         example: 'single_elimination',

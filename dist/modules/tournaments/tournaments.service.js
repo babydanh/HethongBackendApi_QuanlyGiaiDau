@@ -641,7 +641,7 @@ let TournamentsService = class TournamentsService {
             mode: 'LITE',
             isLite: true,
             sportPreset: litePreset.sportPreset,
-            registrationMode: requestedPublic || dto.communityId ? registrationMode : 'INVITE_ONLY',
+            registrationMode,
             liteJoinPolicy: requestedPublic ? 'PUBLIC' : dto.communityId ? 'COMMUNITY_MEMBERS' : 'INVITE_ONLY',
             liteVisibility,
             bracketSetupMode: 'RANDOM',
@@ -758,15 +758,13 @@ let TournamentsService = class TournamentsService {
             ...(dto.contactInfo ? { contactInfo: dto.contactInfo } : {}),
         });
         const record = await this.tournamentsRepository.create(userId, fullDto);
-        const formatsToCreate = (dto.selectedFormats && dto.selectedFormats.length > 0)
-            ? dto.selectedFormats
-            : [
-                sport === 'football'
-                    ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
-                    : (dto.format === 'doubles'
-                        ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
-                        : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES'))
-            ];
+        const formatsToCreate = [
+            sport === 'football'
+                ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
+                : (dto.format === 'doubles'
+                    ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
+                    : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES')),
+        ];
         const mapFormatToDivision = (fmt) => {
             switch (fmt) {
                 case 'MALE_SINGLES':
