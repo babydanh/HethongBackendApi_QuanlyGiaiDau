@@ -69,12 +69,12 @@ export class CreateLiteTournamentDto {
     example: 'MALE',
     description:
       'Giới hạn giới tính cho giải bóng đá Lite; bỏ trống là không ràng buộc',
-    enum: ['MALE', 'FEMALE'],
+    enum: ['MALE', 'FEMALE', 'MIXED'],
   })
   @IsString()
   @IsOptional()
-  @IsIn(['MALE', 'FEMALE'])
-  genderRestriction?: 'MALE' | 'FEMALE';
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
+  genderRestriction?: 'MALE' | 'FEMALE' | 'MIXED';
 
   @ApiPropertyOptional({
     example: 'single_elimination',
