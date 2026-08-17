@@ -794,6 +794,7 @@ let TournamentsService = class TournamentsService {
                     };
             }
         };
+        let divisionCreationError = null;
         for (const fmt of formatsToCreate) {
             const divInfo = mapFormatToDivision(fmt);
             try {
@@ -810,8 +811,18 @@ let TournamentsService = class TournamentsService {
                 }, userId);
             }
             catch (divErr) {
-                console.warn('Failed to auto-create division for tournament:', divErr);
+                divisionCreationError = divErr;
+                break;
             }
+        }
+        if (divisionCreationError) {
+            try {
+                await this.remove(record.id, userId, systemRoles);
+            }
+            catch (cleanupError) {
+                console.error('Failed to clean up incomplete Lite tournament:', cleanupError);
+            }
+            throw new common_1.BadRequestException('Không thể tạo đầy đủ các nội dung thi đấu. Vui lòng thử lại.');
         }
         const updated = await this.tournamentsRepository.update(record.id, userId, {
             status: requestedPublic && !isAdmin ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN',

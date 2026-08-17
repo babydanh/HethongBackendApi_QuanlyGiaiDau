@@ -1174,6 +1174,7 @@ export class TournamentsService {
       }
     };
 
+    let divisionCreationError: unknown = null;
     for (const fmt of formatsToCreate) {
       const divInfo = mapFormatToDivision(fmt);
       try {
@@ -1192,8 +1193,22 @@ export class TournamentsService {
           userId,
         );
       } catch (divErr) {
-        console.warn('Failed to auto-create division for tournament:', divErr);
+        divisionCreationError = divErr;
+        break;
       }
+    }
+
+    if (divisionCreationError) {
+      try {
+        // Compensating cleanup keeps Lite creation all-or-nothing even though
+        // the legacy repository calls are separate operations.
+        await this.remove(record.id, userId, systemRoles);
+      } catch (cleanupError) {
+        console.error('Failed to clean up incomplete Lite tournament:', cleanupError);
+      }
+      throw new BadRequestException(
+        'Không thể tạo đầy đủ các nội dung thi đấu. Vui lòng thử lại.',
+      );
     }
 
     // 10. Auto-publish: set status REGISTRATION_OPEN để đăng ký & bracket được luôn
