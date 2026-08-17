@@ -98,6 +98,51 @@ export class CreateLiteTournamentDto {
   @Max(20)
   maxReserve?: number;
 
+  @ApiPropertyOptional({ example: 2, description: 'Số set/hiệp thắng mặc định cho môn có set' })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(5)
+  setsToWin?: number;
+
+  @ApiPropertyOptional({ example: 21, description: 'Điểm mục tiêu mỗi set của preset; Lite vẫn cho nhập điểm tự do khi thi đấu' })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(99)
+  pointsPerSet?: number;
+
+  @ApiPropertyOptional({ example: true })
+  @IsBoolean()
+  @IsOptional()
+  winByTwo?: boolean;
+
+  @ApiPropertyOptional({ example: 30 })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(199)
+  maxPoints?: number;
+
+  @ApiPropertyOptional({ example: 2, description: 'Số hiệp bóng đá' })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(4)
+  footballHalvesCount?: number;
+
+  @ApiPropertyOptional({ example: 45, description: 'Số phút mỗi hiệp bóng đá' })
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(120)
+  footballHalfDuration?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Cho phép kết quả hòa trong bóng đá' })
+  @IsBoolean()
+  @IsOptional()
+  footballAllowDraw?: boolean;
+
   @ApiPropertyOptional({
     example: 'Giải đấu giao lưu cuối tuần',
     description: 'Mô tả giải đấu',

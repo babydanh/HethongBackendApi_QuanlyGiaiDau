@@ -78,6 +78,7 @@ export const chatRoomMembers = pgTable('chat_room_members', {
   joinedAt: timestamp('joined_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+  clearedAt: timestamp('cleared_at', { withTimezone: true }),
 });
 
 export const chatMessages = pgTable('chat_messages', {

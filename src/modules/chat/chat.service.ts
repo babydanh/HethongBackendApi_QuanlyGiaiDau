@@ -200,7 +200,19 @@ export class ChatService {
           const members = await this.chatRepository.getRoomMemberIds(data.roomId);
           recipientIds = members.filter((m) => m !== userId);
         } else if (roomType === RoomType.CLUB && room.communityId) {
-          recipientIds = await this.chatRepository.getCommunityMemberUserIds(room.communityId, userId);
+          const membersWithPref = await this.chatRepository.getCommunityMembersWithNotificationPref(room.communityId, userId);
+          const mentions = (data.metadata?.mentions as string[]) || [];
+          const isMentioned = (uid: string) =>
+            mentions.includes(uid) ||
+            Boolean(messageText && (messageText.includes(`@${uid}`) || messageText.includes('@all') || messageText.includes('@everyone')));
+
+          recipientIds = membersWithPref
+            .filter((m) => {
+              if (m.notificationPreference === 'MUTED') return false;
+              if (m.notificationPreference === 'MENTIONS_ONLY') return isMentioned(m.userId);
+              return true;
+            })
+            .map((m) => m.userId);
         }
 
         if (recipientIds.length > 0) {
@@ -251,7 +263,26 @@ export class ChatService {
       }
     }
 
-    return this.chatRepository.getMessagesPage(roomId, limit, cursor);
+    return this.chatRepository.getMessagesPage(roomId, limit, cursor, userId);
+  }
+
+  async clearRoomMessages(userId: string, roomId: string) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room) {
+      throw new NotFoundException('Không tìm thấy phòng chat.');
+    }
+
+    const roomType = room.type as RoomType;
+    if (roomType === RoomType.CLUB && room.communityId) {
+      await this.assertClubMember(room.communityId, userId);
+    } else {
+      const isMember = await this.chatRepository.isMemberOfRoom(roomId, userId);
+      if (!isMember) {
+        throw new ForbiddenException('Bạn không phải là thành viên của phòng chat này.');
+      }
+    }
+
+    return await this.chatRepository.clearRoomHistory(userId, roomId);
   }
 
   async revokeMessage(userId: string, messageId: string) {

@@ -883,7 +883,21 @@ export class TournamentsService {
 
     // 5. Build Lite sport preset + rules
     const litePreset = this.buildLiteSportPreset(sport);
-    const sportRules = { ...litePreset.sportRules };
+    const sportRules = {
+      ...litePreset.sportRules,
+      ...(sport === 'football'
+        ? {
+            halvesCount: dto.footballHalvesCount ?? litePreset.sportRules.halvesCount,
+            halfDuration: dto.footballHalfDuration ?? litePreset.sportRules.halfDuration,
+            allowDraw: dto.footballAllowDraw ?? litePreset.sportRules.allowDraw,
+          }
+        : {
+            setsToWin: dto.setsToWin ?? litePreset.sportRules.setsToWin,
+            pointsPerSet: dto.pointsPerSet ?? litePreset.sportRules.pointsPerSet,
+            winByTwo: dto.winByTwo ?? litePreset.sportRules.winByTwo,
+            ...(dto.maxPoints !== undefined ? { maxPoints: dto.maxPoints } : {}),
+          }),
+    };
 
     // 6. Build Lite tournamentConfig shared by App/Web
     const maxTeams = dto.maxTeams || 16;
@@ -951,6 +965,7 @@ export class TournamentsService {
       bracketSetupMode: 'RANDOM',
       allowPlayerReferee: true,
       hideAdvancedSettings: true,
+      scoringMode: 'FREE',
       bracketType: finalBracketType,
       maxTeams,
       startTime: dto.startTime || undefined,
