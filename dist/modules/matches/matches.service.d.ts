@@ -1,0 +1,256 @@
+import { MatchesRepository } from './matches.repository';
+import { OperateMatchDto } from './dto/operate-match.dto';
+import { QueryMatchDto } from './dto/query-match.dto';
+import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
+import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
+import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
+import { LiveScoreGateway } from './live-score.gateway';
+import { RankingsService } from '../rankings/rankings.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { RedisService } from '../../providers/redis/redis.service';
+export declare class MatchesService {
+    private readonly matchesRepository;
+    private readonly liveScoreGateway;
+    private readonly rankingsService;
+    private readonly notificationsService;
+    private readonly redisService;
+    constructor(matchesRepository: MatchesRepository, liveScoreGateway: LiveScoreGateway, rankingsService: RankingsService, notificationsService: NotificationsService, redisService: RedisService);
+    private isAdmin;
+    private isTournamentManager;
+    private resolveOperationalWinner;
+    private finalizeCompletedMatch;
+    private resolveMatchConfig;
+    private resolveFootballForfeitGoals;
+    private validateFootballShootout;
+    private validateFootballPhaseTransition;
+    private validateBasicOverrideScoreDetails;
+    private mergeTrustedSetOverrides;
+    findAll(query: QueryMatchDto): Promise<any>;
+    findOne(id: string): Promise<{
+        refereeName: string | null;
+        groupName: string;
+        tournamentId: string;
+        tournament: {
+            id: string;
+            name: string;
+            tournamentType: string;
+            status: string;
+            visibility: string;
+            isRanked: boolean;
+            communityId: string | null;
+            categoryId: string;
+            categoryName: string | null;
+            categorySlug: string | null;
+            categoryConfig: unknown;
+            matchType: string;
+            genderRestriction: string | null;
+            createdBy: string;
+            sportRules: unknown;
+            tournamentConfig: unknown;
+            venueName: string | null;
+            venueAddress: string | null;
+        } | null;
+        stage: {
+            id: string;
+            name: string;
+            type: string;
+            roundConfig: unknown;
+        } | null;
+        group: {
+            id: string;
+            name: string | null;
+            roundConfig: unknown;
+        } | null;
+        participant1: {
+            id: string;
+            teamName: string;
+            tournamentDivisionId: string | null;
+            eloPoints: number | null;
+            members: {
+                userId: string;
+                fullName: string | null;
+                avatarUrl: string | null;
+                elo?: {
+                    eloPoints: number;
+                } | undefined;
+            }[];
+        } | null;
+        participant2: {
+            id: string;
+            teamName: string;
+            tournamentDivisionId: string | null;
+            eloPoints: number | null;
+            members: {
+                userId: string;
+                fullName: string | null;
+                avatarUrl: string | null;
+                elo?: {
+                    eloPoints: number;
+                } | undefined;
+            }[];
+        } | null;
+        id: string;
+        groupId: string | null;
+        stageId: string;
+        participant1Id: string | null;
+        participant2Id: string | null;
+        winnerId: string | null;
+        status: string;
+        scoreDetails: unknown;
+        p1SetsWon: number;
+        p2SetsWon: number;
+        totalSetsPlayed: number;
+        revision: number;
+        roundNumber: number;
+        matchOrder: number;
+        bracketBranch: string;
+        isBye: boolean;
+        leg: number | null;
+        tieId: string | null;
+        nextMatchId: string | null;
+        loserNextMatchId: string | null;
+        courtId: string | null;
+        courtName: string | null;
+        courtAddress: string | null;
+        refereeId: string | null;
+        scoreConfirmedBy: string | null;
+        scoreConfirmedAt: Date | null;
+        matchEvidenceImages: string[];
+        scheduledAt: Date | null;
+        matchConfig: unknown;
+        startedAt: Date | null;
+        completedAt: Date | null;
+        updatedAt: Date;
+        deletedAt: Date | null;
+        cheerCount: number;
+    }>;
+    updateScore(id: string, user: JwtPayload, updateMatchScoreDto: UpdateMatchScoreDto): Promise<any>;
+    updateStatus(id: string, user: JwtPayload, updateMatchStatusDto: UpdateMatchStatusDto): Promise<any>;
+    operateMatch(id: string, user: JwtPayload, data: OperateMatchDto): Promise<any>;
+    getComments(id: string): Promise<{
+        id: string;
+        matchId: string;
+        commentText: string;
+        createdAt: Date;
+        user: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+        };
+    }[]>;
+    createComment(id: string, user: JwtPayload, createMatchCommentDto: CreateMatchCommentDto): Promise<{
+        id: string;
+        matchId: string;
+        commentText: string;
+        createdAt: Date;
+        user: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+        };
+    }>;
+    updateSchedule(id: string, user: JwtPayload, data: {
+        courtName?: string;
+        courtAddress?: string;
+        refereeId?: string;
+        scheduledAt?: string;
+        matchConfig?: Record<string, unknown>;
+    }): Promise<{
+        id: string;
+        groupId: string | null;
+        tournamentId: string;
+        stageId: string;
+        participant1Id: string | null;
+        participant2Id: string | null;
+        winnerId: string | null;
+        status: string;
+        scoreDetails: unknown;
+        p1SetsWon: number;
+        p2SetsWon: number;
+        totalSetsPlayed: number;
+        revision: number;
+        roundNumber: number;
+        matchOrder: number;
+        bracketBranch: string;
+        isBye: boolean;
+        leg: number | null;
+        tieId: string | null;
+        nextMatchId: string | null;
+        loserNextMatchId: string | null;
+        courtId: string | null;
+        courtName: string | null;
+        courtAddress: string | null;
+        refereeId: string | null;
+        scoreConfirmedBy: string | null;
+        scoreConfirmedAt: Date | null;
+        matchEvidenceImages: string[];
+        scheduledAt: Date | null;
+        matchConfig: unknown;
+        startedAt: Date | null;
+        completedAt: Date | null;
+        updatedAt: Date;
+        deletedAt: Date | null;
+        cheerCount: number;
+    } | undefined>;
+    assignReferee(id: string, refereeId: string, user: JwtPayload): Promise<{
+        id: string;
+        groupId: string | null;
+        tournamentId: string;
+        stageId: string;
+        participant1Id: string | null;
+        participant2Id: string | null;
+        winnerId: string | null;
+        status: string;
+        scoreDetails: unknown;
+        p1SetsWon: number;
+        p2SetsWon: number;
+        totalSetsPlayed: number;
+        revision: number;
+        roundNumber: number;
+        matchOrder: number;
+        bracketBranch: string;
+        isBye: boolean;
+        leg: number | null;
+        tieId: string | null;
+        nextMatchId: string | null;
+        loserNextMatchId: string | null;
+        courtId: string | null;
+        courtName: string | null;
+        courtAddress: string | null;
+        refereeId: string | null;
+        scoreConfirmedBy: string | null;
+        scoreConfirmedAt: Date | null;
+        matchEvidenceImages: string[];
+        scheduledAt: Date | null;
+        matchConfig: unknown;
+        startedAt: Date | null;
+        completedAt: Date | null;
+        updatedAt: Date;
+        deletedAt: Date | null;
+        cheerCount: number;
+    } | undefined>;
+    muteUser(id: string, targetUserId: string, type: 'MUTE' | 'BAN', reason: string | undefined, user: JwtPayload): Promise<{
+        message: string;
+    }>;
+    unmuteUser(id: string, targetUserId: string, user: JwtPayload): Promise<{
+        message: string;
+    }>;
+    getMutedUsers(id: string, user: JwtPayload): Promise<{
+        id: string;
+        userId: string;
+        type: string;
+        reason: string | null;
+        expiresAt: Date | null;
+        createdAt: Date;
+        mutedBy: string | null;
+        fullName: string | null;
+        avatarUrl: string | null;
+    }[]>;
+    cheerMatch(id: string): Promise<{
+        cheerCount: number;
+    }>;
+    getCheerCount(id: string): Promise<{
+        cheerCount: number;
+    }>;
+}

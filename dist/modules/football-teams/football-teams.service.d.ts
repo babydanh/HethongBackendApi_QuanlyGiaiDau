@@ -1,0 +1,182 @@
+import { FootballTeamsRepository } from './football-teams.repository';
+import { CreateFootballTeamDto } from './dto/create-football-team.dto';
+import { UpdateFootballTeamDto } from './dto/update-football-team.dto';
+import { InviteFootballTeamMemberDto } from './dto/invite-football-team-member.dto';
+import { QueryFootballTeamMemberCandidatesDto } from './dto/query-football-team-member-candidates.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+type TeamRole = 'CAPTAIN' | 'MANAGER' | 'PLAYER';
+export declare class FootballTeamsService {
+    private readonly repository;
+    private readonly notificationsService;
+    private readonly logger;
+    constructor(repository: FootballTeamsRepository, notificationsService: NotificationsService);
+    create(userId: string, dto: CreateFootballTeamDto): Promise<{
+        id: string;
+        name: string;
+        logoUrl: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        status: string;
+        communityId: string | null;
+        categoryId: string;
+        createdBy: string;
+        archivedAt: Date | null;
+    }>;
+    listMine(userId: string): Promise<{
+        team: {
+            id: string;
+            name: string;
+            logoUrl: string | null;
+            categoryId: string;
+            communityId: string | null;
+            status: string;
+            createdBy: string;
+            createdAt: Date;
+            updatedAt: Date;
+            archivedAt: Date | null;
+        };
+        membership: {
+            id: string;
+            teamId: string;
+            userId: string;
+            role: string;
+            status: string;
+            invitedBy: string | null;
+            joinedAt: Date | null;
+            leftAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        };
+        rank: {
+            id: string;
+            teamId: string;
+            categoryId: string;
+            tierId: string | null;
+            eloPoints: number;
+            matchesPlayed: number;
+            matchesWon: number;
+            winStreak: number;
+            peakElo: number;
+            lastMatchAt: Date | null;
+            updatedAt: Date;
+        } | null;
+    }[]>;
+    get(teamId: string): Promise<{
+        members: {
+            id: string;
+            teamId: string;
+            userId: string;
+            role: string;
+            status: string;
+            invitedBy: string | null;
+            joinedAt: Date | null;
+            leftAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        }[];
+        id: string;
+        name: string;
+        logoUrl: string | null;
+        categoryId: string;
+        communityId: string | null;
+        status: string;
+        createdBy: string;
+        createdAt: Date;
+        updatedAt: Date;
+        archivedAt: Date | null;
+    }>;
+    searchMemberCandidates(userId: string, teamId: string, query: QueryFootballTeamMemberCandidatesDto): Promise<{
+        id: string;
+        email: string;
+        fullName: string | null;
+        avatarUrl: string | null;
+        membershipStatus: string | null;
+    }[]>;
+    update(userId: string, teamId: string, dto: UpdateFootballTeamDto): Promise<{
+        id: string;
+        name: string;
+        logoUrl: string | null;
+        categoryId: string;
+        communityId: string | null;
+        status: string;
+        createdBy: string;
+        createdAt: Date;
+        updatedAt: Date;
+        archivedAt: Date | null;
+    }>;
+    invite(userId: string, teamId: string, dto: InviteFootballTeamMemberDto): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        status: string;
+        userId: string;
+        role: string;
+        invitedBy: string | null;
+        joinedAt: Date | null;
+        teamId: string;
+        leftAt: Date | null;
+    }>;
+    respond(userId: string, teamId: string, status: 'ACCEPTED' | 'DECLINED'): Promise<{
+        id: string;
+        teamId: string;
+        userId: string;
+        role: string;
+        status: string;
+        invitedBy: string | null;
+        joinedAt: Date | null;
+        leftAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    updateMember(userId: string, teamId: string, targetUserId: string, role: TeamRole): Promise<{
+        id: string;
+        teamId: string;
+        userId: string;
+        role: string;
+        status: string;
+        invitedBy: string | null;
+        joinedAt: Date | null;
+        leftAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    cancelInvite(userId: string, teamId: string, targetUserId: string): Promise<{
+        id: string;
+        teamId: string;
+        userId: string;
+        role: string;
+        status: string;
+        invitedBy: string | null;
+        joinedAt: Date | null;
+        leftAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    removeMember(userId: string, teamId: string, targetUserId: string): Promise<{
+        id: string;
+        teamId: string;
+        userId: string;
+        role: string;
+        status: string;
+        invitedBy: string | null;
+        joinedAt: Date | null;
+        leftAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    leave(userId: string, teamId: string): Promise<{
+        id: string;
+        teamId: string;
+        userId: string;
+        role: string;
+        status: string;
+        invitedBy: string | null;
+        joinedAt: Date | null;
+        leftAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    private assertManager;
+    private notify;
+}
+export {};

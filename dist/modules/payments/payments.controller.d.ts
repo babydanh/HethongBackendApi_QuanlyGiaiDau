@@ -1,0 +1,314 @@
+import { PaymentsService } from './payments.service';
+import { CreatePaymentDto } from './dto/create-payment.dto';
+import { PayoutRequestDto } from './dto/payout-request.dto';
+import { WebhookDto } from './dto/webhook.dto';
+import { ReviewPayoutDto } from './dto/review-payout.dto';
+import { ConfirmRefundDto } from './dto/confirm-refund.dto';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+export declare class PaymentsController {
+    private readonly paymentsService;
+    constructor(paymentsService: PaymentsService);
+    getAdminStats(): Promise<{
+        totalUsers: number;
+        totalCommunities: number;
+        totalTournaments: number;
+        totalAmountProcessed: string;
+        totalPlatformFee: string;
+        totalPayoutProcessed: string;
+    }>;
+    findAllPayouts(): Promise<{
+        payout: {
+            id: string;
+            tournamentId: string;
+            organizerId: string;
+            totalCollected: string;
+            amountRequested: string;
+            platformFeeRetained: string;
+            bankName: string | null;
+            bankAccountNumber: string | null;
+            bankAccountName: string | null;
+            status: string;
+            holdUntil: Date | null;
+            payoutTrigger: string;
+            disbursedAt: Date | null;
+            transactionProofUrl: string | null;
+            processedBy: string | null;
+            processedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        };
+        tournament: {
+            id: string;
+            name: string;
+        };
+        organizer: {
+            id: string;
+            email: string;
+            fullName: string | null;
+        };
+    }[]>;
+    reviewPayout(id: string, reviewPayoutDto: ReviewPayoutDto, user: JwtPayload): Promise<{
+        id: string;
+        tournamentId: string;
+        organizerId: string;
+        totalCollected: string;
+        amountRequested: string;
+        platformFeeRetained: string;
+        bankName: string | null;
+        bankAccountNumber: string | null;
+        bankAccountName: string | null;
+        status: string;
+        holdUntil: Date | null;
+        payoutTrigger: string;
+        disbursedAt: Date | null;
+        transactionProofUrl: string | null;
+        processedBy: string | null;
+        processedAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    findAllTransactions(): Promise<{
+        payment: {
+            id: string;
+            userId: string;
+            participantId: string | null;
+            tournamentId: string;
+            divisionId: string | null;
+            purpose: string;
+            amount: string;
+            platformFeeAmount: string | null;
+            status: string;
+            refundStatus: string | null;
+            refundedAmount: string | null;
+            paymentGateway: string | null;
+            providerOrderCode: string | null;
+            providerTransactionId: string | null;
+            idempotencyKey: string | null;
+            expiresAt: Date | null;
+            refundBankName: string | null;
+            refundAccountNumber: string | null;
+            refundAccountName: string | null;
+            transactionReference: string | null;
+            gatewayResponse: unknown;
+            paidAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        };
+        tournament: {
+            id: string;
+            name: string;
+        };
+        user: {
+            id: string;
+            email: string;
+            fullName: string | null;
+        };
+    }[]>;
+    findAdminPaymentReceipt(id: string): Promise<{
+        id: string;
+        paymentId: string;
+        receiptNumber: string;
+        serviceName: string;
+        purpose: string;
+        tournamentId: string | null;
+        buyerUserId: string | null;
+        subtotal: string;
+        platformFeeAmount: string;
+        taxAmount: string;
+        totalAmount: string;
+        currency: string;
+        issuedAt: Date;
+        snapshot: unknown;
+    }>;
+    confirmRefund(id: string, body: ConfirmRefundDto, user: JwtPayload): Promise<{
+        id: string;
+        userId: string;
+        participantId: string | null;
+        tournamentId: string;
+        divisionId: string | null;
+        purpose: string;
+        amount: string;
+        platformFeeAmount: string | null;
+        status: string;
+        refundStatus: string | null;
+        refundedAmount: string | null;
+        paymentGateway: string | null;
+        providerOrderCode: string | null;
+        providerTransactionId: string | null;
+        idempotencyKey: string | null;
+        expiresAt: Date | null;
+        refundBankName: string | null;
+        refundAccountNumber: string | null;
+        refundAccountName: string | null;
+        transactionReference: string | null;
+        gatewayResponse: unknown;
+        paidAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    createPaymentLink(createPaymentDto: CreatePaymentDto, user: JwtPayload): Promise<{
+        paymentId: string;
+        orderCode: number;
+        paymentUrl: string | null;
+        qrCode: string | undefined;
+        status: string;
+        amount: number;
+        purpose: string;
+        reused: boolean;
+        description?: undefined;
+        expiresAt?: undefined;
+    } | {
+        paymentId: any;
+        orderCode: number;
+        paymentUrl: string;
+        qrCode: string;
+        status: any;
+        amount: number;
+        purpose: import("./dto/create-payment.dto").PaymentPurpose;
+        description: string;
+        expiresAt: Date;
+        reused?: undefined;
+    }>;
+    handleWebhook(webhookDto: WebhookDto): Promise<{
+        accepted: boolean;
+        completed: boolean;
+        idempotent?: undefined;
+        invalidated?: undefined;
+    } | {
+        accepted: boolean;
+        completed: boolean;
+        idempotent: boolean;
+        invalidated?: undefined;
+    } | {
+        accepted: boolean;
+        completed: boolean;
+        invalidated: boolean;
+        idempotent?: undefined;
+    }>;
+    mockVerify(body: {
+        paymentId: string;
+    }): Promise<{
+        completed: boolean;
+        idempotent: boolean;
+    }>;
+    requestPayout(payoutRequestDto: PayoutRequestDto, user: JwtPayload): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        status: string;
+        tournamentId: string;
+        bankName: string | null;
+        bankAccountNumber: string | null;
+        bankAccountName: string | null;
+        organizerId: string;
+        processedAt: Date | null;
+        transactionProofUrl: string | null;
+        processedBy: string | null;
+        totalCollected: string;
+        amountRequested: string;
+        platformFeeRetained: string;
+        holdUntil: Date | null;
+        payoutTrigger: string;
+        disbursedAt: Date | null;
+    }>;
+    findMyPayments(user: JwtPayload): Promise<{
+        payment: {
+            id: string;
+            userId: string;
+            participantId: string | null;
+            tournamentId: string;
+            divisionId: string | null;
+            purpose: string;
+            amount: string;
+            platformFeeAmount: string | null;
+            status: string;
+            refundStatus: string | null;
+            refundedAmount: string | null;
+            paymentGateway: string | null;
+            providerOrderCode: string | null;
+            providerTransactionId: string | null;
+            idempotencyKey: string | null;
+            expiresAt: Date | null;
+            refundBankName: string | null;
+            refundAccountNumber: string | null;
+            refundAccountName: string | null;
+            transactionReference: string | null;
+            gatewayResponse: unknown;
+            paidAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        };
+        tournament: {
+            id: string;
+            name: string;
+        };
+    }[]>;
+    findMyPayouts(user: JwtPayload): Promise<{
+        payout: {
+            id: string;
+            tournamentId: string;
+            organizerId: string;
+            totalCollected: string;
+            amountRequested: string;
+            platformFeeRetained: string;
+            bankName: string | null;
+            bankAccountNumber: string | null;
+            bankAccountName: string | null;
+            status: string;
+            holdUntil: Date | null;
+            payoutTrigger: string;
+            disbursedAt: Date | null;
+            transactionProofUrl: string | null;
+            processedBy: string | null;
+            processedAt: Date | null;
+            createdAt: Date;
+            updatedAt: Date;
+        };
+        tournament: {
+            id: string;
+            name: string;
+        };
+    }[]>;
+    findPaymentById(id: string, user: JwtPayload): Promise<{
+        id: string;
+        userId: string;
+        participantId: string | null;
+        tournamentId: string;
+        divisionId: string | null;
+        purpose: string;
+        amount: string;
+        platformFeeAmount: string | null;
+        status: string;
+        refundStatus: string | null;
+        refundedAmount: string | null;
+        paymentGateway: string | null;
+        providerOrderCode: string | null;
+        providerTransactionId: string | null;
+        idempotencyKey: string | null;
+        expiresAt: Date | null;
+        refundBankName: string | null;
+        refundAccountNumber: string | null;
+        refundAccountName: string | null;
+        transactionReference: string | null;
+        gatewayResponse: unknown;
+        paidAt: Date | null;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    findPaymentReceipt(id: string, user: JwtPayload): Promise<{
+        id: string;
+        paymentId: string;
+        receiptNumber: string;
+        serviceName: string;
+        purpose: string;
+        tournamentId: string | null;
+        buyerUserId: string | null;
+        subtotal: string;
+        platformFeeAmount: string;
+        taxAmount: string;
+        totalAmount: string;
+        currency: string;
+        issuedAt: Date;
+        snapshot: unknown;
+    }>;
+}
