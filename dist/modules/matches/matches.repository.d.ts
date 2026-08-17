@@ -636,9 +636,9 @@ export declare class MatchesRepository {
         createdAt: Date;
         userId: string;
         type: string;
-        expiresAt: Date | null;
         matchId: string;
         reason: string | null;
+        expiresAt: Date | null;
         mutedBy: string | null;
     }>;
     unmuteUser(matchId: string, userId: string): Promise<{
@@ -646,9 +646,9 @@ export declare class MatchesRepository {
         createdAt: Date;
         userId: string;
         type: string;
-        expiresAt: Date | null;
         matchId: string;
         reason: string | null;
+        expiresAt: Date | null;
         mutedBy: string | null;
     }>;
     getFollowerUserIds(tournamentId: string): Promise<string[]>;

@@ -137,6 +137,9 @@ export declare class RankingsService {
     recalculateEloChain(tx: Transaction, playerIds: string[], fromTime: Date, categoryId: string, matchType: string): Promise<void>;
     recalculateEloChainSafe(playerIds: string[], fromTime: Date, categoryId: string, matchType: string): Promise<void>;
     processMatchResultFromOutbox(matchId: string): Promise<{
+        handled: boolean;
+        alreadyProcessed?: boolean;
+    } | {
         alreadyProcessed: boolean;
         matchId: string;
         success?: undefined;
@@ -161,9 +164,6 @@ export declare class RankingsService {
         success: boolean;
         skipped: boolean;
         reason: string;
-    } | {
-        handled: boolean;
-        alreadyProcessed?: boolean;
     }>;
 }
 export {};

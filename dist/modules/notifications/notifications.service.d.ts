@@ -15,10 +15,10 @@ export declare class NotificationsService {
         createdAt: Date;
         updatedAt: Date;
         userId: string;
-        isActive: boolean;
         token: string;
         platform: string;
         deviceInfo: string | null;
+        isActive: boolean;
     } | null>;
     removeDeviceToken(userId: string, dto: RemoveDeviceTokenDto): Promise<void>;
     sendNotification(data: CreateNotificationDto): Promise<{

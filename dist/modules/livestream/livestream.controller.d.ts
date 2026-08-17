@@ -50,8 +50,8 @@ export declare class LivestreamController {
         updatedAt: Date;
         deletedAt: Date | null;
         status: string;
-        createdBy: string | null;
         tournamentId: string;
+        createdBy: string | null;
         protocol: string;
         streamName: string;
         streamKey: string;

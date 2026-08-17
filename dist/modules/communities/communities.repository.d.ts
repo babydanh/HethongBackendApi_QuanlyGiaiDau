@@ -159,14 +159,14 @@ export declare class CommunitiesRepository {
     create(data: Omit<typeof schema.communities.$inferInsert, 'locationGeolocation'>, lat?: number, lng?: number, categoryIds?: string[]): Promise<{
         id: string;
         name: string;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        creatorId: string;
+        description: string | null;
         provinceCode: string | null;
+        logoUrl: string | null;
+        bannerUrl: string | null;
+        creatorId: string;
         districtCode: string | null;
         wardCode: string | null;
         visibility: string;
@@ -328,10 +328,10 @@ export declare class CommunitiesRepository {
     }[]>;
     addMember(communityId: string, userId: string, role: string, status?: string, joinAnswers?: Record<string, string>, invitedBy?: string): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
@@ -398,10 +398,10 @@ export declare class CommunitiesRepository {
     }>;
     removeMember(communityId: string, userId: string): Promise<{
         id: string;
+        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
-        userId: string;
         role: string;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
@@ -413,16 +413,16 @@ export declare class CommunitiesRepository {
     addFollow(communityId: string, userId: string, type: 'FOLLOW' | 'FAVORITE'): Promise<{
         id: string;
         createdAt: Date;
-        communityId: string;
         userId: string;
         type: string;
+        communityId: string;
     }>;
     removeFollow(communityId: string, userId: string, type: 'FOLLOW' | 'FAVORITE'): Promise<{
         id: string;
         createdAt: Date;
-        communityId: string;
         userId: string;
         type: string;
+        communityId: string;
     }>;
     getFavorites(userId: string): Promise<{
         community: {

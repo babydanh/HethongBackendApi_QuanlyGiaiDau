@@ -44,8 +44,8 @@ export declare class ChatController {
         id: string;
         name: string | null;
         createdAt: Date;
-        communityId: string | null;
         type: string;
+        communityId: string | null;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -53,6 +53,17 @@ export declare class ChatController {
         pinnedMessageId: string | null;
     }>;
     createRoom(createRoomDto: CreateRoomDto, user: JwtPayload): Promise<{
+        id: string;
+        name: string | null;
+        createdAt: Date;
+        type: string;
+        communityId: string | null;
+        clubName: string | null;
+        clubAvatar: string | null;
+        isAnnouncementOnly: boolean;
+        slowModeSeconds: number;
+        pinnedMessageId: string | null;
+    } | {
         id: string;
         name: string | null;
         type: string;
@@ -76,17 +87,6 @@ export declare class ChatController {
         updatedAt: string;
         unreadCount: number;
         communityId: string | null;
-    } | {
-        id: string;
-        name: string | null;
-        createdAt: Date;
-        communityId: string | null;
-        type: string;
-        clubName: string | null;
-        clubAvatar: string | null;
-        isAnnouncementOnly: boolean;
-        slowModeSeconds: number;
-        pinnedMessageId: string | null;
     }>;
     sendMessage(createMessageDto: CreateMessageDto, user: JwtPayload): Promise<{
         senderName: string;

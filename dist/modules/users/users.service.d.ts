@@ -325,8 +325,8 @@ export declare class UsersService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         userId: string;
+        status: string;
         requestType: string;
         oldValue: string;
         newValue: string;

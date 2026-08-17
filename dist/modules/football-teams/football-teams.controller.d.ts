@@ -12,12 +12,12 @@ export declare class FootballTeamsController {
     create(user: JwtPayload, dto: CreateFootballTeamDto): Promise<{
         id: string;
         name: string;
-        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
+        categoryId: string;
+        logoUrl: string | null;
         status: string;
         communityId: string | null;
-        categoryId: string;
         createdBy: string;
         archivedAt: Date | null;
     }>;
@@ -107,8 +107,8 @@ export declare class FootballTeamsController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         userId: string;
+        status: string;
         role: string;
         invitedBy: string | null;
         joinedAt: Date | null;

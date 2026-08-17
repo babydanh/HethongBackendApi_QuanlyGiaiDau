@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AppDb } from '../../database/db.types';
@@ -18,7 +17,8 @@ export interface PushNotificationPayload {
 @Injectable()
 export class FirebaseService implements OnModuleInit {
   private readonly logger = new Logger(FirebaseService.name);
-  private firebaseApp: admin.app.App | null = null;
+  private firebaseAdmin: any = null;
+  private firebaseApp: any = null;
   private isInitialized = false;
 
   constructor(
@@ -27,12 +27,21 @@ export class FirebaseService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    try {
+      // Safely require firebase-admin to prevent container crash if missing
+      this.firebaseAdmin = require('firebase-admin');
+    } catch {
+      this.logger.warn('[FirebaseService] firebase-admin package is not installed. Push notifications will be disabled.');
+      return;
+    }
     this.initFirebase();
   }
 
   private initFirebase() {
-    if (admin.apps.length > 0) {
-      this.firebaseApp = admin.apps[0]!;
+    if (!this.firebaseAdmin) return;
+
+    if (this.firebaseAdmin.apps?.length > 0) {
+      this.firebaseApp = this.firebaseAdmin.apps[0];
       this.isInitialized = true;
       return;
     }
@@ -67,8 +76,8 @@ export class FirebaseService implements OnModuleInit {
       }
 
       if (serviceAccount && serviceAccount.project_id && serviceAccount.private_key) {
-        this.firebaseApp = admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
+        this.firebaseApp = this.firebaseAdmin.initializeApp({
+          credential: this.firebaseAdmin.credential.cert(serviceAccount),
         });
         this.isInitialized = true;
         this.logger.log(`[FirebaseService] Firebase Admin SDK initialized successfully for project: ${serviceAccount.project_id}`);
@@ -157,7 +166,7 @@ export class FirebaseService implements OnModuleInit {
    * Send a push notification to multiple users
    */
   async sendPushToUsers(userIds: string[], payload: PushNotificationPayload) {
-    if (!this.isInitialized || !this.firebaseApp || userIds.length === 0) {
+    if (!this.isInitialized || !this.firebaseApp || !this.firebaseAdmin || userIds.length === 0) {
       return { successCount: 0, failureCount: 0 };
     }
 
@@ -192,7 +201,7 @@ export class FirebaseService implements OnModuleInit {
         }
       }
 
-      const multicastMessage: admin.messaging.MulticastMessage = {
+      const multicastMessage = {
         tokens,
         notification: {
           title: payload.title,
@@ -220,11 +229,11 @@ export class FirebaseService implements OnModuleInit {
         },
       };
 
-      const response = await admin.messaging().sendEachForMulticast(multicastMessage);
+      const response = await this.firebaseAdmin.messaging().sendEachForMulticast(multicastMessage);
 
       // Clean up invalid or expired tokens
       const expiredTokenIds: string[] = [];
-      response.responses.forEach((res, idx) => {
+      response.responses.forEach((res: any, idx: number) => {
         if (!res.success && res.error) {
           const errCode = res.error.code;
           if (

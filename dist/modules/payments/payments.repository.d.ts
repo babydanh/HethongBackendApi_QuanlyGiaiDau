@@ -183,11 +183,11 @@ export declare class PaymentsRepository {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         userId: string;
+        status: string;
         tournamentId: string;
-        expiresAt: Date | null;
         participantId: string | null;
+        expiresAt: Date | null;
         divisionId: string | null;
         purpose: string;
         amount: string;

@@ -11,6 +11,7 @@ export declare class FirebaseService implements OnModuleInit {
     private readonly configService;
     private readonly db;
     private readonly logger;
+    private firebaseAdmin;
     private firebaseApp;
     private isInitialized;
     constructor(configService: ConfigService, db: AppDb);
@@ -21,18 +22,18 @@ export declare class FirebaseService implements OnModuleInit {
         createdAt: Date;
         updatedAt: Date;
         userId: string;
-        isActive: boolean;
         token: string;
         platform: string;
         deviceInfo: string | null;
+        isActive: boolean;
     } | null>;
     removeDeviceToken(userId: string, token: string): Promise<void>;
     sendPushToUser(userId: string, payload: PushNotificationPayload): Promise<{
-        successCount: number;
-        failureCount: number;
+        successCount: any;
+        failureCount: any;
     }>;
     sendPushToUsers(userIds: string[], payload: PushNotificationPayload): Promise<{
-        successCount: number;
-        failureCount: number;
+        successCount: any;
+        failureCount: any;
     }>;
 }

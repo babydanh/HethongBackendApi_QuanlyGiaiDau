@@ -376,8 +376,8 @@ export declare class UsersController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         userId: string;
+        status: string;
         requestType: string;
         oldValue: string;
         newValue: string;
