@@ -22,10 +22,29 @@ export class CreateLiteTournamentDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiProperty({ example: 'uuid-community', description: 'ID câu lạc bộ' })
+  @ApiPropertyOptional({ example: 'uuid-community', description: 'ID câu lạc bộ; bỏ trống để tạo giải nhanh riêng bằng quyền Organizer' })
   @IsUUID()
-  @IsNotEmpty()
-  communityId: string;
+  @IsOptional()
+  communityId?: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.../banner.jpg', description: 'Ảnh bìa tùy chọn' })
+  @IsString()
+  @IsOptional()
+  bannerUrl?: string;
+
+  @ApiPropertyOptional({ example: 'https://cdn.../logo.jpg', description: 'Logo tùy chọn' })
+  @IsString()
+  @IsOptional()
+  logoUrl?: string;
+
+  @ApiPropertyOptional({ example: 'Giải thưởng giao lưu', description: 'Mô tả giải thưởng tùy chọn' })
+  @IsString()
+  @IsOptional()
+  prizeDescription?: string;
+
+  @ApiPropertyOptional({ example: { phone: '0900000000', email: 'btc@example.com' }, description: 'Liên hệ BTC tùy chọn' })
+  @IsOptional()
+  contactInfo?: Record<string, string>;
 
   @ApiProperty({
     example: 'badminton',
@@ -160,6 +179,16 @@ export class CreateLiteTournamentDto {
   @IsOptional()
   @IsIn(['OPEN', 'INVITE_ONLY'])
   registrationMode?: 'OPEN' | 'INVITE_ONLY';
+
+  @ApiPropertyOptional({
+    example: 'PRIVATE',
+    description: 'Hiển thị giải Lite: PRIVATE nội bộ/mời riêng hoặc PUBLIC chờ Admin duyệt',
+    enum: ['PRIVATE', 'PUBLIC'],
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn(['PRIVATE', 'PUBLIC'])
+  visibility?: 'PRIVATE' | 'PUBLIC';
 
   @ApiPropertyOptional({ example: 'Sân Pickleball Trung tâm', description: 'Tên sân/địa điểm hiển thị' })
   @IsString()

@@ -912,6 +912,12 @@ export class TournamentsService {
     const registrationMode = dto.registrationMode === 'INVITE_ONLY'
       ? 'INVITE_ONLY'
       : 'OPEN';
+    const requestedPublic = dto.visibility === 'PUBLIC';
+    const liteVisibility = requestedPublic
+      ? 'PUBLIC'
+      : dto.communityId
+        ? 'COMMUNITY'
+        : 'PRIVATE_INVITE';
     const footballTeamSize = sport === 'football' ? (dto.teamSize ?? 7) : undefined;
     const footballMaxReserve = sport === 'football' ? (dto.maxReserve ?? 0) : undefined;
     if (sport === 'football') {
@@ -965,9 +971,9 @@ export class TournamentsService {
       mode: 'LITE',
       isLite: true,
       sportPreset: litePreset.sportPreset,
-      registrationMode,
-      liteJoinPolicy: 'COMMUNITY_MEMBERS',
-      liteVisibility: 'COMMUNITY',
+      registrationMode: requestedPublic || dto.communityId ? registrationMode : 'INVITE_ONLY',
+      liteJoinPolicy: requestedPublic ? 'PUBLIC' : dto.communityId ? 'COMMUNITY_MEMBERS' : 'INVITE_ONLY',
+      liteVisibility,
       bracketSetupMode: 'RANDOM',
       allowPlayerReferee: true,
       hideAdvancedSettings: true,
@@ -986,19 +992,25 @@ export class TournamentsService {
     };
 
     // 7. Check authorization: must be community member (JOINED)
-    const communitySportsLite =
-      await this.tournamentsRepository.findCommunitySports(dto.communityId);
-    if (communitySportsLite.length > 0) {
-      const isMatch = communitySportsLite.some(
-        (s) => s.categoryId === category.id,
-      );
-      if (!isMatch) {
-        throw new BadRequestException(
-          `Giải đấu của câu lạc bộ phải thuộc bộ môn của câu lạc bộ (${communitySportsLite.map((s) => s.categoryName).join(', ')}).`,
+    if (dto.communityId) {
+      const communitySportsLite =
+        await this.tournamentsRepository.findCommunitySports(dto.communityId);
+      if (communitySportsLite.length > 0) {
+        const isMatch = communitySportsLite.some(
+          (s) => s.categoryId === category.id,
         );
+        if (!isMatch) {
+          throw new BadRequestException(
+            `Giải đấu của câu lạc bộ phải thuộc bộ môn của câu lạc bộ (${communitySportsLite.map((s) => s.categoryName).join(', ')}).`,
+          );
+        }
       }
+    } else if (!systemRoles.includes('ADMIN') && !systemRoles.includes('ORGANIZER')) {
+      throw new ForbiddenException(
+        'Giải nhanh ngoài câu lạc bộ yêu cầu quyền Organizer.',
+      );
     }
-    if (!systemRoles.includes('ADMIN')) {
+    if (dto.communityId && !systemRoles.includes('ADMIN')) {
       const member = await this.tournamentsRepository.findCommunityMember(
         dto.communityId,
         userId,
@@ -1077,8 +1089,10 @@ export class TournamentsService {
     Object.assign(fullDto, {
       name: dto.name,
       tournamentType: 'CLUB',
-      visibility: 'PRIVATE',
-      communityId: dto.communityId,
+      visibility: requestedPublic ? 'PUBLIC' : 'PRIVATE',
+      ...(dto.bannerUrl ? { bannerUrl: dto.bannerUrl } : {}),
+      ...(dto.logoUrl ? { logoUrl: dto.logoUrl } : {}),
+      ...(dto.communityId ? { communityId: dto.communityId } : {}),
       categoryId: category.id,
       matchType,
       genderRestriction:
@@ -1094,6 +1108,8 @@ export class TournamentsService {
       registrationStartDate: registrationStartDate.toISOString(),
       registrationEndDate: registrationEndDate?.toISOString(),
       city: dto.province || dto.location || undefined,
+      ...(dto.prizeDescription ? { prizeDescription: dto.prizeDescription } : {}),
+      ...(dto.contactInfo ? { contactInfo: dto.contactInfo } : {}),
     });
 
     // 9. Gọi repository.create() — dùng chung logic insert
@@ -1101,11 +1117,11 @@ export class TournamentsService {
 
     // 10. Auto-publish: set status REGISTRATION_OPEN để đăng ký & bracket được luôn
     const updated = await this.tournamentsRepository.update(record.id, userId, {
-      status: 'REGISTRATION_OPEN',
+      status: requestedPublic && !isAdmin ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN',
     });
 
     // Auto-post to Community Feed for Lite tournaments
-    if (fullDto.communityId) {
+    if (fullDto.communityId && (!requestedPublic || isAdmin)) {
       try {
         await this.communitySocialRepository.createTournamentPost(
           fullDto.communityId,
@@ -3500,13 +3516,13 @@ export class TournamentsService {
     // Xóa dữ liệu mock trước khi mở đăng ký
     await this.tournamentsRepository.clearMockParticipants(id);
 
-    // Tất cả giải đấu do Ban tổ chức/Người dùng tạo (không phải Admin) đều phải chuyển sang PENDING_APPROVAL để Admin phê duyệt
+    // Chỉ giải công khai mới cần Admin duyệt. Giải riêng INVITE_ONLY của
+    // Organizer có thể mở ngay sau khi kiểm tra đủ dữ liệu.
     const isAdmin = systemRoles.includes('ADMIN');
     const notYetOpen =
       existing.registrationStartDate &&
       new Date(existing.registrationStartDate) > new Date();
-    const requiresAdminApproval =
-      !isAdmin && (existing.visibility === 'PUBLIC' || !existing.communityId);
+    const requiresAdminApproval = !isAdmin && existing.visibility === 'PUBLIC';
     const targetStatus = requiresAdminApproval
       ? 'PENDING_APPROVAL'
       : notYetOpen
