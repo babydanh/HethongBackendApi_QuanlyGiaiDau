@@ -316,13 +316,13 @@ export declare class TournamentsController {
     createParent(createParentTournamentDto: CreateParentTournamentDto, user: JwtPayload): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
+        sports: string[];
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
-        sports: string[];
         createdBy: string;
     }>;
     findMyParents(user: JwtPayload): Promise<{
@@ -444,21 +444,21 @@ export declare class TournamentsController {
         id: string;
         name: string;
         createdAt: Date;
-        minElo: number | null;
-        maxElo: number | null;
         status: string;
         matchType: string;
-        genderRestriction: string | null;
-        tournamentId: string;
         entryFee: string;
         registrationEndDate: Date | null;
         maxParticipants: number | null;
         startDate: Date | null;
         venueId: string | null;
         prizeDescription: string | null;
+        genderRestriction: string | null;
+        tournamentId: string;
         isConfigOverride: boolean;
         bracketType: string | null;
         roundConfig: unknown;
+        minElo: number | null;
+        maxElo: number | null;
     }>;
     updateDivision(divisionId: string, updateDivisionDto: UpdateDivisionDto, user: JwtPayload): Promise<{
         id: string;
@@ -552,13 +552,13 @@ export declare class TournamentsController {
         parent: {
             id: string;
             name: string;
+            description: string | null;
+            bannerUrl: string | null;
+            logoUrl: string | null;
+            sports: string[];
             createdAt: Date;
             updatedAt: Date;
             deletedAt: Date | null;
-            description: string | null;
-            logoUrl: string | null;
-            bannerUrl: string | null;
-            sports: string[];
             createdBy: string;
         } | null;
         divisions: {
@@ -626,20 +626,19 @@ export declare class TournamentsController {
     create(createTournamentDto: CreateTournamentDto, user: JwtPayload): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
-        categoryId: string;
-        logoUrl: string | null;
-        bannerUrl: string | null;
+        createdBy: string;
+        parentId: string | null;
         visibility: string;
         status: string;
         communityId: string | null;
+        categoryId: string;
         matchType: string;
-        genderRestriction: string | null;
-        createdBy: string;
-        parentId: string | null;
         sportRules: unknown;
         tournamentConfig: unknown;
         entryFee: string;
@@ -655,6 +654,7 @@ export declare class TournamentsController {
         prizeDescription: string | null;
         prizes: unknown;
         inviteCode: string | null;
+        genderRestriction: string | null;
         contactInfo: unknown;
         city: string | null;
         reservedSlotsCount: number;
@@ -1071,8 +1071,8 @@ export declare class TournamentsController {
     follow(id: string, user: JwtPayload): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         tournamentId: string;
+        userId: string;
     }>;
     unfollow(id: string, user: JwtPayload): Promise<void>;
     getFollowed(user: JwtPayload): Promise<{
@@ -1462,24 +1462,6 @@ export declare class TournamentsController {
         deletedAt: Date | null;
     }>;
     findParticipants(id: string, divisionId?: string): Promise<{
-        id: string;
-        teamName: string;
-        footballTeamId: string | null;
-        footballTeamLogoUrl: string | null;
-        rosterLockedAt: Date | null;
-        seed: number | null;
-        isPaid: boolean;
-        tournamentDivisionId: string | null;
-        teamStatus: string;
-        registeredAt: Date;
-        registeredBy: {
-            id: string | null;
-            fullName: string | null;
-            avatarUrl: string | null;
-        } | null;
-        members: import("./interfaces/tournament-config.interface").RosterMember[];
-        eloPoints?: number;
-    }[] | {
         rosters: {
             profile: {
                 userId: string;
@@ -1513,6 +1495,24 @@ export declare class TournamentsController {
         isWildcard: boolean;
         registeredAt: Date;
         rosterLockedAt: Date | null;
+    }[] | {
+        id: string;
+        teamName: string;
+        footballTeamId: string | null;
+        footballTeamLogoUrl: string | null;
+        rosterLockedAt: Date | null;
+        seed: number | null;
+        isPaid: boolean;
+        tournamentDivisionId: string | null;
+        teamStatus: string;
+        registeredAt: Date;
+        registeredBy: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+        } | null;
+        members: import("./interfaces/tournament-config.interface").RosterMember[];
+        eloPoints?: number;
     }[]>;
     findParticipantsForOrganizer(id: string, divisionId?: string): Promise<{
         id: string;
@@ -1544,9 +1544,9 @@ export declare class TournamentsController {
     addReferee(id: string, body: AddRefereeDto, user: JwtPayload): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         status: string;
         tournamentId: string;
+        userId: string;
         assignedBy: string | null;
         assignedAt: Date;
     }>;
@@ -1562,9 +1562,9 @@ export declare class TournamentsController {
     revokeRefereeInvite(tournamentId: string, refereeId: string, user: JwtPayload): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         status: string;
         tournamentId: string;
+        userId: string;
         assignedBy: string | null;
         assignedAt: Date;
     }>;
@@ -1837,10 +1837,9 @@ export declare class TournamentsController {
         deletedAt: Date | null;
         status: string;
         tournamentId: string;
-        scheduledAt: Date | null;
-        courtName: string | null;
         stageId: string;
         groupId: string | null;
+        refereeId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
         winnerId: string | null;
@@ -1857,12 +1856,13 @@ export declare class TournamentsController {
         tieId: string | null;
         nextMatchId: string | null;
         loserNextMatchId: string | null;
+        courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
-        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];
+        scheduledAt: Date | null;
         matchConfig: unknown;
         startedAt: Date | null;
         completedAt: Date | null;
@@ -1967,17 +1967,17 @@ export declare class TournamentsController {
     addStaffMember(id: string, body: AddStaffMemberDto, user: JwtPayload): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        tournamentId: string;
-        role: string;
         createdBy: string | null;
+        tournamentId: string;
+        userId: string;
+        role: string;
     }>;
     removeStaffMember(id: string, staffUserId: string, user: JwtPayload): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        tournamentId: string;
-        role: string;
         createdBy: string | null;
+        tournamentId: string;
+        userId: string;
+        role: string;
     }>;
 }

@@ -755,6 +755,64 @@ let TournamentsService = class TournamentsService {
             ...(dto.contactInfo ? { contactInfo: dto.contactInfo } : {}),
         });
         const record = await this.tournamentsRepository.create(userId, fullDto);
+        const formatsToCreate = (dto.selectedFormats && dto.selectedFormats.length > 0)
+            ? dto.selectedFormats
+            : [
+                sport === 'football'
+                    ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
+                    : (dto.format === 'doubles'
+                        ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
+                        : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES'))
+            ];
+        const mapFormatToDivision = (fmt) => {
+            switch (fmt) {
+                case 'MALE_SINGLES':
+                case 'SINGLES_MALE':
+                    return { name: 'Đơn Nam', matchType: create_division_dto_1.MatchType.SINGLES, genderRestriction: create_division_dto_1.GenderRestriction.MALE };
+                case 'FEMALE_SINGLES':
+                case 'SINGLES_FEMALE':
+                    return { name: 'Đơn Nữ', matchType: create_division_dto_1.MatchType.SINGLES, genderRestriction: create_division_dto_1.GenderRestriction.FEMALE };
+                case 'MALE_DOUBLES':
+                case 'DOUBLES_MALE':
+                    return { name: 'Đôi Nam', matchType: create_division_dto_1.MatchType.DOUBLES, genderRestriction: create_division_dto_1.GenderRestriction.MALE };
+                case 'FEMALE_DOUBLES':
+                case 'DOUBLES_FEMALE':
+                    return { name: 'Đôi Nữ', matchType: create_division_dto_1.MatchType.DOUBLES, genderRestriction: create_division_dto_1.GenderRestriction.FEMALE };
+                case 'MIXED_DOUBLES':
+                case 'DOUBLES_MIXED':
+                    return { name: 'Đôi Nam Nữ', matchType: create_division_dto_1.MatchType.MIXED_DOUBLES, genderRestriction: create_division_dto_1.GenderRestriction.MIXED };
+                case 'FOOTBALL_MALE':
+                    return { name: 'Đội nam', matchType: create_division_dto_1.MatchType.DOUBLES, genderRestriction: create_division_dto_1.GenderRestriction.MALE };
+                case 'FOOTBALL_FEMALE':
+                    return { name: 'Đội nữ', matchType: create_division_dto_1.MatchType.DOUBLES, genderRestriction: create_division_dto_1.GenderRestriction.FEMALE };
+                case 'FOOTBALL_MIXED':
+                default:
+                    return {
+                        name: sport === 'football' ? 'Không giới hạn' : 'Đôi Nam',
+                        matchType: dto.format === 'singles' ? create_division_dto_1.MatchType.SINGLES : create_division_dto_1.MatchType.DOUBLES,
+                        genderRestriction: undefined,
+                    };
+            }
+        };
+        for (const fmt of formatsToCreate) {
+            const divInfo = mapFormatToDivision(fmt);
+            try {
+                await this.tournamentsRepository.createDivision({
+                    tournamentId: record.id,
+                    name: divInfo.name,
+                    matchType: divInfo.matchType,
+                    genderRestriction: divInfo.genderRestriction,
+                    maxParticipants: maxTeams,
+                    entryFee: 0,
+                    bracketType: finalBracketType,
+                    startDate: startDateTime ? new Date(startDateTime).toISOString() : undefined,
+                    registrationEndDate: registrationEndDate ? registrationEndDate.toISOString() : undefined,
+                }, userId);
+            }
+            catch (divErr) {
+                console.warn('Failed to auto-create division for tournament:', divErr);
+            }
+        }
         const updated = await this.tournamentsRepository.update(record.id, userId, {
             status: requestedPublic && !isAdmin ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN',
         });

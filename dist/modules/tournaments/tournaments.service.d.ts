@@ -292,13 +292,13 @@ export declare class TournamentsService {
         parent: {
             id: string;
             name: string;
+            description: string | null;
+            bannerUrl: string | null;
+            logoUrl: string | null;
+            sports: string[];
             createdAt: Date;
             updatedAt: Date;
             deletedAt: Date | null;
-            description: string | null;
-            logoUrl: string | null;
-            bannerUrl: string | null;
-            sports: string[];
             createdBy: string;
         } | null;
         divisions: {
@@ -356,20 +356,19 @@ export declare class TournamentsService {
     create(userId: string, createTournamentDto: CreateTournamentDto, systemRoles?: string[]): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
-        categoryId: string;
-        logoUrl: string | null;
-        bannerUrl: string | null;
+        createdBy: string;
+        parentId: string | null;
         visibility: string;
         status: string;
         communityId: string | null;
+        categoryId: string;
         matchType: string;
-        genderRestriction: string | null;
-        createdBy: string;
-        parentId: string | null;
         sportRules: unknown;
         tournamentConfig: unknown;
         entryFee: string;
@@ -385,6 +384,7 @@ export declare class TournamentsService {
         prizeDescription: string | null;
         prizes: unknown;
         inviteCode: string | null;
+        genderRestriction: string | null;
         contactInfo: unknown;
         city: string | null;
         reservedSlotsCount: number;
@@ -725,19 +725,19 @@ export declare class TournamentsService {
     }>;
     addTeamMember(participantId: string, userId: string, memberUserId: string, role: 'MAIN' | 'RESERVE'): Promise<{
         id: string;
-        userId: string;
         status: string;
+        participantId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
-        participantId: string;
     }>;
     removeTeamMember(participantId: string, userId: string, memberUserId: string): Promise<{
         id: string;
-        userId: string;
         status: string;
+        participantId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
-        participantId: string;
     }>;
     withdraw(tournamentId: string, userId: string, bankData?: {
         bankName?: string;
@@ -778,24 +778,6 @@ export declare class TournamentsService {
         };
     }>;
     findParticipants(id: string, divisionId?: string): Promise<{
-        id: string;
-        teamName: string;
-        footballTeamId: string | null;
-        footballTeamLogoUrl: string | null;
-        rosterLockedAt: Date | null;
-        seed: number | null;
-        isPaid: boolean;
-        tournamentDivisionId: string | null;
-        teamStatus: string;
-        registeredAt: Date;
-        registeredBy: {
-            id: string | null;
-            fullName: string | null;
-            avatarUrl: string | null;
-        } | null;
-        members: import("./interfaces/tournament-config.interface").RosterMember[];
-        eloPoints?: number;
-    }[] | {
         rosters: {
             profile: {
                 userId: string;
@@ -829,6 +811,24 @@ export declare class TournamentsService {
         isWildcard: boolean;
         registeredAt: Date;
         rosterLockedAt: Date | null;
+    }[] | {
+        id: string;
+        teamName: string;
+        footballTeamId: string | null;
+        footballTeamLogoUrl: string | null;
+        rosterLockedAt: Date | null;
+        seed: number | null;
+        isPaid: boolean;
+        tournamentDivisionId: string | null;
+        teamStatus: string;
+        registeredAt: Date;
+        registeredBy: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+        } | null;
+        members: import("./interfaces/tournament-config.interface").RosterMember[];
+        eloPoints?: number;
     }[]>;
     findParticipantsForOrganizer(id: string, divisionId?: string): Promise<{
         id: string;
@@ -1196,13 +1196,13 @@ export declare class TournamentsService {
     createParent(userId: string, data: CreateParentTournamentDto, systemRoles?: string[]): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
+        sports: string[];
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
-        sports: string[];
         createdBy: string;
     }>;
     updateParent(id: string, userId: string, data: UpdateParentTournamentDto, systemRoles?: string[]): Promise<{
@@ -1313,10 +1313,9 @@ export declare class TournamentsService {
         deletedAt: Date | null;
         status: string;
         tournamentId: string;
-        scheduledAt: Date | null;
-        courtName: string | null;
         stageId: string;
         groupId: string | null;
+        refereeId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
         winnerId: string | null;
@@ -1333,12 +1332,13 @@ export declare class TournamentsService {
         tieId: string | null;
         nextMatchId: string | null;
         loserNextMatchId: string | null;
+        courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
-        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];
+        scheduledAt: Date | null;
         matchConfig: unknown;
         startedAt: Date | null;
         completedAt: Date | null;
@@ -1584,18 +1584,18 @@ export declare class TournamentsService {
     addStaffMember(id: string, email: string, role: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        tournamentId: string;
-        role: string;
         createdBy: string | null;
+        tournamentId: string;
+        userId: string;
+        role: string;
     }>;
     removeStaffMember(id: string, staffUserId: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        tournamentId: string;
-        role: string;
         createdBy: string | null;
+        tournamentId: string;
+        userId: string;
+        role: string;
     }>;
     findReferees(id: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
@@ -1608,8 +1608,8 @@ export declare class TournamentsService {
     followTournament(id: string, userId: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         tournamentId: string;
+        userId: string;
     }>;
     unfollowTournament(id: string, userId: string): Promise<void>;
     getFollowerUserIds(tournamentId: string): Promise<string[]>;
@@ -1662,21 +1662,21 @@ export declare class TournamentsService {
         id: string;
         name: string;
         createdAt: Date;
-        minElo: number | null;
-        maxElo: number | null;
         status: string;
         matchType: string;
-        genderRestriction: string | null;
-        tournamentId: string;
         entryFee: string;
         registrationEndDate: Date | null;
         maxParticipants: number | null;
         startDate: Date | null;
         venueId: string | null;
         prizeDescription: string | null;
+        genderRestriction: string | null;
+        tournamentId: string;
         isConfigOverride: boolean;
         bracketType: string | null;
         roundConfig: unknown;
+        minElo: number | null;
+        maxElo: number | null;
     }>;
     getDivisionsForTournament(tournamentId: string): Promise<{
         _count: {
@@ -1885,9 +1885,9 @@ export declare class TournamentsService {
     addReferee(id: string, email: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         status: string;
         tournamentId: string;
+        userId: string;
         assignedBy: string | null;
         assignedAt: Date;
     }>;
@@ -1903,9 +1903,9 @@ export declare class TournamentsService {
     revokeRefereeInvite(tournamentId: string, refereeId: string, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
         status: string;
         tournamentId: string;
+        userId: string;
         assignedBy: string | null;
         assignedAt: Date;
     }>;

@@ -77,6 +77,16 @@ export class CreateLiteTournamentDto {
   genderRestriction?: 'MALE' | 'FEMALE' | 'MIXED';
 
   @ApiPropertyOptional({
+    example: ['MALE_SINGLES', 'MALE_DOUBLES'],
+    description: 'Danh sách các nội dung thi đấu được chọn (hỗ trợ chọn nhiều)',
+    type: [String],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  selectedFormats?: string[];
+
+  @ApiPropertyOptional({
     example: 'single_elimination',
     description:
       'Thể thức thi đấu. Chỉ hỗ trợ: single_elimination, double_elimination, round_robin, group_stage_knockout.',
