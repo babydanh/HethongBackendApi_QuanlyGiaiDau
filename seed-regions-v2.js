@@ -36,7 +36,7 @@ async function main() {
   try {
     await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`;
     
-    // 1. Tạo hoặc cập nhật cấu trúc bảng provinces
+    // 1. Tạo hoặc bổ sung đầy đủ tất cả các cột cho bảng provinces
     await sql`
       CREATE TABLE IF NOT EXISTS "provinces" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -50,7 +50,15 @@ async function main() {
       )
     `;
 
-    // 2. Tạo hoặc cập nhật cấu trúc bảng wards
+    await sql`
+      ALTER TABLE "provinces" 
+      ADD COLUMN IF NOT EXISTS "name_en" varchar(255),
+      ADD COLUMN IF NOT EXISTS "full_name" varchar(255),
+      ADD COLUMN IF NOT EXISTS "full_name_en" varchar(255),
+      ADD COLUMN IF NOT EXISTS "code_name" varchar(255);
+    `;
+
+    // 2. Tạo hoặc bổ sung đầy đủ tất cả các cột cho bảng wards
     await sql`
       CREATE TABLE IF NOT EXISTS "wards" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -60,24 +68,21 @@ async function main() {
         "full_name" varchar(255),
         "full_name_en" varchar(255),
         "code_name" varchar(255),
-        "province_code" varchar(20) REFERENCES "provinces"("code") ON DELETE CASCADE,
+        "province_code" varchar(20),
         "created_at" timestamp with time zone DEFAULT now() NOT NULL
       )
     `;
 
-    // 3. Đảm bảo cột province_code tồn tại trong bảng wards
     await sql`
-      DO $$ 
-      BEGIN 
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='wards' AND column_name='province_code'
-        ) THEN 
-          ALTER TABLE "wards" ADD COLUMN "province_code" varchar(20) REFERENCES "provinces"("code") ON DELETE CASCADE; 
-        END IF; 
-      END $$;
+      ALTER TABLE "wards" 
+      ADD COLUMN IF NOT EXISTS "name_en" varchar(255),
+      ADD COLUMN IF NOT EXISTS "full_name" varchar(255),
+      ADD COLUMN IF NOT EXISTS "full_name_en" varchar(255),
+      ADD COLUMN IF NOT EXISTS "code_name" varchar(255),
+      ADD COLUMN IF NOT EXISTS "province_code" varchar(20);
     `;
-    console.log('✅ Đã kiểm tra và đảm bảo cấu trúc bảng provinces, wards thành công.');
+
+    console.log('✅ Đã kiểm tra và đồng bộ 100% tất cả các cột của bảng provinces, wards thành công.');
   } catch (tableErr) {
     console.warn('⚠️ Lỗi kiểm tra bảng:', tableErr.message);
   }
