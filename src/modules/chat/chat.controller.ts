@@ -84,6 +84,15 @@ export class ChatController {
     return this.chatService.markRoomRead(user.sub, id);
   }
 
+  @Post('rooms/:id/clear')
+  @ApiOperation({ summary: 'Xóa lịch sử đoạn chat phía người dùng' })
+  async clearRoom(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.clearRoomMessages(user.sub, id);
+  }
+
   @Get('rooms/:id/unread')
   async getUnreadCount(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.chatService.getUnreadCount(user.sub, id);

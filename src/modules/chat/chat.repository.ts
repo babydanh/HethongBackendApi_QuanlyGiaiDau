@@ -29,6 +29,7 @@ export class ChatRepository {
         communityName: schema.communities.name,
         communityLogo: schema.communities.logoUrl,
         createdAt: schema.chatRooms.createdAt,
+        clearedAt: schema.chatRoomMembers.clearedAt,
       })
       .from(schema.chatRoomMembers)
       .innerJoin(schema.chatRooms, eq(schema.chatRoomMembers.roomId, schema.chatRooms.id))
@@ -50,10 +51,18 @@ export class ChatRepository {
         communityName: schema.communities.name,
         communityLogo: schema.communities.logoUrl,
         createdAt: schema.chatRooms.createdAt,
+        clearedAt: schema.chatRoomMembers.clearedAt,
       })
       .from(schema.communityMembers)
       .innerJoin(schema.chatRooms, and(eq(schema.chatRooms.communityId, schema.communityMembers.communityId), eq(schema.chatRooms.type, 'CLUB')))
       .leftJoin(schema.communities, eq(schema.chatRooms.communityId, schema.communities.id))
+      .leftJoin(
+        schema.chatRoomMembers,
+        and(
+          eq(schema.chatRoomMembers.roomId, schema.chatRooms.id),
+          eq(schema.chatRoomMembers.userId, userId),
+        ),
+      )
       .where(and(eq(schema.communityMembers.userId, userId), eq(schema.communityMembers.status, 'JOINED')));
 
     // Deduplicate rooms
@@ -95,7 +104,12 @@ export class ChatRepository {
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
         .where(eq(schema.chatRoomMembers.roomId, room.id));
 
-      // Get last message
+      // Get last message (filtered by clearedAt if user has cleared history)
+      const lastMsgConditions: SQL[] = [eq(schema.chatMessages.roomId, room.id)];
+      if (room.clearedAt) {
+        lastMsgConditions.push(sql`${schema.chatMessages.createdAt} > ${room.clearedAt}`);
+      }
+
       const [lastMessage] = await this.db
         .select({
           id: schema.chatMessages.id,
@@ -110,7 +124,7 @@ export class ChatRepository {
         })
         .from(schema.chatMessages)
         .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
-        .where(eq(schema.chatMessages.roomId, room.id))
+        .where(and(...lastMsgConditions))
         .orderBy(sql`${schema.chatMessages.createdAt} DESC`)
         .limit(1);
 
@@ -632,8 +646,14 @@ export class ChatRepository {
     return result;
   }
 
-  async getMessagesPage(roomId: string, limit: number, cursor?: string) {
+  async getMessagesPage(roomId: string, limit: number, cursor?: string, userId?: string) {
     const conditions: SQL[] = [eq(schema.chatMessages.roomId, roomId)];
+    if (userId) {
+      const clearedAt = await this.getMemberClearedAt(roomId, userId);
+      if (clearedAt) {
+        conditions.push(sql`${schema.chatMessages.createdAt} > ${clearedAt}`);
+      }
+    }
     const decoded = cursor ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor) : null;
     if (decoded?.createdAt && decoded.id) {
       conditions.push(or(lt(schema.chatMessages.createdAt, new Date(decoded.createdAt)), and(eq(schema.chatMessages.createdAt, new Date(decoded.createdAt)), lt(schema.chatMessages.id, decoded.id))) as SQL);
@@ -1173,5 +1193,67 @@ export class ChatRepository {
       .limit(1);
 
     return user ?? null;
+  }
+
+  async getMemberClearedAt(roomId: string, userId: string): Promise<Date | null> {
+    const [member] = await this.db
+      .select({ clearedAt: schema.chatRoomMembers.clearedAt })
+      .from(schema.chatRoomMembers)
+      .where(
+        and(
+          eq(schema.chatRoomMembers.roomId, roomId),
+          eq(schema.chatRoomMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+    return member?.clearedAt ? new Date(member.clearedAt) : null;
+  }
+
+  async clearRoomHistory(userId: string, roomId: string): Promise<boolean> {
+    const room = await this.findRoomById(roomId);
+    if (!room) throw new NotFoundException('Phòng chat không tồn tại');
+
+    const [existing] = await this.db
+      .select({ id: schema.chatRoomMembers.id })
+      .from(schema.chatRoomMembers)
+      .where(
+        and(
+          eq(schema.chatRoomMembers.roomId, roomId),
+          eq(schema.chatRoomMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      await this.db
+        .update(schema.chatRoomMembers)
+        .set({ clearedAt: new Date() })
+        .where(eq(schema.chatRoomMembers.id, existing.id));
+    } else {
+      await this.db.insert(schema.chatRoomMembers).values({
+        roomId,
+        userId,
+        clearedAt: new Date(),
+      });
+    }
+
+    return true;
+  }
+
+  async getCommunityMembersWithNotificationPref(communityId: string, excludeUserId?: string) {
+    const conditions: SQL[] = [
+      eq(schema.communityMembers.communityId, communityId),
+      eq(schema.communityMembers.status, 'JOINED'),
+    ];
+    if (excludeUserId) {
+      conditions.push(sql`${schema.communityMembers.userId} != ${excludeUserId}`);
+    }
+    return this.db
+      .select({
+        userId: schema.communityMembers.userId,
+        notificationPreference: schema.communityMembers.notificationPreference,
+      })
+      .from(schema.communityMembers)
+      .where(and(...conditions));
   }
 }

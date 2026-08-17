@@ -1170,4 +1170,27 @@ export class CommunitiesService {
 
     return roleRank[nextRole] > roleRank[previousRole];
   }
+
+  async updateMemberNotificationPreference(
+    communityId: string,
+    userId: string,
+    preference: 'ALL' | 'MENTIONS_ONLY' | 'MUTED',
+  ) {
+    const member = await this.communitiesRepository.findMember(
+      communityId,
+      userId,
+    );
+    if (!member || member.status !== 'JOINED') {
+      throw new ForbiddenException('Bạn không phải là thành viên của câu lạc bộ này.');
+    }
+    return await this.communitiesRepository.updateMemberNotificationPreference(
+      communityId,
+      userId,
+      preference,
+    );
+  }
+
+  async getMyNotificationPreferences(userId: string) {
+    return await this.communitiesRepository.getMyNotificationPreferences(userId);
+  }
 }

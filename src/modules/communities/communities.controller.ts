@@ -9,6 +9,7 @@ import {
   Query,
   ParseUUIDPipe,
   UseGuards,
+  Put,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,6 +31,7 @@ import { JoinCommunityDto } from './dto/join-community.dto';
 import { ReviewJoinDto } from './dto/review-join.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateGalleryItemDto } from './dto/create-gallery-item.dto';
+import { UpdateNotificationPreferenceDto } from './dto/update-notification-preference.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -466,5 +468,27 @@ export class CommunitiesController {
     @CurrentUser() user?: { id: string; roles?: string[] },
   ) {
     return await this.communitiesService.getRankings(id, limit ? Number(limit) : undefined, user);
+  }
+
+  @Put(':id/members/me/notification-preference')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật cài đặt thông báo của cá nhân trong câu lạc bộ (ALL, MENTIONS_ONLY, MUTED)' })
+  async updateMyNotificationPreference(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateNotificationPreferenceDto,
+  ) {
+    return await this.communitiesService.updateMemberNotificationPreference(
+      id,
+      user.id,
+      dto.preference,
+    );
+  }
+
+  @Get('my/notification-preferences')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách cài đặt thông báo của các CLB mà user tham gia' })
+  async getMyNotificationPreferences(@CurrentUser() user: { id: string }) {
+    return await this.communitiesService.getMyNotificationPreferences(user.id);
   }
 }

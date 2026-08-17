@@ -1475,4 +1475,46 @@ export class CommunitiesRepository {
       .returning();
     return deleted;
   }
+
+  async updateMemberNotificationPreference(
+    communityId: string,
+    userId: string,
+    preference: 'ALL' | 'MENTIONS_ONLY' | 'MUTED',
+  ) {
+    const [updated] = await this.db
+      .update(schema.communityMembers)
+      .set({ notificationPreference: preference })
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+        ),
+      )
+      .returning();
+    return updated;
+  }
+
+  async getMyNotificationPreferences(userId: string) {
+    const rows = await this.db
+      .select({
+        communityId: schema.communities.id,
+        communityName: schema.communities.name,
+        logoUrl: schema.communities.logoUrl,
+        role: schema.communityMembers.role,
+        notificationPreference: schema.communityMembers.notificationPreference,
+      })
+      .from(schema.communityMembers)
+      .innerJoin(
+        schema.communities,
+        eq(schema.communityMembers.communityId, schema.communities.id),
+      )
+      .where(
+        and(
+          eq(schema.communityMembers.userId, userId),
+          eq(schema.communityMembers.status, 'JOINED'),
+          isNull(schema.communities.deletedAt),
+        ),
+      );
+    return rows;
+  }
 }

@@ -7,7 +7,7 @@ import {
   customType,
   jsonb,
   integer,
-  unique
+  unique,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -92,6 +92,9 @@ export const communityMembers = pgTable('community_members', {
   tags: text('tags')
     .array()
     .default(sql`'{}'::text[]`)
+    .notNull(),
+  notificationPreference: varchar('notification_preference', { length: 32 })
+    .default('ALL')
     .notNull(),
   approvedBy: uuid('approved_by').references(() => users.id, { onDelete: 'set null' }),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
