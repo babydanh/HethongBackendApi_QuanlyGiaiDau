@@ -2,18 +2,36 @@
 require('dotenv').config();
 const postgres = require('postgres');
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error('❌ Thiếu biến môi trường DATABASE_URL trong .env');
-  process.exit(1);
-}
+const host = process.env.DB_HOST || 'postgres';
+const port = parseInt(process.env.DB_PORT || '5432', 10);
+const username = process.env.DB_USER || process.env.DB_USERNAME || process.env.POSTGRES_USER || 'postgres';
+const password = process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD || 'postgres';
+const database = process.env.DB_NAME || process.env.POSTGRES_DB || 'tournament_db';
 
-const sql = postgres(databaseUrl, {
-  ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-  max: 10,
-});
+const isSSLEnabled = process.env.DB_SSL === 'true';
+
+const sql = process.env.DATABASE_URL 
+  ? postgres(process.env.DATABASE_URL, {
+      ssl: isSSLEnabled ? { rejectUnauthorized: false } : false,
+      prepare: false,
+      max: 10,
+    })
+  : postgres({
+      host,
+      port,
+      username,
+      password,
+      database,
+      ssl: isSSLEnabled ? { rejectUnauthorized: false } : false,
+      prepare: false,
+      max: 10,
+      connection: {
+        search_path: 'public',
+      },
+    });
 
 async function main() {
+  console.log(`🔌 Đang kết nối Database (${host}:${port}/${database})...`);
   console.log('🔄 Đang kết nối https://provinces.open-api.vn/api/v2/ để lấy dữ liệu địa giới hành chính chuẩn mới (2 cấp: Tỉnh/Thành -> Phường/Xã)...');
 
   try {
