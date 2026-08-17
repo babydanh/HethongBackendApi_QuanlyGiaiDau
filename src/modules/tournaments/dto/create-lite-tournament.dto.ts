@@ -173,12 +173,12 @@ export class CreateLiteTournamentDto {
   @ApiPropertyOptional({
     example: 'OPEN',
     description: 'Chế độ đăng ký',
-    enum: ['OPEN', 'INVITE_ONLY'],
+    enum: ['OPEN', 'APPROVAL', 'INVITE_ONLY'],
   })
   @IsString()
   @IsOptional()
-  @IsIn(['OPEN', 'INVITE_ONLY'])
-  registrationMode?: 'OPEN' | 'INVITE_ONLY';
+  @IsIn(['OPEN', 'APPROVAL', 'INVITE_ONLY'])
+  registrationMode?: 'OPEN' | 'APPROVAL' | 'INVITE_ONLY';
 
   @ApiPropertyOptional({
     example: 'PRIVATE',
