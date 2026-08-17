@@ -222,7 +222,7 @@ src/database/schema/
 |---|---|
 | **Round Robin** | Mỗi đội gặp nhau 1 lần → tính `group_standings` → top N lên vòng sau |
 | **Single Elimination** | Thua 1 trận = loại. Dùng `matches.next_match_id` tạo cây bracket |
-| **Double Elimination** | Thua lần 1 xuống nhánh phụ (`loser_next_match_id`). Thua lần 2 = loại |
+| **Double Elimination** | Thua lần 1 xuống nhánh phụ (`loser_next_match_id`); chung kết tổng là một trận quyết định cuối cùng |
 
 #### Phải biết gì?
 - **Self-referencing**: `matches.next_match_id` → `matches.id` tạo bracket tree

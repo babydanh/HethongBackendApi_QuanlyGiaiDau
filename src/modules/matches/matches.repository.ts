@@ -1613,54 +1613,6 @@ export class MatchesRepository {
       }
     }
 
-    // 4. Double Elimination — Grand Finals Reset
-    if (
-      existing.bracketBranch === 'GRAND_FINALS' &&
-      existing.roundNumber === 1
-    ) {
-      if (winnerId === existing.participant2Id) {
-        const [gf2Exists] = await tx
-          .select()
-          .from(schema.matches)
-          .where(
-            and(
-              eq(schema.matches.groupId, existing.groupId),
-              eq(schema.matches.roundNumber, 2),
-            ),
-          )
-          .limit(1);
-
-        if (!gf2Exists) {
-          const gf2Id = randomUUID();
-          const [gf2] = await tx
-            .insert(schema.matches)
-            .values({
-              id: gf2Id,
-              groupId: existing.groupId,
-              roundNumber: 2,
-              bracketBranch: 'GRAND_FINALS',
-              status: 'SCHEDULED',
-              participant1Id: existing.participant1Id,
-              participant2Id: existing.participant2Id,
-              p1SetsWon: 0,
-              p2SetsWon: 0,
-              totalSetsPlayed: 0,
-              tournamentId: existing.tournamentId,
-              stageId: existing.stageId,
-              updatedAt: new Date(),
-            })
-            .returning();
-
-          await tx
-            .update(schema.matches)
-            .set({ nextMatchId: gf2.id })
-            .where(eq(schema.matches.id, existing.id));
-
-          updated.nextMatchId = gf2.id;
-        }
-      }
-    }
-
     return updated;
   }
 

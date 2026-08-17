@@ -657,9 +657,9 @@ Flow đầy đủ với nhiều gate:
 
 #### Double Elimination (Nhánh thắng/thua)
 - **Nhánh thắng (Winners Bracket):** đội thua xuống nhánh thua
-- **Nhánh thua (Losers Bracket):** đội thua thêm 1 lần nữa mới bị loại
-- **Chung kết:** đội thắng nhánh thua vs đội thắng nhánh thắng
-- Nếu đội nhánh thua thắng ở chung kết → **Chung kết nhánh thua** (đánh lại)
+- **Nhánh thua (Losers Bracket):** đội thua thêm 1 lần nữa mới bị loại trước khi vào chung kết tổng
+- **Chung kết tổng:** đội thắng nhánh thua gặp đội thắng nhánh thắng trong **một trận duy nhất**
+- Kết quả trận chung kết tổng là kết quả cuối cùng; không tạo trận reset dù đội nhánh thắng chưa từng thua
 
 #### Round Robin (Vòng tròn)
 - Mỗi đội gặp nhau 1 hoặc 2 lượt

@@ -47,7 +47,6 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MatchesRepository = void 0;
 const common_1 = require("@nestjs/common");
-const crypto_1 = require("crypto");
 const database_module_1 = require("../../database/database.module");
 const schema = __importStar(require("../../database/schema"));
 const drizzle_orm_1 = require("drizzle-orm");
@@ -1121,42 +1120,6 @@ let MatchesRepository = class MatchesRepository {
                     .set(updateField)
                     .where((0, drizzle_orm_1.eq)(schema.matches.id, existing.loserNextMatchId));
                 await this.autoCompleteIfByeMatch(tx, existing.loserNextMatchId, details.auditUserId);
-            }
-        }
-        if (existing.bracketBranch === 'GRAND_FINALS' &&
-            existing.roundNumber === 1) {
-            if (winnerId === existing.participant2Id) {
-                const [gf2Exists] = await tx
-                    .select()
-                    .from(schema.matches)
-                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema.matches.groupId, existing.groupId), (0, drizzle_orm_1.eq)(schema.matches.roundNumber, 2)))
-                    .limit(1);
-                if (!gf2Exists) {
-                    const gf2Id = (0, crypto_1.randomUUID)();
-                    const [gf2] = await tx
-                        .insert(schema.matches)
-                        .values({
-                        id: gf2Id,
-                        groupId: existing.groupId,
-                        roundNumber: 2,
-                        bracketBranch: 'GRAND_FINALS',
-                        status: 'SCHEDULED',
-                        participant1Id: existing.participant1Id,
-                        participant2Id: existing.participant2Id,
-                        p1SetsWon: 0,
-                        p2SetsWon: 0,
-                        totalSetsPlayed: 0,
-                        tournamentId: existing.tournamentId,
-                        stageId: existing.stageId,
-                        updatedAt: new Date(),
-                    })
-                        .returning();
-                    await tx
-                        .update(schema.matches)
-                        .set({ nextMatchId: gf2.id })
-                        .where((0, drizzle_orm_1.eq)(schema.matches.id, existing.id));
-                    updated.nextMatchId = gf2.id;
-                }
             }
         }
         return updated;

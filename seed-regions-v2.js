@@ -2,13 +2,16 @@
 require('dotenv').config();
 const postgres = require('postgres');
 
+// Match EXACT environment variables used by NestJS database.config.ts
 const host = process.env.DB_HOST || 'postgres';
 const port = parseInt(process.env.DB_PORT || '5432', 10);
-const username = process.env.DB_USER || process.env.DB_USERNAME || process.env.POSTGRES_USER || 'postgres';
+const username = process.env.DB_USERNAME || process.env.DB_USER || process.env.POSTGRES_USER || 'postgres';
 const password = process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD || 'postgres';
-const database = process.env.DB_NAME || process.env.POSTGRES_DB || 'tournament_db';
+const database = process.env.DB_DATABASE || process.env.DB_NAME || process.env.POSTGRES_DB || 'tournament_db';
 
 const isSSLEnabled = process.env.DB_SSL === 'true';
+
+console.log(`🔌 Kết nối Database: ${host}:${port}/${database} (User: ${username})`);
 
 const sql = process.env.DATABASE_URL 
   ? postgres(process.env.DATABASE_URL, {
@@ -31,8 +34,6 @@ const sql = process.env.DATABASE_URL
     });
 
 async function main() {
-  console.log(`🔌 Đang kết nối Database (${host}:${port}/${database})...`);
-
   try {
     await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`;
     
@@ -82,7 +83,7 @@ async function main() {
       ADD COLUMN IF NOT EXISTS "province_code" varchar(20);
     `;
 
-    console.log('✅ Đã kiểm tra và đồng bộ 100% tất cả các cột của bảng provinces, wards thành công.');
+    console.log('✅ Đã kiểm tra và đồng bộ 100% tất cả các cột của bảng provinces, wards trong database chính.');
   } catch (tableErr) {
     console.warn('⚠️ Lỗi kiểm tra bảng:', tableErr.message);
   }
@@ -155,7 +156,7 @@ async function main() {
         ON CONFLICT ("code") DO NOTHING
       `;
     }
-    console.log(`✅ Đã nạp thành công ${wardsToInsert.length} Phường/Xã trực thuộc Tỉnh/Thành!`);
+    console.log(`✅ Đã nạp thành công ${wardsToInsert.length} Phường/Xã trực thuộc Tỉnh/Thành vào database chính!`);
 
   } catch (seedErr) {
     console.error('❌ Lỗi nạp dữ liệu:', seedErr.message);
