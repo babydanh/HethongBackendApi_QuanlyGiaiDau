@@ -410,6 +410,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     } | {
         registrationNotOpen: boolean;
@@ -420,6 +421,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     } | {
         registrationClosed: boolean;
@@ -430,6 +432,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     } | {
         requiresClubJoin: boolean;
@@ -443,6 +446,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     } | {
         clubJoinPending: boolean;
@@ -453,6 +457,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     } | {
         alreadyJoined: boolean;
@@ -464,6 +469,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     } | {
         tournamentFull: boolean;
@@ -474,6 +480,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     } | {
         canJoin: boolean;
@@ -484,6 +491,7 @@ export declare class TournamentsService {
             category: string | undefined;
             matchType: string;
             maxParticipants: number | null;
+            communityId: string | null;
         };
     }>;
     joinLite(inviteCode: string, userId: string): Promise<{

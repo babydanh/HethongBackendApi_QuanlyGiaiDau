@@ -368,8 +368,8 @@ export declare class CommunitiesService {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
         provinceCode: string | null;
+        description: string | null;
         logoUrl: string | null;
         bannerUrl: string | null;
         creatorId: string;
@@ -532,12 +532,12 @@ export declare class CommunitiesService {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     updateMemberRole(requesterId: string, communityId: string, targetUserId: string, dto: UpdateMemberDto, roles: string[]): Promise<{
         id: string;
@@ -560,12 +560,12 @@ export declare class CommunitiesService {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     joinCommunity(userId: string, id: string, answers?: Record<string, string>): Promise<{
         id: string;
@@ -574,12 +574,12 @@ export declare class CommunitiesService {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     reviewJoinRequest(userId: string, id: string, memberId: string, action: 'APPROVE' | 'REJECT', roles: string[]): Promise<{
         id: string;
@@ -693,12 +693,12 @@ export declare class CommunitiesService {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     banMember(requesterId: string, communityId: string, targetUserId: string, roles: string[]): Promise<{
         id: string;
@@ -721,12 +721,12 @@ export declare class CommunitiesService {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     computeStreaks(communityId: string, memberIds: string[]): Promise<Record<string, {
         type: 'WIN' | 'LOSS' | 'ELO_UP';
@@ -778,12 +778,12 @@ export declare class CommunitiesService {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     getGallery(id: string, viewer?: CommunityViewer): Promise<{
         id: string;
@@ -797,16 +797,16 @@ export declare class CommunitiesService {
         id: string;
         createdAt: Date;
         communityId: string;
-        imageUrl: string;
         uploaderId: string | null;
+        imageUrl: string;
         caption: string | null;
     }>;
     removeGalleryItem(userId: string, id: string, imageId: string, roles: string[]): Promise<{
         id: string;
         createdAt: Date;
         communityId: string;
-        imageUrl: string;
         uploaderId: string | null;
+        imageUrl: string;
         caption: string | null;
     }>;
     getTournaments(id: string, status?: string, viewer?: CommunityViewer): Promise<{

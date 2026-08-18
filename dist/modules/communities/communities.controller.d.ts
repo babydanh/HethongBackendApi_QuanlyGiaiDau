@@ -461,8 +461,8 @@ export declare class CommunitiesController {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
         provinceCode: string | null;
+        description: string | null;
         logoUrl: string | null;
         bannerUrl: string | null;
         creatorId: string;
@@ -633,12 +633,12 @@ export declare class CommunitiesController {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     updateMemberRole(user: {
         id: string;
@@ -714,12 +714,12 @@ export declare class CommunitiesController {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     banMember(user: {
         id: string;
@@ -748,12 +748,12 @@ export declare class CommunitiesController {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     joinCommunity(user: {
         id: string;
@@ -764,12 +764,12 @@ export declare class CommunitiesController {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     reviewJoinRequest(user: {
         id: string;
@@ -868,12 +868,12 @@ export declare class CommunitiesController {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     respondToInvite(user: {
         id: string;
@@ -884,12 +884,12 @@ export declare class CommunitiesController {
         approvedBy: string | null;
         communityId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     getGallery(id: string, user?: {
         id: string;
@@ -909,8 +909,8 @@ export declare class CommunitiesController {
         id: string;
         createdAt: Date;
         communityId: string;
-        imageUrl: string;
         uploaderId: string | null;
+        imageUrl: string;
         caption: string | null;
     }>;
     removeGalleryItem(user: {
@@ -920,8 +920,8 @@ export declare class CommunitiesController {
         id: string;
         createdAt: Date;
         communityId: string;
-        imageUrl: string;
         uploaderId: string | null;
+        imageUrl: string;
         caption: string | null;
     }>;
     getTournaments(id: string, status?: string, user?: {

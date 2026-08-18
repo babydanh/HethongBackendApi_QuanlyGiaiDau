@@ -547,8 +547,17 @@ let CommunitiesService = CommunitiesService_1 = class CommunitiesService {
     }
     async respondToInvite(userId, id, action) {
         const member = await this.communitiesRepository.findMember(id, userId);
-        if (!member || member.status !== 'INVITED') {
-            throw new common_1.NotFoundException('No pending invitation found');
+        if (!member) {
+            throw new common_1.NotFoundException('Không tìm thấy lời mời tham gia');
+        }
+        if (member.status === 'JOINED') {
+            if (action === 'ACCEPT') {
+                return member;
+            }
+            return await this.communitiesRepository.removeMember(id, userId);
+        }
+        if (member.status !== 'INVITED') {
+            throw new common_1.NotFoundException('Lời mời không còn hiệu lực hoặc đã được xử lý');
         }
         if (action === 'ACCEPT') {
             return await this.communitiesRepository.updateMemberStatus(id, userId, 'JOINED');
