@@ -47,7 +47,7 @@ describe('bracket advancement slots', () => {
     },
   );
 
-  it.each([0, 1, 2, 3, 65, 100, 4.5])(
+  it.each([0, 1, 2, 3, 129, 200, 4.5])(
     'rejects unsupported participant count %s',
     (participantCount) => {
       expect(() => getDoubleEliminationShape(participantCount)).toThrow(
@@ -56,7 +56,7 @@ describe('bracket advancement slots', () => {
     },
   );
 
-  it.each([4, 8, 16, 32, 64])(
+  it.each([4, 8, 16, 32, 64, 128])(
     'assigns exactly two distinct feeders to every lower-bracket match for size %i',
     (bracketSize) => {
       const shape = getDoubleEliminationShape(bracketSize);
