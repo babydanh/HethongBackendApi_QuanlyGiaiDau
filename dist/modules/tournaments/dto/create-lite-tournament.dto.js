@@ -130,7 +130,7 @@ __decorate([
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({
         example: 'MALE',
-        description: 'Giới hạn giới tính cho giải bóng đá Lite; bỏ trống là không ràng buộc',
+        description: 'Giới hạn giới tính cho hình thức đơn/đôi; bỏ trống là không ràng buộc',
         enum: ['MALE', 'FEMALE', 'MIXED'],
     }),
     (0, class_validator_1.IsString)(),
