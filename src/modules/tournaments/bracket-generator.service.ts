@@ -774,7 +774,7 @@ export class BracketGeneratorService {
         groupsConfig.teams_per_group ??
         groupsConfig.maxGroupSize ??
         config.roundRobinGroupSize ??
-        8,
+        15,
       );
       const winPoints = typeof scoring.winPoints === 'number' ? scoring.winPoints : 3;
       const drawPoints = typeof scoring.drawPoints === 'number' ? scoring.drawPoints : 1;
@@ -794,8 +794,8 @@ export class BracketGeneratorService {
         ...extractSportRuleOverrides(divisionGroupsConfig),
       };
 
-      if (!Number.isInteger(maxGroupSize) || maxGroupSize < 2 || maxGroupSize > 8) {
-        throw new BadRequestException('Tối đa 8 đội/bảng');
+      if (!Number.isInteger(maxGroupSize) || maxGroupSize < 2 || maxGroupSize > 15) {
+        throw new BadRequestException('Bảng đấu vòng tròn hỗ trợ từ 2 đến tối đa 15 đội/bảng. Với số lượng đội vượt quá 15, vui lòng chọn thể thức Vòng bảng và Nhánh đấu (Group Stage + Knockout).');
       }
       if (!Number.isInteger(roundRobinLegs) || roundRobinLegs < 1 || roundRobinLegs > 5) {
         throw new BadRequestException('Số lượt vòng tròn phải nằm trong khoảng 1-5');

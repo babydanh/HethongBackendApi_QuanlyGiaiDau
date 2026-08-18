@@ -788,24 +788,6 @@ export declare class TournamentsService {
         };
     }>;
     findParticipants(id: string, divisionId?: string): Promise<{
-        id: string;
-        teamName: string;
-        footballTeamId: string | null;
-        footballTeamLogoUrl: string | null;
-        rosterLockedAt: Date | null;
-        seed: number | null;
-        isPaid: boolean;
-        tournamentDivisionId: string | null;
-        teamStatus: string;
-        registeredAt: Date;
-        registeredBy: {
-            id: string | null;
-            fullName: string | null;
-            avatarUrl: string | null;
-        } | null;
-        members: import("./interfaces/tournament-config.interface").RosterMember[];
-        eloPoints?: number;
-    }[] | {
         rosters: {
             profile: {
                 userId: string;
@@ -840,6 +822,24 @@ export declare class TournamentsService {
         isWildcard: boolean;
         registeredAt: Date;
         rosterLockedAt: Date | null;
+    }[] | {
+        id: string;
+        teamName: string;
+        footballTeamId: string | null;
+        footballTeamLogoUrl: string | null;
+        rosterLockedAt: Date | null;
+        seed: number | null;
+        isPaid: boolean;
+        tournamentDivisionId: string | null;
+        teamStatus: string;
+        registeredAt: Date;
+        registeredBy: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+        } | null;
+        members: import("./interfaces/tournament-config.interface").RosterMember[];
+        eloPoints?: number;
     }[]>;
     findParticipantsForOrganizer(id: string, divisionId?: string): Promise<{
         id: string;
@@ -1321,16 +1321,15 @@ export declare class TournamentsService {
         participant1Id: string;
         participant2Id: string;
     }, userId: string, systemRoles?: string[]): Promise<{
+        stageId: string;
         id: string;
         updatedAt: Date;
         deletedAt: Date | null;
         status: string;
         tournamentId: string;
-        stageId: string;
         groupId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
-        refereeId: string | null;
         winnerId: string | null;
         scoreDetails: unknown;
         p1SetsWon: number;
@@ -1348,6 +1347,7 @@ export declare class TournamentsService {
         courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
+        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];

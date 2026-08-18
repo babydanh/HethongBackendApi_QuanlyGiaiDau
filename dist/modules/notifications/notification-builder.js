@@ -4,7 +4,7 @@ exports.buildRefereeInviteRevokedNotification = exports.buildRefereeInviteAccept
 exports.buildRefereeInviteDeclinedNotification = void 0;
 const notification_types_1 = require("./notification-types");
 const getCommunityRedirect = (communityId) => `/communities/${communityId}`;
-const getFootballTeamRedirect = (teamId) => `/teams/${teamId}`;
+const getFootballTeamRedirect = (teamId) => `/football-teams?teamId=${encodeURIComponent(teamId)}`;
 const buildFootballTeamNotification = (params) => {
     const copy = {
         FOOTBALL_TEAM_INVITED: ['Lời mời tham gia đội bóng', `Bạn được mời tham gia ${params.teamName}.`],
