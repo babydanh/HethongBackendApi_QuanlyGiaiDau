@@ -211,20 +211,20 @@ export declare class UsersRepository {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        reason: string;
         status: string;
         reporterId: string;
+        reason: string;
+        resolvedAt: Date | null;
+        category: string;
+        evidenceUrls: string[];
+        resolvedBy: string | null;
+        resolutionNote: string | null;
         targetType: string;
         targetId: string;
         source: string;
         sourceReferenceId: string | null;
-        category: string;
-        evidenceUrls: string[];
         assignedTo: string | null;
-        resolvedBy: string | null;
-        resolutionNote: string | null;
         triagedAt: Date | null;
-        resolvedAt: Date | null;
     }>;
     getMyReports(reporterId: string, query: QueryMyReportsDto): Promise<{
         data: {
@@ -266,8 +266,8 @@ export declare class UsersRepository {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        userId: string;
         status: string;
+        userId: string;
         requestType: string;
         oldValue: string;
         newValue: string;

@@ -8,4 +8,5 @@ export declare class RegisterTournamentDto {
     tournamentDivisionId?: string;
     matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
     rankingConsent?: boolean;
+    customResponses?: Record<string, unknown>;
 }

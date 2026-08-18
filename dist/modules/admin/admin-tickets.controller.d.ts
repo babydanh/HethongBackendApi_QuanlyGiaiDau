@@ -8,8 +8,8 @@ export declare class AdminTicketsController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        userId: string;
         status: string;
+        userId: string;
         evidenceUrls: string[];
         contactPhone: string;
         rejectReason: string | null;

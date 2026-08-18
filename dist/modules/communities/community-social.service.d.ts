@@ -46,6 +46,7 @@ export declare class CommunitySocialService {
                 status: string | null;
                 bannerUrl: string | null;
                 maxParticipants: number | null;
+                inviteCode: string | null;
             } | null;
             viewerReaction: string | null;
             id: string;
@@ -82,16 +83,16 @@ export declare class CommunitySocialService {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        type: string;
         status: string;
         communityId: string;
         tournamentId: string | null;
-        idempotencyKey: string | null;
+        type: string;
         authorId: string | null;
         body: string | null;
         mediaUrls: string[];
         topics: string[];
         mentions: string[];
+        idempotencyKey: string | null;
         reactionCount: number;
         commentCount: number;
     }>;
@@ -153,8 +154,8 @@ export declare class CommunitySocialService {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        status: string;
         parentId: string | null;
+        status: string;
         authorId: string | null;
         body: string;
         postId: string;
@@ -244,12 +245,12 @@ export declare class CommunitySocialService {
         createdAt: Date;
         status: string;
         communityId: string;
-        reason: string;
-        resolvedAt: Date | null;
-        reporterId: string;
         postId: string | null;
+        reporterId: string;
         commentId: string | null;
+        reason: string;
         details: string | null;
+        resolvedAt: Date | null;
     }>;
     updatePreferences(communityId: string, user: SocialUser, values: {
         muted: boolean;
@@ -257,8 +258,8 @@ export declare class CommunitySocialService {
     }): Promise<{
         id: string;
         updatedAt: Date;
-        userId: string;
         communityId: string;
+        userId: string;
         muted: boolean;
         notificationsEnabled: boolean;
     }>;

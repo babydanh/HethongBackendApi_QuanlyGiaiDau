@@ -475,7 +475,8 @@ let MatchesService = class MatchesService {
         }
         const isReferee = existing.refereeId === user.sub;
         const isTournamentManager = await this.isTournamentManager(existing, user);
-        if (!isTournamentManager && !isReferee) {
+        const acceptedReferee = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, user.sub);
+        if (!isTournamentManager && !isReferee && !acceptedReferee) {
             throw new common_1.ForbiddenException('Bạn không có quyền nhập điểm cho trận đấu này');
         }
         if (!existing.participant1Id || !existing.participant2Id) {
@@ -689,25 +690,12 @@ let MatchesService = class MatchesService {
         const isReferee = existing.refereeId === user.sub;
         const isTournamentManager = await this.isTournamentManager(existing, user);
         const acceptedReferee = await this.matchesRepository.isRefereeAccepted(existing.tournamentId, user.sub);
-        const canClaimAsReferee = updateMatchStatusDto.status === 'ONGOING' && acceptedReferee;
-        if (!isTournamentManager && !isReferee && !canClaimAsReferee) {
+        if (!isTournamentManager && !isReferee && !acceptedReferee) {
             throw new common_1.ForbiddenException('Bạn không có quyền thay đổi trạng thái trận đấu này');
         }
         if (updateMatchStatusDto.status === 'ONGOING') {
             if (!existing.participant1Id || !existing.participant2Id) {
                 throw new common_1.BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
-            }
-            if (acceptedReferee &&
-                existing.refereeId &&
-                existing.refereeId !== user.sub) {
-                throw new common_1.ForbiddenException('This match is assigned to another referee.');
-            }
-            if (!existing.refereeId && acceptedReferee) {
-                const updated = await this.matchesRepository.updateRefereeId(id, user.sub, user.sub);
-                if (!updated) {
-                    throw new common_1.ConflictException('Another referee claimed this match.');
-                }
-                existing.refereeId = updated.refereeId;
             }
         }
         if (updateMatchStatusDto.status === 'COMPLETED') {

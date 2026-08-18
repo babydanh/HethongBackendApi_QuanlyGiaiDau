@@ -143,6 +143,7 @@ let CommunitySocialRepository = class CommunitySocialRepository {
                 status: schema.tournaments.status,
                 bannerUrl: schema.tournaments.bannerUrl,
                 maxParticipants: schema.tournaments.maxParticipants,
+                inviteCode: schema.tournaments.inviteCode,
             },
             viewerReaction: viewerId
                 ? (0, drizzle_orm_1.sql) `(

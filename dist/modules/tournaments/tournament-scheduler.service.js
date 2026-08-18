@@ -90,6 +90,17 @@ let TournamentSchedulerService = TournamentSchedulerService_1 = class Tournament
         this.logger.log('Running auto-open registration cron job...');
         try {
             const now = new Date();
+            const prematurelyOpenTournaments = await this.db
+                .select()
+                .from(schema.tournaments)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema.tournaments.status, 'REGISTRATION_OPEN'), (0, drizzle_orm_1.gt)(schema.tournaments.registrationStartDate, now)));
+            for (const tournament of prematurelyOpenTournaments) {
+                await this.db
+                    .update(schema.tournaments)
+                    .set({ status: 'UPCOMING', updatedAt: now })
+                    .where((0, drizzle_orm_1.eq)(schema.tournaments.id, tournament.id));
+                this.logger.warn(`Tournament ${tournament.id} was open before its registration start; moved back to UPCOMING.`);
+            }
             const openingTournaments = await this.db
                 .select()
                 .from(schema.tournaments)
@@ -212,6 +223,13 @@ let TournamentSchedulerService = TournamentSchedulerService_1 = class Tournament
                     maxParticipants: t.maxParticipants,
                     entryFee: t.entryFee,
                     isRanked: t.isRanked,
+                    venueId: t.venueId,
+                    bannerUrl: t.bannerUrl,
+                    logoUrl: t.logoUrl,
+                    galleryImages: t.galleryImages,
+                    prizeDescription: t.prizeDescription,
+                    contactInfo: t.contactInfo,
+                    city: t.city,
                     sportRules: t.sportRules,
                     tournamentConfig: newTournamentConfig,
                     startDate: nextTournamentDate,

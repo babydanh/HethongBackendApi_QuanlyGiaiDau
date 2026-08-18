@@ -10,8 +10,8 @@ export declare class SocialController {
         createdAt: Date;
         updatedAt: Date;
         status: string;
-        senderId: string;
         receiverId: string;
+        senderId: string;
     }>;
     respondToRequest(id: string, updateFriendshipDto: UpdateFriendshipDto, user: JwtPayload): Promise<{
         id: string;

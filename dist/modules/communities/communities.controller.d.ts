@@ -458,14 +458,14 @@ export declare class CommunitiesController {
     }, createCommunityDto: CreateCommunityDto): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        provinceCode: string | null;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         creatorId: string;
+        provinceCode: string | null;
         districtCode: string | null;
         wardCode: string | null;
         visibility: string;
@@ -628,10 +628,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, addMemberDto: AddMemberDto): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -689,8 +689,8 @@ export declare class CommunitiesController {
         id: string;
         name: string;
         createdAt: Date;
-        communityId: string;
         createdBy: string | null;
+        communityId: string;
         color: string;
     }>;
     deleteTagPreset(user: {
@@ -700,8 +700,8 @@ export declare class CommunitiesController {
         id: string;
         name: string;
         createdAt: Date;
-        communityId: string;
         createdBy: string | null;
+        communityId: string;
         color: string;
     }>;
     removeMember(user: {
@@ -709,10 +709,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, userId: string): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -743,10 +743,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, userId: string): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -759,10 +759,10 @@ export declare class CommunitiesController {
         id: string;
     }, id: string, body: JoinCommunityDto): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -793,36 +793,36 @@ export declare class CommunitiesController {
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     unfollowCommunity(user: {
         id: string;
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     favoriteCommunity(user: {
         id: string;
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     unfavoriteCommunity(user: {
         id: string;
     }, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     getJoinRequests(user: {
         id: string;
@@ -863,10 +863,10 @@ export declare class CommunitiesController {
         roles: string[];
     }, id: string, body: InviteMemberDto): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -879,10 +879,10 @@ export declare class CommunitiesController {
         id: string;
     }, id: string, action: 'accept' | 'decline'): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;

@@ -58,8 +58,8 @@ export declare class ChatRepository {
         id: string;
         name: string | null;
         createdAt: Date;
-        type: string;
         communityId: string | null;
+        type: string;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -82,8 +82,8 @@ export declare class ChatRepository {
         id: string;
         name: string | null;
         createdAt: Date;
-        type: string;
         communityId: string | null;
+        type: string;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -130,8 +130,8 @@ export declare class ChatRepository {
         id: string;
         name: string | null;
         createdAt: Date;
-        type: string;
         communityId: string | null;
+        type: string;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -159,15 +159,15 @@ export declare class ChatRepository {
         id: string;
         createdAt: Date;
         type: string;
+        senderId: string | null;
+        isRead: boolean;
         isRevoked: boolean;
         revokedAt: Date | null;
-        senderId: string | null;
+        metadata: unknown;
         roomId: string;
         messageText: string | null;
         attachmentsUrls: string[];
-        metadata: unknown;
         clientMessageId: string | null;
-        isRead: boolean;
         revokedBy: string | null;
         replyToId: string | null;
         isPinned: boolean;
@@ -295,7 +295,7 @@ export declare class ChatRepository {
         pinnedMessageId: string | null;
         createdAt: Date;
     }>;
-    getCommunityRole(communityId: string, userId: string): Promise<"MEMBER" | "MODERATOR" | "ADMIN" | "OWNER" | null>;
+    getCommunityRole(communityId: string, userId: string): Promise<"MEMBER" | "ADMIN" | "OWNER" | "MODERATOR" | null>;
     countUnreadForUser(roomId: string, userId: string, lastReadAt?: Date | null): Promise<number>;
     votePoll(userId: string, messageId: string, optionId: string): Promise<{
         messageId: string;

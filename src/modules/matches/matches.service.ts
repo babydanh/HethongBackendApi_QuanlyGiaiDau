@@ -686,7 +686,11 @@ export class MatchesService {
 
     const isReferee = existing.refereeId === user.sub;
     const isTournamentManager = await this.isTournamentManager(existing, user);
-    if (!isTournamentManager && !isReferee) {
+    const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
+      existing.tournamentId,
+      user.sub,
+    );
+    if (!isTournamentManager && !isReferee && !acceptedReferee) {
       throw new ForbiddenException(
         'Bạn không có quyền nhập điểm cho trận đấu này',
       );
@@ -1059,9 +1063,7 @@ export class MatchesService {
       existing.tournamentId,
       user.sub,
     );
-    const canClaimAsReferee =
-      updateMatchStatusDto.status === 'ONGOING' && acceptedReferee;
-    if (!isTournamentManager && !isReferee && !canClaimAsReferee) {
+    if (!isTournamentManager && !isReferee && !acceptedReferee) {
       throw new ForbiddenException(
         'Bạn không có quyền thay đổi trạng thái trận đấu này',
       );
@@ -1072,28 +1074,8 @@ export class MatchesService {
         throw new BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
       }
 
-      if (
-        acceptedReferee &&
-        existing.refereeId &&
-        existing.refereeId !== user.sub
-      ) {
-        throw new ForbiddenException(
-          'This match is assigned to another referee.',
-        );
-      }
-
-      // A referee may claim an unassigned match only after the tournament accepts them.
-      if (!existing.refereeId && acceptedReferee) {
-        const updated = await this.matchesRepository.updateRefereeId(
-          id,
-          user.sub,
-          user.sub,
-        );
-        if (!updated) {
-          throw new ConflictException('Another referee claimed this match.');
-        }
-        existing.refereeId = updated.refereeId;
-      }
+      // Trọng tài được BTC chấp nhận có thể bắt đầu trận mà không bị hệ thống
+      // tự gán vào match. refereeId chỉ đổi ở luồng phân công chủ động của BTC.
     }
 
     if (updateMatchStatusDto.status === 'COMPLETED') {

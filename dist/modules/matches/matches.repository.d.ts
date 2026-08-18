@@ -636,20 +636,20 @@ export declare class MatchesRepository {
         createdAt: Date;
         type: string;
         userId: string;
-        matchId: string;
-        mutedBy: string | null;
         reason: string | null;
         expiresAt: Date | null;
+        matchId: string;
+        mutedBy: string | null;
     }>;
     unmuteUser(matchId: string, userId: string): Promise<{
         id: string;
         createdAt: Date;
         type: string;
         userId: string;
-        matchId: string;
-        mutedBy: string | null;
         reason: string | null;
         expiresAt: Date | null;
+        matchId: string;
+        mutedBy: string | null;
     }>;
     getFollowerUserIds(tournamentId: string): Promise<string[]>;
     incrementCheerCount(id: string): Promise<{

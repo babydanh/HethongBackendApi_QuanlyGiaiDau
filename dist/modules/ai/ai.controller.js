@@ -72,6 +72,14 @@ let AiController = class AiController {
         const reply = await this.aiService.getChatResponse(formattedMessages, userId, currentUrl, pageTitle, isMobile ?? true, searchParams);
         return { success: true, reply, data: reply };
     }
+    async parseTournamentSource(sourceUrl, rawText, sportHint) {
+        const data = await this.aiService.parseTournamentSource({
+            sourceUrl,
+            rawText,
+            sportHint,
+        });
+        return { success: true, data };
+    }
 };
 exports.AiController = AiController;
 __decorate([
@@ -106,6 +114,18 @@ __decorate([
     __metadata("design:paramtypes", [Array, String, String, String, Boolean, String, Object]),
     __metadata("design:returntype", Promise)
 ], AiController.prototype, "message", null);
+__decorate([
+    (0, public_decorator_1.Public)(),
+    (0, common_1.Post)('parse-tournament-source'),
+    (0, common_1.UseGuards)(new rate_limit_guard_1.RateLimitGuard(15, 60000)),
+    (0, swagger_1.ApiOperation)({ summary: 'Phân tích Link Google Form / Điều lệ giải đấu để trích xuất thông tin tự động' }),
+    __param(0, (0, common_1.Body)('sourceUrl')),
+    __param(1, (0, common_1.Body)('rawText')),
+    __param(2, (0, common_1.Body)('sportHint')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], AiController.prototype, "parseTournamentSource", null);
 exports.AiController = AiController = __decorate([
     (0, swagger_1.ApiTags)('ai'),
     (0, common_1.Controller)('ai'),

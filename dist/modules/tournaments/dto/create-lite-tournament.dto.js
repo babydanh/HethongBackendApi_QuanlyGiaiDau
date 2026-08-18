@@ -160,11 +160,11 @@ __decorate([
     __metadata("design:type", String)
 ], CreateLiteTournamentDto.prototype, "bracketType", void 0);
 __decorate([
-    (0, swagger_1.ApiPropertyOptional)({ example: 16, description: 'Số đội tối đa (2-32)' }),
+    (0, swagger_1.ApiPropertyOptional)({ example: 16, description: 'Số đội tối đa (2-128)' }),
     (0, class_validator_1.IsNumber)(),
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.Min)(2),
-    (0, class_validator_1.Max)(32),
+    (0, class_validator_1.Max)(128),
     __metadata("design:type", Number)
 ], CreateLiteTournamentDto.prototype, "maxTeams", void 0);
 __decorate([

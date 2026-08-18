@@ -59,6 +59,7 @@ export declare class CommunitySocialController {
                 status: string | null;
                 bannerUrl: string | null;
                 maxParticipants: number | null;
+                inviteCode: string | null;
             } | null;
             viewerReaction: string | null;
             id: string;
@@ -98,16 +99,16 @@ export declare class CommunitySocialController {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        type: string;
         status: string;
         communityId: string;
         tournamentId: string | null;
-        idempotencyKey: string | null;
+        type: string;
         authorId: string | null;
         body: string | null;
         mediaUrls: string[];
         topics: string[];
         mentions: string[];
+        idempotencyKey: string | null;
         reactionCount: number;
         commentCount: number;
     }>;
@@ -167,8 +168,8 @@ export declare class CommunitySocialController {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        status: string;
         parentId: string | null;
+        status: string;
         authorId: string | null;
         body: string;
         postId: string;
@@ -276,12 +277,12 @@ export declare class CommunitySocialController {
         createdAt: Date;
         status: string;
         communityId: string;
-        reason: string;
-        resolvedAt: Date | null;
-        reporterId: string;
         postId: string | null;
+        reporterId: string;
         commentId: string | null;
+        reason: string;
         details: string | null;
+        resolvedAt: Date | null;
     }>;
     moderate(communityId: string, postId: string, user: {
         id: string;
@@ -310,8 +311,8 @@ export declare class CommunitySocialController {
     }, dto: UpdateCommunityPreferencesDto): Promise<{
         id: string;
         updatedAt: Date;
-        userId: string;
         communityId: string;
+        userId: string;
         muted: boolean;
         notificationsEnabled: boolean;
     }>;

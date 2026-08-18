@@ -1173,6 +1173,44 @@ let TournamentsRepository = class TournamentsRepository {
                         ? 'PENDING_APPROVAL'
                         : 'COMPLETE';
             const isPaid = payableEntryFeeAmount === 0;
+            const registrationForm = (tConfigForTeam.registrationForm || null);
+            const formApplies = Boolean(registrationForm?.status === 'PUBLISHED' &&
+                selectedDivision &&
+                (!Array.isArray(registrationForm.divisionIds) || registrationForm.divisionIds.length === 0 || registrationForm.divisionIds.includes(selectedDivision.id)));
+            if (formApplies && registrationForm?.fields && typeof registrationForm.fields === 'object' && Array.isArray(registrationForm.fields)) {
+                const responses = data.customResponses ?? {};
+                for (const rawField of registrationForm.fields) {
+                    if (!rawField || typeof rawField !== 'object' || Array.isArray(rawField))
+                        continue;
+                    const field = rawField;
+                    const fieldId = typeof field.id === 'string' ? field.id : '';
+                    const value = fieldId ? responses[fieldId] : undefined;
+                    const isEmpty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+                    if (field.required === true && isEmpty) {
+                        throw new common_1.BadRequestException(`Vui lòng điền trường “${typeof field.label === 'string' ? field.label : fieldId}”.`);
+                    }
+                    if (isEmpty)
+                        continue;
+                    if (field.type === 'EMAIL' && (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))) {
+                        throw new common_1.BadRequestException(`Trường “${String(field.label || fieldId)}” phải là email hợp lệ.`);
+                    }
+                    if (field.type === 'NUMBER') {
+                        const numberValue = typeof value === 'number' ? value : Number(value);
+                        if (!Number.isFinite(numberValue))
+                            throw new common_1.BadRequestException(`Trường “${String(field.label || fieldId)}” phải là số.`);
+                        if (typeof field.min === 'number' && numberValue < field.min)
+                            throw new common_1.BadRequestException(`Trường “${String(field.label || fieldId)}” không được nhỏ hơn ${field.min}.`);
+                        if (typeof field.max === 'number' && numberValue > field.max)
+                            throw new common_1.BadRequestException(`Trường “${String(field.label || fieldId)}” không được lớn hơn ${field.max}.`);
+                    }
+                    if (field.type === 'SELECT' && Array.isArray(field.options) && !field.options.includes(value)) {
+                        throw new common_1.BadRequestException(`Lựa chọn của trường “${String(field.label || fieldId)}” không hợp lệ.`);
+                    }
+                    if (field.type === 'CHECKBOX' && value !== true) {
+                        throw new common_1.BadRequestException(`Bạn cần xác nhận “${String(field.label || fieldId)}”.`);
+                    }
+                }
+            }
             let finalTeamName = (data.teamName || '').trim();
             let footballTeamMemberIds = [];
             let footballTeamReserveMemberIds = [];
@@ -1313,6 +1351,7 @@ let TournamentsRepository = class TournamentsRepository {
                 footballTeamId: isTeamSport ? (data.footballTeamId ?? null) : null,
                 footballTeamLogoUrl: isTeamSport ? footballTeamLogoUrl : null,
                 rankingConsent: data.rankingConsent === true,
+                customResponses: data.customResponses ?? null,
                 isPaid,
                 teamInviteToken,
                 teamStatus,

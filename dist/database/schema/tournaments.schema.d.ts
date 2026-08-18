@@ -1361,6 +1361,23 @@ export declare const tournamentParticipants: import("drizzle-orm/pg-core").PgTab
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        customResponses: import("drizzle-orm/pg-core").PgColumn<{
+            name: "custom_responses";
+            tableName: "tournament_participants";
+            dataType: "json";
+            columnType: "PgJsonb";
+            data: unknown;
+            driverParam: unknown;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         isPaid: import("drizzle-orm/pg-core").PgColumn<{
             name: "is_paid";
             tableName: "tournament_participants";

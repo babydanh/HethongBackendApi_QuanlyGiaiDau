@@ -10,4 +10,26 @@ export declare class AiController {
         reply: string;
         data: string;
     }>;
+    parseTournamentSource(sourceUrl?: string, rawText?: string, sportHint?: string): Promise<{
+        success: boolean;
+        data: {
+            name: string;
+            sport: "badminton" | "tennis" | "pickleball" | "table_tennis" | "football";
+            startDate?: string | null;
+            endDate?: string | null;
+            venueName?: string | null;
+            locationAddress?: string | null;
+            province?: string | null;
+            description?: string | null;
+            bannerUrl?: string | null;
+            formats: Array<{
+                name: string;
+                formatKey: string;
+                bracketType?: "SINGLE_ELIMINATION" | "DOUBLE_ELIMINATION" | "ROUND_ROBIN" | "GROUP_STAGE_KNOCKOUT" | null;
+                maxParticipants?: number | null;
+                minElo?: number | null;
+                maxElo?: number | null;
+            }>;
+        };
+    }>;
 }

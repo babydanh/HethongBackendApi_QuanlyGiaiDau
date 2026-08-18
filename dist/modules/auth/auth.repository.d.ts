@@ -40,12 +40,12 @@ export declare class AuthRepository {
         id: string;
         createdAt: Date;
         userId: string;
-        refreshToken: string;
-        userAgent: string | null;
+        expiresAt: Date;
         ipAddress: string | null;
+        userAgent: string | null;
+        refreshToken: string;
         isRevoked: boolean;
         revokedAt: Date | null;
-        expiresAt: Date;
     }>;
     findSessionByRefreshToken(refreshToken: string): Promise<{
         id: string;

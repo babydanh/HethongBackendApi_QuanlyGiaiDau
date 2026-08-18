@@ -8,12 +8,12 @@ export declare class NotificationsRepository {
         id: string;
         createdAt: Date;
         type: string;
-        senderId: string | null;
-        receiverId: string;
-        isRead: boolean;
         title: string;
+        receiverId: string;
+        senderId: string | null;
         content: string;
         redirectUrl: string | null;
+        isRead: boolean;
     }>;
     getNotificationsByUser(userId: string, query: QueryNotificationsDto): Promise<{
         data: {
@@ -63,11 +63,11 @@ export declare class NotificationsRepository {
         id: string;
         createdAt: Date;
         type: string;
-        senderId: string | null;
-        receiverId: string;
-        isRead: boolean;
         title: string;
+        receiverId: string;
+        senderId: string | null;
         content: string;
         redirectUrl: string | null;
+        isRead: boolean;
     }[]>;
 }

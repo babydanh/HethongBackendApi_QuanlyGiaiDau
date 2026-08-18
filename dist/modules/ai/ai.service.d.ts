@@ -27,4 +27,27 @@ export declare class AiService {
     getChatResponseStream(messages: any[], userId?: string, currentUrl?: string, pageTitle?: string, isMobile?: boolean, searchParams?: string): Promise<import("openai/core/streaming.js").Stream<OpenAI.Chat.Completions.ChatCompletionChunk> & {
         _request_id?: string | null;
     }>;
+    parseTournamentSource(dto: {
+        sourceUrl?: string;
+        rawText?: string;
+        sportHint?: string;
+    }): Promise<{
+        name: string;
+        sport: 'badminton' | 'tennis' | 'pickleball' | 'table_tennis' | 'football';
+        startDate?: string | null;
+        endDate?: string | null;
+        venueName?: string | null;
+        locationAddress?: string | null;
+        province?: string | null;
+        description?: string | null;
+        bannerUrl?: string | null;
+        formats: Array<{
+            name: string;
+            formatKey: string;
+            bracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT' | null;
+            maxParticipants?: number | null;
+            minElo?: number | null;
+            maxElo?: number | null;
+        }>;
+    }>;
 }
