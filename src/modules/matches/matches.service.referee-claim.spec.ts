@@ -6,7 +6,7 @@ import type { RankingsService } from '../rankings/rankings.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { RedisService } from '../../providers/redis/redis.service';
 
-describe('MatchesService — referee starts without auto-assignment', () => {
+describe('MatchesService — referee claims match when starting Live', () => {
   let service: MatchesService;
   let mockRepo: jest.Mocked<Partial<MatchesRepository>>;
   let mockGateway: jest.Mocked<Partial<LiveScoreGateway>>;
@@ -65,12 +65,12 @@ describe('MatchesService — referee starts without auto-assignment', () => {
     );
   });
 
-  it('accepted referee can start an unassigned match without being auto-assigned', async () => {
+  it('accepted referee is saved as referee when starting an unassigned match', async () => {
     const result = await service.updateStatus('match-1', refereeWithRolesArray as never, {
       status: 'ONGOING',
     } as never);
     expect(result).toBeDefined();
-    expect(mockRepo.updateRefereeId).not.toHaveBeenCalled();
+    expect(mockRepo.updateRefereeId).toHaveBeenCalledWith('match-1', 'referee-1', 'referee-1');
   });
 
   it('referee not accepted by tournament cannot claim', async () => {

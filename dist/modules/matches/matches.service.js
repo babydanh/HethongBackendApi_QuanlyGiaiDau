@@ -697,6 +697,9 @@ let MatchesService = class MatchesService {
             if (!existing.participant1Id || !existing.participant2Id) {
                 throw new common_1.BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
             }
+            if (acceptedReferee && !existing.refereeId) {
+                await this.matchesRepository.updateRefereeId(id, user.sub, user.sub);
+            }
         }
         if (updateMatchStatusDto.status === 'COMPLETED') {
             if (existing.status === 'COMPLETED') {
