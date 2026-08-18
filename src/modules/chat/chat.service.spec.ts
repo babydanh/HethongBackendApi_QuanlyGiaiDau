@@ -3,6 +3,11 @@ import { ChatService } from './chat.service';
 import { RoomType } from './dto/create-room.dto';
 
 function createService(repository: Record<string, jest.Mock>) {
+  const defaultRepo = {
+    getAllowStrangerMessages: jest.fn().mockResolvedValue(true),
+    isAcquainted: jest.fn().mockResolvedValue(true),
+    ...repository,
+  };
   const gateway = {
     broadcastMessage: jest.fn(),
     broadcastMessagePinned: jest.fn(),
@@ -10,7 +15,7 @@ function createService(repository: Record<string, jest.Mock>) {
   };
   const firebase = { sendPushToUsers: jest.fn() };
   return {
-    service: new ChatService(repository as never, gateway as never, firebase as never),
+    service: new ChatService(defaultRepo as never, gateway as never, firebase as never),
     gateway,
     firebase,
   };
@@ -23,6 +28,8 @@ describe('ChatService authorization regressions', () => {
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
+      getAllowStrangerMessages: jest.fn().mockResolvedValue(true),
+      isAcquainted: jest.fn().mockResolvedValue(true),
       getOrCreateDirectRoom: jest.fn().mockResolvedValue(room),
       getUserRoomById: jest.fn().mockResolvedValue(hydrated),
     };
