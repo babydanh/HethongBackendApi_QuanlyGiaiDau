@@ -1279,9 +1279,18 @@ export class TournamentsService {
       );
     }
 
-    // 10. Auto-publish: set status REGISTRATION_OPEN để đăng ký & bracket được luôn
+    // 10. Publish with the correct registration window.
+    // A future opening time must never be bypassed by Lite creation. Keep the
+    // tournament UPCOMING so the scheduler can open it at registrationStartDate.
+    // Public tournaments still wait for admin approval first.
+    const registrationStartsInFuture = registrationStartDate.getTime() > Date.now();
+    const initialStatus = requestedPublic && !isAdmin
+      ? 'PENDING_APPROVAL'
+      : registrationStartsInFuture
+        ? 'UPCOMING'
+        : 'REGISTRATION_OPEN';
     const updated = await this.tournamentsRepository.update(record.id, userId, {
-      status: requestedPublic && !isAdmin ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN',
+      status: initialStatus,
     });
 
     // Auto-post to Community Feed for Lite tournaments
