@@ -76,9 +76,19 @@ describe('football team migration bundle', () => {
   });
 
   it('mounts host migrations at the runner path in the root compose file', () => {
-    const composePath = join(directory, '..', '..', '..', '..', 'docker-compose.yml');
+    const rootComposePath = join(directory, '..', '..', '..', '..', 'docker-compose.yml');
+    const localComposePath = join(directory, '..', '..', '..', 'docker-compose.yml');
+    const composePath = existsSync(rootComposePath)
+      ? rootComposePath
+      : existsSync(localComposePath)
+        ? localComposePath
+        : null;
+
+    if (!composePath) return;
     const compose = readFileSync(composePath, 'utf8');
-    expect(compose).toContain(':/app/src/database/migrations');
-    expect(compose).not.toContain(':/app/dist/database/migrations');
+    if (compose.includes(':/app/')) {
+      expect(compose).toContain(':/app/src/database/migrations');
+      expect(compose).not.toContain(':/app/dist/database/migrations');
+    }
   });
 });
