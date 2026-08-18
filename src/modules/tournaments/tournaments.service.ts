@@ -772,9 +772,12 @@ export class TournamentsService {
           sportPreset: 'PICKLEBALL_STANDARD',
           sportRules: {
             kind: 'PICKLEBALL',
+            mode: 'LITE',
+            scoringModel: 'RALLY_POINT_SET',
             setsToWin: 2,
             pointsPerSet: 11,
             winByTwo: true,
+            maxPoints: 15,
           },
         };
       case 'badminton':
@@ -782,9 +785,12 @@ export class TournamentsService {
           sportPreset: 'BADMINTON_STANDARD',
           sportRules: {
             kind: 'BADMINTON',
+            mode: 'LITE',
+            scoringModel: 'RALLY_POINT_SET',
             setsToWin: 2,
             pointsPerSet: 21,
             winByTwo: true,
+            maxPoints: 30,
           },
         };
       case 'table_tennis':
@@ -792,9 +798,12 @@ export class TournamentsService {
           sportPreset: 'TABLE_TENNIS_STANDARD',
           sportRules: {
             kind: 'TABLE_TENNIS',
+            mode: 'LITE',
+            scoringModel: 'RALLY_POINT_SET',
             setsToWin: 3,
             pointsPerSet: 11,
             winByTwo: true,
+            maxPoints: 99,
           },
         };
       case 'tennis':
@@ -802,10 +811,13 @@ export class TournamentsService {
           sportPreset: 'TENNIS_SUPER_TIEBREAK',
           sportRules: {
             kind: 'TENNIS',
+            mode: 'LITE',
+            scoringModel: 'TENNIS_SET',
             setsToWin: 1,
             pointsPerSet: 6,
             maxPoints: 7,
             winByTwo: true,
+            tiebreakPoints: 7,
           },
         };
       case 'football':
@@ -813,6 +825,8 @@ export class TournamentsService {
           sportPreset: 'FOOTBALL_STANDARD',
           sportRules: {
             kind: 'FOOTBALL',
+            mode: 'LITE',
+            scoringModel: 'STANDARD',
             halvesCount: 2,
             halfDuration: 45,
             allowDraw: true,
@@ -918,6 +932,10 @@ export class TournamentsService {
     const sportRuleDefaults = litePreset.sportRules as Record<string, unknown>;
     const sportRules = {
       ...litePreset.sportRules,
+      // A Lite tournament always opens with the sport's basic rules while
+      // keeping free-score entry enabled. Category presets must not silently
+      // switch the scoring mode back to Strict.
+      mode: 'LITE',
       ...(sport === 'football'
         ? {
             halvesCount: dto.footballHalvesCount ?? (sportRuleDefaults.halvesCount as number | undefined),
