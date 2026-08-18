@@ -2,7 +2,7 @@ import type { CreateNotificationDto } from './dto/create-notification.dto';
 import { NOTIFICATION_TYPES } from './notification-types';
 
 const getCommunityRedirect = (communityId: string): string => `/communities/${communityId}`;
-const getFootballTeamRedirect = (teamId: string): string => `/teams/${teamId}`;
+const getFootballTeamRedirect = (teamId: string): string => `/football-teams?teamId=${encodeURIComponent(teamId)}`;
 
 export const buildFootballTeamNotification = (params: {
   teamId: string;
