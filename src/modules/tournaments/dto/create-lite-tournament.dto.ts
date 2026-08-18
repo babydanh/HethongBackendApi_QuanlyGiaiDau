@@ -78,7 +78,7 @@ export class CreateLiteTournamentDto {
   @ApiPropertyOptional({
     example: 'MALE',
     description:
-      'Giới hạn giới tính cho giải bóng đá Lite; bỏ trống là không ràng buộc',
+      'Giới hạn giới tính cho hình thức đơn/đôi; bỏ trống là không ràng buộc',
     enum: ['MALE', 'FEMALE', 'MIXED'],
   })
   @IsString()
