@@ -119,12 +119,12 @@ __decorate([
 __decorate([
     (0, swagger_1.ApiPropertyOptional)({
         example: 'singles',
-        description: 'Hình thức: đánh đơn hoặc đôi',
-        enum: ['singles', 'doubles'],
+        description: 'Hình thức: đánh đơn, đôi hoặc đôi nam nữ',
+        enum: ['singles', 'doubles', 'mixed_doubles'],
     }),
     (0, class_validator_1.IsString)(),
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsIn)(['singles', 'doubles']),
+    (0, class_validator_1.IsIn)(['singles', 'doubles', 'mixed_doubles']),
     __metadata("design:type", String)
 ], CreateLiteTournamentDto.prototype, "format", void 0);
 __decorate([

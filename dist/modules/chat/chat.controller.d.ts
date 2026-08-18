@@ -41,11 +41,11 @@ export declare class ChatController {
             role: string;
             tags: string[];
         }[];
-        id: string;
-        name: string | null;
-        createdAt: Date;
         type: string;
+        name: string | null;
         communityId: string | null;
+        id: string;
+        createdAt: Date;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -53,17 +53,6 @@ export declare class ChatController {
         pinnedMessageId: string | null;
     }>;
     createRoom(createRoomDto: CreateRoomDto, user: JwtPayload): Promise<{
-        id: string;
-        name: string | null;
-        createdAt: Date;
-        type: string;
-        communityId: string | null;
-        clubName: string | null;
-        clubAvatar: string | null;
-        isAnnouncementOnly: boolean;
-        slowModeSeconds: number;
-        pinnedMessageId: string | null;
-    } | {
         id: string;
         name: string | null;
         type: string;
@@ -87,6 +76,17 @@ export declare class ChatController {
         updatedAt: string;
         unreadCount: number;
         communityId: string | null;
+    } | {
+        type: string;
+        name: string | null;
+        communityId: string | null;
+        id: string;
+        createdAt: Date;
+        clubName: string | null;
+        clubAvatar: string | null;
+        isAnnouncementOnly: boolean;
+        slowModeSeconds: number;
+        pinnedMessageId: string | null;
     }>;
     sendMessage(createMessageDto: CreateMessageDto, user: JwtPayload): Promise<{
         senderName: string;
@@ -98,19 +98,19 @@ export declare class ChatController {
             text: string;
         } | null;
         reactions: never[];
+        type: string;
         id: string;
         createdAt: Date;
-        type: string;
-        metadata: unknown;
-        isRevoked: boolean;
-        revokedAt: Date | null;
         senderId: string | null;
         isRead: boolean;
         roomId: string;
         messageText: string | null;
         attachmentsUrls: string[];
+        metadata: unknown;
         clientMessageId: string | null;
+        isRevoked: boolean;
         revokedBy: string | null;
+        revokedAt: Date | null;
         replyToId: string | null;
         isPinned: boolean;
         pinnedBy: string | null;
@@ -366,19 +366,19 @@ export declare class ChatController {
             text: string;
         } | null;
         reactions: never[];
+        type: string;
         id: string;
         createdAt: Date;
-        type: string;
-        metadata: unknown;
-        isRevoked: boolean;
-        revokedAt: Date | null;
         senderId: string | null;
         isRead: boolean;
         roomId: string;
         messageText: string | null;
         attachmentsUrls: string[];
+        metadata: unknown;
         clientMessageId: string | null;
+        isRevoked: boolean;
         revokedBy: string | null;
+        revokedAt: Date | null;
         replyToId: string | null;
         isPinned: boolean;
         pinnedBy: string | null;

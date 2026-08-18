@@ -67,12 +67,12 @@ export class CreateLiteTournamentDto {
 
   @ApiPropertyOptional({
     example: 'singles',
-    description: 'Hình thức: đánh đơn hoặc đôi',
-    enum: ['singles', 'doubles'],
+    description: 'Hình thức: đánh đơn, đôi hoặc đôi nam nữ',
+    enum: ['singles', 'doubles', 'mixed_doubles'],
   })
   @IsString()
   @IsOptional()
-  @IsIn(['singles', 'doubles'])
+  @IsIn(['singles', 'doubles', 'mixed_doubles'])
   format?: string;
 
   @ApiPropertyOptional({

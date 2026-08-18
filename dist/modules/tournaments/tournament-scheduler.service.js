@@ -182,7 +182,10 @@ let TournamentSchedulerService = TournamentSchedulerService_1 = class Tournament
                     ? rec.daysOfWeek
                     : [rec.dayOfWeek ?? 6];
                 const timeOfDay = rec.timeOfDay || '18:00';
-                const nextTournamentDate = new Date(rec.nextRunAt || now);
+                const advanceDays = Math.max(0, Number(rec.advanceDays ?? 0));
+                const nextTournamentDate = new Date(rec.nextEventAt ||
+                    rec.nextRunAt ||
+                    now);
                 const dateStr = nextTournamentDate.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric' });
                 const newName = `${rec.templateName || t.name} (${dateStr})`;
                 const [hours, minutes] = timeOfDay.split(':').map(Number);
@@ -219,13 +222,39 @@ let TournamentSchedulerService = TournamentSchedulerService_1 = class Tournament
                     createdBy: t.createdBy,
                 })
                     .returning();
+                const templateDivisions = await this.db
+                    .select()
+                    .from(schema.tournamentDivisions)
+                    .where((0, drizzle_orm_1.eq)(schema.tournamentDivisions.tournamentId, t.id));
+                if (templateDivisions.length > 0) {
+                    await this.db.insert(schema.tournamentDivisions).values(templateDivisions.map((division) => ({
+                        tournamentId: newTournament[0].id,
+                        name: division.name,
+                        matchType: division.matchType,
+                        genderRestriction: division.genderRestriction,
+                        maxParticipants: division.maxParticipants,
+                        entryFee: division.entryFee,
+                        isConfigOverride: division.isConfigOverride,
+                        venueId: division.venueId,
+                        bracketType: division.bracketType,
+                        roundConfig: division.roundConfig,
+                        startDate: nextTournamentDate,
+                        registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
+                        minElo: division.minElo,
+                        maxElo: division.maxElo,
+                        prizeDescription: division.prizeDescription,
+                        status: division.status,
+                    })));
+                }
                 const nextNextRun = this.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay, nextTournamentDate);
+                const nextCreateAt = new Date(nextNextRun.getTime() - advanceDays * 24 * 60 * 60 * 1000);
                 const updatedConfig = {
                     ...config,
                     recurring: {
                         ...rec,
                         lastGeneratedAt: now.toISOString(),
-                        nextRunAt: nextNextRun.toISOString(),
+                        nextRunAt: nextCreateAt.toISOString(),
+                        nextEventAt: nextNextRun.toISOString(),
                     },
                 };
                 await this.db
