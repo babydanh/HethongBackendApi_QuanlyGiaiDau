@@ -107,11 +107,11 @@ export class CreateLiteTournamentDto {
   ])
   bracketType?: string;
 
-  @ApiPropertyOptional({ example: 16, description: 'Số đội tối đa (2-32)' })
+  @ApiPropertyOptional({ example: 16, description: 'Số đội tối đa (2-64)' })
   @IsNumber()
   @IsOptional()
   @Min(2)
-  @Max(32)
+  @Max(64)
   maxTeams?: number;
 
   @ApiPropertyOptional({ example: 7, enum: [5, 7, 11] })
