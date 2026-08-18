@@ -566,18 +566,19 @@ let TournamentsService = class TournamentsService {
                 kind: presetRules.kind,
             },
         };
+        const sportRuleDefaults = litePreset.sportRules;
         const sportRules = {
             ...litePreset.sportRules,
             ...(sport === 'football'
                 ? {
-                    halvesCount: dto.footballHalvesCount ?? litePreset.sportRules.halvesCount,
-                    halfDuration: dto.footballHalfDuration ?? litePreset.sportRules.halfDuration,
-                    allowDraw: dto.footballAllowDraw ?? litePreset.sportRules.allowDraw,
+                    halvesCount: dto.footballHalvesCount ?? sportRuleDefaults.halvesCount,
+                    halfDuration: dto.footballHalfDuration ?? sportRuleDefaults.halfDuration,
+                    allowDraw: dto.footballAllowDraw ?? sportRuleDefaults.allowDraw,
                 }
                 : {
-                    setsToWin: dto.setsToWin ?? litePreset.sportRules.setsToWin,
-                    pointsPerSet: dto.pointsPerSet ?? litePreset.sportRules.pointsPerSet,
-                    winByTwo: dto.winByTwo ?? litePreset.sportRules.winByTwo,
+                    setsToWin: dto.setsToWin ?? sportRuleDefaults.setsToWin,
+                    pointsPerSet: dto.pointsPerSet ?? sportRuleDefaults.pointsPerSet,
+                    winByTwo: dto.winByTwo ?? sportRuleDefaults.winByTwo,
                     ...(dto.maxPoints !== undefined ? { maxPoints: dto.maxPoints } : {}),
                 }),
         };
@@ -586,7 +587,7 @@ let TournamentsService = class TournamentsService {
             ? 'INVITE_ONLY'
             : dto.registrationMode === 'OPEN'
                 ? 'OPEN'
-                : 'APPROVAL';
+                : 'OPEN';
         const requestedPublic = dto.visibility === 'PUBLIC';
         const tournamentType = dto.communityId
             ? 'CLUB'
