@@ -419,6 +419,7 @@ export class UsersRepository {
         gender: schema.profiles.gender,
         bio: schema.profiles.bio,
         isVerified: schema.profiles.isVerified,
+        allowStrangerMessages: schema.profiles.allowStrangerMessages,
       })
       .from(schema.users)
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
