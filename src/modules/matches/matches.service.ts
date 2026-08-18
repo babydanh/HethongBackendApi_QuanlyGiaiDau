@@ -1074,8 +1074,13 @@ export class MatchesService {
         throw new BadRequestException('Chưa đủ đối thủ để bắt đầu trận đấu.');
       }
 
-      // Trọng tài được BTC chấp nhận có thể bắt đầu trận mà không bị hệ thống
-      // tự gán vào match. refereeId chỉ đổi ở luồng phân công chủ động của BTC.
+      // A tournament referee starts from Live (Web/App), so the system records
+      // the person who actually took the match. This is not organizer
+      // assignment: only an accepted referee can claim an unassigned match,
+      // and the repository's conditional update makes the claim race-safe.
+      if (acceptedReferee && !existing.refereeId) {
+        await this.matchesRepository.updateRefereeId(id, user.sub, user.sub);
+      }
     }
 
     if (updateMatchStatusDto.status === 'COMPLETED') {
