@@ -61,4 +61,36 @@ export class AiController {
       res.end();
     }
   }
+
+  @Public()
+  @Post('message')
+  @UseGuards(new RateLimitGuard(30, 60000))
+  @ApiOperation({ summary: 'Gửi tin nhắn nhận phản hồi JSON trực tiếp (dành cho Mobile App)' })
+  async message(
+    @Body('messages') messages: any[],
+    @Body('message') singleMessage: string,
+    @Body('currentUrl') currentUrl: string,
+    @Body('pageTitle') pageTitle: string,
+    @Body('isMobile') isMobile: boolean,
+    @Body('searchParams') searchParams: string,
+    @Req() req: Request,
+  ) {
+    const userId = req ? this.getUserIdFromRequest(req) : undefined;
+    const formattedMessages = Array.isArray(messages) && messages.length > 0
+      ? messages
+      : singleMessage
+      ? [{ role: 'user', content: singleMessage }]
+      : [];
+
+    const reply = await this.aiService.getChatResponse(
+      formattedMessages,
+      userId,
+      currentUrl,
+      pageTitle,
+      isMobile ?? true,
+      searchParams,
+    );
+
+    return { success: true, reply, data: reply };
+  }
 }

@@ -1130,6 +1130,12 @@ export class TournamentsService {
       .filter((part): part is string => Boolean(part));
     const tournamentConfigWithLocation = {
       ...tournamentConfig,
+      schedule: {
+        registrationStartDate: registrationStartDate.toISOString(),
+        ...(registrationEndDate ? { registrationEndDate: registrationEndDate.toISOString() } : {}),
+        ...(startDateTime ? { startDate: startDateTime } : {}),
+        ...(endDateTime ? { endDate: endDateTime } : {}),
+      },
       ...(locationParts.length
         ? {
             location: {
