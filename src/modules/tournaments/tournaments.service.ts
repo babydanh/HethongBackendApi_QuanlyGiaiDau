@@ -932,10 +932,13 @@ export class TournamentsService {
     const maxTeams = dto.maxTeams || 16;
     // Lite is intentionally frictionless: internal Club Lite starts open to
     // members. Public/advanced flows can explicitly request approval or invite-only.
+    // Keep the organizer's selected policy. Public Quick defaults to
+    // APPROVAL; silently collapsing it to OPEN made the UI promise review
+    // while the API immediately accepted every applicant.
     const registrationMode = dto.registrationMode === 'INVITE_ONLY'
       ? 'INVITE_ONLY'
-      : dto.registrationMode === 'OPEN'
-        ? 'OPEN'
+      : dto.registrationMode === 'APPROVAL'
+        ? 'APPROVAL'
         : 'OPEN';
     const requestedPublic = dto.visibility === 'PUBLIC';
     // Community quick-create is always an internal club tournament. For a
@@ -1267,12 +1270,17 @@ export class TournamentsService {
     const frontendUrl = (
       this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001'
     ).replace(/\/+$/, '');
-    const joinPath = `/lite/tournaments/join/${inviteCode}`;
+    // Club Lite keeps its compact one-tap URL. Public Quick is a full
+    // tournament after creation, so new QR/link shares must open the standard
+    // registration page (including doubles partner registration).
+    const joinPath = tournamentType === 'CLUB'
+      ? `/lite/tournaments/join/${inviteCode}`
+      : `/tournaments/${record.id}/register?invite=${encodeURIComponent(inviteCode)}`;
 
     return {
       id: record.id,
       name: record.name,
-      status: 'REGISTRATION_OPEN',
+      status: updated.status,
       inviteCode,
       joinUrl: `${frontendUrl}${joinPath}`,
       qrPayload: `${frontendUrl}${joinPath}`,
@@ -1312,6 +1320,10 @@ export class TournamentsService {
         category: categoryName,
         matchType: t.matchType,
         maxParticipants: t.maxParticipants,
+        // The join client uses ownership to distinguish the intentional
+        // Club Lite one-tap flow from Public Quick, which must use the full
+        // registration flow (partner/roster support included).
+        communityId: tournament.communityId ?? null,
       },
     };
 
