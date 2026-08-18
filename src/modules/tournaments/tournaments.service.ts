@@ -974,11 +974,26 @@ export class TournamentsService {
               dto.recurringDayOfWeek ??
                 (dto.startDate ? new Date(dto.startDate).getDay() : 6),
             ];
-      const nextRun = this.calculateNextRecurringDate(
+      // When the creator selected a start date, that date is the first event
+      // of the recurring series. Only subsequent occurrences are calculated
+      // from the frequency; otherwise a Saturday preset could silently move
+      // the first tournament to a different week.
+      let nextRun: Date | undefined;
+      if (dto.startDate) {
+        const requestedStart = new Date(dto.startDate);
+        if (!Number.isNaN(requestedStart.getTime()) && requestedStart.getTime() > Date.now()) {
+          const [hours, minutes] = timeOfDay.split(':').map(Number);
+          requestedStart.setHours(hours || 0, minutes || 0, 0, 0);
+          if (requestedStart.getTime() > Date.now()) nextRun = requestedStart;
+        }
+      }
+      nextRun ??= this.calculateNextRecurringDate(
         frequency,
         daysOfWeek,
         timeOfDay,
       );
+      const advanceDays = dto.recurringAdvanceDays ?? 0;
+      const nextCreateAt = new Date(nextRun.getTime() - advanceDays * 24 * 60 * 60 * 1000);
 
       recurringConfig = {
         enabled: true,
@@ -995,8 +1010,10 @@ export class TournamentsService {
         ...(footballTeamSize !== undefined ? { minTeamSize: footballTeamSize } : {}),
         ...(footballMaxReserve !== undefined ? { maxReserve: footballMaxReserve } : {}),
         isRanked: dto.isRanked ?? false,
-        advanceDays: dto.recurringAdvanceDays ?? 0,
-        nextRunAt: nextRun.toISOString(),
+        advanceDays,
+        // nextRunAt is the cron due time; nextEventAt is the actual match day.
+        nextRunAt: nextCreateAt.toISOString(),
+        nextEventAt: nextRun.toISOString(),
         lastGeneratedAt: new Date().toISOString(),
       };
     }

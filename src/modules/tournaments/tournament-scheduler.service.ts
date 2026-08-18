@@ -180,7 +180,15 @@ export class TournamentSchedulerService {
           : [rec.dayOfWeek ?? 6];
         const timeOfDay = rec.timeOfDay || '18:00';
 
-        const nextTournamentDate = new Date(rec.nextRunAt || now);
+        const advanceDays = Math.max(0, Number(rec.advanceDays ?? 0));
+        // New templates store the cron due time separately from the actual
+        // match date. Legacy templates used nextRunAt as the event date, so
+        // do not add advanceDays again when nextEventAt is absent.
+        const nextTournamentDate = new Date(
+          rec.nextEventAt ||
+            rec.nextRunAt ||
+            now,
+        );
         const dateStr = nextTournamentDate.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric' });
         const newName = `${rec.templateName || t.name} (${dateStr})`;
 
@@ -221,13 +229,42 @@ export class TournamentSchedulerService {
           })
           .returning();
 
+        const templateDivisions = await this.db
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.tournamentId, t.id));
+        if (templateDivisions.length > 0) {
+          await this.db.insert(schema.tournamentDivisions).values(
+            templateDivisions.map((division) => ({
+              tournamentId: newTournament[0].id,
+              name: division.name,
+              matchType: division.matchType,
+              genderRestriction: division.genderRestriction,
+              maxParticipants: division.maxParticipants,
+              entryFee: division.entryFee,
+              isConfigOverride: division.isConfigOverride,
+              venueId: division.venueId,
+              bracketType: division.bracketType,
+              roundConfig: division.roundConfig,
+              startDate: nextTournamentDate,
+              registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
+              minElo: division.minElo,
+              maxElo: division.maxElo,
+              prizeDescription: division.prizeDescription,
+              status: division.status,
+            })),
+          );
+        }
+
         const nextNextRun = this.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay, nextTournamentDate);
+        const nextCreateAt = new Date(nextNextRun.getTime() - advanceDays * 24 * 60 * 60 * 1000);
         const updatedConfig = {
           ...config,
           recurring: {
             ...rec,
             lastGeneratedAt: now.toISOString(),
-            nextRunAt: nextNextRun.toISOString(),
+            nextRunAt: nextCreateAt.toISOString(),
+            nextEventAt: nextNextRun.toISOString(),
           },
         };
 
