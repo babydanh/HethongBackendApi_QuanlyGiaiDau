@@ -201,6 +201,7 @@ export declare class UsersController {
         gender: string | null;
         bio: string | null;
         isVerified: boolean | null;
+        allowStrangerMessages: boolean | null;
     }>;
     findOne(id: string): Promise<{
         role: string;
@@ -344,20 +345,20 @@ export declare class UsersController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         reason: string;
-        evidenceUrls: string[];
-        resolvedBy: string | null;
-        resolutionNote: string | null;
-        resolvedAt: Date | null;
+        status: string;
         reporterId: string;
         targetType: string;
         targetId: string;
         source: string;
         sourceReferenceId: string | null;
         category: string;
+        evidenceUrls: string[];
         assignedTo: string | null;
+        resolvedBy: string | null;
+        resolutionNote: string | null;
         triagedAt: Date | null;
+        resolvedAt: Date | null;
     }>;
     deleteAccount(user: {
         id: string;

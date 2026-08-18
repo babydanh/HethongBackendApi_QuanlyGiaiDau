@@ -93,10 +93,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('joinChatRoom')
   async handleJoinRoom(
-    @MessageBody() roomId: string,
+    @MessageBody() payload: string | { roomId?: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const user = client.data.user as JwtPayload | undefined;
+    const roomId =
+      typeof payload === 'object' && payload && 'roomId' in payload
+        ? (payload as { roomId?: string }).roomId
+        : String(payload || '');
+
+    if (!roomId) {
+      return { event: 'chat:error', data: 'Invalid roomId' };
+    }
+
+    let user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub) {
+      const token = extractWsToken(client);
+      if (token) {
+        try {
+          user = this.jwtService.verify(token) as JwtPayload;
+          client.data.user = user;
+        } catch {
+          // ignore
+        }
+      }
+    }
+
     const isSupportStaff =
       hasRole(user, UserRole.ADMIN) || hasRole(user, UserRole.MODERATOR);
     // P2D.1: room CLUB kiểm tra qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.

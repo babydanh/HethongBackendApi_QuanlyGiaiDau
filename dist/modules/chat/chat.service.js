@@ -148,10 +148,12 @@ let ChatService = class ChatService {
         }
         else if (roomType === create_room_dto_1.RoomType.CLUB && room.communityId) {
             const senderTags = await this.chatRepository.getMemberTags(room.communityId, userId);
-            this.chatGateway.broadcastClubMessage(data.roomId, {
+            const clubPayload = {
                 ...message,
                 senderTags,
-            });
+            };
+            this.chatGateway.broadcastClubMessage(data.roomId, clubPayload);
+            this.chatGateway.broadcastMessage(data.roomId, clubPayload);
         }
         else {
             this.chatGateway.broadcastMessage(data.roomId, message);

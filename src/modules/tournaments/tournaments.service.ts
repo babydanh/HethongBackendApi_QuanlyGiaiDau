@@ -1275,7 +1275,7 @@ export class TournamentsService {
     // registration page (including doubles partner registration).
     const joinPath = tournamentType === 'CLUB'
       ? `/lite/tournaments/join/${inviteCode}`
-      : `/tournaments/${record.id}/register?invite=${encodeURIComponent(inviteCode)}`;
+      : `/tournaments/${record.id}/register${inviteCode ? `?invite=${encodeURIComponent(inviteCode)}` : ''}`;
 
     return {
       id: record.id,

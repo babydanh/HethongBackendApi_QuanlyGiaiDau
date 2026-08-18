@@ -366,6 +366,7 @@ let UsersRepository = class UsersRepository {
             gender: schema.profiles.gender,
             bio: schema.profiles.bio,
             isVerified: schema.profiles.isVerified,
+            allowStrangerMessages: schema.profiles.allowStrangerMessages,
         })
             .from(schema.users)
             .leftJoin(schema.profiles, (0, drizzle_orm_1.eq)(schema.users.id, schema.profiles.userId))

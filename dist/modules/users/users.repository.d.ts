@@ -203,6 +203,7 @@ export declare class UsersRepository {
         gender: string | null;
         bio: string | null;
         isVerified: boolean | null;
+        allowStrangerMessages: boolean | null;
     } | null>;
     private getPublicProfileAchievements;
     reportTargetExists(targetType: ReportTargetType, targetId: string): Promise<boolean>;
@@ -210,20 +211,20 @@ export declare class UsersRepository {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        status: string;
         reason: string;
-        evidenceUrls: string[];
-        resolvedBy: string | null;
-        resolutionNote: string | null;
-        resolvedAt: Date | null;
+        status: string;
         reporterId: string;
         targetType: string;
         targetId: string;
         source: string;
         sourceReferenceId: string | null;
         category: string;
+        evidenceUrls: string[];
         assignedTo: string | null;
+        resolvedBy: string | null;
+        resolutionNote: string | null;
         triagedAt: Date | null;
+        resolvedAt: Date | null;
     }>;
     getMyReports(reporterId: string, query: QueryMyReportsDto): Promise<{
         data: {

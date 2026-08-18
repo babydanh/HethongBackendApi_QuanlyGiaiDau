@@ -81,8 +81,25 @@ let ChatGateway = class ChatGateway {
         }
         return result;
     }
-    async handleJoinRoom(roomId, client) {
-        const user = client.data.user;
+    async handleJoinRoom(payload, client) {
+        const roomId = typeof payload === 'object' && payload && 'roomId' in payload
+            ? payload.roomId
+            : String(payload || '');
+        if (!roomId) {
+            return { event: 'chat:error', data: 'Invalid roomId' };
+        }
+        let user = client.data.user;
+        if (!user?.sub) {
+            const token = (0, ws_jwt_guard_1.extractWsToken)(client);
+            if (token) {
+                try {
+                    user = this.jwtService.verify(token);
+                    client.data.user = user;
+                }
+                catch {
+                }
+            }
+        }
         const isSupportStaff = (0, role_helper_1.hasRole)(user, enums_1.UserRole.ADMIN) || (0, role_helper_1.hasRole)(user, enums_1.UserRole.MODERATOR);
         const isMember = user?.sub
             ? await this.chatRepository.canAccessRoom(roomId, user.sub)
@@ -252,7 +269,7 @@ __decorate([
     __param(0, (0, websockets_1.MessageBody)()),
     __param(1, (0, websockets_1.ConnectedSocket)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, socket_io_1.Socket]),
+    __metadata("design:paramtypes", [Object, socket_io_1.Socket]),
     __metadata("design:returntype", Promise)
 ], ChatGateway.prototype, "handleJoinRoom", null);
 __decorate([

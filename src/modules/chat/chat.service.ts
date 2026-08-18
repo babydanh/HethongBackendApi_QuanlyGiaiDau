@@ -63,11 +63,11 @@ export class ChatService {
 
     const memberIds = Array.from(new Set([...data.memberIds, userId]));
 
-    if (data.type === 'DIRECT' && memberIds.length !== 2) {
+    if (data.type === RoomType.DIRECT && memberIds.length !== 2) {
       throw new BadRequestException('Direct room must have exactly 2 members');
     }
 
-    if (data.type === 'DIRECT') {
+    if (data.type === RoomType.DIRECT) {
       const otherUserId = memberIds.find((memberId) => memberId !== userId);
       if (!otherUserId || !(await this.chatRepository.isActiveUser(otherUserId))) {
         throw new NotFoundException('Không tìm thấy người dùng để nhắn tin.');
@@ -184,10 +184,12 @@ export class ChatService {
         room.communityId,
         userId,
       );
-      this.chatGateway.broadcastClubMessage(data.roomId, {
+      const clubPayload = {
         ...message,
         senderTags,
-      });
+      };
+      this.chatGateway.broadcastClubMessage(data.roomId, clubPayload);
+      this.chatGateway.broadcastMessage(data.roomId, clubPayload);
     } else {
       this.chatGateway.broadcastMessage(data.roomId, message);
     }
@@ -300,7 +302,7 @@ export class ChatService {
     }
 
     let isAllowed = message.senderId === userId;
-    if (!isAllowed && room.type === 'CLUB' && room.communityId) {
+    if (!isAllowed && room.type === RoomType.CLUB && room.communityId) {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       isAllowed = role === 'OWNER' || role === 'ADMIN' || role === 'MODERATOR';
     }
@@ -322,7 +324,7 @@ export class ChatService {
       throw new NotFoundException('Tin nhắn không thuộc phòng chat này.');
     }
 
-    if (room.type === 'CLUB' && room.communityId) {
+    if (room.type === RoomType.CLUB && room.communityId) {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
         throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền ghim tin nhắn.');
@@ -347,7 +349,7 @@ export class ChatService {
       throw new NotFoundException('Tin nhắn không thuộc phòng chat này.');
     }
 
-    if (room.type === 'CLUB' && room.communityId) {
+    if (room.type === RoomType.CLUB && room.communityId) {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
         throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền bỏ ghim tin nhắn.');
@@ -367,7 +369,7 @@ export class ChatService {
     const room = await this.chatRepository.findRoomById(roomId);
     if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
 
-    if (room.type === 'CLUB' && room.communityId) {
+    if (room.type === RoomType.CLUB && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
     } else if (room.type === RoomType.DIRECT) {
       await this.assertDirectRoomAccess(userId, roomId);
@@ -385,7 +387,7 @@ export class ChatService {
     const room = await this.chatRepository.findRoomById(message.roomId);
     if (!room) throw new NotFoundException('Không tìm thấy phòng chat.');
 
-    if (room.type === 'CLUB' && room.communityId) {
+    if (room.type === RoomType.CLUB && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
     } else if (room.type === RoomType.DIRECT) {
       await this.assertDirectRoomAccess(userId, message.roomId);
@@ -400,7 +402,7 @@ export class ChatService {
 
   async updateClubRoomSettings(userId: string, roomId: string, data: { name?: string; clubAvatar?: string; isAnnouncementOnly?: boolean; slowModeSeconds?: number }) {
     const room = await this.chatRepository.findRoomById(roomId);
-    if (!room || room.type !== 'CLUB' || !room.communityId) {
+    if (!room || room.type !== RoomType.CLUB || !room.communityId) {
       throw new NotFoundException('Phòng chat CLB không tồn tại.');
     }
 

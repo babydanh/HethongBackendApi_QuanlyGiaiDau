@@ -585,8 +585,8 @@ let TournamentsService = class TournamentsService {
         const maxTeams = dto.maxTeams || 16;
         const registrationMode = dto.registrationMode === 'INVITE_ONLY'
             ? 'INVITE_ONLY'
-            : dto.registrationMode === 'OPEN'
-                ? 'OPEN'
+            : dto.registrationMode === 'APPROVAL'
+                ? 'APPROVAL'
                 : 'OPEN';
         const requestedPublic = dto.visibility === 'PUBLIC';
         const tournamentType = dto.communityId
@@ -845,11 +845,13 @@ let TournamentsService = class TournamentsService {
         catch (e) {
         }
         const frontendUrl = (this.configService.get('FRONTEND_URL') || 'http://localhost:3001').replace(/\/+$/, '');
-        const joinPath = `/lite/tournaments/join/${inviteCode}`;
+        const joinPath = tournamentType === 'CLUB'
+            ? `/lite/tournaments/join/${inviteCode}`
+            : `/tournaments/${record.id}/register${inviteCode ? `?invite=${encodeURIComponent(inviteCode)}` : ''}`;
         return {
             id: record.id,
             name: record.name,
-            status: 'REGISTRATION_OPEN',
+            status: updated.status,
             inviteCode,
             joinUrl: `${frontendUrl}${joinPath}`,
             qrPayload: `${frontendUrl}${joinPath}`,
@@ -881,6 +883,7 @@ let TournamentsService = class TournamentsService {
                 category: categoryName,
                 matchType: t.matchType,
                 maxParticipants: t.maxParticipants,
+                communityId: tournament.communityId ?? null,
             },
         };
         if (!userId)
