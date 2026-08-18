@@ -860,7 +860,11 @@ export class TournamentsService {
 
     // 2. Resolve matchType
     const format = dto.format || 'singles';
-    const matchType = format === 'doubles' ? 'DOUBLES' : 'SINGLES';
+    const matchType = format === 'mixed_doubles'
+      ? 'MIXED_DOUBLES'
+      : format === 'doubles'
+        ? 'DOUBLES'
+        : 'SINGLES';
 
     // 3. Validate matchType against category
     this.validateMatchTypeAgainstCategory(
@@ -1176,7 +1180,9 @@ export class TournamentsService {
     const formatsToCreate = [
       sport === 'football'
         ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
-        : (dto.format === 'doubles'
+        : (dto.format === 'mixed_doubles'
+            ? 'MIXED_DOUBLES'
+            : dto.format === 'doubles'
             ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
             : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES')),
     ];

@@ -39,17 +39,6 @@ export declare class ChatService {
     createRoom(userId: string, data: CreateRoomDto): Promise<{
         id: string;
         name: string | null;
-        createdAt: Date;
-        type: string;
-        communityId: string | null;
-        clubName: string | null;
-        clubAvatar: string | null;
-        isAnnouncementOnly: boolean;
-        slowModeSeconds: number;
-        pinnedMessageId: string | null;
-    } | {
-        id: string;
-        name: string | null;
         type: string;
         createdAt: Date;
         participants: {
@@ -71,6 +60,17 @@ export declare class ChatService {
         updatedAt: string;
         unreadCount: number;
         communityId: string | null;
+    } | {
+        type: string;
+        name: string | null;
+        communityId: string | null;
+        id: string;
+        createdAt: Date;
+        clubName: string | null;
+        clubAvatar: string | null;
+        isAnnouncementOnly: boolean;
+        slowModeSeconds: number;
+        pinnedMessageId: string | null;
     }>;
     getOrCreateClubRoom(communityId: string, userId: string): Promise<{
         members: {
@@ -80,11 +80,11 @@ export declare class ChatService {
             role: string;
             tags: string[];
         }[];
-        id: string;
-        name: string | null;
-        createdAt: Date;
         type: string;
+        name: string | null;
         communityId: string | null;
+        id: string;
+        createdAt: Date;
         clubName: string | null;
         clubAvatar: string | null;
         isAnnouncementOnly: boolean;
@@ -115,19 +115,19 @@ export declare class ChatService {
             text: string;
         } | null;
         reactions: never[];
+        type: string;
         id: string;
         createdAt: Date;
-        type: string;
-        metadata: unknown;
-        isRevoked: boolean;
-        revokedAt: Date | null;
         senderId: string | null;
         isRead: boolean;
         roomId: string;
         messageText: string | null;
         attachmentsUrls: string[];
+        metadata: unknown;
         clientMessageId: string | null;
+        isRevoked: boolean;
         revokedBy: string | null;
+        revokedAt: Date | null;
         replyToId: string | null;
         isPinned: boolean;
         pinnedBy: string | null;
@@ -343,19 +343,19 @@ export declare class ChatService {
             text: string;
         } | null;
         reactions: never[];
+        type: string;
         id: string;
         createdAt: Date;
-        type: string;
-        metadata: unknown;
-        isRevoked: boolean;
-        revokedAt: Date | null;
         senderId: string | null;
         isRead: boolean;
         roomId: string;
         messageText: string | null;
         attachmentsUrls: string[];
+        metadata: unknown;
         clientMessageId: string | null;
+        isRevoked: boolean;
         revokedBy: string | null;
+        revokedAt: Date | null;
         replyToId: string | null;
         isPinned: boolean;
         pinnedBy: string | null;

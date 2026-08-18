@@ -536,7 +536,11 @@ let TournamentsService = class TournamentsService {
             throw new common_1.BadRequestException(`Môn thể thao "${sport}" không được hỗ trợ`);
         }
         const format = dto.format || 'singles';
-        const matchType = format === 'doubles' ? 'DOUBLES' : 'SINGLES';
+        const matchType = format === 'mixed_doubles'
+            ? 'MIXED_DOUBLES'
+            : format === 'doubles'
+                ? 'DOUBLES'
+                : 'SINGLES';
         this.validateMatchTypeAgainstCategory(category.categoryConfig, matchType, 'tournament');
         const bracketType = dto.bracketType || 'single_elimination';
         const bracketTypeMap = {
@@ -617,7 +621,19 @@ let TournamentsService = class TournamentsService {
                     dto.recurringDayOfWeek ??
                         (dto.startDate ? new Date(dto.startDate).getDay() : 6),
                 ];
-            const nextRun = this.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay);
+            let nextRun;
+            if (dto.startDate) {
+                const requestedStart = new Date(dto.startDate);
+                if (!Number.isNaN(requestedStart.getTime()) && requestedStart.getTime() > Date.now()) {
+                    const [hours, minutes] = timeOfDay.split(':').map(Number);
+                    requestedStart.setHours(hours || 0, minutes || 0, 0, 0);
+                    if (requestedStart.getTime() > Date.now())
+                        nextRun = requestedStart;
+                }
+            }
+            nextRun ??= this.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay);
+            const advanceDays = dto.recurringAdvanceDays ?? 0;
+            const nextCreateAt = new Date(nextRun.getTime() - advanceDays * 24 * 60 * 60 * 1000);
             recurringConfig = {
                 enabled: true,
                 frequency,
@@ -633,8 +649,9 @@ let TournamentsService = class TournamentsService {
                 ...(footballTeamSize !== undefined ? { minTeamSize: footballTeamSize } : {}),
                 ...(footballMaxReserve !== undefined ? { maxReserve: footballMaxReserve } : {}),
                 isRanked: dto.isRanked ?? false,
-                advanceDays: dto.recurringAdvanceDays ?? 0,
-                nextRunAt: nextRun.toISOString(),
+                advanceDays,
+                nextRunAt: nextCreateAt.toISOString(),
+                nextEventAt: nextRun.toISOString(),
                 lastGeneratedAt: new Date().toISOString(),
             };
         }
@@ -762,9 +779,11 @@ let TournamentsService = class TournamentsService {
         const formatsToCreate = [
             sport === 'football'
                 ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
-                : (dto.format === 'doubles'
-                    ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
-                    : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES')),
+                : (dto.format === 'mixed_doubles'
+                    ? 'MIXED_DOUBLES'
+                    : dto.format === 'doubles'
+                        ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
+                        : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES')),
         ];
         const mapFormatToDivision = (fmt) => {
             switch (fmt) {

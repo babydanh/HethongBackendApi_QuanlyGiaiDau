@@ -157,16 +157,19 @@ export class BracketGeneratorService {
         matchNodesByRound.set(r, roundMatches);
       }
 
-      // Gắn next_match_id — 2 leg cùng cặp trỏ cùng trận vòng sau
-      const tiesPerRound = twoLegged ? 2 : 1;
+      // Gắn next_match_id — 2 trận ở vòng hiện tại dẫn vào 1 trận ở vòng kế tiếp
       for (let r = 1; r < totalRounds; r++) {
         const currentRoundMatches = matchNodesByRound.get(r)!;
         const nextRoundMatches = matchNodesByRound.get(r + 1)!;
 
         for (let i = 0; i < currentRoundMatches.length; i++) {
-          const nextMatchIndex = Math.floor(i / tiesPerRound);
-          currentRoundMatches[i].nextMatchId =
-            nextRoundMatches[nextMatchIndex].id;
+          const nextMatchIndex = twoLegged
+            ? Math.floor(i / 4) * 2 + (i % 2)
+            : Math.floor(i / 2);
+          if (nextRoundMatches && nextRoundMatches[nextMatchIndex]) {
+            currentRoundMatches[i].nextMatchId =
+              nextRoundMatches[nextMatchIndex].id;
+          }
         }
       }
 

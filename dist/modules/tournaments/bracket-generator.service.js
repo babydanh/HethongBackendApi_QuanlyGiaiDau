@@ -138,14 +138,17 @@ let BracketGeneratorService = class BracketGeneratorService {
                 }
                 matchNodesByRound.set(r, roundMatches);
             }
-            const tiesPerRound = twoLegged ? 2 : 1;
             for (let r = 1; r < totalRounds; r++) {
                 const currentRoundMatches = matchNodesByRound.get(r);
                 const nextRoundMatches = matchNodesByRound.get(r + 1);
                 for (let i = 0; i < currentRoundMatches.length; i++) {
-                    const nextMatchIndex = Math.floor(i / tiesPerRound);
-                    currentRoundMatches[i].nextMatchId =
-                        nextRoundMatches[nextMatchIndex].id;
+                    const nextMatchIndex = twoLegged
+                        ? Math.floor(i / 4) * 2 + (i % 2)
+                        : Math.floor(i / 2);
+                    if (nextRoundMatches && nextRoundMatches[nextMatchIndex]) {
+                        currentRoundMatches[i].nextMatchId =
+                            nextRoundMatches[nextMatchIndex].id;
+                    }
                 }
             }
             const sortedParticipants = [...participants];
