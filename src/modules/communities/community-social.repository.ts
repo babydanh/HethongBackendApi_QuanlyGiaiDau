@@ -125,6 +125,7 @@ export class CommunitySocialRepository {
           status: schema.tournaments.status,
           bannerUrl: schema.tournaments.bannerUrl,
           maxParticipants: schema.tournaments.maxParticipants,
+          inviteCode: schema.tournaments.inviteCode,
         },
         viewerReaction: viewerId
           ? sql<string | null>`(
@@ -611,4 +612,3 @@ export class CommunitySocialRepository {
     return deleted;
   }
 }
-
