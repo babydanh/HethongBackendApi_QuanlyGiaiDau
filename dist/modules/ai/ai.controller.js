@@ -62,6 +62,16 @@ let AiController = class AiController {
             res.end();
         }
     }
+    async message(messages, singleMessage, currentUrl, pageTitle, isMobile, searchParams, req) {
+        const userId = req ? this.getUserIdFromRequest(req) : undefined;
+        const formattedMessages = Array.isArray(messages) && messages.length > 0
+            ? messages
+            : singleMessage
+                ? [{ role: 'user', content: singleMessage }]
+                : [];
+        const reply = await this.aiService.getChatResponse(formattedMessages, userId, currentUrl, pageTitle, isMobile ?? true, searchParams);
+        return { success: true, reply, data: reply };
+    }
 };
 exports.AiController = AiController;
 __decorate([
@@ -80,6 +90,22 @@ __decorate([
     __metadata("design:paramtypes", [Array, String, String, Boolean, String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], AiController.prototype, "chat", null);
+__decorate([
+    (0, public_decorator_1.Public)(),
+    (0, common_1.Post)('message'),
+    (0, common_1.UseGuards)(new rate_limit_guard_1.RateLimitGuard(30, 60000)),
+    (0, swagger_1.ApiOperation)({ summary: 'Gửi tin nhắn nhận phản hồi JSON trực tiếp (dành cho Mobile App)' }),
+    __param(0, (0, common_1.Body)('messages')),
+    __param(1, (0, common_1.Body)('message')),
+    __param(2, (0, common_1.Body)('currentUrl')),
+    __param(3, (0, common_1.Body)('pageTitle')),
+    __param(4, (0, common_1.Body)('isMobile')),
+    __param(5, (0, common_1.Body)('searchParams')),
+    __param(6, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Array, String, String, String, Boolean, String, Object]),
+    __metadata("design:returntype", Promise)
+], AiController.prototype, "message", null);
 exports.AiController = AiController = __decorate([
     (0, swagger_1.ApiTags)('ai'),
     (0, common_1.Controller)('ai'),
