@@ -32,6 +32,7 @@ import { Cron } from '@nestjs/schedule';
 import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
 import {
   CreateDivisionDto,
+  DivisionBracketType,
   GenderRestriction,
   MatchType,
 } from './dto/create-division.dto';
@@ -910,18 +911,19 @@ export class TournamentsService {
         kind: presetRules.kind,
       },
     };
+    const sportRuleDefaults = litePreset.sportRules as Record<string, unknown>;
     const sportRules = {
       ...litePreset.sportRules,
       ...(sport === 'football'
         ? {
-            halvesCount: dto.footballHalvesCount ?? (litePreset.sportRules.halvesCount as number | undefined),
-            halfDuration: dto.footballHalfDuration ?? (litePreset.sportRules.halfDuration as number | undefined),
-            allowDraw: dto.footballAllowDraw ?? (litePreset.sportRules.allowDraw as boolean | undefined),
+            halvesCount: dto.footballHalvesCount ?? (sportRuleDefaults.halvesCount as number | undefined),
+            halfDuration: dto.footballHalfDuration ?? (sportRuleDefaults.halfDuration as number | undefined),
+            allowDraw: dto.footballAllowDraw ?? (sportRuleDefaults.allowDraw as boolean | undefined),
           }
         : {
-            setsToWin: dto.setsToWin ?? (litePreset.sportRules.setsToWin as number | undefined),
-            pointsPerSet: dto.pointsPerSet ?? (litePreset.sportRules.pointsPerSet as number | undefined),
-            winByTwo: dto.winByTwo ?? (litePreset.sportRules.winByTwo as boolean | undefined),
+            setsToWin: dto.setsToWin ?? (sportRuleDefaults.setsToWin as number | undefined),
+            pointsPerSet: dto.pointsPerSet ?? (sportRuleDefaults.pointsPerSet as number | undefined),
+            winByTwo: dto.winByTwo ?? (sportRuleDefaults.winByTwo as boolean | undefined),
             ...(dto.maxPoints !== undefined ? { maxPoints: dto.maxPoints } : {}),
           }),
     };
@@ -1202,7 +1204,7 @@ export class TournamentsService {
             genderRestriction: divInfo.genderRestriction,
             maxParticipants: maxTeams,
             entryFee: 0,
-            bracketType: finalBracketType,
+            bracketType: finalBracketType as DivisionBracketType,
             startDate: startDateTime ? new Date(startDateTime).toISOString() : undefined,
             registrationEndDate: registrationEndDate ? registrationEndDate.toISOString() : undefined,
           },
