@@ -89,7 +89,7 @@ describe('MatchesService object-level football authority', () => {
     expect(repository.updateScore).not.toHaveBeenCalled();
   });
 
-  it('lets an accepted unassigned referee claim the scheduled match', async () => {
+  it('lets an accepted unassigned referee start the scheduled match without auto-assigning', async () => {
     repository.findById.mockResolvedValue({
       ...baseMatch,
       status: 'SCHEDULED',
@@ -103,6 +103,6 @@ describe('MatchesService object-level football authority', () => {
         { status: 'ONGOING' } as never,
       ),
     ).resolves.toBeDefined();
-    expect(repository.updateRefereeId).toHaveBeenCalledWith('match-1', 'ref-1', 'ref-1');
+    expect(repository.updateRefereeId).not.toHaveBeenCalled();
   });
 });
