@@ -9,8 +9,8 @@ export declare class SocialService {
         createdAt: Date;
         updatedAt: Date;
         status: string;
-        senderId: string;
         receiverId: string;
+        senderId: string;
     }>;
     respondToRequest(userId: string, friendshipId: string, data: UpdateFriendshipDto): Promise<{
         id: string;

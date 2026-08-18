@@ -9,16 +9,16 @@ export declare class SeriesService {
     create(userId: string, data: CreateSeriesDto): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
-        slug: string;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         visibility: string;
         rules: unknown;
         status: string;
+        slug: string;
         startDate: Date | null;
         endDate: Date | null;
         organizerId: string;
@@ -148,8 +148,8 @@ export declare class SeriesService {
         createdAt: Date;
         tournamentId: string;
         order: number;
-        legId: string;
         region: string | null;
+        legId: string;
         pointMultiplier: number;
     }>;
     unlinkTournament(seriesId: string, eventId: string, userId: string, roles: string[]): Promise<{
@@ -157,8 +157,8 @@ export declare class SeriesService {
         createdAt: Date;
         tournamentId: string;
         order: number;
-        legId: string;
         region: string | null;
+        legId: string;
         pointMultiplier: number;
     }>;
     findEvents(legId: string): Promise<{

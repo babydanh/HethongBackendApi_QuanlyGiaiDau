@@ -8,11 +8,11 @@ export declare class AdminModerationController {
         id: string;
         createdAt: Date;
         userId: string;
-        isActive: boolean;
         reason: string;
         expiresAt: Date | null;
         bannedBy: string;
         banType: string;
+        isActive: boolean;
     }>;
     unbanUser(admin: JwtPayload, userId: string): Promise<{
         success: boolean;

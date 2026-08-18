@@ -412,6 +412,7 @@ export declare class TournamentsRepository {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -438,6 +439,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -460,6 +462,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -483,6 +486,7 @@ export declare class TournamentsRepository {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -549,6 +553,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1094,6 +1099,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1121,6 +1127,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1143,6 +1150,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1165,6 +1173,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1262,6 +1271,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1279,16 +1289,16 @@ export declare class TournamentsRepository {
     addRoster(participantId: string, userId: string, role: 'MAIN' | 'RESERVE', maxTeamSize?: number): Promise<{
         id: string;
         status: string;
-        userId: string;
         participantId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
     }>;
     removeRoster(participantId: string, userId: string): Promise<{
         id: string;
         status: string;
-        userId: string;
         participantId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
     }>;
@@ -1308,6 +1318,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1443,6 +1454,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1666,9 +1678,9 @@ export declare class TournamentsRepository {
         tournamentId: string;
         stageId: string;
         groupId: string | null;
-        refereeId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
+        refereeId: string | null;
         winnerId: string | null;
         scoreDetails: unknown;
         p1SetsWon: number;
@@ -1781,6 +1793,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1816,6 +1829,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1840,6 +1854,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1862,6 +1877,7 @@ export declare class TournamentsRepository {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -1885,6 +1901,7 @@ export declare class TournamentsRepository {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -1909,6 +1926,7 @@ export declare class TournamentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1931,6 +1949,7 @@ export declare class TournamentsRepository {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -1954,6 +1973,7 @@ export declare class TournamentsRepository {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;

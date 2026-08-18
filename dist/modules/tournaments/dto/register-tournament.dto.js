@@ -22,6 +22,7 @@ class RegisterTournamentDto {
     tournamentDivisionId;
     matchType;
     rankingConsent;
+    customResponses;
 }
 exports.RegisterTournamentDto = RegisterTournamentDto;
 __decorate([
@@ -87,4 +88,10 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", Boolean)
 ], RegisterTournamentDto.prototype, "rankingConsent", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Câu trả lời cho form đăng ký tùy chỉnh', type: Object }),
+    (0, class_validator_1.IsObject)(),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", Object)
+], RegisterTournamentDto.prototype, "customResponses", void 0);
 //# sourceMappingURL=register-tournament.dto.js.map

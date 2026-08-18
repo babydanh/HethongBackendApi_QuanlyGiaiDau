@@ -298,6 +298,7 @@ export declare class TournamentsController {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -794,6 +795,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -817,6 +819,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -849,6 +852,7 @@ export declare class TournamentsController {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -872,6 +876,7 @@ export declare class TournamentsController {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -1229,6 +1234,7 @@ export declare class TournamentsController {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -1256,6 +1262,7 @@ export declare class TournamentsController {
             seed: number | null;
             points: number;
             rankingConsent: boolean;
+            customResponses: unknown;
             isPaid: boolean;
             teamInviteToken: string | null;
             teamStatus: string;
@@ -1280,6 +1287,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1302,6 +1310,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1470,6 +1479,24 @@ export declare class TournamentsController {
         deletedAt: Date | null;
     }>;
     findParticipants(id: string, divisionId?: string): Promise<{
+        id: string;
+        teamName: string;
+        footballTeamId: string | null;
+        footballTeamLogoUrl: string | null;
+        rosterLockedAt: Date | null;
+        seed: number | null;
+        isPaid: boolean;
+        tournamentDivisionId: string | null;
+        teamStatus: string;
+        registeredAt: Date;
+        registeredBy: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+        } | null;
+        members: import("./interfaces/tournament-config.interface").RosterMember[];
+        eloPoints?: number;
+    }[] | {
         rosters: {
             profile: {
                 userId: string;
@@ -1494,6 +1521,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1503,24 +1531,6 @@ export declare class TournamentsController {
         isWildcard: boolean;
         registeredAt: Date;
         rosterLockedAt: Date | null;
-    }[] | {
-        id: string;
-        teamName: string;
-        footballTeamId: string | null;
-        footballTeamLogoUrl: string | null;
-        rosterLockedAt: Date | null;
-        seed: number | null;
-        isPaid: boolean;
-        tournamentDivisionId: string | null;
-        teamStatus: string;
-        registeredAt: Date;
-        registeredBy: {
-            id: string | null;
-            fullName: string | null;
-            avatarUrl: string | null;
-        } | null;
-        members: import("./interfaces/tournament-config.interface").RosterMember[];
-        eloPoints?: number;
     }[]>;
     findParticipantsForOrganizer(id: string, divisionId?: string): Promise<{
         id: string;
@@ -1613,6 +1623,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1640,6 +1651,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1662,6 +1674,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1684,6 +1697,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1773,6 +1787,7 @@ export declare class TournamentsController {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -1847,9 +1862,9 @@ export declare class TournamentsController {
         tournamentId: string;
         stageId: string;
         groupId: string | null;
-        refereeId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
+        refereeId: string | null;
         winnerId: string | null;
         scoreDetails: unknown;
         p1SetsWon: number;

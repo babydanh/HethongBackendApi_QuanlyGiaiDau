@@ -199,16 +199,16 @@ export declare class OrganizerSeriesController {
     create(data: CreateSeriesDto, user: JwtPayload): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
-        slug: string;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         visibility: string;
         rules: unknown;
         status: string;
+        slug: string;
         startDate: Date | null;
         endDate: Date | null;
         organizerId: string;
@@ -296,8 +296,8 @@ export declare class OrganizerSeriesController {
         createdAt: Date;
         tournamentId: string;
         order: number;
-        legId: string;
         region: string | null;
+        legId: string;
         pointMultiplier: number;
     }>;
     unlinkTournament(id: string, legId: string, eventId: string, user: JwtPayload): Promise<{
@@ -305,8 +305,8 @@ export declare class OrganizerSeriesController {
         createdAt: Date;
         tournamentId: string;
         order: number;
-        legId: string;
         region: string | null;
+        legId: string;
         pointMultiplier: number;
     }>;
     resetSeason(id: string, user: JwtPayload): Promise<{

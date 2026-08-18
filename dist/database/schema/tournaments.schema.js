@@ -141,6 +141,7 @@ exports.tournamentParticipants = (0, pg_core_1.pgTable)('tournament_participants
     seed: (0, pg_core_1.integer)('seed'),
     points: (0, pg_core_1.integer)('points').default(0).notNull(),
     rankingConsent: (0, pg_core_1.boolean)('ranking_consent').default(false).notNull(),
+    customResponses: (0, pg_core_1.jsonb)('custom_responses'),
     isPaid: (0, pg_core_1.boolean)('is_paid').default(false).notNull(),
     teamInviteToken: (0, pg_core_1.varchar)('team_invite_token', { length: 50 }).unique(),
     teamStatus: (0, pg_core_1.varchar)('team_status', { length: 50 }).default('PENDING').notNull(),

@@ -468,9 +468,12 @@ let TournamentsService = class TournamentsService {
                     sportPreset: 'PICKLEBALL_STANDARD',
                     sportRules: {
                         kind: 'PICKLEBALL',
+                        mode: 'LITE',
+                        scoringModel: 'RALLY_POINT_SET',
                         setsToWin: 2,
                         pointsPerSet: 11,
                         winByTwo: true,
+                        maxPoints: 15,
                     },
                 };
             case 'badminton':
@@ -478,9 +481,12 @@ let TournamentsService = class TournamentsService {
                     sportPreset: 'BADMINTON_STANDARD',
                     sportRules: {
                         kind: 'BADMINTON',
+                        mode: 'LITE',
+                        scoringModel: 'RALLY_POINT_SET',
                         setsToWin: 2,
                         pointsPerSet: 21,
                         winByTwo: true,
+                        maxPoints: 30,
                     },
                 };
             case 'table_tennis':
@@ -488,9 +494,12 @@ let TournamentsService = class TournamentsService {
                     sportPreset: 'TABLE_TENNIS_STANDARD',
                     sportRules: {
                         kind: 'TABLE_TENNIS',
+                        mode: 'LITE',
+                        scoringModel: 'RALLY_POINT_SET',
                         setsToWin: 3,
                         pointsPerSet: 11,
                         winByTwo: true,
+                        maxPoints: 99,
                     },
                 };
             case 'tennis':
@@ -498,10 +507,13 @@ let TournamentsService = class TournamentsService {
                     sportPreset: 'TENNIS_SUPER_TIEBREAK',
                     sportRules: {
                         kind: 'TENNIS',
+                        mode: 'LITE',
+                        scoringModel: 'TENNIS_SET',
                         setsToWin: 1,
                         pointsPerSet: 6,
                         maxPoints: 7,
                         winByTwo: true,
+                        tiebreakPoints: 7,
                     },
                 };
             case 'football':
@@ -509,6 +521,8 @@ let TournamentsService = class TournamentsService {
                     sportPreset: 'FOOTBALL_STANDARD',
                     sportRules: {
                         kind: 'FOOTBALL',
+                        mode: 'LITE',
+                        scoringModel: 'STANDARD',
                         halvesCount: 2,
                         halfDuration: 45,
                         allowDraw: true,
@@ -573,6 +587,7 @@ let TournamentsService = class TournamentsService {
         const sportRuleDefaults = litePreset.sportRules;
         const sportRules = {
             ...litePreset.sportRules,
+            mode: 'LITE',
             ...(sport === 'football'
                 ? {
                     halvesCount: dto.footballHalvesCount ?? sportRuleDefaults.halvesCount,
@@ -851,8 +866,14 @@ let TournamentsService = class TournamentsService {
             }
             throw new common_1.BadRequestException('Không thể tạo đầy đủ các nội dung thi đấu. Vui lòng thử lại.');
         }
+        const registrationStartsInFuture = registrationStartDate.getTime() > Date.now();
+        const initialStatus = requestedPublic && !isAdmin
+            ? 'PENDING_APPROVAL'
+            : registrationStartsInFuture
+                ? 'UPCOMING'
+                : 'REGISTRATION_OPEN';
         const updated = await this.tournamentsRepository.update(record.id, userId, {
-            status: requestedPublic && !isAdmin ? 'PENDING_APPROVAL' : 'REGISTRATION_OPEN',
+            status: initialStatus,
         });
         if (fullDto.communityId && (!requestedPublic || isAdmin)) {
             try {

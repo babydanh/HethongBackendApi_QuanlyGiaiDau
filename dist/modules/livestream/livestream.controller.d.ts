@@ -49,9 +49,9 @@ export declare class LivestreamController {
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
+        createdBy: string | null;
         status: string;
         tournamentId: string;
-        createdBy: string | null;
         protocol: string;
         streamName: string;
         streamKey: string;
@@ -82,8 +82,8 @@ export declare class LivestreamController {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        matchId: string;
         startedAt: Date | null;
+        matchId: string;
         playbackUrl: string | null;
         cameraId: string | null;
         streamStatus: string;

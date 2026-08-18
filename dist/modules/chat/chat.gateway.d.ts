@@ -69,11 +69,11 @@ export declare class ChatGateway implements OnGatewayConnection, OnGatewayDiscon
             id: string;
             createdAt: Date;
             type: string;
-            metadata: unknown;
-            isRevoked: boolean;
-            revokedAt: Date | null;
             senderId: string | null;
             isRead: boolean;
+            isRevoked: boolean;
+            revokedAt: Date | null;
+            metadata: unknown;
             roomId: string;
             messageText: string | null;
             attachmentsUrls: string[];

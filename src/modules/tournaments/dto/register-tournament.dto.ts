@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional, IsIn, Matches, IsBoolean } from 'class-validator';
+import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional, IsIn, Matches, IsBoolean, IsObject } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterTournamentDto {
@@ -55,4 +55,9 @@ export class RegisterTournamentDto {
   @IsBoolean()
   @IsOptional()
   rankingConsent?: boolean;
+
+  @ApiPropertyOptional({ description: 'Câu trả lời cho form đăng ký tùy chỉnh', type: Object })
+  @IsObject()
+  @IsOptional()
+  customResponses?: Record<string, unknown>;
 }

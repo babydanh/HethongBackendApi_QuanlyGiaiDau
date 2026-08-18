@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import { MatchesService } from './matches.service';
 import type { MatchesRepository } from './matches.repository';
 import type { LiveScoreGateway } from './live-score.gateway';
@@ -6,7 +6,7 @@ import type { RankingsService } from '../rankings/rankings.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { RedisService } from '../../providers/redis/redis.service';
 
-describe('MatchesService — referee claim via roles array (NOTE-6)', () => {
+describe('MatchesService — referee starts without auto-assignment', () => {
   let service: MatchesService;
   let mockRepo: jest.Mocked<Partial<MatchesRepository>>;
   let mockGateway: jest.Mocked<Partial<LiveScoreGateway>>;
@@ -43,7 +43,7 @@ describe('MatchesService — referee claim via roles array (NOTE-6)', () => {
       isRefereeAccepted: jest.fn().mockResolvedValue(true),
       updateRefereeId: jest.fn().mockResolvedValue({ refereeId: 'referee-1' }),
       updateStatus: jest.fn().mockImplementation((id: string) =>
-        Promise.resolve({ ...scheduledMatch, refereeId: 'referee-1', id }),
+        Promise.resolve({ ...scheduledMatch, refereeId: null, id }),
       ),
     };
     mockGateway = {
@@ -65,12 +65,12 @@ describe('MatchesService — referee claim via roles array (NOTE-6)', () => {
     );
   });
 
-  it('accepted referee with roles array can claim an unassigned match (start ONGOING)', async () => {
+  it('accepted referee can start an unassigned match without being auto-assigned', async () => {
     const result = await service.updateStatus('match-1', refereeWithRolesArray as never, {
       status: 'ONGOING',
     } as never);
     expect(result).toBeDefined();
-    expect(mockRepo.updateRefereeId).toHaveBeenCalledWith('match-1', 'referee-1', 'referee-1');
+    expect(mockRepo.updateRefereeId).not.toHaveBeenCalled();
   });
 
   it('referee not accepted by tournament cannot claim', async () => {
@@ -81,22 +81,14 @@ describe('MatchesService — referee claim via roles array (NOTE-6)', () => {
     expect(mockRepo.updateRefereeId).not.toHaveBeenCalled();
   });
 
-  it('cannot claim match already assigned to another referee', async () => {
+  it('starting does not change an explicit referee assignment', async () => {
     mockRepo.findById = jest.fn().mockResolvedValue({
       ...scheduledMatch,
       refereeId: 'referee-other',
     });
-    await expect(
-      service.updateStatus('match-1', refereeWithRolesArray as never, { status: 'ONGOING' } as never),
-    ).rejects.toThrow(ForbiddenException);
+    const result = await service.updateStatus('match-1', refereeWithRolesArray as never, { status: 'ONGOING' } as never);
+    expect(result).toBeDefined();
     expect(mockRepo.updateRefereeId).not.toHaveBeenCalled();
-  });
-
-  it('concurrent claim conflict surfaces when conditional update returns null', async () => {
-    mockRepo.updateRefereeId = jest.fn().mockResolvedValue(null);
-    await expect(
-      service.updateStatus('match-1', refereeWithRolesArray as never, { status: 'ONGOING' } as never),
-    ).rejects.toThrow(ConflictException);
   });
 
   it('non-referee without admin cannot start match', async () => {

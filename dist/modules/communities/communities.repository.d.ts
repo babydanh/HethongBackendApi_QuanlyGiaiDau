@@ -159,14 +159,14 @@ export declare class CommunitiesRepository {
     create(data: Omit<typeof schema.communities.$inferInsert, 'locationGeolocation'>, lat?: number, lng?: number, categoryIds?: string[]): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        description: string | null;
-        provinceCode: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         creatorId: string;
+        provinceCode: string | null;
         districtCode: string | null;
         wardCode: string | null;
         visibility: string;
@@ -328,17 +328,17 @@ export declare class CommunitiesRepository {
     }[]>;
     addMember(communityId: string, userId: string, role: string, status?: string, joinAnswers?: Record<string, string>, invitedBy?: string): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     updateMemberStatus(communityId: string, userId: string, status: string, approvedBy?: string): Promise<{
         id: string;
@@ -398,31 +398,31 @@ export declare class CommunitiesRepository {
     }>;
     removeMember(communityId: string, userId: string): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
+        joinedAt: Date;
         invitedBy: string | null;
         joinAnswers: Record<string, string> | null;
         tags: string[];
         notificationPreference: string;
         approvedAt: Date | null;
-        joinedAt: Date;
     }>;
     addFollow(communityId: string, userId: string, type: 'FOLLOW' | 'FAVORITE'): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     removeFollow(communityId: string, userId: string, type: 'FOLLOW' | 'FAVORITE'): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     getFavorites(userId: string): Promise<{
         community: {
@@ -476,8 +476,8 @@ export declare class CommunitiesRepository {
         id: string;
         createdAt: Date;
         communityId: string;
-        imageUrl: string;
         uploaderId: string | null;
+        imageUrl: string;
         caption: string | null;
     }>;
     getTournaments(communityId: string, status?: string): Promise<{
@@ -617,8 +617,8 @@ export declare class CommunitiesRepository {
         id: string;
         createdAt: Date;
         communityId: string;
-        imageUrl: string;
         uploaderId: string | null;
+        imageUrl: string;
         caption: string | null;
     }>;
     getMatchResultStreaks(communityId: string, userIds: string[]): Promise<Array<{
@@ -643,8 +643,8 @@ export declare class CommunitiesRepository {
         id: string;
         name: string;
         createdAt: Date;
-        communityId: string;
         createdBy: string | null;
+        communityId: string;
         color: string;
     }>;
     findTagPresetByName(communityId: string, name: string): Promise<{
@@ -654,8 +654,8 @@ export declare class CommunitiesRepository {
         id: string;
         name: string;
         createdAt: Date;
-        communityId: string;
         createdBy: string | null;
+        communityId: string;
         color: string;
     }>;
     updateMemberNotificationPreference(communityId: string, userId: string, preference: 'ALL' | 'MENTIONS_ONLY' | 'MUTED'): Promise<{

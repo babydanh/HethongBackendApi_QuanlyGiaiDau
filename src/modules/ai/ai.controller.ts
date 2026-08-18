@@ -93,4 +93,21 @@ export class AiController {
 
     return { success: true, reply, data: reply };
   }
+
+  @Public()
+  @Post('parse-tournament-source')
+  @UseGuards(new RateLimitGuard(15, 60000))
+  @ApiOperation({ summary: 'Phân tích Link Google Form / Điều lệ giải đấu để trích xuất thông tin tự động' })
+  async parseTournamentSource(
+    @Body('sourceUrl') sourceUrl?: string,
+    @Body('rawText') rawText?: string,
+    @Body('sportHint') sportHint?: string,
+  ) {
+    const data = await this.aiService.parseTournamentSource({
+      sourceUrl,
+      rawText,
+      sportHint,
+    });
+    return { success: true, data };
+  }
 }

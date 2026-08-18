@@ -69,6 +69,7 @@ export declare class PaymentsRepository {
         seed: number | null;
         points: number;
         rankingConsent: boolean;
+        customResponses: unknown;
         isPaid: boolean;
         teamInviteToken: string | null;
         teamStatus: string;
@@ -183,10 +184,11 @@ export declare class PaymentsRepository {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        userId: string;
         status: string;
         tournamentId: string;
         participantId: string | null;
+        userId: string;
+        idempotencyKey: string | null;
         expiresAt: Date | null;
         divisionId: string | null;
         purpose: string;
@@ -197,7 +199,6 @@ export declare class PaymentsRepository {
         paymentGateway: string | null;
         providerOrderCode: string | null;
         providerTransactionId: string | null;
-        idempotencyKey: string | null;
         refundBankName: string | null;
         refundAccountNumber: string | null;
         refundAccountName: string | null;
@@ -216,11 +217,11 @@ export declare class PaymentsRepository {
     }): Promise<{
         id: string;
         createdAt: Date;
-        processedAt: Date | null;
         amount: string;
         providerOrderCode: string;
         providerTransactionId: string | null;
         paymentId: string | null;
+        processedAt: Date | null;
         eventKey: string;
         statusCode: string;
         signatureVerified: boolean;
@@ -375,10 +376,10 @@ export declare class PaymentsRepository {
         bankName: string | null;
         bankAccountNumber: string | null;
         bankAccountName: string | null;
-        organizerId: string;
-        processedAt: Date | null;
         transactionProofUrl: string | null;
         processedBy: string | null;
+        processedAt: Date | null;
+        organizerId: string;
         totalCollected: string;
         amountRequested: string;
         platformFeeRetained: string;

@@ -137,9 +137,9 @@ let AiService = AiService_1 = class AiService {
             const orgActive = (w.organizedTournaments || []).filter(isActive);
             const partActive = (w.participatingTournaments || []).filter(isActive);
             const coOrgActive = (w.coOrganizerTournaments || []).filter(isActive);
-            const refTournaments = w.refereeTournaments || [];
+            const refActive = (w.refereeTournaments || []).filter(isActive);
             const refInvites = w.refereeInvites || [];
-            ctxLines.push(`- Vai trò hiện tại: ${orgActive.length > 0 ? 'Ban tổ chức' : partActive.length > 0 ? 'Vận động viên' : 'Người dùng'}`);
+            ctxLines.push(`- Vai trò hiện tại: ${orgActive.length > 0 ? 'Ban tổ chức' : refActive.length > 0 ? 'Trọng tài' : partActive.length > 0 ? 'Vận động viên' : 'Người dùng'}`);
             if (orgActive.length > 0) {
                 ctxLines.push(`- Giải đang tổ chức (${orgActive.length}):`);
                 orgActive.slice(0, 3).forEach((t) => {
@@ -156,6 +156,9 @@ let AiService = AiService_1 = class AiService {
             }
             if (coOrgActive.length > 0) {
                 ctxLines.push(`- Đồng tổ chức: ${coOrgActive.length} giải`);
+            }
+            if (refActive.length > 0) {
+                ctxLines.push(`- Trọng tài: ${refActive.length} giải`);
             }
             if (refInvites.length > 0) {
                 ctxLines.push(`- Lời mời làm trọng tài: ${refInvites.length} lời mời`);
@@ -306,6 +309,142 @@ ${divisionsStr}
         catch (error) {
             console.error('OpenRouter AI Chat Stream Error:', error);
             throw new common_1.InternalServerErrorException('Lỗi kết nối stream với máy chủ AI: ' + error.message);
+        }
+    }
+    async parseTournamentSource(dto) {
+        let sourceContent = dto.rawText?.trim() || '';
+        if (dto.sourceUrl?.trim()) {
+            try {
+                const response = await fetch(dto.sourceUrl.trim(), {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    },
+                    signal: AbortSignal.timeout(10000),
+                });
+                if (response.ok) {
+                    const html = await response.text();
+                    const textOnly = html
+                        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                        .replace(/<[^>]+>/g, ' ')
+                        .replace(/\s+/g, ' ')
+                        .trim();
+                    if (textOnly.length > 50) {
+                        sourceContent = `[NỘI DUNG TẢI TỪ URL: ${dto.sourceUrl}]\n${textOnly.slice(0, 8000)}\n\n${sourceContent}`;
+                    }
+                }
+            }
+            catch (err) {
+                this.logger.warn(`Could not fetch tournament sourceUrl (${dto.sourceUrl}): ${err.message}`);
+            }
+        }
+        if (!sourceContent) {
+            throw new common_1.BadRequestException('Không thể đọc nội dung từ link hoặc nội dung trống. Vui lòng cung cấp link hoặc dán trực tiếp điều lệ giải để AI phân tích.');
+        }
+        const systemPrompt = `Bạn là chuyên gia phân tích dữ liệu giải đấu thể thao cho nền tảng Sporto / Quản lý giải đấu.
+Nhiệm vụ của bạn là đọc thông tin / điều lệ / form đăng ký giải đấu và trích xuất cấu trúc JSON chuẩn xác.
+
+Quy tắc phân loại:
+1. "sport": một trong ['pickleball', 'badminton', 'tennis', 'table_tennis', 'football']. Mặc định 'pickleball' nếu không rõ.
+2. "name": Tên chính thức của giải đấu.
+3. "startDate", "endDate": Chuỗi ISO 8601 YYYY-MM-DD hoặc null nếu không rõ.
+4. "venueName": Tên sân vận động / cụm sân.
+5. "locationAddress": Địa chỉ sân.
+6. "province": Tỉnh / Thành phố diễn ra giải (VD: "Hồ Chí Minh", "Hà Nội", "Đà Nẵng",...).
+7. "description": Tóm tắt quy định, điều lệ hoặc thông tin giải đấu.
+8. "bannerUrl": Link ảnh banner/poster nếu tìm thấy trong văn bản (hoặc null).
+9. "formats": Danh sách các nội dung thi đấu (Divisions). Mỗi mục gồm:
+   - "name": Tên hiển thị (VD: "Đôi Nam 6.5", "Đôi Nam Nữ Open", "Đơn Nam 3.0", "Đôi Nữ")
+   - "formatKey": Chuẩn hóa theo một trong các giá trị:
+     + "SINGLES_MALE", "SINGLES_FEMALE", "DOUBLES_MALE", "DOUBLES_FEMALE", "MIXED_DOUBLES"
+     + Hoặc môn bóng đá: "FOOTBALL_MALE", "FOOTBALL_FEMALE", "FOOTBALL_OPEN"
+   - "bracketType": "SINGLE_ELIMINATION" | "DOUBLE_ELIMINATION" | "ROUND_ROBIN" | "GROUP_STAGE_KNOCKOUT" (mặc định "SINGLE_ELIMINATION" nếu không rõ)
+   - "maxParticipants": Số lượng VĐV hoặc Cặp tối đa (mặc định 16 hoặc 32)
+   - "minElo": Số ELO tối thiểu (hoặc null)
+   - "maxElo": Số ELO tối đa (hoặc null)
+
+QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định dạng yêu cầu. Không bọc trong \`\`\`json\`\`\`, không giải thích thêm.`;
+        if (!this.openai) {
+            return {
+                name: 'Giải Đấu Thể Thao Mới',
+                sport: dto.sportHint || 'pickleball',
+                startDate: null,
+                endDate: null,
+                venueName: null,
+                locationAddress: null,
+                province: null,
+                description: sourceContent.slice(0, 500),
+                bannerUrl: null,
+                formats: [
+                    {
+                        name: 'Đôi Nam',
+                        formatKey: 'DOUBLES_MALE',
+                        bracketType: 'SINGLE_ELIMINATION',
+                        maxParticipants: 16,
+                        minElo: null,
+                        maxElo: null,
+                    },
+                    {
+                        name: 'Đôi Nam Nữ',
+                        formatKey: 'MIXED_DOUBLES',
+                        bracketType: 'SINGLE_ELIMINATION',
+                        maxParticipants: 16,
+                        minElo: null,
+                        maxElo: null,
+                    },
+                ],
+            };
+        }
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: this.modelName,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: `Hãy phân tích nội dung giải đấu sau đây:\n\n${sourceContent}` },
+                ],
+                temperature: 0.1,
+            });
+            const rawResult = response.choices[0]?.message?.content?.trim() || '{}';
+            const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
+            const cleanJson = jsonMatch ? jsonMatch[0] : rawResult;
+            const parsed = JSON.parse(cleanJson);
+            return {
+                name: parsed.name || 'Giải đấu thể thao',
+                sport: ['pickleball', 'badminton', 'tennis', 'table_tennis', 'football'].includes(parsed.sport)
+                    ? parsed.sport
+                    : dto.sportHint || 'pickleball',
+                startDate: parsed.startDate || null,
+                endDate: parsed.endDate || null,
+                venueName: parsed.venueName || null,
+                locationAddress: parsed.locationAddress || null,
+                province: parsed.province || null,
+                description: parsed.description || null,
+                bannerUrl: parsed.bannerUrl || null,
+                formats: Array.isArray(parsed.formats) && parsed.formats.length > 0
+                    ? parsed.formats.map((f) => ({
+                        name: f.name || 'Nội dung thi đấu',
+                        formatKey: f.formatKey || 'DOUBLES_MALE',
+                        bracketType: f.bracketType || 'SINGLE_ELIMINATION',
+                        maxParticipants: typeof f.maxParticipants === 'number' ? f.maxParticipants : 16,
+                        minElo: typeof f.minElo === 'number' ? f.minElo : null,
+                        maxElo: typeof f.maxElo === 'number' ? f.maxElo : null,
+                    }))
+                    : [
+                        {
+                            name: 'Đôi Nam',
+                            formatKey: 'DOUBLES_MALE',
+                            bracketType: 'SINGLE_ELIMINATION',
+                            maxParticipants: 16,
+                            minElo: null,
+                            maxElo: null,
+                        },
+                    ],
+            };
+        }
+        catch (error) {
+            this.logger.error(`Lỗi phân tích AI Tournament: ${error.message}`);
+            throw new common_1.InternalServerErrorException(`Không thể phân tích nội dung giải: ${error.message}`);
         }
     }
 };

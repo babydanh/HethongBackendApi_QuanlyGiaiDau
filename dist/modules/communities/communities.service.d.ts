@@ -365,14 +365,14 @@ export declare class CommunitiesService {
     create(userId: string, dto: CreateCommunityDto): Promise<{
         id: string;
         name: string;
+        description: string | null;
+        bannerUrl: string | null;
+        logoUrl: string | null;
         createdAt: Date;
         updatedAt: Date;
         deletedAt: Date | null;
-        provinceCode: string | null;
-        description: string | null;
-        logoUrl: string | null;
-        bannerUrl: string | null;
         creatorId: string;
+        provinceCode: string | null;
         districtCode: string | null;
         wardCode: string | null;
         visibility: string;
@@ -527,10 +527,10 @@ export declare class CommunitiesService {
     }>;
     addMember(requesterId: string, communityId: string, dto: AddMemberDto, roles: string[]): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -555,10 +555,10 @@ export declare class CommunitiesService {
     }>;
     removeMember(requesterId: string, communityId: string, targetUserId: string, roles: string[]): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -569,10 +569,10 @@ export declare class CommunitiesService {
     }>;
     joinCommunity(userId: string, id: string, answers?: Record<string, string>): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -598,30 +598,30 @@ export declare class CommunitiesService {
     followCommunity(userId: string, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     unfollowCommunity(userId: string, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     favoriteCommunity(userId: string, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     unfavoriteCommunity(userId: string, id: string): Promise<{
         id: string;
         createdAt: Date;
-        userId: string;
-        type: string;
         communityId: string;
+        type: string;
+        userId: string;
     }>;
     getFavorites(userId: string): Promise<{
         community: {
@@ -688,10 +688,10 @@ export declare class CommunitiesService {
     }>;
     inviteMember(userId: string, id: string, targetUserId: string, role: CommunityMemberRole, roles: string[]): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -716,10 +716,10 @@ export declare class CommunitiesService {
     }>;
     unbanMember(requesterId: string, communityId: string, targetUserId: string, roles: string[]): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
@@ -759,24 +759,24 @@ export declare class CommunitiesService {
         id: string;
         name: string;
         createdAt: Date;
-        communityId: string;
         createdBy: string | null;
+        communityId: string;
         color: string;
     }>;
     deleteTagPreset(requesterId: string, communityId: string, presetId: string, roles: string[]): Promise<{
         id: string;
         name: string;
         createdAt: Date;
-        communityId: string;
         createdBy: string | null;
+        communityId: string;
         color: string;
     }>;
     respondToInvite(userId: string, id: string, action: 'ACCEPT' | 'DECLINE'): Promise<{
         id: string;
-        userId: string;
         status: string;
         approvedBy: string | null;
         communityId: string;
+        userId: string;
         role: string;
         joinedAt: Date;
         invitedBy: string | null;

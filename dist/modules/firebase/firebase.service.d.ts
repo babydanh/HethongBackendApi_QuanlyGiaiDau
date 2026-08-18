@@ -22,10 +22,10 @@ export declare class FirebaseService implements OnModuleInit {
         createdAt: Date;
         updatedAt: Date;
         userId: string;
+        isActive: boolean;
         token: string;
         platform: string;
         deviceInfo: string | null;
-        isActive: boolean;
     } | null>;
     removeDeviceToken(userId: string, token: string): Promise<void>;
     sendPushToUser(userId: string, payload: PushNotificationPayload): Promise<{

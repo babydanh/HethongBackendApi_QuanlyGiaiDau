@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -34,20 +34,15 @@ export class AiService {
         apiKey,
         baseURL,
         defaultHeaders: {
-          'HTTP-Referer': 'https://vndcsport.com', // Optional, for OpenRouter rankings
-          'X-Title': 'Sporto', // Optional, for OpenRouter rankings
+          'HTTP-Referer': 'https://vndcsport.com',
+          'X-Title': 'Sporto',
         },
       });
     }
 
-    // Load system prompt from file
     this.loadBaseSystemPrompt();
   }
 
-  /**
-   * Đọc system prompt từ file docs/ai-system-prompt.md
-   * Nếu file không tồn tại, dùng fallback cứng.
-   */
   private loadBaseSystemPrompt(): void {
     const promptPath = path.join(__dirname, '..', '..', '..', 'docs', 'ai-system-prompt.md');
     try {
@@ -58,18 +53,14 @@ export class AiService {
         this.logger.warn(`Không tìm thấy file system prompt tại ${promptPath}, dùng fallback.`);
         this.baseSystemPrompt = this.getFallbackSystemPrompt();
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Lỗi đọc file system prompt: ${error.message}`);
       this.baseSystemPrompt = this.getFallbackSystemPrompt();
     }
   }
 
-  /**
-   * Helper to extract UUID from URL path
-   */
   private extractTournamentId(url?: string): string | null {
     if (!url) return null;
-    // Match standard UUID v4 format: e.g., /tournaments/550e8400-e29b-41d4-a716-446655440000
     const match = url.match(/\/tournaments\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
     return match ? match[1] : null;
   }
@@ -78,7 +69,6 @@ export class AiService {
     const ctxLines: string[] = [];
     ctxLines.push('\n--- THÔNG TIN CÁ NHÂN CỦA BẠN ---');
 
-    // Chạy song song tất cả queries
     const [unreadResult, workspaceResult, rankingResult, upcomingResult] = await Promise.allSettled([
       this.notificationsService.getUnreadCount(userId),
       this.tournamentsService.getMyWorkspace(userId),
@@ -90,25 +80,22 @@ export class AiService {
       })(),
     ]);
 
-    // 1. Thông báo chưa đọc
     if (unreadResult.status === 'fulfilled') {
       ctxLines.push(`- Thông báo chưa đọc: ${unreadResult.value.count}`);
     }
 
-    // 2. Workspace — phân loại role dùng getMyWorkspace
     const ACTIVE_STATUSES = ['IN_PROGRESS', 'REGISTRATION_OPEN', 'UPCOMING'] as const;
     const isActive = (t: { status?: string }) => t.status && ACTIVE_STATUSES.includes(t.status as typeof ACTIVE_STATUSES[number]);
 
     if (workspaceResult.status === 'fulfilled') {
       const w = workspaceResult.value;
-
       const orgActive = (w.organizedTournaments || []).filter(isActive);
       const partActive = (w.participatingTournaments || []).filter(isActive);
       const coOrgActive = (w.coOrganizerTournaments || []).filter(isActive);
-      const refTournaments = w.refereeTournaments || [];
+      const refActive = (w.refereeTournaments || []).filter(isActive);
       const refInvites = w.refereeInvites || [];
 
-      ctxLines.push(`- Vai trò hiện tại: ${orgActive.length > 0 ? 'Ban tổ chức' : partActive.length > 0 ? 'Vận động viên' : 'Người dùng'}`);
+      ctxLines.push(`- Vai trò hiện tại: ${orgActive.length > 0 ? 'Ban tổ chức' : refActive.length > 0 ? 'Trọng tài' : partActive.length > 0 ? 'Vận động viên' : 'Người dùng'}`);
 
       if (orgActive.length > 0) {
         ctxLines.push(`- Giải đang tổ chức (${orgActive.length}):`);
@@ -130,18 +117,20 @@ export class AiService {
         ctxLines.push(`- Đồng tổ chức: ${coOrgActive.length} giải`);
       }
 
+      if (refActive.length > 0) {
+        ctxLines.push(`- Trọng tài: ${refActive.length} giải`);
+      }
+
       if (refInvites.length > 0) {
         ctxLines.push(`- Lời mời làm trọng tài: ${refInvites.length} lời mời`);
       }
     }
 
-    // 3. ELO hiện tại
     if (rankingResult.status === 'fulfilled' && rankingResult.value?.publicRanks?.length > 0) {
       const top = rankingResult.value.publicRanks[0];
       ctxLines.push(`- ELO hiện tại: ${top.eloPoints ?? 'Chưa có'} (${top.tierName || 'Chưa xếp hạng'})`);
     }
 
-    // 4. Trận sắp tới
     if (upcomingResult.status === 'fulfilled') {
       const matches = upcomingResult.value;
       if (Array.isArray(matches)) {
@@ -160,9 +149,6 @@ export class AiService {
     return ctxLines.join('\n');
   }
 
-  /**
-   * System prompt fallback khi không đọc được file
-   */
   private getFallbackSystemPrompt(): string {
     return `Bạn là Trợ lý ảo AI của nền tảng quản lý giải đấu thể thao Sporto.
 Bạn hỗ trợ người dùng về tạo giải đấu, quản lý giải, đăng ký thi đấu, ELO, thanh toán, và các thao tác trên hệ thống.
@@ -237,14 +223,12 @@ ${tournamentInfo}
 --- CÁC BẢNG ĐẤU (DIVISIONS) ---
 ${divisionsStr}
 ---`;
-
         }
       } catch (error) {
         console.error('Error fetching tournament context for AI chat:', error);
       }
     }
 
-    // Thêm context về trang hiện tại (pageTitle, device type, search params)
     if (pageTitle || isMobile !== undefined || searchParams) {
       const deviceLabel = isMobile ? 'Điện thoại' : 'Máy tính';
       pageContext += `\n--- TRANG HIỆN TẠI ---\n`;
@@ -325,5 +309,169 @@ ${divisionsStr}
       throw new InternalServerErrorException('Lỗi kết nối stream với máy chủ AI: ' + error.message);
     }
   }
-}
 
+  async parseTournamentSource(dto: {
+    sourceUrl?: string;
+    rawText?: string;
+    sportHint?: string;
+  }): Promise<{
+    name: string;
+    sport: 'badminton' | 'tennis' | 'pickleball' | 'table_tennis' | 'football';
+    startDate?: string | null;
+    endDate?: string | null;
+    venueName?: string | null;
+    locationAddress?: string | null;
+    province?: string | null;
+    description?: string | null;
+    bannerUrl?: string | null;
+    formats: Array<{
+      name: string;
+      formatKey: string;
+      bracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT' | null;
+      maxParticipants?: number | null;
+      minElo?: number | null;
+      maxElo?: number | null;
+    }>;
+  }> {
+    let sourceContent = dto.rawText?.trim() || '';
+
+    // If a URL is provided, try to fetch its text content
+    if (dto.sourceUrl?.trim()) {
+      try {
+        const response = await fetch(dto.sourceUrl.trim(), {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (response.ok) {
+          const html = await response.text();
+          const textOnly = html
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (textOnly.length > 50) {
+            sourceContent = `[NỘI DUNG TẢI TỪ URL: ${dto.sourceUrl}]\n${textOnly.slice(0, 8000)}\n\n${sourceContent}`;
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Could not fetch tournament sourceUrl (${dto.sourceUrl}): ${err.message}`);
+      }
+    }
+
+    if (!sourceContent) {
+      throw new BadRequestException('Không thể đọc nội dung từ link hoặc nội dung trống. Vui lòng cung cấp link hoặc dán trực tiếp điều lệ giải để AI phân tích.');
+    }
+
+    const systemPrompt = `Bạn là chuyên gia phân tích dữ liệu giải đấu thể thao cho nền tảng Sporto / Quản lý giải đấu.
+Nhiệm vụ của bạn là đọc thông tin / điều lệ / form đăng ký giải đấu và trích xuất cấu trúc JSON chuẩn xác.
+
+Quy tắc phân loại:
+1. "sport": một trong ['pickleball', 'badminton', 'tennis', 'table_tennis', 'football']. Mặc định 'pickleball' nếu không rõ.
+2. "name": Tên chính thức của giải đấu.
+3. "startDate", "endDate": Chuỗi ISO 8601 YYYY-MM-DD hoặc null nếu không rõ.
+4. "venueName": Tên sân vận động / cụm sân.
+5. "locationAddress": Địa chỉ sân.
+6. "province": Tỉnh / Thành phố diễn ra giải (VD: "Hồ Chí Minh", "Hà Nội", "Đà Nẵng",...).
+7. "description": Tóm tắt quy định, điều lệ hoặc thông tin giải đấu.
+8. "bannerUrl": Link ảnh banner/poster nếu tìm thấy trong văn bản (hoặc null).
+9. "formats": Danh sách các nội dung thi đấu (Divisions). Mỗi mục gồm:
+   - "name": Tên hiển thị (VD: "Đôi Nam 6.5", "Đôi Nam Nữ Open", "Đơn Nam 3.0", "Đôi Nữ")
+   - "formatKey": Chuẩn hóa theo một trong các giá trị:
+     + "SINGLES_MALE", "SINGLES_FEMALE", "DOUBLES_MALE", "DOUBLES_FEMALE", "MIXED_DOUBLES"
+     + Hoặc môn bóng đá: "FOOTBALL_MALE", "FOOTBALL_FEMALE", "FOOTBALL_OPEN"
+   - "bracketType": "SINGLE_ELIMINATION" | "DOUBLE_ELIMINATION" | "ROUND_ROBIN" | "GROUP_STAGE_KNOCKOUT" (mặc định "SINGLE_ELIMINATION" nếu không rõ)
+   - "maxParticipants": Số lượng VĐV hoặc Cặp tối đa (mặc định 16 hoặc 32)
+   - "minElo": Số ELO tối thiểu (hoặc null)
+   - "maxElo": Số ELO tối đa (hoặc null)
+
+QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định dạng yêu cầu. Không bọc trong \`\`\`json\`\`\`, không giải thích thêm.`;
+
+    if (!this.openai) {
+      return {
+        name: 'Giải Đấu Thể Thao Mới',
+        sport: (dto.sportHint as any) || 'pickleball',
+        startDate: null,
+        endDate: null,
+        venueName: null,
+        locationAddress: null,
+        province: null,
+        description: sourceContent.slice(0, 500),
+        bannerUrl: null,
+        formats: [
+          {
+            name: 'Đôi Nam',
+            formatKey: 'DOUBLES_MALE',
+            bracketType: 'SINGLE_ELIMINATION',
+            maxParticipants: 16,
+            minElo: null,
+            maxElo: null,
+          },
+          {
+            name: 'Đôi Nam Nữ',
+            formatKey: 'MIXED_DOUBLES',
+            bracketType: 'SINGLE_ELIMINATION',
+            maxParticipants: 16,
+            minElo: null,
+            maxElo: null,
+          },
+        ],
+      };
+    }
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: this.modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Hãy phân tích nội dung giải đấu sau đây:\n\n${sourceContent}` },
+        ],
+        temperature: 0.1,
+      });
+
+      const rawResult = response.choices[0]?.message?.content?.trim() || '{}';
+      const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
+      const cleanJson = jsonMatch ? jsonMatch[0] : rawResult;
+
+      const parsed = JSON.parse(cleanJson);
+      return {
+        name: parsed.name || 'Giải đấu thể thao',
+        sport: ['pickleball', 'badminton', 'tennis', 'table_tennis', 'football'].includes(parsed.sport)
+          ? parsed.sport
+          : (dto.sportHint as any) || 'pickleball',
+        startDate: parsed.startDate || null,
+        endDate: parsed.endDate || null,
+        venueName: parsed.venueName || null,
+        locationAddress: parsed.locationAddress || null,
+        province: parsed.province || null,
+        description: parsed.description || null,
+        bannerUrl: parsed.bannerUrl || null,
+        formats: Array.isArray(parsed.formats) && parsed.formats.length > 0
+          ? parsed.formats.map((f: any) => ({
+              name: f.name || 'Nội dung thi đấu',
+              formatKey: f.formatKey || 'DOUBLES_MALE',
+              bracketType: f.bracketType || 'SINGLE_ELIMINATION',
+              maxParticipants: typeof f.maxParticipants === 'number' ? f.maxParticipants : 16,
+              minElo: typeof f.minElo === 'number' ? f.minElo : null,
+              maxElo: typeof f.maxElo === 'number' ? f.maxElo : null,
+            }))
+          : [
+              {
+                name: 'Đôi Nam',
+                formatKey: 'DOUBLES_MALE',
+                bracketType: 'SINGLE_ELIMINATION',
+                maxParticipants: 16,
+                minElo: null,
+                maxElo: null,
+              },
+            ],
+      };
+    } catch (error: any) {
+      this.logger.error(`Lỗi phân tích AI Tournament: ${error.message}`);
+      throw new InternalServerErrorException(`Không thể phân tích nội dung giải: ${error.message}`);
+    }
+  }
+}

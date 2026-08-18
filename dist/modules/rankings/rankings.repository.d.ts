@@ -158,11 +158,11 @@ export declare class RankingsRepository {
     getOrCreateUserRank(tx: AppTx, userId: string, categoryId: string, matchType: string, scope: 'PUBLIC' | 'COMMUNITY', communityId?: string, forUpdate?: boolean, genderRestriction?: string): Promise<{
         id: string;
         updatedAt: Date;
-        userId: string;
-        categoryId: string;
         communityId: string | null;
+        categoryId: string;
         matchType: string;
         genderRestriction: string | null;
+        userId: string;
         eloPoints: number;
         tierId: string | null;
         shieldActive: boolean;
@@ -175,11 +175,11 @@ export declare class RankingsRepository {
     } | {
         id: string;
         updatedAt: Date;
-        userId: string;
-        categoryId: string;
         communityId: string;
+        categoryId: string;
         matchType: string;
         genderRestriction: string | null;
+        userId: string;
         eloPoints: number;
         matchesPlayed: number;
         matchesWon: number;

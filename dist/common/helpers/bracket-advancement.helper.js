@@ -6,7 +6,7 @@ exports.resolveWinnerTargetSlot = resolveWinnerTargetSlot;
 exports.resolveLoserTargetSlot = resolveLoserTargetSlot;
 exports.resolveWinnersLoserTargetIndex = resolveWinnersLoserTargetIndex;
 exports.MIN_DOUBLE_ELIMINATION_PARTICIPANTS = 4;
-exports.MAX_DOUBLE_ELIMINATION_PARTICIPANTS = 64;
+exports.MAX_DOUBLE_ELIMINATION_PARTICIPANTS = 128;
 function getDoubleEliminationShape(participantCount) {
     if (!Number.isInteger(participantCount) ||
         participantCount < exports.MIN_DOUBLE_ELIMINATION_PARTICIPANTS ||

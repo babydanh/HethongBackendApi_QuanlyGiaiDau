@@ -80,8 +80,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        userId: string;
         status: string;
+        userId: string;
         evidenceUrls: string[];
         contactPhone: string;
         rejectReason: string | null;
@@ -141,11 +141,11 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         userId: string;
-        isActive: boolean;
         reason: string;
         expiresAt: Date | null;
         bannedBy: string;
         banType: string;
+        isActive: boolean;
     }>;
     unbanUser(userId: string, adminId: string): Promise<{
         success: boolean;

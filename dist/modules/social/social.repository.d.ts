@@ -7,8 +7,8 @@ export declare class SocialRepository {
         createdAt: Date;
         updatedAt: Date;
         status: string;
-        senderId: string;
         receiverId: string;
+        senderId: string;
     }>;
     findFriendship(userA: string, userB: string): Promise<{
         id: string;

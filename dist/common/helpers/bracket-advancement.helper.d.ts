@@ -1,6 +1,6 @@
 export type BracketParticipantSlot = 'participant1Id' | 'participant2Id';
 export declare const MIN_DOUBLE_ELIMINATION_PARTICIPANTS = 4;
-export declare const MAX_DOUBLE_ELIMINATION_PARTICIPANTS = 64;
+export declare const MAX_DOUBLE_ELIMINATION_PARTICIPANTS = 128;
 export interface DoubleEliminationShape {
     bracketSize: number;
     winnersRounds: number;
