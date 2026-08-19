@@ -88,18 +88,15 @@ export class CommunitySocialService {
       );
     }
 
-    for (const receiverId of validMentionIds) {
-      if (receiverId === user.id) continue;
-      await this.notificationsService.sendNotification(
-        buildCommunityPostMentionedNotification({
-          communityId,
-          communityName: community.name,
-          senderName: user.fullName?.trim() || 'Thành viên',
-          receiverId,
-          senderId: user.id,
-          postId: post.id,
-        }),
-      );
+    if (post.status !== 'PENDING') {
+      await this.sendMentionNotifications({
+        communityId,
+        communityName: community.name,
+        mentionIds: validMentionIds,
+        senderId: user.id,
+        senderName: user.fullName?.trim() || 'Thành viên',
+        postId: post.id,
+      });
     }
     return {
       ...post,
@@ -226,7 +223,22 @@ export class CommunitySocialService {
     await this.requireJoined(communityId, user.id);
     const post = await this.socialRepository.findPost(postId);
     if (!post || post.communityId !== communityId) throw new NotFoundException('Không tìm thấy bài viết.');
+    if (await this.socialRepository.findOpenPostReport(communityId, postId, user.id)) {
+      throw new BadRequestException('Bạn đã báo cáo bài viết này và đang chờ xử lý.');
+    }
     return this.socialRepository.createReport({ communityId, reporterId: user.id, postId, reason: dto.reason, details: dto.details });
+  }
+
+  async listReports(communityId: string, user: SocialUser, status?: string) {
+    await this.requireManager(communityId, user);
+    return this.socialRepository.listReports(communityId, status);
+  }
+
+  async updateReportStatus(communityId: string, reportId: string, user: SocialUser, status: string) {
+    await this.requireManager(communityId, user);
+    const updated = await this.socialRepository.updateReportStatus(communityId, reportId, status);
+    if (!updated) throw new NotFoundException('Không tìm thấy báo cáo.');
+    return updated;
   }
 
   async updatePreferences(communityId: string, user: SocialUser, values: { muted: boolean; notificationsEnabled: boolean }) {
@@ -249,6 +261,14 @@ export class CommunitySocialService {
           postId: post.id,
         }),
       );
+      await this.sendMentionNotifications({
+        communityId,
+        communityName: community.name,
+        mentionIds: Array.isArray(post.mentions) ? post.mentions : [],
+        senderId: post.authorId,
+        senderName: 'Thành viên CLB',
+        postId: post.id,
+      });
     }
     return updated;
   }
@@ -303,6 +323,41 @@ export class CommunitySocialService {
     const community = await this.communitiesRepository.findById(communityId);
     if (!community) throw new NotFoundException('Không tìm thấy cộng đồng.');
     return community;
+  }
+
+  private async sendMentionNotifications(params: {
+    communityId: string;
+    communityName: string;
+    mentionIds: string[];
+    senderId: string;
+    senderName: string;
+    postId: string;
+  }) {
+    const preferences = await this.socialRepository.getMentionNotificationPreferences(
+      params.communityId,
+      [...new Set(params.mentionIds)],
+    );
+    await Promise.all(
+      preferences
+        .filter((preference) =>
+          preference.userId !== params.senderId &&
+          preference.notificationPreference !== 'MUTED' &&
+          preference.socialMuted !== true &&
+          preference.socialNotificationsEnabled !== false,
+        )
+        .map((preference) =>
+          this.notificationsService.sendNotification(
+            buildCommunityPostMentionedNotification({
+              communityId: params.communityId,
+              communityName: params.communityName,
+              senderName: params.senderName,
+              receiverId: preference.userId,
+              senderId: params.senderId,
+              postId: params.postId,
+            }),
+          ),
+        ),
+    );
   }
 
   private async requireJoined(communityId: string, userId?: string) {

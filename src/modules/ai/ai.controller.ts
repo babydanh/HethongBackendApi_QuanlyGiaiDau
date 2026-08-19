@@ -4,30 +4,30 @@ import { Public } from '../../common/decorators/public.decorator';
 import { AiService } from './ai.service';
 import type { Request, Response } from 'express';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 
 @ApiTags('ai')
 @Controller('ai')
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
+  private getUserFromRequest(request: Request): { id?: string; sub?: string; roles?: string[] } | undefined {
+    return (request as Request & { user?: { id?: string; sub?: string; roles?: string[] } }).user;
+  }
+
   private getUserIdFromRequest(request: Request): string | undefined {
-    if (!request || !request.headers) return undefined;
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return undefined;
-    }
-    const token = authHeader.split(' ')[1];
-    try {
-      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('ascii'));
-      return payload.sub || undefined;
-    } catch {
-      return undefined;
-    }
+    const user = this.getUserFromRequest(request);
+    return user?.id || user?.sub || undefined;
+  }
+
+  private getUserRolesFromRequest(request: Request): string[] {
+    const roles = this.getUserFromRequest(request)?.roles;
+    return Array.isArray(roles) ? roles.filter((role): role is string => typeof role === 'string') : [];
   }
 
   @Public()
   @Post('chat')
-  @UseGuards(new RateLimitGuard(12, 60000))
+  @UseGuards(OptionalJwtAuthGuard, new RateLimitGuard(12, 60000))
   @ApiOperation({ summary: 'Gửi tin nhắn hội thoại và nhận phản hồi từ Trợ lý ảo AI' })
   async chat(
     @Body('messages') messages: any[],
@@ -47,7 +47,7 @@ export class AiController {
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
     try {
-      const stream = await this.aiService.getChatResponseStream(messages || [], userId, currentUrl, pageTitle, isMobile, searchParams);
+      const stream = await this.aiService.getChatResponseStream(messages || [], userId, currentUrl, pageTitle, isMobile, searchParams, this.getUserRolesFromRequest(req));
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content || '';
         if (content) {
@@ -64,7 +64,7 @@ export class AiController {
 
   @Public()
   @Post('message')
-  @UseGuards(new RateLimitGuard(30, 60000))
+  @UseGuards(OptionalJwtAuthGuard, new RateLimitGuard(30, 60000))
   @ApiOperation({ summary: 'Gửi tin nhắn nhận phản hồi JSON trực tiếp (dành cho Mobile App)' })
   async message(
     @Body('messages') messages: any[],
@@ -89,6 +89,7 @@ export class AiController {
       pageTitle,
       isMobile ?? true,
       searchParams,
+      this.getUserRolesFromRequest(req),
     );
 
     return { success: true, reply, data: reply };

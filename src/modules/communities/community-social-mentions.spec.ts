@@ -43,6 +43,7 @@ describe('CommunitySocialService @mention policy', () => {
   let socialRepository: {
     getSettings: jest.Mock;
     getJoinedMentionIds: jest.Mock;
+    getMentionNotificationPreferences: jest.Mock;
     createPost: jest.Mock;
   };
   let communitiesRepository: {
@@ -59,6 +60,14 @@ describe('CommunitySocialService @mention policy', () => {
         postApprovalRequired: false,
       }),
       getJoinedMentionIds: jest.fn().mockResolvedValue([MENTION_ID]),
+      getMentionNotificationPreferences: jest.fn().mockResolvedValue([
+        {
+          userId: MENTION_ID,
+          notificationPreference: 'ALL',
+          socialMuted: false,
+          socialNotificationsEnabled: true,
+        },
+      ]),
       createPost: jest.fn().mockResolvedValue({ id: 'post-id' }),
     };
     communitiesRepository = {
