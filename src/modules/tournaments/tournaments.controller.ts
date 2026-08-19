@@ -503,9 +503,17 @@ export class TournamentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body('divisionId') divisionId: string | undefined,
     @Body('seedingType') seedingType: 'SEEDED' | 'RANDOM' | undefined,
+    @Body('allowReset') allowReset: boolean | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.generateBracket(id, user.sub, this.getSystemRoles(user), divisionId, seedingType);
+    return this.tournamentsService.generateBracket(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      divisionId,
+      seedingType,
+      allowReset ?? true,
+    );
   }
 
   @Post(':id/publish')

@@ -63,6 +63,9 @@ export interface CategoryConfig {
 }
 export interface RosterMember {
     userId: string;
+    email?: string | null;
+    phoneNumber?: string | null;
+    gender?: string | null;
     fullName: string | null;
     avatarUrl: string | null;
     role: string;

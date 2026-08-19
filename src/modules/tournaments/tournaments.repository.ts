@@ -3382,10 +3382,12 @@ export class TournamentsRepository {
       tournamentDivisionId: string | null;
       teamStatus: string;
       registeredAt: Date;
+      customResponses: Record<string, unknown> | null;
       registeredBy: {
         id: string | null;
         fullName: string | null;
         avatarUrl: string | null;
+        email: string | null;
       } | null;
       members: RosterMember[];
       eloPoints?: number;
@@ -3405,10 +3407,14 @@ export class TournamentsRepository {
           schema.tournamentParticipants.tournamentDivisionId,
         teamStatus: schema.tournamentParticipants.teamStatus,
         registeredAt: schema.tournamentParticipants.registeredAt,
+        customResponses: schema.tournamentParticipants.customResponses,
         registeredBy: {
           id: schema.users.id,
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
+          email: schema.users.email,
+          phoneNumber: schema.profiles.phoneNumber,
+          gender: schema.profiles.gender,
         },
       })
       .from(schema.tournamentParticipants)
@@ -3458,6 +3464,9 @@ export class TournamentsRepository {
       .select({
         participantId: schema.tournamentRosters.participantId,
         userId: schema.tournamentRosters.userId,
+        email: schema.users.email,
+        phoneNumber: schema.profiles.phoneNumber,
+        gender: schema.profiles.gender,
         role: schema.tournamentRosters.role,
         isMock: schema.users.isMock,
         fullName: schema.profiles.fullName,
@@ -3508,6 +3517,9 @@ export class TournamentsRepository {
       const list = rostersMap.get(r.participantId) || [];
       list.push({
         userId: r.userId,
+        email: r.email,
+        phoneNumber: r.phoneNumber,
+        gender: r.gender,
         fullName: r.fullName,
         avatarUrl: r.avatarUrl,
         role: r.role,
@@ -3571,6 +3583,10 @@ export class TournamentsRepository {
       }
       return {
         ...p,
+        customResponses:
+          p.customResponses && typeof p.customResponses === 'object' && !Array.isArray(p.customResponses)
+            ? (p.customResponses as Record<string, unknown>)
+            : null,
         members,
         eloPoints,
       };

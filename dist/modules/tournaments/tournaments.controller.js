@@ -236,8 +236,8 @@ let TournamentsController = class TournamentsController {
     async remove(id, user) {
         return this.tournamentsService.remove(id, user.sub, this.getSystemRoles(user));
     }
-    async generateBracket(id, divisionId, seedingType, user) {
-        return this.tournamentsService.generateBracket(id, user.sub, this.getSystemRoles(user), divisionId, seedingType);
+    async generateBracket(id, divisionId, seedingType, allowReset, user) {
+        return this.tournamentsService.generateBracket(id, user.sub, this.getSystemRoles(user), divisionId, seedingType, allowReset ?? true);
     }
     async publish(id, user) {
         return this.tournamentsService.publish(id, user.sub, this.getSystemRoles(user));
@@ -747,9 +747,10 @@ __decorate([
     __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(1, (0, common_1.Body)('divisionId')),
     __param(2, (0, common_1.Body)('seedingType')),
-    __param(3, (0, current_user_decorator_1.CurrentUser)()),
+    __param(3, (0, common_1.Body)('allowReset')),
+    __param(4, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object, Object, Object]),
+    __metadata("design:paramtypes", [String, Object, Object, Object, Object]),
     __metadata("design:returntype", Promise)
 ], TournamentsController.prototype, "generateBracket", null);
 __decorate([

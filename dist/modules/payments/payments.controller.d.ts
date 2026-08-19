@@ -192,14 +192,16 @@ export declare class PaymentsController {
         idempotent: boolean;
     }>;
     requestPayout(payoutRequestDto: PayoutRequestDto, user: JwtPayload): Promise<{
-        tournamentId: string;
         id: string;
         createdAt: Date;
         updatedAt: Date;
         status: string;
+        tournamentId: string;
         bankName: string | null;
         bankAccountNumber: string | null;
         bankAccountName: string | null;
+        transactionProofUrl: string | null;
+        processedBy: string | null;
         processedAt: Date | null;
         organizerId: string;
         totalCollected: string;
@@ -208,8 +210,6 @@ export declare class PaymentsController {
         holdUntil: Date | null;
         payoutTrigger: string;
         disbursedAt: Date | null;
-        transactionProofUrl: string | null;
-        processedBy: string | null;
     }>;
     findMyPayments(user: JwtPayload): Promise<{
         payment: {
