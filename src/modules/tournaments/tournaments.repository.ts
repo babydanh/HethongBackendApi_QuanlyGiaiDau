@@ -1858,6 +1858,9 @@ export class TournamentsRepository {
           if (field.type === 'SELECT' && Array.isArray(field.options) && !field.options.includes(value)) {
             throw new BadRequestException(`Lựa chọn của trường “${String(field.label || fieldId)}” không hợp lệ.`);
           }
+          if (field.type === 'MULTI_SELECT' && Array.isArray(field.options) && (!Array.isArray(value) || value.some((item) => !(field.options as unknown[]).includes(item)))) {
+            throw new BadRequestException(`Lựa chọn của trường “${String(field.label || fieldId)}” không hợp lệ.`);
+          }
           if (field.type === 'CHECKBOX' && value !== true) {
             throw new BadRequestException(`Bạn cần xác nhận “${String(field.label || fieldId)}”.`);
           }
