@@ -112,8 +112,8 @@ export declare class FootballTeamsService {
         userId: string;
         role: string;
         joinedAt: Date | null;
-        invitedBy: string | null;
         teamId: string;
+        invitedBy: string | null;
         leftAt: Date | null;
     }>;
     respond(userId: string, teamId: string, status: 'ACCEPTED' | 'DECLINED'): Promise<{

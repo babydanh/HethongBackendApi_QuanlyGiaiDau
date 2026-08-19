@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MatchesService = void 0;
 const common_1 = require("@nestjs/common");
+const schedule_1 = require("@nestjs/schedule");
 const matches_repository_1 = require("./matches.repository");
 const operate_match_dto_1 = require("./dto/operate-match.dto");
 const live_score_gateway_1 = require("./live-score.gateway");
@@ -35,6 +36,49 @@ let MatchesService = class MatchesService {
         this.rankingsService = rankingsService;
         this.notificationsService = notificationsService;
         this.redisService = redisService;
+    }
+    async notifyUpcomingMatchReminders() {
+        const now = Date.now();
+        const windows = [
+            { key: '24h', minutes: 24 * 60, tolerance: 10, label: '1 ngày' },
+            { key: '2h', minutes: 120, tolerance: 10, label: '2 giờ' },
+            { key: '30m', minutes: 30, tolerance: 5, label: '30 phút' },
+        ];
+        try {
+            const result = await this.matchesRepository.findAll({ page: 1, limit: 500, status: 'SCHEDULED' });
+            for (const match of result.data) {
+                if (!match.scheduledAt || match.status !== 'SCHEDULED')
+                    continue;
+                const scheduledMs = new Date(match.scheduledAt).getTime();
+                if (!Number.isFinite(scheduledMs) || scheduledMs <= now)
+                    continue;
+                const minutesUntil = (scheduledMs - now) / 60000;
+                const window = windows.find((candidate) => Math.abs(minutesUntil - candidate.minutes) <= candidate.tolerance);
+                if (!window)
+                    continue;
+                const reminderKey = `match-reminder:${match.id}:${window.key}`;
+                if (await this.redisService.get(reminderKey))
+                    continue;
+                await this.redisService.set(reminderKey, '1', 36 * 60 * 60);
+                const participantIds = [match.participant1Id, match.participant2Id]
+                    .filter((participantId) => Boolean(participantId));
+                const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+                const scheduledAt = match.scheduledAt;
+                await Promise.all(rosters.map((roster) => this.notificationsService.sendNotification((0, notification_builder_1.buildMatchReminderNotification)({
+                    matchId: match.id,
+                    receiverId: roster.userId,
+                    tournamentName: match.tournament?.name || 'giải đấu',
+                    scheduledTime: new Date(scheduledAt).toLocaleString('vi-VN'),
+                    court: match.courtName || 'Chưa xếp sân',
+                    untilLabel: window.label,
+                    bracketBranch: match.bracketBranch,
+                    roundNumber: match.roundNumber,
+                }))));
+            }
+        }
+        catch (error) {
+            console.error('Failed to send upcoming match reminders:', error);
+        }
     }
     isAdmin(user) {
         return (0, role_helper_1.isAdminUser)(user);
@@ -126,6 +170,7 @@ let MatchesService = class MatchesService {
                 const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
                 for (const roster of rosters) {
                     await this.notificationsService.sendNotification((0, notification_builder_1.buildMatchCompletedNotification)({
+                        matchId,
                         receiverId: roster.userId,
                         tournamentId: existing.tournamentId,
                         tournamentName: existing.tournament?.name || 'giải đấu',
@@ -868,6 +913,7 @@ let MatchesService = class MatchesService {
                     for (const roster of rosters) {
                         await this.notificationsService.sendNotification(data.action === 'POSTPONE'
                             ? (0, notification_builder_1.buildMatchScheduledNotification)({
+                                matchId: id,
                                 receiverId: roster.userId,
                                 tournamentId: existing.tournamentId,
                                 tournamentName: existing.tournament?.name || 'giải đấu',
@@ -876,6 +922,8 @@ let MatchesService = class MatchesService {
                                 divisionId: existing.participant1?.tournamentDivisionId ||
                                     existing.participant2?.tournamentDivisionId ||
                                     undefined,
+                                bracketBranch: existing.bracketBranch,
+                                roundNumber: existing.roundNumber,
                             })
                             : {
                                 receiverId: roster.userId,
@@ -1060,6 +1108,7 @@ let MatchesService = class MatchesService {
                     const court = updatedMatch?.courtName || 'Chưa xếp sân';
                     for (const roster of rosters) {
                         await this.notificationsService.sendNotification((0, notification_builder_1.buildMatchScheduledNotification)({
+                            matchId: id,
                             receiverId: roster.userId,
                             tournamentId: existing.tournamentId,
                             tournamentName: existing.tournament?.name || 'giải đấu',
@@ -1068,6 +1117,8 @@ let MatchesService = class MatchesService {
                             divisionId: existing.participant1?.tournamentDivisionId ||
                                 existing.participant2?.tournamentDivisionId ||
                                 undefined,
+                            bracketBranch: existing.bracketBranch,
+                            roundNumber: existing.roundNumber,
                         }));
                     }
                 }
@@ -1168,6 +1219,12 @@ let MatchesService = class MatchesService {
     }
 };
 exports.MatchesService = MatchesService;
+__decorate([
+    (0, schedule_1.Cron)('*/10 * * * *'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], MatchesService.prototype, "notifyUpcomingMatchReminders", null);
 exports.MatchesService = MatchesService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [matches_repository_1.MatchesRepository,

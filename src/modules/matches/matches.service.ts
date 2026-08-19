@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { MatchesRepository } from './matches.repository';
 import {
   MATCH_OPERATION_ACTIONS,
@@ -22,6 +23,7 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import {
   buildMatchCompletedNotification,
   buildMatchScheduledNotification,
+  buildMatchReminderNotification,
   buildRefereeAssignedNotification,
 } from '../notifications/notification-builder';
 import { RedisService } from '../../providers/redis/redis.service';
@@ -43,6 +45,51 @@ export class MatchesService {
     private readonly notificationsService: NotificationsService,
     private readonly redisService: RedisService,
   ) {}
+
+  @Cron('*/10 * * * *')
+  async notifyUpcomingMatchReminders() {
+    const now = Date.now();
+    const windows = [
+      { key: '24h', minutes: 24 * 60, tolerance: 10, label: '1 ngày' },
+      { key: '2h', minutes: 120, tolerance: 10, label: '2 giờ' },
+      { key: '30m', minutes: 30, tolerance: 5, label: '30 phút' },
+    ];
+
+    try {
+      const result = await this.matchesRepository.findAll({ page: 1, limit: 500, status: 'SCHEDULED' });
+      for (const match of result.data) {
+        if (!match.scheduledAt || match.status !== 'SCHEDULED') continue;
+        const scheduledMs = new Date(match.scheduledAt).getTime();
+        if (!Number.isFinite(scheduledMs) || scheduledMs <= now) continue;
+        const minutesUntil = (scheduledMs - now) / 60000;
+        const window = windows.find((candidate) => Math.abs(minutesUntil - candidate.minutes) <= candidate.tolerance);
+        if (!window) continue;
+
+        const reminderKey = `match-reminder:${match.id}:${window.key}`;
+        if (await this.redisService.get(reminderKey)) continue;
+        await this.redisService.set(reminderKey, '1', 36 * 60 * 60);
+
+        const participantIds = [match.participant1Id, match.participant2Id]
+          .filter((participantId): participantId is string => Boolean(participantId));
+        const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+        const scheduledAt = match.scheduledAt;
+        await Promise.all(rosters.map((roster) => this.notificationsService.sendNotification(
+          buildMatchReminderNotification({
+            matchId: match.id,
+            receiverId: roster.userId,
+            tournamentName: match.tournament?.name || 'giải đấu',
+            scheduledTime: new Date(scheduledAt).toLocaleString('vi-VN'),
+            court: match.courtName || 'Chưa xếp sân',
+            untilLabel: window.label,
+            bracketBranch: match.bracketBranch,
+            roundNumber: match.roundNumber,
+          }),
+        )));
+      }
+    } catch (error) {
+      console.error('Failed to send upcoming match reminders:', error);
+    }
+  }
 
   private isAdmin(user: JwtPayload) {
     return isAdminUser(user);
@@ -205,6 +252,7 @@ export class MatchesService {
         for (const roster of rosters) {
           await this.notificationsService.sendNotification(
             buildMatchCompletedNotification({
+              matchId,
               receiverId: roster.userId,
               tournamentId: existing.tournamentId,
               tournamentName: existing.tournament?.name || 'giải đấu',
@@ -1371,6 +1419,7 @@ export class MatchesService {
             await this.notificationsService.sendNotification(
               data.action === 'POSTPONE'
                 ? buildMatchScheduledNotification({
+                    matchId: id,
                     receiverId: roster.userId,
                     tournamentId: existing.tournamentId,
                     tournamentName: existing.tournament?.name || 'giải đấu',
@@ -1380,6 +1429,8 @@ export class MatchesService {
                       existing.participant1?.tournamentDivisionId ||
                       existing.participant2?.tournamentDivisionId ||
                       undefined,
+                    bracketBranch: existing.bracketBranch,
+                    roundNumber: existing.roundNumber,
                   })
                 : {
                     receiverId: roster.userId,
@@ -1657,6 +1708,7 @@ export class MatchesService {
           for (const roster of rosters) {
             await this.notificationsService.sendNotification(
               buildMatchScheduledNotification({
+                matchId: id,
                 receiverId: roster.userId,
                 tournamentId: existing.tournamentId,
                 tournamentName: existing.tournament?.name || 'giải đấu',
@@ -1666,6 +1718,8 @@ export class MatchesService {
                   existing.participant1?.tournamentDivisionId ||
                   existing.participant2?.tournamentDivisionId ||
                   undefined,
+                bracketBranch: existing.bracketBranch,
+                roundNumber: existing.roundNumber,
               }),
             );
           }

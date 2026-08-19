@@ -1,4 +1,5 @@
 import type { CreateNotificationDto } from './dto/create-notification.dto';
+export declare const getFootballTeamRedirect: (teamId: string) => string;
 export declare const buildFootballTeamNotification: (params: {
     teamId: string;
     teamName: string;
@@ -249,18 +250,32 @@ export declare const buildPayoutReviewedNotification: (params: {
     approved: boolean;
 }) => CreateNotificationDto;
 export declare const buildMatchCompletedNotification: (params: {
+    matchId: string;
     tournamentId: string;
     tournamentName: string;
     receiverId: string;
     divisionId?: string;
 }) => CreateNotificationDto;
 export declare const buildMatchScheduledNotification: (params: {
+    matchId: string;
     tournamentId: string;
     tournamentName: string;
     receiverId: string;
     court: string;
     scheduledTime: string;
     divisionId?: string;
+    bracketBranch?: string | null;
+    roundNumber?: number | null;
+}) => CreateNotificationDto;
+export declare const buildMatchReminderNotification: (params: {
+    matchId: string;
+    tournamentName: string;
+    receiverId: string;
+    scheduledTime: string;
+    court: string;
+    untilLabel: string;
+    bracketBranch?: string | null;
+    roundNumber?: number | null;
 }) => CreateNotificationDto;
 export declare const buildRefereeAssignedNotification: (params: {
     tournamentId: string;

@@ -286,9 +286,9 @@ export declare class TournamentsController {
     }>;
     joinByInviteCode(inviteCode: string, registerTournamentDto: RegisterTournamentDto, user: JwtPayload): Promise<{
         participant: {
+            tournamentId: string;
             id: string;
             isMock: boolean;
-            tournamentId: string;
             tournamentDivisionId: string | null;
             groupId: string | null;
             registeredBy: string;
@@ -442,6 +442,7 @@ export declare class TournamentsController {
         createdAt: Date;
     }[]>;
     createDivision(id: string, createDivisionDto: CreateDivisionDto, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         name: string;
         createdAt: Date;
@@ -454,7 +455,6 @@ export declare class TournamentsController {
         venueId: string | null;
         prizeDescription: string | null;
         genderRestriction: string | null;
-        tournamentId: string;
         isConfigOverride: boolean;
         bracketType: string | null;
         roundConfig: unknown;
@@ -807,9 +807,9 @@ export declare class TournamentsController {
         rosterLockedAt: Date | null;
     }[]>;
     pairLiteParticipants(id: string, dto: PairLiteParticipantsDto, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         isMock: boolean;
-        tournamentId: string;
         tournamentDivisionId: string | null;
         groupId: string | null;
         registeredBy: string;
@@ -864,9 +864,9 @@ export declare class TournamentsController {
             rosterLockedAt: Date | null;
         };
         partner: {
+            tournamentId: string;
             id: string;
             isMock: boolean;
-            tournamentId: string;
             tournamentDivisionId: string | null;
             groupId: string | null;
             registeredBy: string;
@@ -1082,9 +1082,9 @@ export declare class TournamentsController {
         deletedAt: Date | null;
     }>;
     follow(id: string, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         createdAt: Date;
-        tournamentId: string;
         userId: string;
     }>;
     unfollow(id: string, user: JwtPayload): Promise<void>;
@@ -1222,9 +1222,9 @@ export declare class TournamentsController {
     }>;
     register(id: string, registerTournamentDto: RegisterTournamentDto, user: JwtPayload, inviteCode?: string): Promise<{
         participant: {
+            tournamentId: string;
             id: string;
             isMock: boolean;
-            tournamentId: string;
             tournamentDivisionId: string | null;
             groupId: string | null;
             registeredBy: string;
@@ -1560,13 +1560,13 @@ export declare class TournamentsController {
         avatarUrl: string | null;
     }[]>;
     addReferee(id: string, body: AddRefereeDto, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         createdAt: Date;
         status: string;
-        tournamentId: string;
         userId: string;
-        assignedBy: string | null;
         assignedAt: Date;
+        assignedBy: string | null;
     }>;
     respondToRefereeInvite(tournamentId: string, refereeId: string, action: 'ACCEPT' | 'DECLINE', user: JwtPayload): Promise<{
         id: string;
@@ -1578,13 +1578,13 @@ export declare class TournamentsController {
         createdAt: Date;
     }>;
     revokeRefereeInvite(tournamentId: string, refereeId: string, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         createdAt: Date;
         status: string;
-        tournamentId: string;
         userId: string;
-        assignedBy: string | null;
         assignedAt: Date;
+        assignedBy: string | null;
     }>;
     findBracket(id: string, divisionId?: string): Promise<{
         stages: import("./interfaces/tournament-config.interface").BracketStage[];
@@ -1611,9 +1611,9 @@ export declare class TournamentsController {
         deletedAt: Date | null;
     } | null>;
     seedMockParticipants(id: string, dto: SeedMockParticipantsDto, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         isMock: boolean;
-        tournamentId: string;
         tournamentDivisionId: string | null;
         groupId: string | null;
         registeredBy: string;
@@ -1775,9 +1775,9 @@ export declare class TournamentsController {
         }[];
     }>;
     assignReservedSlot(id: string, userEmailOrPhone: string, teamName: string, partnerEmailOrPhone: string | undefined, divisionId: string | undefined, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         isMock: boolean;
-        tournamentId: string;
         tournamentDivisionId: string | null;
         groupId: string | null;
         registeredBy: string;
@@ -1855,12 +1855,13 @@ export declare class TournamentsController {
         deletedAt: Date | null;
     }>;
     createPlayoffMatch(id: string, stageId: string, participant1Id: string, participant2Id: string, user: JwtPayload): Promise<{
-        stageId: string;
+        tournamentId: string;
+        refereeId: string | null;
         id: string;
         updatedAt: Date;
         deletedAt: Date | null;
         status: string;
-        tournamentId: string;
+        stageId: string;
         groupId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
@@ -1881,7 +1882,6 @@ export declare class TournamentsController {
         courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
-        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];
@@ -1988,18 +1988,18 @@ export declare class TournamentsController {
         email: string;
     }[]>;
     addStaffMember(id: string, body: AddStaffMemberDto, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         createdAt: Date;
         createdBy: string | null;
-        tournamentId: string;
         userId: string;
         role: string;
     }>;
     removeStaffMember(id: string, staffUserId: string, user: JwtPayload): Promise<{
+        tournamentId: string;
         id: string;
         createdAt: Date;
         createdBy: string | null;
-        tournamentId: string;
         userId: string;
         role: string;
     }>;

@@ -121,13 +121,13 @@ let MatchesRepository = class MatchesRepository {
           )
         )`);
         }
-        if (publicOnly) {
+        if (publicOnly || (!tId && !userId)) {
             conditions.push((0, drizzle_orm_1.sql) `(
           exists (
             select 1 from ${schema.tournaments} t
             where t.id = ${schema.matches.tournamentId}
             and t.deleted_at is null
-            and (t.visibility = 'PUBLIC' or t.visibility is null)
+            ${publicOnly ? (0, drizzle_orm_1.sql) `and (t.visibility = 'PUBLIC' or t.visibility is null)` : (0, drizzle_orm_1.sql) ``}
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
           or exists (
@@ -136,7 +136,7 @@ let MatchesRepository = class MatchesRepository {
             join ${schema.tournaments} t on s.tournament_id = t.id
             where g.id = ${schema.matches.groupId}
             and t.deleted_at is null
-            and (t.visibility = 'PUBLIC' or t.visibility is null)
+            ${publicOnly ? (0, drizzle_orm_1.sql) `and (t.visibility = 'PUBLIC' or t.visibility is null)` : (0, drizzle_orm_1.sql) ``}
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
         )`);

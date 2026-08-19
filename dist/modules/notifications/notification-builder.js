@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildRefereeInviteRevokedNotification = exports.buildRefereeInviteAcceptedNotification = exports.buildRefereeInviteNotification = exports.buildStaffAddedNotification = exports.buildRefereeAssignedNotification = exports.buildMatchScheduledNotification = exports.buildMatchCompletedNotification = exports.buildPayoutReviewedNotification = exports.buildUserUnbannedNotification = exports.buildUserBannedNotification = exports.buildVerificationRejectedNotification = exports.buildVerificationApprovedNotification = exports.buildTournamentDeleteRejectedNotification = exports.buildTournamentDeleteApprovedNotification = exports.buildTournamentUnsuspendedNotification = exports.buildTournamentSuspendedNotification = exports.buildTournamentPublishRejectedNotification = exports.buildTournamentPublishApprovedNotification = exports.buildOrganizerPaymentCompletedNotification = exports.buildTournamentCancelledNotification = exports.buildReservedSlotAssignedNotification = exports.buildParticipantPaymentCompletedNotification = exports.buildRegistrationTimeoutNotification = exports.buildRegistrationCancelledFullNotification = exports.buildParticipantKickedNotification = exports.buildParticipantWithdrawnNotification = exports.buildPartnerInviteCancelledNotification = exports.buildPartnerInviteRejectedNotification = exports.buildPartnerInviteAcceptedNotification = exports.buildPartnerInviteReceivedNotification = exports.buildParticipantTeammateJoinedNotification = exports.buildParticipantPendingTeammateNotification = exports.buildParticipantRegistrationRejectedNotification = exports.buildParticipantRegistrationSuccessNotification = exports.buildParticipantRegistrationPendingNotification = exports.buildOrganizerTeamCompletedNotification = exports.buildOrganizerNewRegistrationNotification = exports.buildCommunityPostApprovedNotification = exports.buildCommunityPostCommentedNotification = exports.buildCommunityPostMentionedNotification = exports.buildCommunityUnbannedNotification = exports.buildCommunityBannedNotification = exports.buildCommunityOwnershipTransferredNotification = exports.buildCommunityInviteRevokedNotification = exports.buildCommunityKickedNotification = exports.buildCommunityRoleDemotedNotification = exports.buildCommunityRolePromotedNotification = exports.buildCommunityInviteNotification = exports.buildFootballRosterConfirmationNotification = exports.buildFootballTeamNotification = void 0;
-exports.buildRefereeInviteDeclinedNotification = void 0;
+exports.buildRefereeInviteNotification = exports.buildStaffAddedNotification = exports.buildRefereeAssignedNotification = exports.buildMatchReminderNotification = exports.buildMatchScheduledNotification = exports.buildMatchCompletedNotification = exports.buildPayoutReviewedNotification = exports.buildUserUnbannedNotification = exports.buildUserBannedNotification = exports.buildVerificationRejectedNotification = exports.buildVerificationApprovedNotification = exports.buildTournamentDeleteRejectedNotification = exports.buildTournamentDeleteApprovedNotification = exports.buildTournamentUnsuspendedNotification = exports.buildTournamentSuspendedNotification = exports.buildTournamentPublishRejectedNotification = exports.buildTournamentPublishApprovedNotification = exports.buildOrganizerPaymentCompletedNotification = exports.buildTournamentCancelledNotification = exports.buildReservedSlotAssignedNotification = exports.buildParticipantPaymentCompletedNotification = exports.buildRegistrationTimeoutNotification = exports.buildRegistrationCancelledFullNotification = exports.buildParticipantKickedNotification = exports.buildParticipantWithdrawnNotification = exports.buildPartnerInviteCancelledNotification = exports.buildPartnerInviteRejectedNotification = exports.buildPartnerInviteAcceptedNotification = exports.buildPartnerInviteReceivedNotification = exports.buildParticipantTeammateJoinedNotification = exports.buildParticipantPendingTeammateNotification = exports.buildParticipantRegistrationRejectedNotification = exports.buildParticipantRegistrationSuccessNotification = exports.buildParticipantRegistrationPendingNotification = exports.buildOrganizerTeamCompletedNotification = exports.buildOrganizerNewRegistrationNotification = exports.buildCommunityPostApprovedNotification = exports.buildCommunityPostCommentedNotification = exports.buildCommunityPostMentionedNotification = exports.buildCommunityUnbannedNotification = exports.buildCommunityBannedNotification = exports.buildCommunityOwnershipTransferredNotification = exports.buildCommunityInviteRevokedNotification = exports.buildCommunityKickedNotification = exports.buildCommunityRoleDemotedNotification = exports.buildCommunityRolePromotedNotification = exports.buildCommunityInviteNotification = exports.buildFootballRosterConfirmationNotification = exports.buildFootballTeamNotification = exports.getFootballTeamRedirect = void 0;
+exports.buildRefereeInviteDeclinedNotification = exports.buildRefereeInviteRevokedNotification = exports.buildRefereeInviteAcceptedNotification = void 0;
 const notification_types_1 = require("./notification-types");
 const getCommunityRedirect = (communityId) => `/communities/${communityId}`;
 const getFootballTeamRedirect = (teamId) => `/football-teams?teamId=${encodeURIComponent(teamId)}`;
+exports.getFootballTeamRedirect = getFootballTeamRedirect;
 const buildFootballTeamNotification = (params) => {
     const copy = {
         FOOTBALL_TEAM_INVITED: ['Lời mời tham gia đội bóng', `Bạn được mời tham gia ${params.teamName}.`],
@@ -22,7 +23,10 @@ const buildFootballTeamNotification = (params) => {
         type: notification_types_1.NOTIFICATION_TYPES[params.type],
         title,
         content,
-        redirectUrl: getFootballTeamRedirect(params.teamId),
+        redirectUrl: params.type === 'FOOTBALL_TEAM_INVITE_CANCELLED' ||
+            params.type === 'FOOTBALL_TEAM_MEMBER_REMOVED'
+            ? '/notifications'
+            : (0, exports.getFootballTeamRedirect)(params.teamId),
     };
 };
 exports.buildFootballTeamNotification = buildFootballTeamNotification;
@@ -453,23 +457,31 @@ const buildMatchCompletedNotification = (params) => ({
     type: notification_types_1.NOTIFICATION_TYPES.MATCH_COMPLETED,
     title: 'Trận đấu đã hoàn thành',
     content: `Trận đấu của bạn tại giải ${params.tournamentName} đã có kết quả. Xem ngay!`,
-    redirectUrl: getTournamentRedirect(params.tournamentId, {
-        tab: 'bracket',
-        divisionId: params.divisionId,
-    }),
+    redirectUrl: `/live/${params.matchId}`,
 });
 exports.buildMatchCompletedNotification = buildMatchCompletedNotification;
 const buildMatchScheduledNotification = (params) => ({
     receiverId: params.receiverId,
     type: notification_types_1.NOTIFICATION_TYPES.MATCH_SCHEDULED,
     title: 'Cập nhật lịch thi đấu mới',
-    content: `Trận đấu của bạn tại giải ${params.tournamentName} đã được xếp lịch vào lúc ${params.scheduledTime} tại sân ${params.court}. Vui lòng kiểm tra và có mặt đúng giờ.`,
-    redirectUrl: getTournamentRedirect(params.tournamentId, {
-        tab: 'bracket',
-        divisionId: params.divisionId,
-    }),
+    content: `Trận đấu của bạn tại giải ${params.tournamentName}${formatMatchPath(params.bracketBranch, params.roundNumber)} đã được xếp lịch vào lúc ${params.scheduledTime} tại sân ${params.court}. Vui lòng kiểm tra và có mặt đúng giờ.`,
+    redirectUrl: `/live/${params.matchId}`,
 });
 exports.buildMatchScheduledNotification = buildMatchScheduledNotification;
+const formatMatchPath = (branch, round) => {
+    const branchLabel = branch === 'WINNERS' ? 'Nhánh thắng' : branch === 'LOSERS' ? 'Nhánh thua' : branch === 'MAIN' ? 'Nhánh chính' : '';
+    const roundLabel = round && round > 0 ? `Vòng ${round}` : '';
+    const path = [branchLabel, roundLabel].filter(Boolean).join(' · ');
+    return path ? ` (${path})` : '';
+};
+const buildMatchReminderNotification = (params) => ({
+    receiverId: params.receiverId,
+    type: notification_types_1.NOTIFICATION_TYPES.MATCH_REMINDER,
+    title: `Nhắc lịch thi đấu · còn ${params.untilLabel}`,
+    content: `Trận của bạn tại giải ${params.tournamentName}${formatMatchPath(params.bracketBranch, params.roundNumber)} diễn ra lúc ${params.scheduledTime} tại sân ${params.court}.`,
+    redirectUrl: `/live/${params.matchId}`,
+});
+exports.buildMatchReminderNotification = buildMatchReminderNotification;
 const buildRefereeAssignedNotification = (params) => ({
     receiverId: params.receiverId,
     type: notification_types_1.NOTIFICATION_TYPES.REFEREE_ASSIGNED,

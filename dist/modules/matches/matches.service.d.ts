@@ -16,6 +16,7 @@ export declare class MatchesService {
     private readonly notificationsService;
     private readonly redisService;
     constructor(matchesRepository: MatchesRepository, liveScoreGateway: LiveScoreGateway, rankingsService: RankingsService, notificationsService: NotificationsService, redisService: RedisService);
+    notifyUpcomingMatchReminders(): Promise<void>;
     private isAdmin;
     private isTournamentManager;
     private resolveOperationalWinner;
