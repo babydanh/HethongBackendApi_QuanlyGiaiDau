@@ -3370,6 +3370,7 @@ export class TournamentsRepository {
     categoryId: string,
     divisionId?: string,
     onlyEligible = false,
+    includePaymentDetails = false,
   ): Promise<
     {
       id: string;
@@ -3390,6 +3391,18 @@ export class TournamentsRepository {
         email: string | null;
       } | null;
       members: RosterMember[];
+      payment: {
+        id: string;
+        amount: string;
+        status: string;
+        paymentGateway: string | null;
+        transactionReference: string | null;
+        providerTransactionId: string | null;
+        providerOrderCode: string | null;
+        paidAt: Date | null;
+        receiptNumber: string | null;
+        currency: string | null;
+      } | null;
       eloPoints?: number;
     }[]
   > {
@@ -3459,6 +3472,33 @@ export class TournamentsRepository {
 
     // 2. Fetch rosters and ELO info for all participant IDs
     const participantIds = participants.map((p) => p.id);
+
+    const paymentRows = includePaymentDetails ? await this.db
+      .select({
+        participantId: schema.payments.participantId,
+        id: schema.payments.id,
+        amount: schema.payments.amount,
+        status: schema.payments.status,
+        paymentGateway: schema.payments.paymentGateway,
+        transactionReference: schema.payments.transactionReference,
+        providerTransactionId: schema.payments.providerTransactionId,
+        providerOrderCode: schema.payments.providerOrderCode,
+        paidAt: schema.payments.paidAt,
+        receiptNumber: schema.paymentReceipts.receiptNumber,
+        currency: schema.paymentReceipts.currency,
+      })
+      .from(schema.payments)
+      .leftJoin(schema.paymentReceipts, eq(schema.paymentReceipts.paymentId, schema.payments.id))
+      .where(and(inArray(schema.payments.participantId, participantIds), eq(schema.payments.purpose, 'REGISTRATION_FEE')))
+      .orderBy(desc(schema.payments.createdAt)) : [];
+    const paymentMap = new Map<string, (typeof paymentRows)[number]>();
+    for (const payment of paymentRows) {
+      if (!payment.participantId) continue;
+      const current = paymentMap.get(payment.participantId);
+      if (!current || (payment.status === 'COMPLETED' && current.status !== 'COMPLETED')) {
+        paymentMap.set(payment.participantId, payment);
+      }
+    }
 
     const rosters = await this.db
       .select({
@@ -3588,6 +3628,7 @@ export class TournamentsRepository {
             ? (p.customResponses as Record<string, unknown>)
             : null,
         members,
+        payment: includePaymentDetails ? (paymentMap.get(p.id) ?? null) : null,
         eloPoints,
       };
     });
@@ -3598,7 +3639,16 @@ export class TournamentsRepository {
     categoryId: string,
     divisionId?: string,
   ) {
-    return this.findParticipants(tournamentId, categoryId, divisionId, false);
+    const participants = await this.findParticipants(tournamentId, categoryId, divisionId, false, false);
+    return participants.map(({ customResponses: _customResponses, payment: _payment, registeredBy, members, ...participant }) => ({
+      ...participant,
+      customResponses: null,
+      payment: null,
+      registeredBy: registeredBy
+        ? { id: registeredBy.id, fullName: registeredBy.fullName, avatarUrl: registeredBy.avatarUrl, email: null }
+        : null,
+      members: members.map(({ email: _email, phoneNumber: _phoneNumber, gender: _gender, ...member }) => member),
+    }));
   }
 
   async findOpsAuditLogs(
@@ -7808,5 +7858,269 @@ export class TournamentsRepository {
       )
       .where(and(...conditions))
       .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
+  }
+
+  async importParticipants(
+    tournamentId: string,
+    managerUserId: string,
+    items: {
+      teamName: string;
+      player1Name: string;
+      player1Email?: string;
+      player1Phone?: string;
+      player2Name?: string;
+      player2Email?: string;
+      player2Phone?: string;
+      elo?: number;
+      isPaid?: boolean;
+      autoApprove?: boolean;
+      customResponses?: Record<string, any>;
+    }[],
+    divisionId?: string,
+  ) {
+    return await this.db.transaction(async (tx) => {
+      const tournament = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1)
+        .then((res) => res[0]);
+
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
+
+      let divisionMatchType = tournament.matchType;
+      if (divisionId) {
+        const division = await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(
+            and(
+              eq(schema.tournamentDivisions.id, divisionId),
+              eq(schema.tournamentDivisions.tournamentId, tournamentId),
+            ),
+          )
+          .limit(1)
+          .then((res) => res[0]);
+
+        if (division) {
+          divisionMatchType = division.matchType;
+        }
+      }
+
+      const isDoubles =
+        divisionMatchType === 'DOUBLES' ||
+        divisionMatchType === 'MIXED_DOUBLES';
+
+      const results: (typeof schema.tournamentParticipants.$inferSelect)[] = [];
+      const unregisteredEmails: Array<{ email: string; name: string; teamName: string }> = [];
+
+      for (const item of items) {
+        // 1. Resolve User 1
+        let user1Id: string | null = null;
+        const p1Email = item.player1Email?.trim()?.toLowerCase();
+        const p1Phone = item.player1Phone?.trim();
+
+        if (p1Email || p1Phone) {
+          let foundUser: typeof schema.users.$inferSelect | undefined;
+          if (p1Email) {
+            foundUser = await tx
+              .select()
+              .from(schema.users)
+              .where(eq(schema.users.email, p1Email))
+              .limit(1)
+              .then((r) => r[0]);
+          }
+          if (!foundUser && p1Phone) {
+            const foundProfile = await tx
+              .select()
+              .from(schema.profiles)
+              .where(eq(schema.profiles.phoneNumber, p1Phone))
+              .limit(1)
+              .then((r) => r[0]);
+            if (foundProfile) {
+              foundUser = await tx
+                .select()
+                .from(schema.users)
+                .where(eq(schema.users.id, foundProfile.userId))
+                .limit(1)
+                .then((r) => r[0]);
+            }
+          }
+
+          if (foundUser) {
+            user1Id = foundUser.id;
+          } else {
+            const guestEmail = p1Email || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
+            const [newUser] = await tx
+              .insert(schema.users)
+              .values({
+                email: guestEmail,
+                isEmailVerified: false,
+                isMock: false,
+              })
+              .returning();
+
+            await tx.insert(schema.profiles).values({
+              userId: newUser.id,
+              fullName: item.player1Name || 'VĐV Khách',
+              phoneNumber: p1Phone || null,
+            });
+
+            user1Id = newUser.id;
+            if (p1Email) {
+              unregisteredEmails.push({
+                email: p1Email,
+                name: item.player1Name,
+                teamName: item.teamName,
+              });
+            }
+          }
+        } else {
+          const guestEmail = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
+          const [newUser] = await tx
+            .insert(schema.users)
+            .values({
+              email: guestEmail,
+              isEmailVerified: false,
+              isMock: false,
+            })
+            .returning();
+
+          await tx.insert(schema.profiles).values({
+            userId: newUser.id,
+            fullName: item.player1Name || 'VĐV Khách',
+          });
+          user1Id = newUser.id;
+        }
+
+        // 2. Resolve User 2 (if doubles)
+        let user2Id: string | null = null;
+        if (isDoubles && (item.player2Name || item.player2Email || item.player2Phone)) {
+          const p2Email = item.player2Email?.trim()?.toLowerCase();
+          const p2Phone = item.player2Phone?.trim();
+
+          if (p2Email || p2Phone) {
+            let foundUser2: typeof schema.users.$inferSelect | undefined;
+            if (p2Email) {
+              foundUser2 = await tx
+                .select()
+                .from(schema.users)
+                .where(eq(schema.users.email, p2Email))
+                .limit(1)
+                .then((r) => r[0]);
+            }
+            if (!foundUser2 && p2Phone) {
+              const foundProfile2 = await tx
+                .select()
+                .from(schema.profiles)
+                .where(eq(schema.profiles.phoneNumber, p2Phone))
+                .limit(1)
+                .then((r) => r[0]);
+              if (foundProfile2) {
+                foundUser2 = await tx
+                  .select()
+                  .from(schema.users)
+                  .where(eq(schema.users.id, foundProfile2.userId))
+                  .limit(1)
+                  .then((r) => r[0]);
+              }
+            }
+
+            if (foundUser2) {
+              user2Id = foundUser2.id;
+            } else {
+              const guestEmail2 = p2Email || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
+              const [newUser2] = await tx
+                .insert(schema.users)
+                .values({
+                  email: guestEmail2,
+                  isEmailVerified: false,
+                  isMock: false,
+                })
+                .returning();
+
+              await tx.insert(schema.profiles).values({
+                userId: newUser2.id,
+                fullName: item.player2Name || 'Đồng đội',
+                phoneNumber: p2Phone || null,
+              });
+
+              user2Id = newUser2.id;
+              if (p2Email) {
+                unregisteredEmails.push({
+                  email: p2Email,
+                  name: item.player2Name || 'VĐV',
+                  teamName: item.teamName,
+                });
+              }
+            }
+          } else if (item.player2Name) {
+            const guestEmail2 = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
+            const [newUser2] = await tx
+              .insert(schema.users)
+              .values({
+                email: guestEmail2,
+                isEmailVerified: false,
+                isMock: false,
+              })
+              .returning();
+
+            await tx.insert(schema.profiles).values({
+              userId: newUser2.id,
+              fullName: item.player2Name,
+            });
+            user2Id = newUser2.id;
+          }
+        }
+
+        const teamStatus = item.autoApprove ? 'APPROVED' : 'PENDING';
+
+        const [participant] = await tx
+          .insert(schema.tournamentParticipants)
+          .values({
+            tournamentId,
+            tournamentDivisionId: divisionId ?? null,
+            registeredBy: user1Id || managerUserId,
+            teamName: item.teamName || item.player1Name || 'Đội đăng ký',
+            isPaid: item.isPaid ?? true,
+            teamStatus,
+            partnerUserId: user2Id || null,
+            seed: item.elo ? Math.round(item.elo) : null,
+            customResponses: item.customResponses || {
+              importedFrom: 'GOOGLE_FORM',
+              player1Email: item.player1Email,
+              player1Phone: item.player1Phone,
+              player2Name: item.player2Name,
+              player2Email: item.player2Email,
+              player2Phone: item.player2Phone,
+            },
+          })
+          .returning();
+
+        if (user1Id) {
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: user1Id,
+            role: 'MAIN',
+          });
+        }
+
+        if (user2Id) {
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: user2Id,
+            role: 'MAIN',
+          });
+        }
+
+        results.push(participant);
+      }
+
+      return {
+        importedCount: results.length,
+        unregisteredEmails,
+        participants: results,
+      };
+    });
   }
 }

@@ -27,6 +27,7 @@ const generate_lite_pairs_dto_1 = require("./dto/generate-lite-pairs.dto");
 const update_stage_dto_1 = require("./dto/update-stage.dto");
 const update_group_dto_1 = require("./dto/update-group.dto");
 const seed_mock_participants_dto_1 = require("./dto/seed-mock-participants.dto");
+const import_participants_dto_1 = require("./dto/import-participants.dto");
 const gallery_dto_1 = require("./dto/gallery.dto");
 const create_parent_tournament_dto_1 = require("./dto/create-parent-tournament.dto");
 const update_parent_tournament_dto_1 = require("./dto/update-parent-tournament.dto");
@@ -293,8 +294,8 @@ let TournamentsController = class TournamentsController {
     async findParticipants(id, divisionId) {
         return this.tournamentsService.findParticipants(id, divisionId);
     }
-    async findParticipantsForOrganizer(id, divisionId) {
-        return this.tournamentsService.findParticipantsForOrganizer(id, divisionId);
+    async findParticipantsForOrganizer(id, divisionId, user) {
+        return this.tournamentsService.findParticipantsForOrganizer(id, divisionId, user.sub, this.getSystemRoles(user));
     }
     async findReferees(id, user) {
         return this.tournamentsService.findReferees(id, user.sub, this.getSystemRoles(user));
@@ -319,6 +320,9 @@ let TournamentsController = class TournamentsController {
     }
     async seedMockParticipants(id, dto, user) {
         return this.tournamentsService.seedMockParticipants(id, user.sub, dto.names, this.getSystemRoles(user), dto.divisionId);
+    }
+    async importParticipants(id, dto, user) {
+        return this.tournamentsService.importParticipantsFromForm(id, user.sub, this.getSystemRoles(user), dto);
     }
     async clearMockParticipants(id, divisionId, user) {
         return this.tournamentsService.clearMockParticipants(id, user.sub, this.getSystemRoles(user), divisionId);
@@ -962,8 +966,9 @@ __decorate([
     (0, swagger_1.ApiOperation)({ summary: 'Lấy danh sách participant đầy đủ cho BTC' }),
     __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(1, (0, common_1.Query)('divisionId')),
+    __param(2, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:paramtypes", [String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], TournamentsController.prototype, "findParticipantsForOrganizer", null);
 __decorate([
@@ -1061,6 +1066,18 @@ __decorate([
     __metadata("design:paramtypes", [String, seed_mock_participants_dto_1.SeedMockParticipantsDto, Object]),
     __metadata("design:returntype", Promise)
 ], TournamentsController.prototype, "seedMockParticipants", null);
+__decorate([
+    (0, common_1.Post)(':id/import-participants'),
+    (0, verified_decorator_1.Verified)(),
+    (0, swagger_1.ApiBearerAuth)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Nhập danh sách VĐV từ Google Form / Excel' }),
+    __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(1, (0, common_1.Body)()),
+    __param(2, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, import_participants_dto_1.ImportParticipantsDto, Object]),
+    __metadata("design:returntype", Promise)
+], TournamentsController.prototype, "importParticipants", null);
 __decorate([
     (0, common_1.Delete)(':id/mock-participants'),
     (0, verified_decorator_1.Verified)(),

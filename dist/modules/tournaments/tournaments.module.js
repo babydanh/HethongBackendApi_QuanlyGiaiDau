@@ -21,12 +21,13 @@ const storage_module_1 = require("../../providers/storage/storage.module");
 const auth_module_1 = require("../auth/auth.module");
 const communities_module_1 = require("../communities/communities.module");
 const matches_module_1 = require("../matches/matches.module");
+const mail_module_1 = require("../../providers/mail/mail.module");
 let TournamentsModule = class TournamentsModule {
 };
 exports.TournamentsModule = TournamentsModule;
 exports.TournamentsModule = TournamentsModule = __decorate([
     (0, common_1.Module)({
-        imports: [database_module_1.DatabaseModule, series_module_1.SeriesModule, redis_module_1.RedisModule, storage_module_1.StorageModule, auth_module_1.AuthModule, communities_module_1.CommunitiesModule, matches_module_1.MatchesModule],
+        imports: [database_module_1.DatabaseModule, series_module_1.SeriesModule, redis_module_1.RedisModule, storage_module_1.StorageModule, auth_module_1.AuthModule, communities_module_1.CommunitiesModule, matches_module_1.MatchesModule, mail_module_1.MailModule],
         controllers: [tournaments_controller_1.TournamentsController],
         providers: [
             tournaments_service_1.TournamentsService,
