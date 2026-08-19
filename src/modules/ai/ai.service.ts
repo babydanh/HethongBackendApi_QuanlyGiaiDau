@@ -335,7 +335,7 @@ ${divisionsStr}
     registrationFormFields: Array<{
       id: string;
       label: string;
-      type: 'TEXT' | 'TEXTAREA' | 'EMAIL' | 'PHONE' | 'NUMBER' | 'SELECT' | 'CHECKBOX' | 'FILE';
+      type: 'TEXT' | 'TEXTAREA' | 'EMAIL' | 'PHONE' | 'NUMBER' | 'SELECT' | 'MULTI_SELECT' | 'CHECKBOX' | 'FILE';
       required: boolean;
       helpText?: string;
       options?: string[];
@@ -343,6 +343,8 @@ ${divisionsStr}
       max?: number;
       acceptedFileTypes?: string[];
       maxFileSizeMb?: number;
+      confidence?: number;
+      needsReview?: boolean;
     }>;
   }> {
     let sourceContent = dto.rawText?.trim() || '';
@@ -359,6 +361,13 @@ ${divisionsStr}
         });
         if (response.ok) {
           const html = await response.text();
+          // Google Forms keeps question labels/options in an embedded JSON payload,
+          // not only in visible HTML. Preserve that payload for semantic extraction.
+          const embeddedData = Array.from(html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi))
+            .map((match) => match[1])
+            .filter((script) => script.includes('FB_PUBLIC_LOAD_DATA_') || script.includes('FORM_ID'))
+            .join('\n')
+            .slice(0, 24000);
           const textOnly = html
             .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
             .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
@@ -366,7 +375,7 @@ ${divisionsStr}
             .replace(/\s+/g, ' ')
             .trim();
           if (textOnly.length > 50) {
-            sourceContent = `[NỘI DUNG TẢI TỪ URL: ${dto.sourceUrl}]\n${textOnly.slice(0, 8000)}\n\n${sourceContent}`;
+            sourceContent = `[NỘI DUNG TẢI TỪ URL: ${dto.sourceUrl}]\n${textOnly.slice(0, 24000)}\n${embeddedData ? `\n[DỮ LIỆU NHÚNG CỦA GOOGLE FORM]\n${embeddedData}` : ''}\n\n${sourceContent}`;
           }
         }
       } catch (err: any) {
@@ -402,12 +411,13 @@ Quy tắc phân loại:
 10. "registrationFormFields": Toàn bộ câu hỏi/ô nhập liệu được tìm thấy trong form đăng ký hoặc điều lệ. Đọc theo ngữ nghĩa, không chỉ theo từ khóa:
    - "id": slug tiếng Anh không dấu, duy nhất, ổn định.
    - "label": giữ nguyên nội dung câu hỏi bằng tiếng Việt/ngôn ngữ nguồn.
-   - "type": chọn đúng một trong TEXT, TEXTAREA, EMAIL, PHONE, NUMBER, SELECT, CHECKBOX, FILE.
-   - EMAIL cho email, PHONE cho số điện thoại; NUMBER cho điểm/trình độ/số lượng; SELECT cho trắc nghiệm một lựa chọn; CHECKBOX cho nhiều lựa chọn hoặc xác nhận đồng ý; FILE cho tải ảnh/tệp; TEXTAREA cho mô tả dài; TEXT cho họ tên/công ty/địa chỉ ngắn.
+   - "type": chọn đúng một trong TEXT, TEXTAREA, EMAIL, PHONE, NUMBER, SELECT, MULTI_SELECT, CHECKBOX, FILE.
+   - EMAIL cho email, PHONE cho số điện thoại; NUMBER cho điểm/trình độ/số lượng; SELECT cho trắc nghiệm một lựa chọn; MULTI_SELECT cho checkbox nhiều lựa chọn; CHECKBOX chỉ cho một ô xác nhận đồng ý; FILE cho tải ảnh/tệp; TEXTAREA cho mô tả dài; TEXT cho họ tên/công ty/địa chỉ ngắn.
    - "required": true nếu câu hỏi có dấu bắt buộc hoặc ngữ nghĩa yêu cầu bắt buộc.
    - "helpText": mô tả/ghi chú đi kèm câu hỏi nếu có.
    - "options": toàn bộ lựa chọn theo đúng thứ tự với SELECT/CHECKBOX.
    - "min", "max": chỉ điền khi nguồn có giới hạn số rõ ràng; "acceptedFileTypes" và "maxFileSizeMb" chỉ điền khi nguồn nêu rõ.
+   - "confidence": số từ 0 đến 1 cho độ chắc chắn; "needsReview": true nếu câu hỏi mơ hồ hoặc không chắc loại trường/ràng buộc.
    Không tự thêm các trường hồ sơ hệ thống (họ tên, email, điện thoại) nếu nguồn không hỏi; không bỏ sót câu hỏi đăng ký nào chỉ vì nó không liên quan đến thể thức.
 
 QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định dạng yêu cầu. Không bọc trong \`\`\`json\`\`\`, không giải thích thêm.`;
@@ -461,7 +471,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
 
       const parsed = JSON.parse(cleanJson);
       const rawFields = Array.isArray(parsed.registrationFormFields) ? parsed.registrationFormFields : [];
-      const allowedTypes = new Set(['TEXT', 'TEXTAREA', 'EMAIL', 'PHONE', 'NUMBER', 'SELECT', 'CHECKBOX', 'FILE']);
+      const allowedTypes = new Set(['TEXT', 'TEXTAREA', 'EMAIL', 'PHONE', 'NUMBER', 'SELECT', 'MULTI_SELECT', 'CHECKBOX', 'FILE']);
       const usedIds = new Set<string>();
       const registrationFormFields = rawFields
         .map((field: any, index: number) => {
@@ -472,10 +482,11 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
           let suffix = 2;
           while (usedIds.has(id)) id = `${baseId}_${suffix++}`;
           usedIds.add(id);
-          const type = allowedTypes.has(field.type) ? field.type : 'TEXT';
           const options = Array.isArray(field.options)
             ? field.options.map((option: unknown) => String(option).trim()).filter(Boolean).slice(0, 100)
             : undefined;
+          const requestedType = allowedTypes.has(field.type) ? field.type : 'TEXT';
+          const type = requestedType === 'CHECKBOX' && options && options.length > 1 ? 'MULTI_SELECT' : requestedType;
           return {
             id,
             label: String(field.label || `Câu hỏi ${index + 1}`).trim().slice(0, 300),
@@ -489,6 +500,8 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
               ? field.acceptedFileTypes.map((value: unknown) => String(value).trim()).filter(Boolean).slice(0, 20)
               : undefined,
             maxFileSizeMb: typeof field.maxFileSizeMb === 'number' && Number.isFinite(field.maxFileSizeMb) ? field.maxFileSizeMb : undefined,
+            confidence: typeof field.confidence === 'number' ? Math.min(1, Math.max(0, field.confidence)) : undefined,
+            needsReview: field.needsReview === true || (typeof field.confidence === 'number' && field.confidence < 0.8),
           };
         })
         .filter((field: { label: string }) => field.label.length > 0)
