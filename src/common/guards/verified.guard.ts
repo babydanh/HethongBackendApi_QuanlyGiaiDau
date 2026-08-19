@@ -5,12 +5,16 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { VERIFIED_KEY } from '../decorators/verified.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
 export class VerifiedGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  constructor(
+    private reflector: Reflector,
+    private configService: ConfigService,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const isVerifiedRoute = this.reflector.getAllAndOverride<boolean>(
@@ -37,8 +41,10 @@ export class VerifiedGuard implements CanActivate {
       throw new ForbiddenException('Email verification is required');
     }
 
-    // Mock/test accounts intentionally bypass email verification.
-    if (user.isMock) {
+    // Mock accounts may bypass verification only outside production. This keeps
+    // seeded test fixtures usable without leaving a production backdoor.
+    const nodeEnv = this.configService.get<string>('NODE_ENV') || 'development';
+    if (user.isMock && nodeEnv !== 'production') {
       return true;
     }
 

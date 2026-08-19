@@ -98,8 +98,11 @@ describe('VerifiedGuard', () => {
       }),
     }) as unknown as Reflector;
 
+  const createConfig = (nodeEnv: string) =>
+    ({ get: jest.fn((key: string) => (key === 'NODE_ENV' ? nodeEnv : undefined)) }) as unknown as ConfigService;
+
   it('rejects an authenticated user whose email is not verified', () => {
-    const guard = new VerifiedGuard(createReflector(true));
+    const guard = new VerifiedGuard(createReflector(true), createConfig('test'));
 
     expect(() =>
       guard.canActivate(
@@ -109,18 +112,37 @@ describe('VerifiedGuard', () => {
   });
 
   it('accepts a verified user and preserves the mock-account exception', () => {
-    const verifiedGuard = new VerifiedGuard(createReflector(true));
+    const verifiedGuard = new VerifiedGuard(
+      createReflector(true),
+      createConfig('test'),
+    );
     expect(
       verifiedGuard.canActivate(
         createContext({ user: { isEmailVerified: true, isMock: false } }),
       ),
     ).toBe(true);
 
-    const mockGuard = new VerifiedGuard(createReflector(true));
+    const mockGuard = new VerifiedGuard(
+      createReflector(true),
+      createConfig('test'),
+    );
     expect(
       mockGuard.canActivate(
         createContext({ user: { isEmailVerified: false, isMock: true } }),
       ),
     ).toBe(true);
+  });
+
+  it('rejects mock accounts in production', () => {
+    const guard = new VerifiedGuard(
+      createReflector(true),
+      createConfig('production'),
+    );
+
+    expect(() =>
+      guard.canActivate(
+        createContext({ user: { isEmailVerified: false, isMock: true } }),
+      ),
+    ).toThrow('Email verification is required');
   });
 });
