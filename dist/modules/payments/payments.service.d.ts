@@ -65,6 +65,7 @@ export declare class PaymentsService {
         bankName: string | null;
         bankAccountNumber: string | null;
         bankAccountName: string | null;
+        processedAt: Date | null;
         organizerId: string;
         totalCollected: string;
         amountRequested: string;
@@ -74,7 +75,6 @@ export declare class PaymentsService {
         disbursedAt: Date | null;
         transactionProofUrl: string | null;
         processedBy: string | null;
-        processedAt: Date | null;
     }>;
     findPaymentById(userId: string, id: string): Promise<{
         id: string;

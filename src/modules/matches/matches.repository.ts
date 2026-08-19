@@ -552,6 +552,7 @@ export class MatchesRepository {
         tournamentName?: string;
         categoryId?: string;
         categoryName?: string;
+        divisionName?: string;
         venueName?: string | null;
         venueAddress?: string | null;
         matchType?: string;
@@ -584,6 +585,7 @@ export class MatchesRepository {
           )`,
           categoryId: schema.tournaments.categoryId,
           categoryName: schema.categories.name,
+          divisionName: schema.tournamentDivisions.name,
           matchType: schema.tournaments.matchType,
           genderRestriction: schema.tournaments.genderRestriction,
           divisionMatchType: schema.tournamentDivisions.matchType,
@@ -634,6 +636,7 @@ export class MatchesRepository {
           tournamentName: g.tournamentName,
           categoryId: g.categoryId || undefined,
           categoryName: g.categoryName || undefined,
+          divisionName: g.divisionName || undefined,
           venueName: g.venueName || null,
           venueAddress: g.venueAddress || null,
           matchType: g.divisionMatchType || g.matchType || undefined,
@@ -699,6 +702,7 @@ export class MatchesRepository {
           category: {
             name: groupStage?.categoryName,
           },
+          divisionName: groupStage?.divisionName,
         },
       };
     });

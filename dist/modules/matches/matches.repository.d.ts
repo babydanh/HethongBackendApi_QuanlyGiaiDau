@@ -48,6 +48,7 @@ export declare class MatchesRepository {
                 category: {
                     name: string | undefined;
                 };
+                divisionName: string | undefined;
             };
             id: string;
             groupId: string | null;

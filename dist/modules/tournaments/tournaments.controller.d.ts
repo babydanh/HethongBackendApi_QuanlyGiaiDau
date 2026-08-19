@@ -1565,8 +1565,8 @@ export declare class TournamentsController {
         createdAt: Date;
         status: string;
         userId: string;
-        assignedAt: Date;
         assignedBy: string | null;
+        assignedAt: Date;
     }>;
     respondToRefereeInvite(tournamentId: string, refereeId: string, action: 'ACCEPT' | 'DECLINE', user: JwtPayload): Promise<{
         id: string;
@@ -1583,8 +1583,8 @@ export declare class TournamentsController {
         createdAt: Date;
         status: string;
         userId: string;
-        assignedAt: Date;
         assignedBy: string | null;
+        assignedAt: Date;
     }>;
     findBracket(id: string, divisionId?: string): Promise<{
         stages: import("./interfaces/tournament-config.interface").BracketStage[];
