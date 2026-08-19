@@ -75,3 +75,7 @@ secrets/
 *adminsdk*.json
 *service-account*.json
 
+# SVN metadata
+.svn/
+*.svn*
+
