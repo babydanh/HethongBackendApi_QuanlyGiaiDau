@@ -55,7 +55,7 @@ export class CommunitySocialService {
     }
     const settings = await this.socialRepository.getSettings(communityId);
     const mentionIds = [...new Set(dto.mentions ?? [])];
-    const canManage = member.role === 'OWNER' || member.role === 'MODERATOR' || user.roles?.includes('ADMIN');
+    const canManage = member.role === 'OWNER' || member.role === 'ADMIN' || member.role === 'MODERATOR' || user.roles?.includes('ADMIN');
     if (mentionIds.length > 0 && settings.memberTaggingPolicy === 'OFF') {
       throw new ForbiddenException('Cộng đồng hiện đang tắt gắn thẻ thành viên.');
     }
@@ -72,7 +72,7 @@ export class CommunitySocialService {
     if (settings.postingPolicy === 'ADMINS' && !canManage) {
       throw new ForbiddenException('Chỉ ban quản trị được đăng bài.');
     }
-    const status = settings.postApprovalRequired && member.role !== 'OWNER' && member.role !== 'MODERATOR'
+    const status = settings.postApprovalRequired && member.role !== 'OWNER' && member.role !== 'ADMIN' && member.role !== 'MODERATOR'
       ? 'PENDING'
       : 'PUBLISHED';
     const post = await this.socialRepository.createPost(communityId, user.id, { ...dto, mentions: validMentionIds }, status, idempotencyKey);
@@ -372,7 +372,7 @@ export class CommunitySocialService {
   private async requireManager(communityId: string, user: SocialUser) {
     if (user.roles?.includes('ADMIN')) return null;
     const member = await this.requireJoined(communityId, user.id);
-    if (!['OWNER', 'MODERATOR'].includes(member.role)) {
+    if (!['OWNER', 'ADMIN', 'MODERATOR'].includes(member.role)) {
       throw new ForbiddenException('Bạn không có quyền quản trị không gian này.');
     }
     return member;
