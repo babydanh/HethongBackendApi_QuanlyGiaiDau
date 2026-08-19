@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  UseGuards,
 } from '@nestjs/common';
 import { MatchesService } from './matches.service';
 import { QueryMatchDto } from './dto/query-match.dto';
@@ -22,6 +23,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
@@ -55,8 +57,7 @@ export class MatchesController {
     return await this.matchesService.getComments(id);
   }
 
-  @Public()
-  @SkipThrottle()
+  @UseGuards(new RateLimitGuard(10, 60_000))
   @Post(':id/comments')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo bình luận trận đấu' })
@@ -166,7 +167,7 @@ export class MatchesController {
   }
 
   @Public()
-  @SkipThrottle()
+  @UseGuards(new RateLimitGuard(20, 60_000))
   @Post(':id/cheer')
   @ApiOperation({ summary: 'Cổ vũ trận đấu (tăng cheer count)' })
   async cheerMatch(@Param('id', ParseUUIDPipe) id: string) {

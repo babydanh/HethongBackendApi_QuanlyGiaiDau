@@ -227,65 +227,6 @@ export class TournamentSchedulerService {
           },
         };
 
-        const inviteCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-        const newTournament = await this.db
-          .insert(schema.tournaments)
-          .values({
-            name: newName,
-            tournamentType: 'CLUB',
-            visibility: t.visibility,
-            communityId: t.communityId,
-            categoryId: t.categoryId,
-            matchType: t.matchType,
-            description: t.description,
-            maxParticipants: t.maxParticipants,
-            entryFee: t.entryFee,
-            isRanked: t.isRanked,
-            venueId: t.venueId,
-            bannerUrl: t.bannerUrl,
-            logoUrl: t.logoUrl,
-            galleryImages: t.galleryImages,
-            prizeDescription: t.prizeDescription,
-            contactInfo: t.contactInfo,
-            city: t.city,
-            sportRules: t.sportRules,
-            tournamentConfig: newTournamentConfig,
-            startDate: nextTournamentDate,
-            registrationStartDate: now,
-            registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
-            status: 'REGISTRATION_OPEN',
-            inviteCode,
-            createdBy: t.createdBy,
-          })
-          .returning();
-
-        const templateDivisions = await this.db
-          .select()
-          .from(schema.tournamentDivisions)
-          .where(eq(schema.tournamentDivisions.tournamentId, t.id));
-        if (templateDivisions.length > 0) {
-          await this.db.insert(schema.tournamentDivisions).values(
-            templateDivisions.map((division) => ({
-              tournamentId: newTournament[0].id,
-              name: division.name,
-              matchType: division.matchType,
-              genderRestriction: division.genderRestriction,
-              maxParticipants: division.maxParticipants,
-              entryFee: division.entryFee,
-              isConfigOverride: division.isConfigOverride,
-              venueId: division.venueId,
-              bracketType: division.bracketType,
-              roundConfig: division.roundConfig,
-              startDate: nextTournamentDate,
-              registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
-              minElo: division.minElo,
-              maxElo: division.maxElo,
-              prizeDescription: division.prizeDescription,
-              status: division.status,
-            })),
-          );
-        }
-
         const nextNextRun = this.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay, nextTournamentDate);
         const nextCreateAt = new Date(nextNextRun.getTime() - advanceDays * 24 * 60 * 60 * 1000);
         const updatedConfig = {
@@ -298,13 +239,99 @@ export class TournamentSchedulerService {
           },
         };
 
-        await this.db
-          .update(schema.tournaments)
-          .set({
-            tournamentConfig: updatedConfig,
-            updatedAt: now,
-          })
-          .where(eq(schema.tournaments.id, t.id));
+        const generated = await this.db.transaction(async (tx) => {
+          const [lockedTemplate] = await tx
+            .select()
+            .from(schema.tournaments)
+            .where(
+              and(
+                eq(schema.tournaments.id, t.id),
+                isNull(schema.tournaments.deletedAt),
+                ne(schema.tournaments.status, 'CANCELLED'),
+                sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'enabled')::boolean = true`,
+                sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt')::timestamptz <= ${now}`,
+              ),
+            )
+            .for('update');
+
+          if (!lockedTemplate) return null;
+
+          const inviteCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+          const [newTournament] = await tx
+            .insert(schema.tournaments)
+            .values({
+              name: newName,
+              tournamentType: 'CLUB',
+              visibility: lockedTemplate.visibility,
+              communityId: lockedTemplate.communityId,
+              categoryId: lockedTemplate.categoryId,
+              matchType: lockedTemplate.matchType,
+              description: lockedTemplate.description,
+              maxParticipants: lockedTemplate.maxParticipants,
+              entryFee: lockedTemplate.entryFee,
+              isRanked: lockedTemplate.isRanked,
+              venueId: lockedTemplate.venueId,
+              bannerUrl: lockedTemplate.bannerUrl,
+              logoUrl: lockedTemplate.logoUrl,
+              galleryImages: lockedTemplate.galleryImages,
+              prizeDescription: lockedTemplate.prizeDescription,
+              contactInfo: lockedTemplate.contactInfo,
+              city: lockedTemplate.city,
+              sportRules: lockedTemplate.sportRules,
+              tournamentConfig: newTournamentConfig,
+              startDate: nextTournamentDate,
+              registrationStartDate: now,
+              registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
+              status: 'REGISTRATION_OPEN',
+              inviteCode,
+              createdBy: lockedTemplate.createdBy,
+            })
+            .returning();
+
+          const templateDivisions = await tx
+            .select()
+            .from(schema.tournamentDivisions)
+            .where(eq(schema.tournamentDivisions.tournamentId, lockedTemplate.id));
+          if (templateDivisions.length > 0) {
+            await tx.insert(schema.tournamentDivisions).values(
+              templateDivisions.map((division) => ({
+                tournamentId: newTournament.id,
+                name: division.name,
+                matchType: division.matchType,
+                genderRestriction: division.genderRestriction,
+                maxParticipants: division.maxParticipants,
+                entryFee: division.entryFee,
+                isConfigOverride: division.isConfigOverride,
+                venueId: division.venueId,
+                bracketType: division.bracketType,
+                roundConfig: division.roundConfig,
+                startDate: nextTournamentDate,
+                registrationEndDate: new Date(nextTournamentDate.getTime() - 60 * 60 * 1000),
+                minElo: division.minElo,
+                maxElo: division.maxElo,
+                prizeDescription: division.prizeDescription,
+                status: division.status,
+              })),
+            );
+          }
+
+          await tx
+            .update(schema.tournaments)
+            .set({
+              tournamentConfig: updatedConfig,
+              updatedAt: now,
+            })
+            .where(eq(schema.tournaments.id, lockedTemplate.id));
+
+          return {
+            tournament: newTournament,
+            template: lockedTemplate,
+          };
+        });
+
+        if (!generated) continue;
+        const newTournament = generated.tournament;
+        const template = generated.template;
 
         if (t.communityId) {
           const members = await this.db

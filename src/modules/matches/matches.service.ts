@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { MatchesRepository } from './matches.repository';
@@ -1574,10 +1575,14 @@ export class MatchesService {
       throw new NotFoundException('Match not found');
     }
 
-    const userId = user?.sub ?? null;
+    const userId = user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('Bạn cần đăng nhập để bình luận');
+    }
+
     const comment = await this.matchesRepository.createComment(
       id,
-      userId as string,
+      userId,
       createMatchCommentDto.commentText.trim(),
     );
 

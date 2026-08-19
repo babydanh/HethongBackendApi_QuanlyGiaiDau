@@ -194,8 +194,10 @@ export class TournamentsRepository {
     options?: {
       defaultTournamentType?: 'CLUB' | 'PUBLIC' | null;
       defaultVisibility?: 'PUBLIC' | 'PRIVATE' | null;
+      includeInviteCode?: boolean;
     },
   ) {
+    const includeInviteCode = options?.includeInviteCode === true;
     const {
       page = 1,
       limit = 10,
@@ -435,19 +437,25 @@ export class TournamentsRepository {
                   ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
                 ),
               );
-            return {
+            const division = {
               ...d,
               categoryId: row.tournament.categoryId,
-              inviteCode: row.tournament.inviteCode,
               _count: {
                 participants: dCount.count,
               },
             };
+            return {
+              ...division,
+              inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
+            };
+
           }),
         );
 
+        const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
         return {
-          ...row.tournament,
+          ...safeTournament,
+          inviteCode: includeInviteCode ? _inviteCode : null,
           category: row.category?.id ? row.category : null,
           venue: row.venue?.id ? row.venue : null,
           _count: {
@@ -498,7 +506,8 @@ export class TournamentsRepository {
     return code;
   }
 
-  async findById(id: string) {
+  async findById(id: string, options?: { includeInviteCode?: boolean }) {
+    const includeInviteCode = options?.includeInviteCode === true;
     const result = await this.db
       .select({
         tournament: schema.tournaments,
@@ -700,20 +709,25 @@ export class TournamentsRepository {
           .from(schema.tournamentStages)
           .where(eq(schema.tournamentStages.tournamentDivisionId, division.id));
 
-        return {
+        const divisionWithCounts = {
           ...division,
           categoryId: row.tournament.categoryId,
-          inviteCode: row.tournament.inviteCode,
           _count: {
             participants: participantCountByDivision.count,
             matches: matchCountByDivision.count,
           },
         };
+        return {
+          ...divisionWithCounts,
+          inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
+        };
       }),
     );
 
+    const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
     return {
-      ...row.tournament,
+      ...safeTournament,
+      inviteCode: includeInviteCode ? _inviteCode : null,
       category: row.category?.id ? row.category : null,
       community: row.community?.id ? row.community : null,
       venue: row.venue?.id ? row.venue : null,
