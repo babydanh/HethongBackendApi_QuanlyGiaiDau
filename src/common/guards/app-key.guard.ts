@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
@@ -49,41 +50,27 @@ export class AppKeyGuard implements CanActivate {
       return true;
     }
 
-    const expectedKey = this.configService.get<string>('APP_API_KEY');
+    const expectedKey = this.configService.get<string>('APP_API_KEY')?.trim();
+    const nodeEnv = this.configService.get<string>('NODE_ENV') || 'development';
+
     if (!expectedKey) {
-      // If no key configured, allow all
+      if (nodeEnv === 'production') {
+        throw new InternalServerErrorException(
+          'Application security is misconfigured: APP_API_KEY is required in production',
+        );
+      }
+
+      // Local development and tests may intentionally omit the app key.
       return true;
     }
 
-    const providedKey = request.headers['x-app-key'] as string;
-    if (providedKey && providedKey === expectedKey) {
+    const providedKey = request.headers['x-app-key'];
+    if (typeof providedKey === 'string' && providedKey.trim() === expectedKey) {
       return true;
     }
 
-    // Allow requests originating from official Web domain (sporto.asia, www.sporto.asia, localhost, etc.)
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'https://sporto.asia';
-    const origin = (request.headers['origin'] as string) || '';
-    const referer = (request.headers['referer'] as string) || '';
-    const host = (request.headers['host'] as string) || '';
-
-    const isAllowedDomain = (urlStr: string) => {
-      if (!urlStr) return false;
-      return (
-        urlStr.includes('sporto.asia') ||
-        urlStr.includes('localhost') ||
-        urlStr.includes('127.0.0.1') ||
-        urlStr.startsWith(frontendUrl)
-      );
-    };
-
-    if (
-      isAllowedDomain(origin) ||
-      isAllowedDomain(referer) ||
-      isAllowedDomain(host)
-    ) {
-      return true;
-    }
-
+    // Origin, Referer, and Host are caller-controlled metadata and must never
+    // be treated as a substitute for the application secret.
     throw new ForbiddenException('Unauthorized Application (Invalid App Key)');
   }
 }

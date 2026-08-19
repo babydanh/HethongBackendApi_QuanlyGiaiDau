@@ -2217,6 +2217,10 @@ export class TournamentsRepository {
         participant,
         entryFee: payableEntryFeeAmount,
         paymentUrl,
+        paymentEligible:
+          participant.teamStatus === 'COMPLETE' &&
+          !participant.isPaid &&
+          payableEntryFeeAmount > 0,
         teamInviteLink:
           isDoubles || (isTeamSport && !data.footballTeamId)
             ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`

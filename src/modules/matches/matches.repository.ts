@@ -69,6 +69,131 @@ export class MatchesRepository {
     private readonly auditService: AuditService,
   ) {}
 
+  /**
+   * Live rooms must follow the same visibility boundary as HTTP tournament
+   * details. Public tournaments are viewable anonymously; private or hidden
+   * tournaments require an authenticated owner/admin, joined community member,
+   * active roster member, staff member, or accepted referee.
+   */
+  async canAccessLiveTournament(
+    tournamentId: string,
+    userId?: string | null,
+    systemRoles: string[] = [],
+  ): Promise<boolean> {
+    const [tournament] = await this.db
+      .select({
+        id: schema.tournaments.id,
+        createdBy: schema.tournaments.createdBy,
+        communityId: schema.tournaments.communityId,
+        visibility: schema.tournaments.visibility,
+        status: schema.tournaments.status,
+      })
+      .from(schema.tournaments)
+      .where(
+        and(
+          eq(schema.tournaments.id, tournamentId),
+          isNull(schema.tournaments.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!tournament) return false;
+
+    const isAdmin = systemRoles.includes('ADMIN');
+    const isOwner = Boolean(userId && tournament.createdBy === userId);
+    const privileged = isAdmin || isOwner;
+
+    if (
+      ['DRAFT', 'PENDING_APPROVAL', 'PENDING_DELETE', 'SUSPENDED', 'CANCELLED'].includes(
+        tournament.status,
+      )
+    ) {
+      return privileged;
+    }
+
+    if (tournament.visibility !== 'PRIVATE') return true;
+    if (!userId) return false;
+    if (privileged) return true;
+
+    if (tournament.communityId) {
+      const [member] = await this.db
+        .select({ id: schema.communityMembers.id })
+        .from(schema.communityMembers)
+        .where(
+          and(
+            eq(schema.communityMembers.communityId, tournament.communityId),
+            eq(schema.communityMembers.userId, userId),
+            eq(schema.communityMembers.status, 'JOINED'),
+          ),
+        )
+        .limit(1);
+      if (member) return true;
+    }
+
+    const [roster] = await this.db
+      .select({ id: schema.tournamentRosters.id })
+      .from(schema.tournamentRosters)
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
+      )
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          eq(schema.tournamentRosters.userId, userId),
+          eq(schema.tournamentRosters.status, 'ACTIVE'),
+        ),
+      )
+      .limit(1);
+    if (roster) return true;
+
+    const [staff] = await this.db
+      .select({ id: schema.tournamentStaff.id })
+      .from(schema.tournamentStaff)
+      .where(
+        and(
+          eq(schema.tournamentStaff.tournamentId, tournamentId),
+          eq(schema.tournamentStaff.userId, userId),
+        ),
+      )
+      .limit(1);
+    if (staff) return true;
+
+    const [referee] = await this.db
+      .select({ id: schema.tournamentReferees.id })
+      .from(schema.tournamentReferees)
+      .where(
+        and(
+          eq(schema.tournamentReferees.tournamentId, tournamentId),
+          eq(schema.tournamentReferees.userId, userId),
+          eq(schema.tournamentReferees.status, 'ACCEPTED'),
+        ),
+      )
+      .limit(1);
+
+    return Boolean(referee);
+  }
+
+  async canAccessLiveMatch(
+    matchId: string,
+    userId?: string | null,
+    systemRoles: string[] = [],
+  ): Promise<boolean> {
+    const [match] = await this.db
+      .select({ tournamentId: schema.matches.tournamentId })
+      .from(schema.matches)
+      .where(
+        and(eq(schema.matches.id, matchId), isNull(schema.matches.deletedAt)),
+      )
+      .limit(1);
+
+    if (!match) return false;
+    return this.canAccessLiveTournament(match.tournamentId, userId, systemRoles);
+  }
+
   async findAll(query: QueryMatchDto) {
     const {
       page = 1,
