@@ -57,14 +57,16 @@ export declare class PaymentsService {
         idempotent: boolean;
     }>;
     requestPayout(organizerId: string, data: PayoutRequestDto): Promise<{
-        tournamentId: string;
         id: string;
         createdAt: Date;
         updatedAt: Date;
         status: string;
+        tournamentId: string;
         bankName: string | null;
         bankAccountNumber: string | null;
         bankAccountName: string | null;
+        transactionProofUrl: string | null;
+        processedBy: string | null;
         processedAt: Date | null;
         organizerId: string;
         totalCollected: string;
@@ -73,8 +75,6 @@ export declare class PaymentsService {
         holdUntil: Date | null;
         payoutTrigger: string;
         disbursedAt: Date | null;
-        transactionProofUrl: string | null;
-        processedBy: string | null;
     }>;
     findPaymentById(userId: string, id: string): Promise<{
         id: string;

@@ -633,10 +633,12 @@ export declare class TournamentsRepository {
         tournamentDivisionId: string | null;
         teamStatus: string;
         registeredAt: Date;
+        customResponses: Record<string, unknown> | null;
         registeredBy: {
             id: string | null;
             fullName: string | null;
             avatarUrl: string | null;
+            email: string | null;
         } | null;
         members: RosterMember[];
         eloPoints?: number;
@@ -652,10 +654,12 @@ export declare class TournamentsRepository {
         tournamentDivisionId: string | null;
         teamStatus: string;
         registeredAt: Date;
+        customResponses: Record<string, unknown> | null;
         registeredBy: {
             id: string | null;
             fullName: string | null;
             avatarUrl: string | null;
+            email: string | null;
         } | null;
         members: RosterMember[];
         eloPoints?: number;
@@ -1289,16 +1293,16 @@ export declare class TournamentsRepository {
     addRoster(participantId: string, userId: string, role: 'MAIN' | 'RESERVE', maxTeamSize?: number): Promise<{
         id: string;
         status: string;
-        participantId: string;
         userId: string;
+        participantId: string;
         role: string;
         joinedAt: Date;
     }>;
     removeRoster(participantId: string, userId: string): Promise<{
         id: string;
         status: string;
-        participantId: string;
         userId: string;
+        participantId: string;
         role: string;
         joinedAt: Date;
     }>;
@@ -1680,7 +1684,6 @@ export declare class TournamentsRepository {
         groupId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
-        refereeId: string | null;
         winnerId: string | null;
         scoreDetails: unknown;
         p1SetsWon: number;
@@ -1698,6 +1701,7 @@ export declare class TournamentsRepository {
         courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
+        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];

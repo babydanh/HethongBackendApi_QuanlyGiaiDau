@@ -2158,10 +2158,14 @@ let TournamentsRepository = class TournamentsRepository {
             tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
             teamStatus: schema.tournamentParticipants.teamStatus,
             registeredAt: schema.tournamentParticipants.registeredAt,
+            customResponses: schema.tournamentParticipants.customResponses,
             registeredBy: {
                 id: schema.users.id,
                 fullName: schema.profiles.fullName,
                 avatarUrl: schema.profiles.avatarUrl,
+                email: schema.users.email,
+                phoneNumber: schema.profiles.phoneNumber,
+                gender: schema.profiles.gender,
             },
         })
             .from(schema.tournamentParticipants)
@@ -2187,6 +2191,9 @@ let TournamentsRepository = class TournamentsRepository {
             .select({
             participantId: schema.tournamentRosters.participantId,
             userId: schema.tournamentRosters.userId,
+            email: schema.users.email,
+            phoneNumber: schema.profiles.phoneNumber,
+            gender: schema.profiles.gender,
             role: schema.tournamentRosters.role,
             isMock: schema.users.isMock,
             fullName: schema.profiles.fullName,
@@ -2208,6 +2215,9 @@ let TournamentsRepository = class TournamentsRepository {
             const list = rostersMap.get(r.participantId) || [];
             list.push({
                 userId: r.userId,
+                email: r.email,
+                phoneNumber: r.phoneNumber,
+                gender: r.gender,
                 fullName: r.fullName,
                 avatarUrl: r.avatarUrl,
                 role: r.role,
@@ -2264,6 +2274,9 @@ let TournamentsRepository = class TournamentsRepository {
             }
             return {
                 ...p,
+                customResponses: p.customResponses && typeof p.customResponses === 'object' && !Array.isArray(p.customResponses)
+                    ? p.customResponses
+                    : null,
                 members,
                 eloPoints,
             };
