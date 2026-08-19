@@ -332,6 +332,18 @@ ${divisionsStr}
       minElo?: number | null;
       maxElo?: number | null;
     }>;
+    registrationFormFields: Array<{
+      id: string;
+      label: string;
+      type: 'TEXT' | 'TEXTAREA' | 'EMAIL' | 'PHONE' | 'NUMBER' | 'SELECT' | 'CHECKBOX' | 'FILE';
+      required: boolean;
+      helpText?: string;
+      options?: string[];
+      min?: number;
+      max?: number;
+      acceptedFileTypes?: string[];
+      maxFileSizeMb?: number;
+    }>;
   }> {
     let sourceContent = dto.rawText?.trim() || '';
 
@@ -387,6 +399,16 @@ Quy tắc phân loại:
    - "maxParticipants": Số lượng VĐV hoặc Cặp tối đa (mặc định 16 hoặc 32)
    - "minElo": Số ELO tối thiểu (hoặc null)
    - "maxElo": Số ELO tối đa (hoặc null)
+10. "registrationFormFields": Toàn bộ câu hỏi/ô nhập liệu được tìm thấy trong form đăng ký hoặc điều lệ. Đọc theo ngữ nghĩa, không chỉ theo từ khóa:
+   - "id": slug tiếng Anh không dấu, duy nhất, ổn định.
+   - "label": giữ nguyên nội dung câu hỏi bằng tiếng Việt/ngôn ngữ nguồn.
+   - "type": chọn đúng một trong TEXT, TEXTAREA, EMAIL, PHONE, NUMBER, SELECT, CHECKBOX, FILE.
+   - EMAIL cho email, PHONE cho số điện thoại; NUMBER cho điểm/trình độ/số lượng; SELECT cho trắc nghiệm một lựa chọn; CHECKBOX cho nhiều lựa chọn hoặc xác nhận đồng ý; FILE cho tải ảnh/tệp; TEXTAREA cho mô tả dài; TEXT cho họ tên/công ty/địa chỉ ngắn.
+   - "required": true nếu câu hỏi có dấu bắt buộc hoặc ngữ nghĩa yêu cầu bắt buộc.
+   - "helpText": mô tả/ghi chú đi kèm câu hỏi nếu có.
+   - "options": toàn bộ lựa chọn theo đúng thứ tự với SELECT/CHECKBOX.
+   - "min", "max": chỉ điền khi nguồn có giới hạn số rõ ràng; "acceptedFileTypes" và "maxFileSizeMb" chỉ điền khi nguồn nêu rõ.
+   Không tự thêm các trường hồ sơ hệ thống (họ tên, email, điện thoại) nếu nguồn không hỏi; không bỏ sót câu hỏi đăng ký nào chỉ vì nó không liên quan đến thể thức.
 
 QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định dạng yêu cầu. Không bọc trong \`\`\`json\`\`\`, không giải thích thêm.`;
 
@@ -419,6 +441,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
             maxElo: null,
           },
         ],
+        registrationFormFields: [],
       };
     }
 
@@ -437,6 +460,40 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
       const cleanJson = jsonMatch ? jsonMatch[0] : rawResult;
 
       const parsed = JSON.parse(cleanJson);
+      const rawFields = Array.isArray(parsed.registrationFormFields) ? parsed.registrationFormFields : [];
+      const allowedTypes = new Set(['TEXT', 'TEXTAREA', 'EMAIL', 'PHONE', 'NUMBER', 'SELECT', 'CHECKBOX', 'FILE']);
+      const usedIds = new Set<string>();
+      const registrationFormFields = rawFields
+        .map((field: any, index: number) => {
+          const baseId = String(field.id || `field_${index + 1}`)
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || `field_${index + 1}`;
+          let id = baseId;
+          let suffix = 2;
+          while (usedIds.has(id)) id = `${baseId}_${suffix++}`;
+          usedIds.add(id);
+          const type = allowedTypes.has(field.type) ? field.type : 'TEXT';
+          const options = Array.isArray(field.options)
+            ? field.options.map((option: unknown) => String(option).trim()).filter(Boolean).slice(0, 100)
+            : undefined;
+          return {
+            id,
+            label: String(field.label || `Câu hỏi ${index + 1}`).trim().slice(0, 300),
+            type,
+            required: field.required === true,
+            helpText: field.helpText ? String(field.helpText).trim().slice(0, 1000) : undefined,
+            options: options && options.length > 0 ? options : undefined,
+            min: typeof field.min === 'number' && Number.isFinite(field.min) ? field.min : undefined,
+            max: typeof field.max === 'number' && Number.isFinite(field.max) ? field.max : undefined,
+            acceptedFileTypes: Array.isArray(field.acceptedFileTypes)
+              ? field.acceptedFileTypes.map((value: unknown) => String(value).trim()).filter(Boolean).slice(0, 20)
+              : undefined,
+            maxFileSizeMb: typeof field.maxFileSizeMb === 'number' && Number.isFinite(field.maxFileSizeMb) ? field.maxFileSizeMb : undefined,
+          };
+        })
+        .filter((field: { label: string }) => field.label.length > 0)
+        .slice(0, 100);
+
       return {
         name: parsed.name || 'Giải đấu thể thao',
         sport: ['pickleball', 'badminton', 'tennis', 'table_tennis', 'football'].includes(parsed.sport)
@@ -468,6 +525,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
                 maxElo: null,
               },
             ],
+        registrationFormFields,
       };
     } catch (error: any) {
       this.logger.error(`Lỗi phân tích AI Tournament: ${error.message}`);
