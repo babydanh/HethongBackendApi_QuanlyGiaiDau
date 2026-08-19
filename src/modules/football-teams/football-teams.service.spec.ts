@@ -12,7 +12,10 @@ describe('FootballTeamsService permissions', () => {
     removeMember: jest.fn(),
     cancelInvite: jest.fn(),
   };
-  const notifications = { sendNotification: jest.fn() };
+  const notifications = {
+    sendNotification: jest.fn(),
+    deleteByReceiverTypeAndRedirect: jest.fn(),
+  };
   const service = new FootballTeamsService(repository as never, notifications as never);
 
   beforeEach(() => jest.clearAllMocks());
@@ -69,5 +72,26 @@ describe('FootballTeamsService permissions', () => {
       .resolves.toEqual({ invitedBy: 'captain', status: 'ACTIVE' });
     expect(repository.respond).toHaveBeenCalledWith('team', 'target', 'ACCEPTED');
     expect(notifications.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('notifies the invited user when a pending invitation is cancelled', async () => {
+    repository.findMember.mockResolvedValue({ status: 'ACTIVE', role: 'CAPTAIN' });
+    repository.findById.mockResolvedValue({ id: 'team', name: 'FC Test', members: [] });
+    repository.cancelInvite.mockResolvedValue({ invitedBy: 'actor', status: 'REMOVED' });
+
+    await expect(service.cancelInvite('actor', 'team', 'target'))
+      .resolves.toEqual({ invitedBy: 'actor', status: 'REMOVED' });
+    expect(repository.cancelInvite).toHaveBeenCalledWith('team', 'target');
+    expect(notifications.deleteByReceiverTypeAndRedirect).toHaveBeenCalledWith(
+      'target',
+      'FOOTBALL_TEAM_INVITED',
+      '/football-teams?teamId=team',
+    );
+    expect(notifications.sendNotification).toHaveBeenCalledTimes(1);
+    expect(notifications.sendNotification.mock.calls[0][0]).toMatchObject({
+      receiverId: 'target',
+      type: 'FOOTBALL_TEAM_INVITE_CANCELLED',
+      redirectUrl: '/notifications',
+    });
   });
 });

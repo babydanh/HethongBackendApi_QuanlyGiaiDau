@@ -5,7 +5,7 @@ import { UpdateFootballTeamDto } from './dto/update-football-team.dto';
 import { InviteFootballTeamMemberDto } from './dto/invite-football-team-member.dto';
 import { QueryFootballTeamMemberCandidatesDto } from './dto/query-football-team-member-candidates.dto';
 import { NotificationsService } from '../notifications/notifications.service';
-import { buildFootballTeamNotification } from '../notifications/notification-builder';
+import { buildFootballTeamNotification, getFootballTeamRedirect } from '../notifications/notification-builder';
 
 type TeamRole = 'CAPTAIN' | 'MANAGER' | 'PLAYER';
 
@@ -98,6 +98,17 @@ export class FootballTeamsService {
     await this.assertManager(userId, teamId);
     const team = await this.repository.findById(teamId);
     const member = await this.repository.cancelInvite(teamId, targetUserId);
+    // Xóa thông báo mời cũ để không còn nút nhận lời mời đã bị hủy;
+    // nếu sau này mời lại, chỉ thông báo mới được phép thao tác.
+    try {
+      await this.notificationsService.deleteByReceiverTypeAndRedirect(
+        targetUserId,
+        'FOOTBALL_TEAM_INVITED',
+        getFootballTeamRedirect(teamId),
+      );
+    } catch (error) {
+      this.logger.warn(`Không dọn được thông báo mời đội bóng đã hủy: ${String(error)}`);
+    }
     await this.notify({
       teamId,
       teamName: team.name,

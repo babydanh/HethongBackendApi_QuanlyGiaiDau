@@ -534,8 +534,8 @@ export declare class CommunitiesService {
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
-        joinAnswers: Record<string, string> | null;
         tags: string[];
+        joinAnswers: Record<string, string> | null;
         notificationPreference: string;
         approvedAt: Date | null;
     }>;
@@ -562,8 +562,8 @@ export declare class CommunitiesService {
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
-        joinAnswers: Record<string, string> | null;
         tags: string[];
+        joinAnswers: Record<string, string> | null;
         notificationPreference: string;
         approvedAt: Date | null;
     }>;
@@ -576,8 +576,8 @@ export declare class CommunitiesService {
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
-        joinAnswers: Record<string, string> | null;
         tags: string[];
+        joinAnswers: Record<string, string> | null;
         notificationPreference: string;
         approvedAt: Date | null;
     }>;
@@ -695,8 +695,8 @@ export declare class CommunitiesService {
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
-        joinAnswers: Record<string, string> | null;
         tags: string[];
+        joinAnswers: Record<string, string> | null;
         notificationPreference: string;
         approvedAt: Date | null;
     }>;
@@ -723,8 +723,8 @@ export declare class CommunitiesService {
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
-        joinAnswers: Record<string, string> | null;
         tags: string[];
+        joinAnswers: Record<string, string> | null;
         notificationPreference: string;
         approvedAt: Date | null;
     }>;
@@ -780,8 +780,8 @@ export declare class CommunitiesService {
         role: string;
         joinedAt: Date;
         invitedBy: string | null;
-        joinAnswers: Record<string, string> | null;
         tags: string[];
+        joinAnswers: Record<string, string> | null;
         notificationPreference: string;
         approvedAt: Date | null;
     }>;

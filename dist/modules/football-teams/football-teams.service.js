@@ -94,6 +94,12 @@ let FootballTeamsService = FootballTeamsService_1 = class FootballTeamsService {
         await this.assertManager(userId, teamId);
         const team = await this.repository.findById(teamId);
         const member = await this.repository.cancelInvite(teamId, targetUserId);
+        try {
+            await this.notificationsService.deleteByReceiverTypeAndRedirect(targetUserId, 'FOOTBALL_TEAM_INVITED', (0, notification_builder_1.getFootballTeamRedirect)(teamId));
+        }
+        catch (error) {
+            this.logger.warn(`Không dọn được thông báo mời đội bóng đã hủy: ${String(error)}`);
+        }
         await this.notify({
             teamId,
             teamName: team.name,

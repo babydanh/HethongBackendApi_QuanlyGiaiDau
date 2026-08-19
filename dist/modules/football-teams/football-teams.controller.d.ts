@@ -111,8 +111,8 @@ export declare class FootballTeamsController {
         userId: string;
         role: string;
         joinedAt: Date | null;
-        invitedBy: string | null;
         teamId: string;
+        invitedBy: string | null;
         leftAt: Date | null;
     }>;
     respond(user: JwtPayload, id: string, dto: RespondFootballTeamInviteDto): Promise<{

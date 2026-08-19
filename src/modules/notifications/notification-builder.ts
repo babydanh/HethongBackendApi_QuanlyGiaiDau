@@ -2,7 +2,7 @@ import type { CreateNotificationDto } from './dto/create-notification.dto';
 import { NOTIFICATION_TYPES } from './notification-types';
 
 const getCommunityRedirect = (communityId: string): string => `/communities/${communityId}`;
-const getFootballTeamRedirect = (teamId: string): string => `/football-teams?teamId=${encodeURIComponent(teamId)}`;
+export const getFootballTeamRedirect = (teamId: string): string => `/football-teams?teamId=${encodeURIComponent(teamId)}`;
 
 export const buildFootballTeamNotification = (params: {
   teamId: string;
@@ -34,7 +34,14 @@ export const buildFootballTeamNotification = (params: {
     type: NOTIFICATION_TYPES[params.type],
     title,
     content,
-    redirectUrl: getFootballTeamRedirect(params.teamId),
+    // Người vừa bị hủy lời mời/xóa khỏi đội không còn xuất hiện trong
+    // danh sách đội của họ; đưa họ về trung tâm thông báo thay vì màn hình
+    // quản lý đội trống. Các sự kiện còn lại vẫn mở đúng đội bóng.
+    redirectUrl:
+      params.type === 'FOOTBALL_TEAM_INVITE_CANCELLED' ||
+      params.type === 'FOOTBALL_TEAM_MEMBER_REMOVED'
+        ? '/notifications'
+        : getFootballTeamRedirect(params.teamId),
   };
 };
 
@@ -686,6 +693,7 @@ export const buildPayoutReviewedNotification = (params: {
 });
 
 export const buildMatchCompletedNotification = (params: {
+  matchId: string;
   tournamentId: string;
   tournamentName: string;
   receiverId: string;
@@ -695,28 +703,49 @@ export const buildMatchCompletedNotification = (params: {
   type: NOTIFICATION_TYPES.MATCH_COMPLETED,
   title: 'Trận đấu đã hoàn thành',
   content: `Trận đấu của bạn tại giải ${params.tournamentName} đã có kết quả. Xem ngay!`,
-  redirectUrl: getTournamentRedirect(params.tournamentId, {
-    tab: 'bracket',
-    divisionId: params.divisionId,
-  }),
+  redirectUrl: `/live/${params.matchId}`,
 });
 
 export const buildMatchScheduledNotification = (params: {
+  matchId: string;
   tournamentId: string;
   tournamentName: string;
   receiverId: string;
   court: string;
   scheduledTime: string;
   divisionId?: string;
+  bracketBranch?: string | null;
+  roundNumber?: number | null;
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.MATCH_SCHEDULED,
   title: 'Cập nhật lịch thi đấu mới',
-  content: `Trận đấu của bạn tại giải ${params.tournamentName} đã được xếp lịch vào lúc ${params.scheduledTime} tại sân ${params.court}. Vui lòng kiểm tra và có mặt đúng giờ.`,
-  redirectUrl: getTournamentRedirect(params.tournamentId, {
-    tab: 'bracket',
-    divisionId: params.divisionId,
-  }),
+  content: `Trận đấu của bạn tại giải ${params.tournamentName}${formatMatchPath(params.bracketBranch, params.roundNumber)} đã được xếp lịch vào lúc ${params.scheduledTime} tại sân ${params.court}. Vui lòng kiểm tra và có mặt đúng giờ.`,
+  redirectUrl: `/live/${params.matchId}`,
+});
+
+const formatMatchPath = (branch?: string | null, round?: number | null): string => {
+  const branchLabel = branch === 'WINNERS' ? 'Nhánh thắng' : branch === 'LOSERS' ? 'Nhánh thua' : branch === 'MAIN' ? 'Nhánh chính' : branch === 'PLAYOFF' ? 'Play-off' : branch === 'GRAND_FINALS' ? 'Chung kết' : '';
+  const roundLabel = round && round > 0 ? `Vòng ${round}` : '';
+  const path = [branchLabel, roundLabel].filter(Boolean).join(' · ');
+  return path ? ` (${path})` : '';
+};
+
+export const buildMatchReminderNotification = (params: {
+  matchId: string;
+  tournamentName: string;
+  receiverId: string;
+  scheduledTime: string;
+  court: string;
+  untilLabel: string;
+  bracketBranch?: string | null;
+  roundNumber?: number | null;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.MATCH_REMINDER,
+  title: `Nhắc lịch thi đấu · còn ${params.untilLabel}`,
+  content: `Trận của bạn tại giải ${params.tournamentName}${formatMatchPath(params.bracketBranch, params.roundNumber)} diễn ra lúc ${params.scheduledTime} tại sân ${params.court}.`,
+  redirectUrl: `/live/${params.matchId}`,
 });
 
 export const buildRefereeAssignedNotification = (params: {
