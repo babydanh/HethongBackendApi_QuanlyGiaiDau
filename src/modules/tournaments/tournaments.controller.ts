@@ -26,6 +26,7 @@ import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
+import { ImportParticipantsDto } from './dto/import-participants.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
@@ -725,9 +726,10 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Lấy danh sách participant đầy đủ cho BTC' })
   async findParticipantsForOrganizer(
     @Param('id', ParseUUIDPipe) id: string,
-    @Query('divisionId') divisionId?: string,
+    @Query('divisionId') divisionId: string | undefined,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.findParticipantsForOrganizer(id, divisionId);
+    return this.tournamentsService.findParticipantsForOrganizer(id, divisionId, user.sub, this.getSystemRoles(user));
   }
 
   @Get(':id/referees')
@@ -833,6 +835,23 @@ export class TournamentsController {
       dto.names,
       this.getSystemRoles(user),
       dto.divisionId,
+    );
+  }
+
+  @Post(':id/import-participants')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Nhập danh sách VĐV từ Google Form / Excel' })
+  async importParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ImportParticipantsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.importParticipantsFromForm(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
     );
   }
 

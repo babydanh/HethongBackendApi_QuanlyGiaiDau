@@ -12,6 +12,8 @@ import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
+import { ImportParticipantsDto } from './dto/import-participants.dto';
+import { MailService } from '../../providers/mail/mail.service';
 import { BracketGeneratorService } from './bracket-generator.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateDivisionDto } from './dto/create-division.dto';
@@ -29,7 +31,8 @@ export declare class TournamentsService {
     private readonly configService;
     private readonly communitySocialRepository;
     private readonly liveScoreGateway?;
-    constructor(tournamentsRepository: TournamentsRepository, bracketGeneratorService: BracketGeneratorService, notificationsService: NotificationsService, storageService: StorageService, redisService: RedisService, configService: ConfigService, communitySocialRepository: CommunitySocialRepository, liveScoreGateway?: LiveScoreGateway | undefined);
+    private readonly mailService?;
+    constructor(tournamentsRepository: TournamentsRepository, bracketGeneratorService: BracketGeneratorService, notificationsService: NotificationsService, storageService: StorageService, redisService: RedisService, configService: ConfigService, communitySocialRepository: CommunitySocialRepository, liveScoreGateway?: LiveScoreGateway | undefined, mailService?: MailService | undefined);
     private broadcastRegistrationChanged;
     calculateNextRecurringDate(frequency: string, daysOfWeek: number[] | number, timeOfDay: string, fromDate?: Date): Date;
     private isManager;
@@ -788,26 +791,6 @@ export declare class TournamentsService {
         };
     }>;
     findParticipants(id: string, divisionId?: string): Promise<{
-        id: string;
-        teamName: string;
-        footballTeamId: string | null;
-        footballTeamLogoUrl: string | null;
-        rosterLockedAt: Date | null;
-        seed: number | null;
-        isPaid: boolean;
-        tournamentDivisionId: string | null;
-        teamStatus: string;
-        registeredAt: Date;
-        customResponses: Record<string, unknown> | null;
-        registeredBy: {
-            id: string | null;
-            fullName: string | null;
-            avatarUrl: string | null;
-            email: string | null;
-        } | null;
-        members: import("./interfaces/tournament-config.interface").RosterMember[];
-        eloPoints?: number;
-    }[] | {
         rosters: {
             profile: {
                 userId: string;
@@ -842,8 +825,39 @@ export declare class TournamentsService {
         isWildcard: boolean;
         registeredAt: Date;
         rosterLockedAt: Date | null;
+    }[] | {
+        customResponses: null;
+        payment: null;
+        registeredBy: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+            email: null;
+        } | null;
+        members: {
+            userId: string;
+            fullName: string | null;
+            avatarUrl: string | null;
+            role: string;
+            isMock?: boolean;
+            elo: {
+                eloPoints: number;
+                tierName: string;
+            };
+        }[];
+        id: string;
+        teamName: string;
+        footballTeamId: string | null;
+        footballTeamLogoUrl: string | null;
+        rosterLockedAt: Date | null;
+        seed: number | null;
+        isPaid: boolean;
+        tournamentDivisionId: string | null;
+        teamStatus: string;
+        registeredAt: Date;
+        eloPoints?: number;
     }[]>;
-    findParticipantsForOrganizer(id: string, divisionId?: string): Promise<{
+    findParticipantsForOrganizer(id: string, divisionId: string | undefined, userId: string, systemRoles?: string[]): Promise<{
         id: string;
         teamName: string;
         footballTeamId: string | null;
@@ -862,6 +876,18 @@ export declare class TournamentsService {
             email: string | null;
         } | null;
         members: import("./interfaces/tournament-config.interface").RosterMember[];
+        payment: {
+            id: string;
+            amount: string;
+            status: string;
+            paymentGateway: string | null;
+            transactionReference: string | null;
+            providerTransactionId: string | null;
+            providerOrderCode: string | null;
+            paidAt: Date | null;
+            receiptNumber: string | null;
+            currency: string | null;
+        } | null;
         eloPoints?: number;
     }[]>;
     findBracket(id: string, divisionId?: string): Promise<{
@@ -1332,6 +1358,7 @@ export declare class TournamentsService {
         tournamentId: string;
         stageId: string;
         groupId: string | null;
+        refereeId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
         winnerId: string | null;
@@ -1351,7 +1378,6 @@ export declare class TournamentsService {
         courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
-        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];
@@ -2093,5 +2119,10 @@ export declare class TournamentsService {
         isWildcard: boolean;
         registeredAt: Date;
         rosterLockedAt: Date | null;
+    }>;
+    importParticipantsFromForm(tournamentId: string, userId: string, systemRoles: string[], dto: ImportParticipantsDto): Promise<{
+        message: string;
+        importedCount: number;
+        emailsSent: number;
     }>;
 }

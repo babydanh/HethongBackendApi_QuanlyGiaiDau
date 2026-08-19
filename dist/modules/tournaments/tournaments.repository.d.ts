@@ -622,7 +622,7 @@ export declare class TournamentsRepository {
         dateOfBirth: string | null;
         gender: string | null;
     }>;
-    findParticipants(tournamentId: string, categoryId: string, divisionId?: string, onlyEligible?: boolean): Promise<{
+    findParticipants(tournamentId: string, categoryId: string, divisionId?: string, onlyEligible?: boolean, includePaymentDetails?: boolean): Promise<{
         id: string;
         teamName: string;
         footballTeamId: string | null;
@@ -641,9 +641,40 @@ export declare class TournamentsRepository {
             email: string | null;
         } | null;
         members: RosterMember[];
+        payment: {
+            id: string;
+            amount: string;
+            status: string;
+            paymentGateway: string | null;
+            transactionReference: string | null;
+            providerTransactionId: string | null;
+            providerOrderCode: string | null;
+            paidAt: Date | null;
+            receiptNumber: string | null;
+            currency: string | null;
+        } | null;
         eloPoints?: number;
     }[]>;
     findPublicParticipants(tournamentId: string, categoryId: string, divisionId?: string): Promise<{
+        customResponses: null;
+        payment: null;
+        registeredBy: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+            email: null;
+        } | null;
+        members: {
+            userId: string;
+            fullName: string | null;
+            avatarUrl: string | null;
+            role: string;
+            isMock?: boolean;
+            elo: {
+                eloPoints: number;
+                tierName: string;
+            };
+        }[];
         id: string;
         teamName: string;
         footballTeamId: string | null;
@@ -654,14 +685,6 @@ export declare class TournamentsRepository {
         tournamentDivisionId: string | null;
         teamStatus: string;
         registeredAt: Date;
-        customResponses: Record<string, unknown> | null;
-        registeredBy: {
-            id: string | null;
-            fullName: string | null;
-            avatarUrl: string | null;
-            email: string | null;
-        } | null;
-        members: RosterMember[];
         eloPoints?: number;
     }[]>;
     findOpsAuditLogs(tournamentId: string, divisionId?: string, limit?: number): Promise<{
@@ -1682,6 +1705,7 @@ export declare class TournamentsRepository {
         tournamentId: string;
         stageId: string;
         groupId: string | null;
+        refereeId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
         winnerId: string | null;
@@ -1701,7 +1725,6 @@ export declare class TournamentsRepository {
         courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
-        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];
@@ -2043,4 +2066,47 @@ export declare class TournamentsRepository {
         participant1Name: string | null;
         participant2Name: string | null;
     }[]>;
+    importParticipants(tournamentId: string, managerUserId: string, items: {
+        teamName: string;
+        player1Name: string;
+        player1Email?: string;
+        player1Phone?: string;
+        player2Name?: string;
+        player2Email?: string;
+        player2Phone?: string;
+        elo?: number;
+        isPaid?: boolean;
+        autoApprove?: boolean;
+        customResponses?: Record<string, any>;
+    }[], divisionId?: string): Promise<{
+        importedCount: number;
+        unregisteredEmails: {
+            email: string;
+            name: string;
+            teamName: string;
+        }[];
+        participants: {
+            id: string;
+            isMock: boolean;
+            tournamentId: string;
+            tournamentDivisionId: string | null;
+            groupId: string | null;
+            registeredBy: string;
+            teamName: string;
+            footballTeamId: string | null;
+            footballTeamLogoUrl: string | null;
+            seed: number | null;
+            points: number;
+            rankingConsent: boolean;
+            customResponses: unknown;
+            isPaid: boolean;
+            teamInviteToken: string | null;
+            teamStatus: string;
+            partnerUserId: string | null;
+            partnerInviteExpiresAt: Date | null;
+            isWildcard: boolean;
+            registeredAt: Date;
+            rosterLockedAt: Date | null;
+        }[];
+    }>;
 }

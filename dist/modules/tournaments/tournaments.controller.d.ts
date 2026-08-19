@@ -11,6 +11,7 @@ import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
+import { ImportParticipantsDto } from './dto/import-participants.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
@@ -1479,26 +1480,6 @@ export declare class TournamentsController {
         deletedAt: Date | null;
     }>;
     findParticipants(id: string, divisionId?: string): Promise<{
-        id: string;
-        teamName: string;
-        footballTeamId: string | null;
-        footballTeamLogoUrl: string | null;
-        rosterLockedAt: Date | null;
-        seed: number | null;
-        isPaid: boolean;
-        tournamentDivisionId: string | null;
-        teamStatus: string;
-        registeredAt: Date;
-        customResponses: Record<string, unknown> | null;
-        registeredBy: {
-            id: string | null;
-            fullName: string | null;
-            avatarUrl: string | null;
-            email: string | null;
-        } | null;
-        members: import("./interfaces/tournament-config.interface").RosterMember[];
-        eloPoints?: number;
-    }[] | {
         rosters: {
             profile: {
                 userId: string;
@@ -1533,8 +1514,39 @@ export declare class TournamentsController {
         isWildcard: boolean;
         registeredAt: Date;
         rosterLockedAt: Date | null;
+    }[] | {
+        customResponses: null;
+        payment: null;
+        registeredBy: {
+            id: string | null;
+            fullName: string | null;
+            avatarUrl: string | null;
+            email: null;
+        } | null;
+        members: {
+            userId: string;
+            fullName: string | null;
+            avatarUrl: string | null;
+            role: string;
+            isMock?: boolean;
+            elo: {
+                eloPoints: number;
+                tierName: string;
+            };
+        }[];
+        id: string;
+        teamName: string;
+        footballTeamId: string | null;
+        footballTeamLogoUrl: string | null;
+        rosterLockedAt: Date | null;
+        seed: number | null;
+        isPaid: boolean;
+        tournamentDivisionId: string | null;
+        teamStatus: string;
+        registeredAt: Date;
+        eloPoints?: number;
     }[]>;
-    findParticipantsForOrganizer(id: string, divisionId?: string): Promise<{
+    findParticipantsForOrganizer(id: string, divisionId: string | undefined, user: JwtPayload): Promise<{
         id: string;
         teamName: string;
         footballTeamId: string | null;
@@ -1553,6 +1565,18 @@ export declare class TournamentsController {
             email: string | null;
         } | null;
         members: import("./interfaces/tournament-config.interface").RosterMember[];
+        payment: {
+            id: string;
+            amount: string;
+            status: string;
+            paymentGateway: string | null;
+            transactionReference: string | null;
+            providerTransactionId: string | null;
+            providerOrderCode: string | null;
+            paidAt: Date | null;
+            receiptNumber: string | null;
+            currency: string | null;
+        } | null;
         eloPoints?: number;
     }[]>;
     findReferees(id: string, user: JwtPayload): Promise<{
@@ -1637,6 +1661,11 @@ export declare class TournamentsController {
         registeredAt: Date;
         rosterLockedAt: Date | null;
     }[]>;
+    importParticipants(id: string, dto: ImportParticipantsDto, user: JwtPayload): Promise<{
+        message: string;
+        importedCount: number;
+        emailsSent: number;
+    }>;
     clearMockParticipants(id: string, divisionId: string | undefined, user: JwtPayload): Promise<{
         count: number;
     }>;
@@ -1866,6 +1895,7 @@ export declare class TournamentsController {
         tournamentId: string;
         stageId: string;
         groupId: string | null;
+        refereeId: string | null;
         participant1Id: string | null;
         participant2Id: string | null;
         winnerId: string | null;
@@ -1885,7 +1915,6 @@ export declare class TournamentsController {
         courtName: string | null;
         courtId: string | null;
         courtAddress: string | null;
-        refereeId: string | null;
         scoreConfirmedBy: string | null;
         scoreConfirmedAt: Date | null;
         matchEvidenceImages: string[];

@@ -12,9 +12,10 @@ import { StorageModule } from '../../providers/storage/storage.module';
 import { AuthModule } from '../auth/auth.module';
 import { CommunitiesModule } from '../communities/communities.module';
 import { MatchesModule } from '../matches/matches.module';
+import { MailModule } from '../../providers/mail/mail.module';
 
 @Module({
-  imports: [DatabaseModule, SeriesModule, RedisModule, StorageModule, AuthModule, CommunitiesModule, MatchesModule],
+  imports: [DatabaseModule, SeriesModule, RedisModule, StorageModule, AuthModule, CommunitiesModule, MatchesModule, MailModule],
   controllers: [TournamentsController],
   providers: [
     TournamentsService,
