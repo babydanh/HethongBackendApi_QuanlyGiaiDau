@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   BadRequestException,
   ForbiddenException,
   NotFoundException,
@@ -16,6 +17,8 @@ import { FirebaseService } from '../firebase/firebase.service';
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly chatGateway: ChatGateway,
@@ -23,7 +26,12 @@ export class ChatService {
   ) {}
 
   async getUserRooms(userId: string) {
-    return this.chatRepository.getUserRooms(userId);
+    try {
+      return await this.chatRepository.getUserRooms(userId);
+    } catch (error) {
+      this.logger.error(`Failed to get user rooms for ${userId}:`, error);
+      return [];
+    }
   }
 
   private async assertDirectRoomAccess(userId: string, roomId: string) {
@@ -68,7 +76,7 @@ export class ChatService {
         throw new BadRequestException('Bạn không thể tự nhắn tin cho chính mình.');
       }
       if (memberIds.length !== 2) {
-        throw new BadRequestException('Cuộc trò chuyện trực tiếp cần có đúng 2 thành viên.');
+        throw new BadRequestException('Bạn không thể tự nhắn tin cho chính mình.');
       }
     }
 

@@ -9,6 +9,8 @@ import { MatchesService } from '../matches/matches.service';
 import { PaymentsService } from '../payments/payments.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { QueryMatchDto } from '../matches/dto/query-match.dto';
+import { AiToolRouter } from './ai-tool.router';
+import type { AiAssistantResponse, AiStreamEvent, AiToolContext, AiToolEvent, AiToolResultEnvelope } from './ai-tool.types';
 
 @Injectable()
 export class AiService {
@@ -19,6 +21,7 @@ export class AiService {
   private readonly maxHistoryMessages = 24;
   private readonly maxMessageChars = 6000;
   private readonly maxHistoryChars = 24000;
+  private readonly maxToolRounds = 4;
 
   constructor(
     private readonly configService: ConfigService,
@@ -27,6 +30,7 @@ export class AiService {
     private readonly matchesService: MatchesService,
     private readonly paymentsService: PaymentsService,
     private readonly rankingsService: RankingsService,
+    private readonly aiToolRouter: AiToolRouter,
   ) {
     const apiKey = this.configService.get<string>('ai.apiKey');
     const baseURL = this.configService.get<string>('ai.baseUrl') || 'https://openrouter.ai/api/v1';
@@ -303,6 +307,99 @@ ${divisionsStr}
     ];
   }
 
+  private toolContext(
+    userId?: string,
+    currentUrl?: string,
+    pageTitle?: string,
+    isMobile?: boolean,
+    userRoles: string[] = [],
+  ): AiToolContext {
+    return { userId, currentUrl, pageTitle, isMobile, roles: userRoles };
+  }
+
+  private async runToolLoop(
+    openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[],
+    context: AiToolContext,
+  ): Promise<AiAssistantResponse> {
+    if (!this.openai) {
+      throw new InternalServerErrorException('Hệ thống trợ lý AI hiện chưa được cấu hình API Key từ OpenRouter. Vui lòng liên hệ quản trị viên.');
+    }
+
+    const llmMessages: any[] = [...openAiMessages];
+    const toolEvents: AiToolEvent[] = [];
+    const uiBlocks: NonNullable<AiAssistantResponse['uiBlocks']> = [];
+    const tools = context.userId ? this.aiToolRouter.getDefinitions() : undefined;
+
+    for (let round = 0; round < this.maxToolRounds; round += 1) {
+      const response = await this.openai.chat.completions.create({
+        model: this.modelName,
+        messages: llmMessages,
+        ...(tools && tools.length > 0 ? { tools, tool_choice: 'auto' as const } : {}),
+      });
+      const assistantMessage: any = response.choices[0]?.message;
+      const toolCalls = Array.isArray(assistantMessage?.tool_calls) ? assistantMessage.tool_calls : [];
+
+      if (toolCalls.length === 0) {
+        return {
+          content: assistantMessage?.content || 'Trợ lý AI chưa phản hồi. Vui lòng thử lại sau.',
+          uiBlocks,
+          toolEvents,
+        };
+      }
+
+      llmMessages.push(assistantMessage);
+      for (const call of toolCalls) {
+        const toolName = typeof call?.function?.name === 'string' ? call.function.name : '';
+        if (!toolName || typeof call?.id !== 'string') continue;
+
+        const startEvent = this.aiToolRouter.toToolStartEvent(toolName, round + 1);
+        toolEvents.push(startEvent);
+        const result: AiToolResultEnvelope = await this.aiToolRouter.execute(
+          toolName,
+          typeof call.function.arguments === 'string' ? call.function.arguments : '{}',
+          context,
+        );
+        const resultEvent = this.aiToolRouter.toToolResultEvent(toolName, round + 1, result);
+        toolEvents.push(resultEvent);
+        if (result.uiBlocks?.length) uiBlocks.push(...result.uiBlocks);
+
+        llmMessages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify(result),
+        });
+      }
+    }
+
+    return {
+      content: 'Mình chưa thể hoàn tất việc kiểm tra dữ liệu trong thời gian cho phép. Bạn vui lòng thử lại với câu hỏi ngắn hơn.',
+      uiBlocks,
+      toolEvents,
+    };
+  }
+
+  async getChatAssistantResponse(
+    messages: any[],
+    userId?: string,
+    currentUrl?: string,
+    pageTitle?: string,
+    isMobile?: boolean,
+    searchParams?: string,
+    userRoles: string[] = [],
+  ): Promise<AiAssistantResponse> {
+    if (!this.openai) {
+      return { content: 'Hệ thống trợ lý AI hiện chưa được cấu hình API Key từ OpenRouter. Vui lòng liên hệ quản trị viên.', uiBlocks: [], toolEvents: [] };
+    }
+
+    try {
+      const openAiMessages = await this.buildOpenAiMessages(messages, userId, currentUrl, pageTitle, isMobile, searchParams, userRoles);
+      return await this.runToolLoop(openAiMessages, this.toolContext(userId, currentUrl, pageTitle, isMobile, userRoles));
+    } catch (error: any) {
+      console.error('OpenRouter AI Chat Error:', error);
+      throw new InternalServerErrorException('Lỗi kết nối với máy chủ AI: ' + error.message);
+    }
+  }
+
   async getChatResponse(
     messages: any[],
     userId?: string,
@@ -312,26 +409,11 @@ ${divisionsStr}
     searchParams?: string,
     userRoles: string[] = [],
   ): Promise<string> {
-    if (!this.openai) {
-      return 'Hệ thống trợ lý AI hiện chưa được cấu hình API Key từ OpenRouter. Vui lòng liên hệ quản trị viên.';
-    }
-
-    try {
-      const openAiMessages = await this.buildOpenAiMessages(messages, userId, currentUrl, pageTitle, isMobile, searchParams, userRoles);
-
-      const response = await this.openai.chat.completions.create({
-        model: this.modelName,
-        messages: openAiMessages,
-      });
-
-      return response.choices[0]?.message?.content || 'Trợ lý AI chưa phản hồi. Vui lòng thử lại sau.';
-    } catch (error: any) {
-      console.error('OpenRouter AI Chat Error:', error);
-      throw new InternalServerErrorException('Lỗi kết nối với máy chủ AI: ' + error.message);
-    }
+    const result = await this.getChatAssistantResponse(messages, userId, currentUrl, pageTitle, isMobile, searchParams, userRoles);
+    return result.content;
   }
 
-  async getChatResponseStream(
+  async *getChatResponseStream(
     messages: any[],
     userId?: string,
     currentUrl?: string,
@@ -339,19 +421,34 @@ ${divisionsStr}
     isMobile?: boolean,
     searchParams?: string,
     userRoles: string[] = [],
-  ) {
+  ): AsyncGenerator<AiStreamEvent> {
     if (!this.openai) {
       throw new InternalServerErrorException('Hệ thống trợ lý AI hiện chưa được cấu hình API Key từ OpenRouter. Vui lòng liên hệ quản trị viên.');
     }
 
     try {
       const openAiMessages = await this.buildOpenAiMessages(messages, userId, currentUrl, pageTitle, isMobile, searchParams, userRoles);
+      const context = this.toolContext(userId, currentUrl, pageTitle, isMobile, userRoles);
 
-      return await this.openai.chat.completions.create({
-        model: this.modelName,
-        messages: openAiMessages,
-        stream: true,
-      });
+      if (!userId) {
+        const stream = await this.openai.chat.completions.create({
+          model: this.modelName,
+          messages: openAiMessages,
+          stream: true,
+        });
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || '';
+          if (content) yield { type: 'content', content };
+        }
+        yield { type: 'done' };
+        return;
+      }
+
+      const result = await this.runToolLoop(openAiMessages, context);
+      for (const event of result.toolEvents) yield { type: 'tool', event };
+      if (result.uiBlocks.length > 0) yield { type: 'ui_blocks', blocks: result.uiBlocks };
+      if (result.content) yield { type: 'content', content: result.content };
+      yield { type: 'done' };
     } catch (error: any) {
       console.error('OpenRouter AI Chat Stream Error:', error);
       throw new InternalServerErrorException('Lỗi kết nối stream với máy chủ AI: ' + error.message);

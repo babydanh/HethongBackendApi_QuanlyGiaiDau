@@ -11,7 +11,62 @@ import {
   Min,
   Max,
   IsIn,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+class CreateLiteDivisionConfigDto {
+  @ApiProperty({ example: 'Đôi Nam' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ enum: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'] })
+  @IsString()
+  @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
+  matchType: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+
+  @ApiPropertyOptional({ enum: ['MALE', 'FEMALE', 'MIXED'] })
+  @IsString()
+  @IsOptional()
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
+  genderRestriction?: 'MALE' | 'FEMALE' | 'MIXED';
+
+  @ApiPropertyOptional({ example: 64, description: 'Số người/đội tối đa cho nội dung' })
+  @IsNumber()
+  @IsOptional()
+  @Min(2)
+  @Max(128)
+  maxParticipants?: number;
+
+  @ApiPropertyOptional({ enum: ['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'] })
+  @IsString()
+  @IsOptional()
+  @IsIn(['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'])
+  bracketType?: 'SINGLE_ELIMINATION' | 'DOUBLE_ELIMINATION' | 'ROUND_ROBIN' | 'GROUP_STAGE_KNOCKOUT';
+
+  @ApiPropertyOptional({ example: 1000 })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  minElo?: number | null;
+
+  @ApiPropertyOptional({ example: 1600 })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  maxElo?: number | null;
+
+  @ApiPropertyOptional({ example: '2026-10-15T00:00:00.000Z' })
+  @IsDateString()
+  @IsOptional()
+  startDate?: string | null;
+
+  @ApiPropertyOptional({ example: '2026-10-14T23:59:00.000Z' })
+  @IsDateString()
+  @IsOptional()
+  registrationEndDate?: string | null;
+}
 
 export class CreateLiteTournamentDto {
   @ApiProperty({
@@ -113,6 +168,16 @@ export class CreateLiteTournamentDto {
   @Min(2)
   @Max(128)
   maxTeams?: number;
+
+  @ApiPropertyOptional({
+    type: [CreateLiteDivisionConfigDto],
+    description: 'Các nội dung đã cấu hình trong tạo nhanh. Đây là DTO nghiệp vụ, không nhận state UI như selectedFormats.',
+  })
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CreateLiteDivisionConfigDto)
+  divisions?: CreateLiteDivisionConfigDto[];
 
   @ApiPropertyOptional({ example: 7, enum: [5, 7, 11] })
   @IsNumber()
