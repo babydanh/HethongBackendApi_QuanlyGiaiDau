@@ -6,6 +6,7 @@ import {
   ConflictException,
   BadRequestException,
   HttpStatus,
+  Optional,
 } from '@nestjs/common';
 import { CommunitiesRepository } from './communities.repository';
 import { BaseException } from '../../common/exceptions/base.exception';
@@ -28,6 +29,7 @@ import {
   buildCommunityUnbannedNotification,
 } from '../notifications/notification-builder';
 import { StorageService } from '../../providers/storage/storage.service';
+import { RedisService } from '../../providers/redis/redis.service';
 import {
   isStoredImageUrl,
   extractStoredImagePublicId,
@@ -54,12 +56,35 @@ export class CommunitiesService {
     private readonly communitiesRepository: CommunitiesRepository,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
+    @Optional() private readonly redisService?: RedisService,
   ) {}
 
   // --- COMMUNITIES ---
 
   async findAll(query: QueryCommunityDto) {
-    return await this.communitiesRepository.findAll(query);
+    const cacheKey = `communities:list:${JSON.stringify(query)}`;
+    try {
+      const cached = await this.redisService?.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (error) {
+      this.logger.debug(`Community list cache read skipped: ${String(error)}`);
+    }
+
+    const result = await this.communitiesRepository.findAll(query);
+    try {
+      await this.redisService?.set(cacheKey, JSON.stringify(result), 30);
+    } catch (error) {
+      this.logger.debug(`Community list cache write skipped: ${String(error)}`);
+    }
+    return result;
+  }
+
+  private async invalidatePublicListCache(): Promise<void> {
+    try {
+      await this.redisService?.delByPattern('communities:list:*');
+    } catch (error) {
+      this.logger.debug(`Community list cache invalidation skipped: ${String(error)}`);
+    }
   }
 
   async findMyCommunities(userId: string) {
@@ -212,7 +237,9 @@ export class CommunitiesService {
       creatorId: userId,
       status: 'ACTIVE',
     };
-    return await this.communitiesRepository.create(data, lat, lng, categoryIds);
+    const created = await this.communitiesRepository.create(data, lat, lng, categoryIds);
+    await this.invalidatePublicListCache();
+    return created;
   }
 
   async update(
@@ -231,13 +258,15 @@ export class CommunitiesService {
     if (rest.description !== undefined) {
       rest.description = await this.sanitizeDescription(rest.description);
     }
-    return await this.communitiesRepository.update(
+    const updated = await this.communitiesRepository.update(
       id,
       rest,
       lat,
       lng,
       categoryIds,
     );
+    await this.invalidatePublicListCache();
+    return updated;
   }
 
   async review(
@@ -255,7 +284,9 @@ export class CommunitiesService {
       rejectedReason:
         dto.status === 'APPROVED' ? null : dto.rejectedReason || null,
     };
-    return await this.communitiesRepository.update(id, updateData);
+    const reviewed = await this.communitiesRepository.update(id, updateData);
+    await this.invalidatePublicListCache();
+    return reviewed;
   }
 
   async remove(userId: string, id: string, roles: string[]) {
@@ -265,7 +296,9 @@ export class CommunitiesService {
       await this.checkPermissions(community.id, userId, roles, ['OWNER']);
     }
 
-    return await this.communitiesRepository.delete(id);
+    const deleted = await this.communitiesRepository.delete(id);
+    await this.invalidatePublicListCache();
+    return deleted;
   }
 
   // --- MEMBERS ---
