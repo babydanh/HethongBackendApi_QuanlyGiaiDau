@@ -1829,15 +1829,6 @@ export class TournamentsRepository {
           : inviteBaseExpiresAt
         : null;
 
-      const teamStatus = isWaitlisted
-        ? 'WAITLISTED'
-        : isDoubles
-          ? 'PENDING_PARTNER'
-          : regMode === 'APPROVAL'
-            ? 'PENDING_APPROVAL'
-            : 'COMPLETE';
-      const isPaid = payableEntryFeeAmount === 0;
-
       const registrationForm = (tConfigForTeam.registrationForm || null) as {
         status?: string;
         divisionIds?: unknown;
@@ -1967,6 +1958,24 @@ export class TournamentsRepository {
         finalTeamName = footballTeam.name;
         footballTeamLogoUrl = footballTeam.logoUrl ?? null;
       }
+      const requiredFootballMainRosterCount = isTeamSport
+        ? this.getRequiredFootballMainRosterCount(tournament.tournamentConfig)
+        : 0;
+      const hasUndersizedFootballRoster =
+        isTeamSport &&
+        Boolean(data.footballTeamId) &&
+        footballTeamMemberIds.length < requiredFootballMainRosterCount;
+      const teamStatus = isWaitlisted
+        ? 'WAITLISTED'
+        : isDoubles
+          ? 'PENDING_PARTNER'
+          : hasUndersizedFootballRoster
+            ? 'PENDING'
+            : regMode === 'APPROVAL'
+              ? 'PENDING_APPROVAL'
+              : 'COMPLETE';
+      const isPaid = payableEntryFeeAmount === 0;
+
       if (isTeamSport && data.footballTeamId && selectedDivision) {
         const divisionGender = (selectedDivision.genderRestriction || '')
           .trim()
@@ -2234,6 +2243,7 @@ export class TournamentsRepository {
         paymentEligible:
           participant.teamStatus === 'COMPLETE' &&
           !participant.isPaid &&
+          Number.isSafeInteger(payableEntryFeeAmount) &&
           payableEntryFeeAmount > 0,
         teamInviteLink:
           isDoubles || (isTeamSport && !data.footballTeamId)
@@ -3205,8 +3215,29 @@ export class TournamentsRepository {
       .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(eq(schema.tournamentRosters.participantId, participantId));
 
+    const [tournamentFeeRow] = await this.db
+      .select({ entryFee: schema.tournaments.entryFee })
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1);
+    let payableEntryFeeAmount = Number(tournamentFeeRow?.entryFee ?? 0);
+    if (participant.tournamentDivisionId) {
+      const [divisionFeeRow] = await this.db
+        .select({ entryFee: schema.tournamentDivisions.entryFee })
+        .from(schema.tournamentDivisions)
+        .where(eq(schema.tournamentDivisions.id, participant.tournamentDivisionId))
+        .limit(1);
+      payableEntryFeeAmount = Number(divisionFeeRow?.entryFee ?? payableEntryFeeAmount);
+    }
+    const paymentEligible =
+      participant.teamStatus === 'COMPLETE' &&
+      !participant.isPaid &&
+      Number.isSafeInteger(payableEntryFeeAmount) &&
+      payableEntryFeeAmount > 0;
+
     return {
       registered: true,
+      paymentEligible,
       participant: {
         id: participant.id,
         teamName: participant.teamName,
@@ -5474,6 +5505,18 @@ export class TournamentsRepository {
           : roster.mainMemberIds.length === 1 && roster.reserveMemberIds.length === 0
             ? 'CONFIRMED'
             : 'PENDING_CONFIRMATION';
+      const registrationConfig =
+        tournament?.tournamentConfig &&
+        typeof tournament.tournamentConfig === 'object' &&
+        !Array.isArray(tournament.tournamentConfig)
+          ? (tournament.tournamentConfig as Record<string, unknown>)
+          : {};
+      const nextParticipantStatus =
+        roster.mainMemberIds.length < requiredMainRosterCount
+          ? 'PENDING'
+          : registrationConfig.registrationMode === 'APPROVAL'
+            ? 'PENDING_APPROVAL'
+            : 'COMPLETE';
       const [updatedEntry] = await tx
         .update(schema.tournamentTeamEntries)
         .set({
@@ -5483,6 +5526,10 @@ export class TournamentsRepository {
         })
         .where(eq(schema.tournamentTeamEntries.id, entry.id))
         .returning();
+      await tx
+        .update(schema.tournamentParticipants)
+        .set({ teamStatus: nextParticipantStatus })
+        .where(eq(schema.tournamentParticipants.id, participantId));
       await this.auditService.logUpdate(
         tx,
         actorUserId,

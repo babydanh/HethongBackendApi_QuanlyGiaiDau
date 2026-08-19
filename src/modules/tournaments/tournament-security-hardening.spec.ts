@@ -45,6 +45,13 @@ describe('Tournament security hardening — structural contracts', () => {
     expect(matchesControllerSource).toContain("@UseGuards(new RateLimitGuard(20, 60_000))\n  @Post(':id/cheer')");
     expect(matchesServiceSource).toContain("throw new UnauthorizedException('Bạn cần đăng nhập để bình luận')");
   });
+
+  it('keeps football draft registrations ineligible for payment until the roster is complete', () => {
+    expect(repositorySource).toContain('hasUndersizedFootballRoster');
+    expect(repositorySource).toContain("hasUndersizedFootballRoster\n            ? 'PENDING'");
+    expect(repositorySource).toContain('const nextParticipantStatus =');
+    expect(repositorySource).toContain(".set({ teamStatus: nextParticipantStatus })");
+  });
 });
 
 export {};

@@ -14,8 +14,8 @@ const makeService = (participant: Record<string, unknown>) => {
     { get: jest.fn().mockReturnValue(undefined) } as never,
     { reserveSlot: jest.fn(), releaseSlot: jest.fn() } as never,
   );
-  return service as PaymentsService & {
-    calculatePayment: (...args: never[]) => Promise<unknown>;
+  return service as unknown as {
+    calculatePayment: (userId: string, data: unknown, tournament: unknown) => Promise<unknown>;
   };
 };
 

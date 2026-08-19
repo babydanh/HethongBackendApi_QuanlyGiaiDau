@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { MatchesRepository } from './matches.repository';
 import { LiveScoreGateway } from './live-score.gateway';
 
-const createClient = (token?: string) =>
+const createClient = (token?: string, queryToken?: string) =>
   ({
     id: 'client-1',
     connected: true,
@@ -11,7 +11,7 @@ const createClient = (token?: string) =>
     handshake: {
       auth: token ? { token: `Bearer ${token}` } : {},
       headers: {},
-      query: {},
+      query: queryToken ? { token: queryToken } : {},
     },
     join: jest.fn(),
     leave: jest.fn(),
@@ -64,6 +64,15 @@ describe('LiveScoreGateway room authorization', () => {
       'Bạn không có quyền theo dõi giải đấu này',
     );
     expect(client.join).not.toHaveBeenCalled();
+  });
+
+  it('does not use query-string tokens for live authorization', () => {
+    const client = createClient(undefined, 'query-token');
+
+    gateway.handleConnection(client);
+
+    expect(jwtService.verify).not.toHaveBeenCalled();
+    expect(client.data.user).toBeUndefined();
   });
 
   it('passes verified JWT identity and roles to match authorization', async () => {

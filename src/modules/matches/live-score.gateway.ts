@@ -34,6 +34,7 @@ export class LiveScoreGateway
 
   private readonly clientMatchRooms = new Map<string, Set<string>>();
   private readonly clientTournamentRooms = new Map<string, Set<string>>();
+  private readonly zombieDisconnectTimers = new Map<string, NodeJS.Timeout>();
   
   // Bộ đệm gộp tin (Batching) cho viewer counts
   private readonly pendingViewerUpdates = new Set<string>();
@@ -80,10 +81,12 @@ export class LiveScoreGateway
       clearInterval(this.metricsInterval);
     }
     this.loopMonitor.disable();
+    this.zombieDisconnectTimers.forEach((timer) => clearTimeout(timer));
+    this.zombieDisconnectTimers.clear();
   }
 
   handleConnection(client: Socket) {
-    const token = extractWsToken(client);
+    const token = extractWsToken(client, { allowQueryToken: false });
     if (token) {
       try {
         client.data.user = this.jwtService.verify<JwtPayload>(token);
@@ -98,7 +101,8 @@ export class LiveScoreGateway
     
     // Zombie connection prevention: 
     // Ngắt kết nối client sau 30 giây nếu họ không tham gia bất kỳ phòng (Room) trận đấu nào.
-    setTimeout(() => {
+    const zombieTimer = setTimeout(() => {
+      this.zombieDisconnectTimers.delete(client.id);
       if (client.connected) {
         const joinedRooms = this.clientMatchRooms.get(client.id);
         const joinedTournamentRooms = this.clientTournamentRooms.get(client.id);
@@ -109,9 +113,16 @@ export class LiveScoreGateway
         }
       }
     }, 30000);
+    this.zombieDisconnectTimers.set(client.id, zombieTimer);
   }
 
   handleDisconnect(client: Socket) {
+    const zombieTimer = this.zombieDisconnectTimers.get(client.id);
+    if (zombieTimer) {
+      clearTimeout(zombieTimer);
+      this.zombieDisconnectTimers.delete(client.id);
+    }
+
     const joinedMatchIds = this.clientMatchRooms.get(client.id);
     if (joinedMatchIds) {
       joinedMatchIds.forEach((matchId) => {

@@ -3,7 +3,10 @@ import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
 
-export function extractWsToken(client: Socket): string | null {
+export function extractWsToken(
+    client: Socket,
+    options: { allowQueryToken?: boolean } = {},
+): string | null {
     let token = client.handshake.auth?.token;
     if (typeof token === 'string' && token.trim()) {
         return token.trim().replace(/^Bearer\s+/i, '').trim();
@@ -20,9 +23,11 @@ export function extractWsToken(client: Socket): string | null {
         if (cookies.accessToken) return cookies.accessToken;
     }
 
-    const queryToken = client.handshake.query?.token;
-    if (typeof queryToken === 'string' && queryToken.trim()) {
-        return queryToken.trim().replace(/^Bearer\s+/i, '').trim();
+    if (options.allowQueryToken !== false) {
+        const queryToken = client.handshake.query?.token;
+        if (typeof queryToken === 'string' && queryToken.trim()) {
+            return queryToken.trim().replace(/^Bearer\s+/i, '').trim();
+        }
     }
 
     const authorization = client.handshake.headers.authorization;
