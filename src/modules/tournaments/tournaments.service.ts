@@ -1143,8 +1143,15 @@ export class TournamentsService {
     if (registrationEndDate && registrationStartDate >= registrationEndDate) {
       throw new BadRequestException('Thời gian mở đăng ký phải trước thời gian đóng.');
     }
+    const now = new Date();
+    if (registrationEndDate && registrationEndDate <= now) {
+      throw new BadRequestException('Thời gian đóng đăng ký phải ở tương lai để giải không tự chuyển sang chốt danh sách.');
+    }
     if (startDateTime && registrationEndDate && registrationEndDate >= new Date(startDateTime)) {
       throw new BadRequestException('Thời gian đóng đăng ký phải trước giờ bắt đầu giải.');
+    }
+    if (startDateTime && new Date(startDateTime) <= now) {
+      throw new BadRequestException('Ngày bắt đầu giải phải ở tương lai khi tạo giải nhanh.');
     }
     const locationParts = [dto.venueName, dto.locationAddress, dto.ward, dto.district, dto.province]
       .map((part) => part?.trim())
@@ -1204,62 +1211,50 @@ export class TournamentsService {
     // Lite creates one safe default division. Additional divisions are
     // materialized explicitly by the typed frontend division API, so wizard
     // fields such as selectedFormats never cross this API boundary.
-    const formatsToCreate = [
-      sport === 'football'
-        ? (dto.genderRestriction ? `FOOTBALL_${dto.genderRestriction}` : 'FOOTBALL_MIXED')
-        : (dto.format === 'mixed_doubles'
-            ? 'MIXED_DOUBLES'
-            : dto.format === 'doubles'
-            ? (dto.genderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_DOUBLES' : 'MALE_DOUBLES'))
-            : (dto.genderRestriction === 'FEMALE' ? 'FEMALE_SINGLES' : 'MALE_SINGLES')),
-    ];
-
-    const mapFormatToDivision = (fmt: string) => {
-      switch (fmt) {
-        case 'MALE_SINGLES':
-        case 'SINGLES_MALE':
-          return { name: 'Đơn Nam', matchType: MatchType.SINGLES, genderRestriction: GenderRestriction.MALE };
-        case 'FEMALE_SINGLES':
-        case 'SINGLES_FEMALE':
-          return { name: 'Đơn Nữ', matchType: MatchType.SINGLES, genderRestriction: GenderRestriction.FEMALE };
-        case 'MALE_DOUBLES':
-        case 'DOUBLES_MALE':
-          return { name: 'Đôi Nam', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.MALE };
-        case 'FEMALE_DOUBLES':
-        case 'DOUBLES_FEMALE':
-          return { name: 'Đôi Nữ', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.FEMALE };
-        case 'MIXED_DOUBLES':
-        case 'DOUBLES_MIXED':
-          return { name: 'Đôi Nam Nữ', matchType: MatchType.MIXED_DOUBLES, genderRestriction: GenderRestriction.MIXED };
-        case 'FOOTBALL_MALE':
-          return { name: 'Đội nam', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.MALE };
-        case 'FOOTBALL_FEMALE':
-          return { name: 'Đội nữ', matchType: MatchType.DOUBLES, genderRestriction: GenderRestriction.FEMALE };
-        case 'FOOTBALL_MIXED':
-        default:
-          return {
-            name: sport === 'football' ? 'Không giới hạn' : 'Đôi Nam',
-            matchType: dto.format === 'singles' ? MatchType.SINGLES : MatchType.DOUBLES,
-            genderRestriction: undefined,
-          };
-      }
-    };
+    const formatsToCreate = dto.divisions?.length
+      ? dto.divisions
+      : [
+          {
+            name: sport === 'football'
+              ? (dto.genderRestriction === 'FEMALE' ? 'Đội nữ' : dto.genderRestriction === 'MALE' ? 'Đội nam' : 'Không giới hạn')
+              : dto.format === 'singles'
+                ? (dto.genderRestriction === 'FEMALE' ? 'Đơn Nữ' : 'Đơn Nam')
+                : dto.format === 'mixed_doubles' || dto.genderRestriction === 'MIXED'
+                  ? 'Đôi Nam Nữ'
+                  : dto.genderRestriction === 'FEMALE' ? 'Đôi Nữ' : 'Đôi Nam',
+            matchType: sport === 'football'
+              ? MatchType.DOUBLES
+              : dto.format === 'singles'
+                ? MatchType.SINGLES
+                : dto.format === 'mixed_doubles' || dto.genderRestriction === 'MIXED'
+                  ? MatchType.MIXED_DOUBLES
+                  : MatchType.DOUBLES,
+            genderRestriction: sport === 'football' && !dto.genderRestriction
+              ? undefined
+              : dto.genderRestriction,
+            maxParticipants: maxTeams,
+            bracketType: finalBracketType,
+            startDate: startDateTime ? new Date(startDateTime).toISOString() : undefined,
+            registrationEndDate: registrationEndDate ? registrationEndDate.toISOString() : undefined,
+          },
+        ];
 
     let divisionCreationError: unknown = null;
-    for (const fmt of formatsToCreate) {
-      const divInfo = mapFormatToDivision(fmt);
+    for (const divInfo of formatsToCreate) {
       try {
         await this.tournamentsRepository.createDivision(
           {
             tournamentId: record.id,
-            name: divInfo.name,
-            matchType: divInfo.matchType,
-            genderRestriction: divInfo.genderRestriction,
-            maxParticipants: maxTeams,
+            name: divInfo.name.trim(),
+            matchType: divInfo.matchType as MatchType,
+            genderRestriction: divInfo.genderRestriction as GenderRestriction | undefined,
+            maxParticipants: divInfo.maxParticipants ?? maxTeams,
             entryFee: 0,
-            bracketType: finalBracketType as DivisionBracketType,
-            startDate: startDateTime ? new Date(startDateTime).toISOString() : undefined,
-            registrationEndDate: registrationEndDate ? registrationEndDate.toISOString() : undefined,
+            bracketType: (divInfo.bracketType ?? finalBracketType) as DivisionBracketType,
+            startDate: divInfo.startDate ? new Date(divInfo.startDate).toISOString() : undefined,
+            registrationEndDate: divInfo.registrationEndDate ? new Date(divInfo.registrationEndDate).toISOString() : undefined,
+            minElo: divInfo.minElo ?? null,
+            maxElo: divInfo.maxElo ?? null,
           },
           userId,
         );

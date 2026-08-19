@@ -47,11 +47,14 @@ export class AiController {
     res.setHeader('X-Content-Type-Options', 'nosniff');
 
     try {
-      const stream = await this.aiService.getChatResponseStream(messages || [], userId, currentUrl, pageTitle, isMobile, searchParams, this.getUserRolesFromRequest(req));
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || '';
-        if (content) {
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      const stream = this.aiService.getChatResponseStream(messages || [], userId, currentUrl, pageTitle, isMobile, searchParams, this.getUserRolesFromRequest(req));
+      for await (const event of stream) {
+        if (event.type === 'content' && event.content) {
+          res.write(`data: ${JSON.stringify({ content: event.content })}\n\n`);
+        } else if (event.type === 'tool') {
+          res.write(`data: ${JSON.stringify({ tool: event.event })}\n\n`);
+        } else if (event.type === 'ui_blocks') {
+          res.write(`data: ${JSON.stringify({ ui_blocks: event.blocks })}\n\n`);
         }
       }
       res.write('data: [DONE]\n\n');
@@ -82,7 +85,7 @@ export class AiController {
       ? [{ role: 'user', content: singleMessage }]
       : [];
 
-    const reply = await this.aiService.getChatResponse(
+    const result = await this.aiService.getChatAssistantResponse(
       formattedMessages,
       userId,
       currentUrl,
@@ -92,7 +95,7 @@ export class AiController {
       this.getUserRolesFromRequest(req),
     );
 
-    return { success: true, reply, data: reply };
+    return { success: true, reply: result.content, data: result.content, ui_blocks: result.uiBlocks, tool_events: result.toolEvents };
   }
 
   @Public()
