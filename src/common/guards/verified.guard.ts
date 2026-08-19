@@ -34,15 +34,18 @@ export class VerifiedGuard implements CanActivate {
     }
 
     if (!user) {
-      return true;
+      throw new ForbiddenException('Email verification is required');
     }
 
-    // Mock/test accounts skip verification check
+    // Mock/test accounts intentionally bypass email verification.
     if (user.isMock) {
       return true;
     }
 
-    // Email verification check bypassed for seamless registration
+    if (user.isEmailVerified !== true) {
+      throw new ForbiddenException('Email verification is required');
+    }
+
     return true;
   }
 }

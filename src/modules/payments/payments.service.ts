@@ -482,8 +482,8 @@ export class PaymentsService {
       if (data.divisionId && data.divisionId !== participant.tournamentDivisionId) {
         throw new BadRequestException('divisionId không khớp lượt đăng ký.');
       }
-      if (!['COMPLETE', 'PENDING_APPROVAL'].includes(participant.teamStatus)) {
-        throw new BadRequestException('Lượt đăng ký chưa ở trạng thái hợp lệ để thanh toán.');
+      if (participant.teamStatus !== 'COMPLETE') {
+        throw new BadRequestException('Lượt đăng ký phải hoàn tất đủ thành viên trước khi thanh toán.');
       }
 
       let amount = Number(tournament.entryFee);
@@ -668,7 +668,7 @@ export class PaymentsService {
     if (payment.divisionId && payment.divisionId !== participant.tournamentDivisionId) {
       return 'PARTICIPANT_DIVISION_MISMATCH';
     }
-    if (!['COMPLETE', 'PENDING_APPROVAL'].includes(participant.teamStatus)) {
+    if (participant.teamStatus !== 'COMPLETE') {
       return `PARTICIPANT_STATUS_${participant.teamStatus}`;
     }
 

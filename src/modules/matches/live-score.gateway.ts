@@ -6,9 +6,14 @@ import {
   ConnectedSocket,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  WsException,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { MatchesRepository } from './matches.repository';
+import { extractWsToken } from '../../common/guards/ws-jwt.guard';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { MatchBroadcastData } from './interfaces/match-broadcast.interface';
 import { corsOptions } from '../../config/cors.config';
 import { monitorEventLoopDelay } from 'perf_hooks';
@@ -39,7 +44,10 @@ export class LiveScoreGateway
   // Khởi tạo monitor đo độ trễ Event Loop của Node.js
   private readonly loopMonitor = monitorEventLoopDelay({ resolution: 20 });
 
-  constructor() {
+  constructor(
+    private readonly matchesRepository: MatchesRepository,
+    private readonly jwtService: JwtService,
+  ) {
     this.loopMonitor.enable();
 
     // Khởi tạo vòng lặp gộp tin gửi lượt xem định kỳ 1 giây/lần
@@ -75,6 +83,17 @@ export class LiveScoreGateway
   }
 
   handleConnection(client: Socket) {
+    const token = extractWsToken(client);
+    if (token) {
+      try {
+        client.data.user = this.jwtService.verify<JwtPayload>(token);
+      } catch {
+        // Anonymous access remains valid for public live rooms. An invalid
+        // token simply cannot authorize entry into a private room.
+        client.data.user = undefined;
+      }
+    }
+
     this.logger.log(`Client connected: ${client.id}`);
     
     // Zombie connection prevention: 
@@ -121,19 +140,38 @@ export class LiveScoreGateway
   }
 
   @SubscribeMessage('joinMatch')
-  handleJoinMatch(
+  async handleJoinMatch(
     @MessageBody() matchId: string,
     @ConnectedSocket() client: Socket,
   ) {
-    const room = `match:${matchId}`;
+    const normalizedMatchId = typeof matchId === 'string' ? matchId.trim() : '';
+    const user = client.data.user as JwtPayload | undefined;
+    const roles = Array.isArray(user?.roles)
+      ? user.roles
+      : user?.role
+        ? [user.role]
+        : [];
+
+    if (
+      !normalizedMatchId ||
+      !(await this.matchesRepository.canAccessLiveMatch(
+        normalizedMatchId,
+        user?.sub,
+        roles,
+      ))
+    ) {
+      throw new WsException('Bạn không có quyền xem trận đấu này');
+    }
+
+    const room = `match:${normalizedMatchId}`;
     client.join(room);
     const joinedMatchIds = this.clientMatchRooms.get(client.id) ?? new Set<string>();
-    joinedMatchIds.add(matchId);
+    joinedMatchIds.add(normalizedMatchId);
     this.clientMatchRooms.set(client.id, joinedMatchIds);
     
     // Đăng ký và phát cập nhật lượt xem lập tức cho client vừa join và cả phòng
-    const viewerCount = this.getViewerCount(matchId);
-    const payload = JSON.stringify({ matchId, viewerCount });
+    const viewerCount = this.getViewerCount(normalizedMatchId);
+    const payload = JSON.stringify({ matchId: normalizedMatchId, viewerCount });
     client.emit('viewer:count', payload);
     this.server.to(room).emit('viewer:count', payload);
     
@@ -166,14 +204,34 @@ export class LiveScoreGateway
   }
 
   @SubscribeMessage('joinTournament')
-  handleJoinTournament(
+  async handleJoinTournament(
     @MessageBody() tournamentId: string,
     @ConnectedSocket() client: Socket,
   ) {
-    const room = `tournament:${tournamentId}`;
+    const normalizedTournamentId =
+      typeof tournamentId === 'string' ? tournamentId.trim() : '';
+    const user = client.data.user as JwtPayload | undefined;
+    const roles = Array.isArray(user?.roles)
+      ? user.roles
+      : user?.role
+        ? [user.role]
+        : [];
+
+    if (
+      !normalizedTournamentId ||
+      !(await this.matchesRepository.canAccessLiveTournament(
+        normalizedTournamentId,
+        user?.sub,
+        roles,
+      ))
+    ) {
+      throw new WsException('Bạn không có quyền theo dõi giải đấu này');
+    }
+
+    const room = `tournament:${normalizedTournamentId}`;
     client.join(room);
     const joinedTournamentIds = this.clientTournamentRooms.get(client.id) ?? new Set<string>();
-    joinedTournamentIds.add(tournamentId);
+    joinedTournamentIds.add(normalizedTournamentId);
     this.clientTournamentRooms.set(client.id, joinedTournamentIds);
     return { event: 'joined', data: room };
   }
