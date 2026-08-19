@@ -463,7 +463,9 @@ export class TournamentsService {
     participantId?: string,
     teamInviteToken?: string,
   ) {
-    const tournament = await this.tournamentsRepository.findById(id);
+    const tournament = await this.tournamentsRepository.findById(id, {
+      includeInviteCode: true,
+    });
     if (!tournament) {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
