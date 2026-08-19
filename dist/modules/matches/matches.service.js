@@ -64,11 +64,22 @@ let MatchesService = class MatchesService {
                     .filter((participantId) => Boolean(participantId));
                 const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
                 const scheduledAt = match.scheduledAt;
+                const scheduledTime = new Date(scheduledAt).toLocaleString('vi-VN', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false,
+                });
                 await Promise.all(rosters.map((roster) => this.notificationsService.sendNotification((0, notification_builder_1.buildMatchReminderNotification)({
                     matchId: match.id,
                     receiverId: roster.userId,
                     tournamentName: match.tournament?.name || 'giải đấu',
-                    scheduledTime: new Date(scheduledAt).toLocaleString('vi-VN'),
+                    sportName: match.tournament?.category?.name,
+                    divisionName: match.tournament?.divisionName,
+                    matchType: match.tournament?.matchType,
+                    scheduledTime,
                     court: match.courtName || 'Chưa xếp sân',
                     untilLabel: window.label,
                     bracketBranch: match.bracketBranch,

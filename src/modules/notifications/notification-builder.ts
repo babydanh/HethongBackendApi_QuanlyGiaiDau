@@ -734,6 +734,9 @@ const formatMatchPath = (branch?: string | null, round?: number | null): string 
 export const buildMatchReminderNotification = (params: {
   matchId: string;
   tournamentName: string;
+  sportName?: string | null;
+  divisionName?: string | null;
+  matchType?: string | null;
   receiverId: string;
   scheduledTime: string;
   court: string;
@@ -743,10 +746,29 @@ export const buildMatchReminderNotification = (params: {
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.MATCH_REMINDER,
-  title: `Nhắc lịch thi đấu · còn ${params.untilLabel}`,
-  content: `Trận của bạn tại giải ${params.tournamentName}${formatMatchPath(params.bracketBranch, params.roundNumber)} diễn ra lúc ${params.scheduledTime} tại sân ${params.court}.`,
+  title: `${params.tournamentName} · còn ${params.untilLabel}`,
+  content: [
+    `Giải: ${params.tournamentName}`,
+    params.sportName ? `Môn: ${params.sportName}` : null,
+    params.divisionName ? `Nội dung: ${params.divisionName}` : params.matchType ? `Nội dung: ${formatMatchType(params.matchType)}` : null,
+    `Lịch: ${params.scheduledTime}${formatMatchPath(params.bracketBranch, params.roundNumber)}`,
+    `Sân: ${params.court}`,
+    'Mở thông báo để vào đúng trang trận đấu.',
+  ].filter(Boolean).join(' · '),
   redirectUrl: `/live/${params.matchId}`,
 });
+
+const formatMatchType = (value: string): string => {
+  const labels: Record<string, string> = {
+    SINGLES: 'Đơn',
+    DOUBLES: 'Đôi',
+    MEN_DOUBLES: 'Đôi nam',
+    WOMEN_DOUBLES: 'Đôi nữ',
+    MIXED_DOUBLES: 'Đôi nam nữ',
+    FOOTBALL_TEAM: 'Đội bóng',
+  };
+  return labels[value] || value;
+};
 
 export const buildRefereeAssignedNotification = (params: {
   tournamentId: string;

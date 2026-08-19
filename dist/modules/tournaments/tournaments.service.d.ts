@@ -1905,8 +1905,8 @@ export declare class TournamentsService {
         createdAt: Date;
         status: string;
         userId: string;
-        assignedAt: Date;
         assignedBy: string | null;
+        assignedAt: Date;
     }>;
     respondToRefereeInvite(tournamentId: string, refereeId: string, userId: string, action: 'ACCEPT' | 'DECLINE'): Promise<{
         id: string;
@@ -1923,8 +1923,8 @@ export declare class TournamentsService {
         createdAt: Date;
         status: string;
         userId: string;
-        assignedAt: Date;
         assignedBy: string | null;
+        assignedAt: Date;
     }>;
     private checkLiteAuthorization;
     getLiteParticipants(id: string, userId: string, systemRoles?: string[]): Promise<{

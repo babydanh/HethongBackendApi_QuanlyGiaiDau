@@ -270,6 +270,9 @@ export declare const buildMatchScheduledNotification: (params: {
 export declare const buildMatchReminderNotification: (params: {
     matchId: string;
     tournamentName: string;
+    sportName?: string | null;
+    divisionName?: string | null;
+    matchType?: string | null;
     receiverId: string;
     scheduledTime: string;
     court: string;

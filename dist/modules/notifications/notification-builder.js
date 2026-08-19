@@ -469,7 +469,7 @@ const buildMatchScheduledNotification = (params) => ({
 });
 exports.buildMatchScheduledNotification = buildMatchScheduledNotification;
 const formatMatchPath = (branch, round) => {
-    const branchLabel = branch === 'WINNERS' ? 'Nhánh thắng' : branch === 'LOSERS' ? 'Nhánh thua' : branch === 'MAIN' ? 'Nhánh chính' : '';
+    const branchLabel = branch === 'WINNERS' ? 'Nhánh thắng' : branch === 'LOSERS' ? 'Nhánh thua' : branch === 'MAIN' ? 'Nhánh chính' : branch === 'PLAYOFF' ? 'Play-off' : branch === 'GRAND_FINALS' ? 'Chung kết' : '';
     const roundLabel = round && round > 0 ? `Vòng ${round}` : '';
     const path = [branchLabel, roundLabel].filter(Boolean).join(' · ');
     return path ? ` (${path})` : '';
@@ -477,11 +477,29 @@ const formatMatchPath = (branch, round) => {
 const buildMatchReminderNotification = (params) => ({
     receiverId: params.receiverId,
     type: notification_types_1.NOTIFICATION_TYPES.MATCH_REMINDER,
-    title: `Nhắc lịch thi đấu · còn ${params.untilLabel}`,
-    content: `Trận của bạn tại giải ${params.tournamentName}${formatMatchPath(params.bracketBranch, params.roundNumber)} diễn ra lúc ${params.scheduledTime} tại sân ${params.court}.`,
+    title: `${params.tournamentName} · còn ${params.untilLabel}`,
+    content: [
+        `Giải: ${params.tournamentName}`,
+        params.sportName ? `Môn: ${params.sportName}` : null,
+        params.divisionName ? `Nội dung: ${params.divisionName}` : params.matchType ? `Nội dung: ${formatMatchType(params.matchType)}` : null,
+        `Lịch: ${params.scheduledTime}${formatMatchPath(params.bracketBranch, params.roundNumber)}`,
+        `Sân: ${params.court}`,
+        'Mở thông báo để vào đúng trang trận đấu.',
+    ].filter(Boolean).join(' · '),
     redirectUrl: `/live/${params.matchId}`,
 });
 exports.buildMatchReminderNotification = buildMatchReminderNotification;
+const formatMatchType = (value) => {
+    const labels = {
+        SINGLES: 'Đơn',
+        DOUBLES: 'Đôi',
+        MEN_DOUBLES: 'Đôi nam',
+        WOMEN_DOUBLES: 'Đôi nữ',
+        MIXED_DOUBLES: 'Đôi nam nữ',
+        FOOTBALL_TEAM: 'Đội bóng',
+    };
+    return labels[value] || value;
+};
 const buildRefereeAssignedNotification = (params) => ({
     receiverId: params.receiverId,
     type: notification_types_1.NOTIFICATION_TYPES.REFEREE_ASSIGNED,

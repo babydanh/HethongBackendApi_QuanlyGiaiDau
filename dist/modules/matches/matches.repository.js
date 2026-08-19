@@ -412,6 +412,7 @@ let MatchesRepository = class MatchesRepository {
           )`,
                 categoryId: schema.tournaments.categoryId,
                 categoryName: schema.categories.name,
+                divisionName: schema.tournamentDivisions.name,
                 matchType: schema.tournaments.matchType,
                 genderRestriction: schema.tournaments.genderRestriction,
                 divisionMatchType: schema.tournamentDivisions.matchType,
@@ -435,6 +436,7 @@ let MatchesRepository = class MatchesRepository {
                     tournamentName: g.tournamentName,
                     categoryId: g.categoryId || undefined,
                     categoryName: g.categoryName || undefined,
+                    divisionName: g.divisionName || undefined,
                     venueName: g.venueName || null,
                     venueAddress: g.venueAddress || null,
                     matchType: g.divisionMatchType || g.matchType || undefined,
@@ -495,6 +497,7 @@ let MatchesRepository = class MatchesRepository {
                     category: {
                         name: groupStage?.categoryName,
                     },
+                    divisionName: groupStage?.divisionName,
                 },
             };
         });
