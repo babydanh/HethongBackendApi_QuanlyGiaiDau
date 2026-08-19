@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, ilike, SQL, or, and } from 'drizzle-orm';
+import { and, asc, eq, ilike, or, SQL } from 'drizzle-orm';
 import { QueryRegionDto, QueryWardDto } from './dto/query-region.dto';
 
 @Injectable()
@@ -19,7 +19,11 @@ export class RegionsRepository {
         ilike(schema.provinces.fullName, `%${query.search}%`)
       );
     }
-    return this.db.select().from(schema.provinces).where(conditions).orderBy(schema.provinces.code);
+    return this.db
+      .select()
+      .from(schema.provinces)
+      .where(conditions)
+      .orderBy(asc(schema.provinces.fullName), asc(schema.provinces.name), asc(schema.provinces.code));
   }
 
   async findWards(query: QueryWardDto) {
@@ -41,6 +45,10 @@ export class RegionsRepository {
     
     conditions = filters.length > 1 ? and(...filters) : filters[0];
 
-    return this.db.select().from(schema.wards).where(conditions).orderBy(schema.wards.name);
+    return this.db
+      .select()
+      .from(schema.wards)
+      .where(conditions)
+      .orderBy(asc(schema.wards.fullName), asc(schema.wards.name), asc(schema.wards.code));
   }
 }
