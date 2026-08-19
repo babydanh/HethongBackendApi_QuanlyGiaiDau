@@ -63,8 +63,13 @@ export class ChatService {
 
     const memberIds = Array.from(new Set([...data.memberIds, userId]));
 
-    if (data.type === RoomType.DIRECT && memberIds.length !== 2) {
-      throw new BadRequestException('Direct room must have exactly 2 members');
+    if (data.type === RoomType.DIRECT) {
+      if (data.memberIds.length === 1 && data.memberIds[0] === userId) {
+        throw new BadRequestException('Bạn không thể tự nhắn tin cho chính mình.');
+      }
+      if (memberIds.length !== 2) {
+        throw new BadRequestException('Cuộc trò chuyện trực tiếp cần có đúng 2 thành viên.');
+      }
     }
 
     if (data.type === RoomType.DIRECT) {
