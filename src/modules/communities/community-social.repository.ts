@@ -311,6 +311,43 @@ export class CommunitySocialRepository {
     return report;
   }
 
+  async findOpenPostReport(communityId: string, postId: string, reporterId: string) {
+    const [report] = await this.db.select({ id: schema.communitySocialReports.id })
+      .from(schema.communitySocialReports)
+      .where(and(
+        eq(schema.communitySocialReports.communityId, communityId),
+        eq(schema.communitySocialReports.postId, postId),
+        eq(schema.communitySocialReports.reporterId, reporterId),
+        eq(schema.communitySocialReports.status, 'OPEN'),
+      ))
+      .limit(1);
+    return report ?? null;
+  }
+
+  async listReports(communityId: string, status?: string) {
+    const conditions: SQL[] = [eq(schema.communitySocialReports.communityId, communityId)];
+    if (status) conditions.push(eq(schema.communitySocialReports.status, status));
+    return this.db.select({
+      report: schema.communitySocialReports,
+      post: { id: schema.communityPosts.id, body: schema.communityPosts.body, status: schema.communityPosts.status },
+      reporter: { id: schema.users.id, fullName: schema.profiles.fullName, email: schema.users.email },
+    })
+      .from(schema.communitySocialReports)
+      .leftJoin(schema.communityPosts, eq(schema.communitySocialReports.postId, schema.communityPosts.id))
+      .leftJoin(schema.users, eq(schema.communitySocialReports.reporterId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.communitySocialReports.reporterId, schema.profiles.userId))
+      .where(and(...conditions))
+      .orderBy(asc(schema.communitySocialReports.status), desc(schema.communitySocialReports.createdAt));
+  }
+
+  async updateReportStatus(communityId: string, reportId: string, status: string) {
+    const [updated] = await this.db.update(schema.communitySocialReports)
+      .set({ status, resolvedAt: status === 'OPEN' || status === 'REVIEWING' ? null : new Date() })
+      .where(and(eq(schema.communitySocialReports.id, reportId), eq(schema.communitySocialReports.communityId, communityId)))
+      .returning();
+    return updated ?? null;
+  }
+
   async updatePreferences(communityId: string, userId: string, values: { muted: boolean; notificationsEnabled: boolean }) {
     const [preference] = await this.db.insert(schema.communityMemberSocialPreferences).values({ communityId, userId, ...values })
       .onConflictDoUpdate({ target: [schema.communityMemberSocialPreferences.communityId, schema.communityMemberSocialPreferences.userId], set: { ...values, updatedAt: new Date() } }).returning();
@@ -322,6 +359,30 @@ export class CommunitySocialRepository {
     const rows = await this.db.select({ userId: schema.communityMembers.userId }).from(schema.communityMembers)
       .where(and(eq(schema.communityMembers.communityId, communityId), eq(schema.communityMembers.status, 'JOINED'), inArray(schema.communityMembers.userId, ids)));
     return rows.map((row) => row.userId);
+  }
+
+  async getMentionNotificationPreferences(communityId: string, userIds: string[]) {
+    if (userIds.length === 0) return [];
+    return this.db
+      .select({
+        userId: schema.communityMembers.userId,
+        notificationPreference: schema.communityMembers.notificationPreference,
+        socialMuted: schema.communityMemberSocialPreferences.muted,
+        socialNotificationsEnabled: schema.communityMemberSocialPreferences.notificationsEnabled,
+      })
+      .from(schema.communityMembers)
+      .leftJoin(
+        schema.communityMemberSocialPreferences,
+        and(
+          eq(schema.communityMemberSocialPreferences.communityId, schema.communityMembers.communityId),
+          eq(schema.communityMemberSocialPreferences.userId, schema.communityMembers.userId),
+        ),
+      )
+      .where(and(
+        eq(schema.communityMembers.communityId, communityId),
+        eq(schema.communityMembers.status, 'JOINED'),
+        inArray(schema.communityMembers.userId, userIds),
+      ));
   }
 
   async updatePostStatus(postId: string, status: 'PUBLISHED' | 'REJECTED' | 'HIDDEN') {

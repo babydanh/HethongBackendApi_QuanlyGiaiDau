@@ -1,7 +1,10 @@
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import { NOTIFICATION_TYPES } from './notification-types';
 
-const getCommunityRedirect = (communityId: string): string => `/communities/${communityId}`;
+const getCommunityRedirect = (communityId: string, postId?: string): string =>
+  postId
+    ? `/communities/${communityId}?postId=${encodeURIComponent(postId)}`
+    : `/communities/${communityId}`;
 export const getFootballTeamRedirect = (teamId: string): string => `/football-teams?teamId=${encodeURIComponent(teamId)}`;
 
 export const buildFootballTeamNotification = (params: {
@@ -225,7 +228,7 @@ export const buildCommunityPostMentionedNotification = (params: {
   type: NOTIFICATION_TYPES.COMMUNITY_POST_MENTIONED,
   title: 'Bạn được nhắc tên trong bài viết CLB',
   content: `${params.senderName} vừa nhắc đến bạn trong một bài viết tại CLB ${params.communityName}.`,
-  redirectUrl: getCommunityRedirect(params.communityId),
+  redirectUrl: getCommunityRedirect(params.communityId, params.postId),
 });
 
 export const buildCommunityPostCommentedNotification = (params: {
@@ -241,7 +244,7 @@ export const buildCommunityPostCommentedNotification = (params: {
   type: NOTIFICATION_TYPES.COMMUNITY_POST_COMMENTED,
   title: 'Bài viết của bạn có bình luận mới',
   content: `${params.senderName} vừa bình luận vào bài viết của bạn tại CLB ${params.communityName}.`,
-  redirectUrl: getCommunityRedirect(params.communityId),
+  redirectUrl: getCommunityRedirect(params.communityId, params.postId),
 });
 
 export const buildCommunityPostApprovedNotification = (params: {

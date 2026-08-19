@@ -14,6 +14,7 @@ import { ModerateCommunityPostDto } from './dto/moderate-community-post.dto';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
 import { ModerateCommunityCommentDto } from './dto/moderate-community-comment.dto';
+import { UpdateCommunityReportStatusDto } from './dto/update-community-report-status.dto';
 
 @ApiTags('community-social')
 @Controller('communities/:communityId')
@@ -116,6 +117,18 @@ export class CommunitySocialController {
   @ApiBearerAuth()
   report(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('postId', ParseUUIDPipe) postId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Body() dto: ReportCommunityContentDto) {
     return this.socialService.report(communityId, postId, user, dto);
+  }
+
+  @Get('moderation/reports')
+  @ApiBearerAuth()
+  listReports(@Param('communityId', ParseUUIDPipe) communityId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Query('status') status?: string) {
+    return this.socialService.listReports(communityId, user, status);
+  }
+
+  @Patch('moderation/reports/:reportId')
+  @ApiBearerAuth()
+  updateReport(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('reportId', ParseUUIDPipe) reportId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Body() dto: UpdateCommunityReportStatusDto) {
+    return this.socialService.updateReportStatus(communityId, reportId, user, dto.status);
   }
 
   @Patch('posts/:postId/moderation')
