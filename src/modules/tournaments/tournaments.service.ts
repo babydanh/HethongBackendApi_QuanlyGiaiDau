@@ -1153,6 +1153,15 @@ export class TournamentsService {
     if (startDateTime && new Date(startDateTime) <= now) {
       throw new BadRequestException('Ngày bắt đầu giải phải ở tương lai khi tạo giải nhanh.');
     }
+    const hasVenueName = Boolean(dto.venueName?.trim());
+    const hasLocationAddress = Boolean(dto.locationAddress?.trim());
+    if (hasVenueName !== hasLocationAddress) {
+      throw new BadRequestException('Nếu nhập địa điểm, cần điền cả tên sân và địa chỉ chi tiết.');
+    }
+    if (dto.ward?.trim() && !dto.province?.trim()) {
+      throw new BadRequestException('Phường/xã phải đi kèm tỉnh/thành phố.');
+    }
+
     const locationParts = [dto.venueName, dto.locationAddress, dto.ward, dto.district, dto.province]
       .map((part) => part?.trim())
       .filter((part): part is string => Boolean(part));
@@ -1240,9 +1249,10 @@ export class TournamentsService {
         ];
 
     let divisionCreationError: unknown = null;
+    const createdDivisionIds: string[] = [];
     for (const divInfo of formatsToCreate) {
       try {
-        await this.tournamentsRepository.createDivision(
+        const createdDivision = await this.tournamentsRepository.createDivision(
           {
             tournamentId: record.id,
             name: divInfo.name.trim(),
@@ -1258,6 +1268,7 @@ export class TournamentsService {
           },
           userId,
         );
+        if (createdDivision?.id) createdDivisionIds.push(createdDivision.id);
       } catch (divErr) {
         divisionCreationError = divErr;
         break;
@@ -1335,6 +1346,7 @@ export class TournamentsService {
       id: record.id,
       name: record.name,
       status: updated.status,
+      divisionIds: createdDivisionIds,
       inviteCode,
       joinUrl: `${frontendUrl}${joinPath}`,
       qrPayload: `${frontendUrl}${joinPath}`,
