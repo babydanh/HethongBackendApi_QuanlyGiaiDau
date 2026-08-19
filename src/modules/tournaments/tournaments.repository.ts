@@ -8073,7 +8073,7 @@ export class TournamentsRepository {
           }
         }
 
-        const teamStatus = item.autoApprove ? 'APPROVED' : 'PENDING';
+        const teamStatus = item.autoApprove ? 'COMPLETE' : 'PENDING_APPROVAL';
 
         const [participant] = await tx
           .insert(schema.tournamentParticipants)
