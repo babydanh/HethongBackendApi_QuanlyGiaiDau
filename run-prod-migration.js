@@ -38,7 +38,7 @@ const sql = postgres({
   connection: { search_path: 'public' },
 });
 
-// Errors that are safe to ignore (object already exists)
+// Errors that are safe to ignore (object already exists or already dropped)
 const IGNORABLE_CODES = new Set([
   '42P07', // duplicate_table
   '42701', // duplicate_column
@@ -46,6 +46,9 @@ const IGNORABLE_CODES = new Set([
   '23505', // unique_violation (on constraint creation)
   '42P06', // duplicate_schema
   '42723', // duplicate_function
+  '42704', // undefined_object (e.g. drop constraint if not exists)
+  '42703', // undefined_column
+  '42P01', // undefined_table (safe on conditional drops)
 ]);
 
 async function runStatement(statement) {
