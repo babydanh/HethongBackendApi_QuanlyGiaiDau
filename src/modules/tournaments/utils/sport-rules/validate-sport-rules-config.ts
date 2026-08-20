@@ -477,10 +477,10 @@ function validateGroupStageStructure(payload: Record<string, unknown>, sourceLab
     throw new BadRequestException(`${sourceLabel}: playoffConfig phải là object.`);
   }
   if (playoffConfig) {
-    if (playoffConfig.type !== undefined && !['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION'].includes(String(playoffConfig.type))) {
+    if (playoffConfig.type !== undefined && (typeof playoffConfig.type !== 'string' || !['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION'].includes(playoffConfig.type))) {
       throw new BadRequestException(`${sourceLabel}: thể thức playoff không hợp lệ.`);
     }
-    if (playoffConfig.seedingType !== undefined && !['SEEDED', 'RANDOM'].includes(String(playoffConfig.seedingType))) {
+    if (playoffConfig.seedingType !== undefined && (typeof playoffConfig.seedingType !== 'string' || !['SEEDED', 'RANDOM'].includes(playoffConfig.seedingType))) {
       throw new BadRequestException(`${sourceLabel}: cách xếp hạt giống playoff không hợp lệ.`);
     }
   }
@@ -491,12 +491,12 @@ function validateGroupStageStructure(payload: Record<string, unknown>, sourceLab
   }
   if (tiebreakerRules) {
     const allowedRules = ['SET_DIFF', 'H2H_POINTS', 'POINT_DIFF'];
-    if (tiebreakerRules.primary !== undefined && !allowedRules.includes(String(tiebreakerRules.primary))) {
+    if (tiebreakerRules.primary !== undefined && (typeof tiebreakerRules.primary !== 'string' || !allowedRules.includes(tiebreakerRules.primary))) {
       throw new BadRequestException(`${sourceLabel}: tiêu chí phân hạng chính không hợp lệ.`);
     }
     if (tiebreakerRules.secondary !== undefined && (
       !Array.isArray(tiebreakerRules.secondary) ||
-      tiebreakerRules.secondary.some((rule) => !allowedRules.includes(String(rule)))
+      tiebreakerRules.secondary.some((rule) => typeof rule !== 'string' || !allowedRules.includes(rule))
     )) {
       throw new BadRequestException(`${sourceLabel}: danh sách tiêu chí phân hạng phụ không hợp lệ.`);
     }
@@ -551,7 +551,7 @@ export function validateSportRuleConfig(
   const scoringModel = payload.scoringModel ?? payload.scoring_model;
   if (scoringModel !== undefined && scoringModel !== SCORING_MODEL_BY_KIND[kind]) {
     throw new BadRequestException(
-      `${options.sourceLabel}: scoringModel ${String(scoringModel)} không khớp với kind ${kind}.`,
+      `${options.sourceLabel}: scoringModel ${typeof scoringModel === 'string' ? scoringModel : 'invalid'} không khớp với kind ${kind}.`,
     );
   }
 
