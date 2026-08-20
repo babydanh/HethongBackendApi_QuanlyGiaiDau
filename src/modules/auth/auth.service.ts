@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  InternalServerErrorException,
   Inject,
   Logger,
 } from '@nestjs/common';
@@ -57,20 +58,48 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(registerDto.password, 12);
 
-    // Default role PLAYER
-    const defaultRole = await this.authRepository.findRoleByName(
-      UserRole.PLAYER,
-    );
-    // Note: If role doesn't exist, it should be seeded. For now, assuming it exists.
+    // Default role PLAYER (Tìm hoặc lấy role đầu tiên / fallback)
+    let defaultRole = await this.authRepository.findRoleByName(UserRole.PLAYER);
+    if (!defaultRole) {
+      // Tìm không phân biệt hoa thường nếu có
+      const [anyPlayerRole] = await this.db
+        .select()
+        .from(schema.roles)
+        .where(sql`LOWER(${schema.roles.name}) = 'player'`)
+        .limit(1);
+      defaultRole = anyPlayerRole;
+    }
+
+    if (!defaultRole) {
+      // Tự động tạo role PLAYER nếu DB chưa có
+      const [createdRole] = await this.db
+        .insert(schema.roles)
+        .values({
+          name: UserRole.PLAYER,
+          slug: 'player',
+          description: 'Vận động viên / Người chơi',
+        })
+        .onConflictDoNothing()
+        .returning();
+      defaultRole = createdRole || (await this.authRepository.findRoleByName(UserRole.PLAYER));
+    }
+
+    if (!defaultRole) {
+      throw new InternalServerErrorException('Hệ thống chưa thiết lập vai trò người chơi (PLAYER).');
+    }
 
     const newUser = await this.authRepository.createUserWithProfile(
       { email, passwordHash: hashedPassword },
       { fullName: registerDto.fullName, userId: '' }, // userId will be populated in repository
-      defaultRole?.id || '',
+      defaultRole.id,
     );
 
-    // Tạo userRanks mặc định (ELO 1000) cho tất cả category
-    await this.authRepository.createDefaultUserRanks(newUser.id);
+    // Tạo userRanks mặc định (ELO 1000) cho tất cả category (bọc try/catch an toàn)
+    try {
+      await this.authRepository.createDefaultUserRanks(newUser.id);
+    } catch (err) {
+      this.logger.warn(`Không thể tạo userRank mặc định cho user ${newUser.id}: ${err.message}`);
+    }
 
     delete (newUser as { passwordHash?: string | null }).passwordHash;
     return newUser;
