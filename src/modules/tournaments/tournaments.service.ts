@@ -39,6 +39,7 @@ import {
   MatchType,
 } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
+import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
 import { resolveEffectiveSportRules } from './utils/sport-rules/resolve-effective-sport-rules';
 import {
   inferAllowedSportRuleKinds,
@@ -2368,6 +2369,49 @@ export class TournamentsService {
         seedingType,
       );
     }
+  }
+
+  async updateBracketSlots(
+    id: string,
+    divisionId: string,
+    userId: string,
+    data: UpdateBracketSlotsDto,
+    systemRoles: string[] = [],
+  ) {
+    if (!divisionId) {
+      throw new BadRequestException('divisionId là bắt buộc khi cập nhật bracket');
+    }
+
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    let isAuthorized = await this.isManager(tournament, userId, systemRoles);
+    if (!isAuthorized && tournament.parentId) {
+      const parent = await this.tournamentsRepository.findParentById(tournament.parentId);
+      isAuthorized = parent?.createdBy === userId;
+    }
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(
+        tournament.communityId,
+        userId,
+      );
+      isAuthorized = member?.role === 'OWNER' || member?.role === 'MODERATOR';
+    }
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền cập nhật bracket của giải đấu này');
+    }
+
+    const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
+    if (!divisions.some((division) => division.id === divisionId)) {
+      throw new NotFoundException('Không tìm thấy bảng đấu cho giải đấu này');
+    }
+
+    return this.tournamentsRepository.updateBracketSlots(
+      id,
+      divisionId,
+      userId,
+      data,
+    );
   }
 
   async generateLiteBracket(

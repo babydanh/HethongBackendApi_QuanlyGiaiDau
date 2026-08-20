@@ -11,12 +11,12 @@ import {
 /**
  * P2C.2 — Gán/Xoá tag BQT cho thành viên cộng đồng.
  * `tags` replace toàn bộ (mảng rỗng = xoá hết). Mỗi tag được trim,
- * 1-24 ký tự, chỉ chứa chữ cái/số/khoảng trắng/gạch dưới/gạch ngang (không emoji).
+ * 1-15 ký tự, chỉ chứa chữ cái/số/khoảng trắng/gạch dưới/gạch ngang (không emoji).
  */
 export class UpdateMemberTagsDto {
   @ApiProperty({
     description:
-      'Danh sách tag BQT (tối đa 5). Mỗi tag 1-40 ký tự.',
+      'Danh sách tag BQT (tối đa 3). Mỗi tag 1-15 ký tự.',
     example: ['Nòng cốt', '⚡ Smash sấm sét', 'VĐV xuất sắc'],
     type: [String],
   })
@@ -26,8 +26,8 @@ export class UpdateMemberTagsDto {
       : value,
   )
   @IsArray()
-  @ArrayMaxSize(5)
+  @ArrayMaxSize(3)
   @IsString({ each: true })
-  @Length(1, 40, { each: true })
+  @Length(1, 15, { each: true })
   tags: string[];
 }
