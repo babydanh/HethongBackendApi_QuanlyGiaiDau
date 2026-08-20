@@ -12,6 +12,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
+    "seed:prod": "npx ts-node src/database/seeds/seed-prod.ts",
     "seed:roles": "npx ts-node src/database/seeds/roles.seed.ts",
     "seed:categories": "npx ts-node src/database/seeds/categories.seed.ts",
     "seed:regions": "npx ts-node src/database/seeds/seed-regions.ts",
