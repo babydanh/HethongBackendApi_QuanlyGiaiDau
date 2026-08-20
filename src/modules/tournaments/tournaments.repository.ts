@@ -57,7 +57,10 @@ import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
-import { hasFootballScoreSnapshot, sortFootballStandings } from './utils/football-standings';
+import {
+  hasFootballScoreSnapshot,
+  sortFootballStandings,
+} from './utils/football-standings';
 import { validateFootballRosterSelection } from './utils/football-roster-validation';
 import { assertFootballRosterLockable } from './utils/football-roster-lock';
 import { resolveFootballTeamConfig } from './utils/football-team-config';
@@ -453,7 +456,6 @@ export class TournamentsRepository {
               ...division,
               inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
             };
-
           }),
         );
 
@@ -1858,37 +1860,88 @@ export class TournamentsRepository {
       const formApplies = Boolean(
         registrationForm?.status === 'PUBLISHED' &&
         selectedDivision &&
-        (!Array.isArray(registrationForm.divisionIds) || registrationForm.divisionIds.length === 0 || registrationForm.divisionIds.includes(selectedDivision.id)),
+        (!Array.isArray(registrationForm.divisionIds) ||
+          registrationForm.divisionIds.length === 0 ||
+          registrationForm.divisionIds.includes(selectedDivision.id)),
       );
-      if (formApplies && registrationForm?.fields && typeof registrationForm.fields === 'object' && Array.isArray(registrationForm.fields)) {
+      if (
+        formApplies &&
+        registrationForm?.fields &&
+        typeof registrationForm.fields === 'object' &&
+        Array.isArray(registrationForm.fields)
+      ) {
         const responses = data.customResponses ?? {};
         for (const rawField of registrationForm.fields) {
-          if (!rawField || typeof rawField !== 'object' || Array.isArray(rawField)) continue;
+          if (
+            !rawField ||
+            typeof rawField !== 'object' ||
+            Array.isArray(rawField)
+          )
+            continue;
           const field = rawField as Record<string, unknown>;
           const fieldId = typeof field.id === 'string' ? field.id : '';
           const value = fieldId ? responses[fieldId] : undefined;
-          const isEmpty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+          const isEmpty =
+            value === undefined ||
+            value === null ||
+            value === '' ||
+            (Array.isArray(value) && value.length === 0);
           if (field.required === true && isEmpty) {
-            throw new BadRequestException(`Vui lòng điền trường “${typeof field.label === 'string' ? field.label : fieldId}”.`);
+            throw new BadRequestException(
+              `Vui lòng điền trường “${typeof field.label === 'string' ? field.label : fieldId}”.`,
+            );
           }
           if (isEmpty) continue;
-          if (field.type === 'EMAIL' && (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))) {
-            throw new BadRequestException(`Trường “${typeof field.label === 'string' ? field.label : fieldId}” phải là email hợp lệ.`);
+          if (
+            field.type === 'EMAIL' &&
+            (typeof value !== 'string' ||
+              !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+          ) {
+            throw new BadRequestException(
+              `Trường “${typeof field.label === 'string' ? field.label : fieldId}” phải là email hợp lệ.`,
+            );
           }
           if (field.type === 'NUMBER') {
-            const numberValue = typeof value === 'number' ? value : Number(value);
-            if (!Number.isFinite(numberValue)) throw new BadRequestException(`Trường “${typeof field.label === 'string' ? field.label : fieldId}” phải là số.`);
-            if (typeof field.min === 'number' && numberValue < field.min) throw new BadRequestException(`Trường “${typeof field.label === 'string' ? field.label : fieldId}” không được nhỏ hơn ${field.min}.`);
-            if (typeof field.max === 'number' && numberValue > field.max) throw new BadRequestException(`Trường “${typeof field.label === 'string' ? field.label : fieldId}” không được lớn hơn ${field.max}.`);
+            const numberValue =
+              typeof value === 'number' ? value : Number(value);
+            if (!Number.isFinite(numberValue))
+              throw new BadRequestException(
+                `Trường “${typeof field.label === 'string' ? field.label : fieldId}” phải là số.`,
+              );
+            if (typeof field.min === 'number' && numberValue < field.min)
+              throw new BadRequestException(
+                `Trường “${typeof field.label === 'string' ? field.label : fieldId}” không được nhỏ hơn ${field.min}.`,
+              );
+            if (typeof field.max === 'number' && numberValue > field.max)
+              throw new BadRequestException(
+                `Trường “${typeof field.label === 'string' ? field.label : fieldId}” không được lớn hơn ${field.max}.`,
+              );
           }
-          if (field.type === 'SELECT' && Array.isArray(field.options) && !field.options.includes(value)) {
-            throw new BadRequestException(`Lựa chọn của trường “${typeof field.label === 'string' ? field.label : fieldId}” không hợp lệ.`);
+          if (
+            field.type === 'SELECT' &&
+            Array.isArray(field.options) &&
+            !field.options.includes(value)
+          ) {
+            throw new BadRequestException(
+              `Lựa chọn của trường “${typeof field.label === 'string' ? field.label : fieldId}” không hợp lệ.`,
+            );
           }
-          if (field.type === 'MULTI_SELECT' && Array.isArray(field.options) && (!Array.isArray(value) || value.some((item) => !(field.options as unknown[]).includes(item)))) {
-            throw new BadRequestException(`Lựa chọn của trường “${typeof field.label === 'string' ? field.label : fieldId}” không hợp lệ.`);
+          if (
+            field.type === 'MULTI_SELECT' &&
+            Array.isArray(field.options) &&
+            (!Array.isArray(value) ||
+              value.some(
+                (item) => !(field.options as unknown[]).includes(item),
+              ))
+          ) {
+            throw new BadRequestException(
+              `Lựa chọn của trường “${typeof field.label === 'string' ? field.label : fieldId}” không hợp lệ.`,
+            );
           }
           if (field.type === 'CHECKBOX' && value !== true) {
-            throw new BadRequestException(`Bạn cần xác nhận “${typeof field.label === 'string' ? field.label : fieldId}”.`);
+            throw new BadRequestException(
+              `Bạn cần xác nhận “${typeof field.label === 'string' ? field.label : fieldId}”.`,
+            );
           }
         }
       }
@@ -2421,7 +2474,10 @@ export class TournamentsRepository {
         });
       }
 
-      const partnerConfig = (tournament?.tournamentConfig || {}) as Record<string, unknown>;
+      const partnerConfig = (tournament?.tournamentConfig || {}) as Record<
+        string,
+        unknown
+      >;
       const targetStatus =
         partnerConfig.isLite === true
           ? 'COMPLETE'
@@ -2771,7 +2827,7 @@ export class TournamentsRepository {
 
       // Team sport: giới hạn số thành viên theo maxTeamSize (MAIN + RESERVE)
       if (isTeamSport) {
-      const maxTeamSize = resolveFootballTeamConfig(teamConfig).maxTotalSize;
+        const maxTeamSize = resolveFootballTeamConfig(teamConfig).maxTotalSize;
         if (Number.isFinite(maxTeamSize) && maxTeamSize > 0) {
           const [countRes] = await tx
             .select({ total: sql<number>`count(*)::int` })
@@ -3249,9 +3305,13 @@ export class TournamentsRepository {
       const [divisionFeeRow] = await this.db
         .select({ entryFee: schema.tournamentDivisions.entryFee })
         .from(schema.tournamentDivisions)
-        .where(eq(schema.tournamentDivisions.id, participant.tournamentDivisionId))
+        .where(
+          eq(schema.tournamentDivisions.id, participant.tournamentDivisionId),
+        )
         .limit(1);
-      payableEntryFeeAmount = Number(divisionFeeRow?.entryFee ?? payableEntryFeeAmount);
+      payableEntryFeeAmount = Number(
+        divisionFeeRow?.entryFee ?? payableEntryFeeAmount,
+      );
     }
     const paymentEligible =
       participant.teamStatus === 'COMPLETE' &&
@@ -3549,29 +3609,42 @@ export class TournamentsRepository {
     // 2. Fetch rosters and ELO info for all participant IDs
     const participantIds = participants.map((p) => p.id);
 
-    const paymentRows = includePaymentDetails ? await this.db
-      .select({
-        participantId: schema.payments.participantId,
-        id: schema.payments.id,
-        amount: schema.payments.amount,
-        status: schema.payments.status,
-        paymentGateway: schema.payments.paymentGateway,
-        transactionReference: schema.payments.transactionReference,
-        providerTransactionId: schema.payments.providerTransactionId,
-        providerOrderCode: schema.payments.providerOrderCode,
-        paidAt: schema.payments.paidAt,
-        receiptNumber: schema.paymentReceipts.receiptNumber,
-        currency: schema.paymentReceipts.currency,
-      })
-      .from(schema.payments)
-      .leftJoin(schema.paymentReceipts, eq(schema.paymentReceipts.paymentId, schema.payments.id))
-      .where(and(inArray(schema.payments.participantId, participantIds), eq(schema.payments.purpose, 'REGISTRATION_FEE')))
-      .orderBy(desc(schema.payments.createdAt)) : [];
+    const paymentRows = includePaymentDetails
+      ? await this.db
+          .select({
+            participantId: schema.payments.participantId,
+            id: schema.payments.id,
+            amount: schema.payments.amount,
+            status: schema.payments.status,
+            paymentGateway: schema.payments.paymentGateway,
+            transactionReference: schema.payments.transactionReference,
+            providerTransactionId: schema.payments.providerTransactionId,
+            providerOrderCode: schema.payments.providerOrderCode,
+            paidAt: schema.payments.paidAt,
+            receiptNumber: schema.paymentReceipts.receiptNumber,
+            currency: schema.paymentReceipts.currency,
+          })
+          .from(schema.payments)
+          .leftJoin(
+            schema.paymentReceipts,
+            eq(schema.paymentReceipts.paymentId, schema.payments.id),
+          )
+          .where(
+            and(
+              inArray(schema.payments.participantId, participantIds),
+              eq(schema.payments.purpose, 'REGISTRATION_FEE'),
+            ),
+          )
+          .orderBy(desc(schema.payments.createdAt))
+      : [];
     const paymentMap = new Map<string, (typeof paymentRows)[number]>();
     for (const payment of paymentRows) {
       if (!payment.participantId) continue;
       const current = paymentMap.get(payment.participantId);
-      if (!current || (payment.status === 'COMPLETED' && current.status !== 'COMPLETED')) {
+      if (
+        !current ||
+        (payment.status === 'COMPLETED' && current.status !== 'COMPLETED')
+      ) {
         paymentMap.set(payment.participantId, payment);
       }
     }
@@ -3689,7 +3762,9 @@ export class TournamentsRepository {
       const members = rostersMap.get(p.id) || [];
       let eloPoints = 1000;
       if (p.footballTeamId) {
-        eloPoints = (rosters.find((row) => row.participantId === p.id)?.footballTeamEloPoints) ?? 1000;
+        eloPoints =
+          rosters.find((row) => row.participantId === p.id)
+            ?.footballTeamEloPoints ?? 1000;
       } else if (members.length === 1) {
         eloPoints = members[0].elo?.eloPoints ?? 1000;
       } else if (members.length === 2) {
@@ -3700,7 +3775,9 @@ export class TournamentsRepository {
       return {
         ...p,
         customResponses:
-          p.customResponses && typeof p.customResponses === 'object' && !Array.isArray(p.customResponses)
+          p.customResponses &&
+          typeof p.customResponses === 'object' &&
+          !Array.isArray(p.customResponses)
             ? (p.customResponses as Record<string, unknown>)
             : null,
         members,
@@ -3715,13 +3792,24 @@ export class TournamentsRepository {
     categoryId: string,
     divisionId?: string,
   ) {
-    const participants = await this.findParticipants(tournamentId, categoryId, divisionId, false, false);
+    const participants = await this.findParticipants(
+      tournamentId,
+      categoryId,
+      divisionId,
+      false,
+      false,
+    );
     return participants.map((p) => ({
       ...p,
       customResponses: null,
       payment: null,
       registeredBy: p.registeredBy
-        ? { id: p.registeredBy.id, fullName: p.registeredBy.fullName, avatarUrl: p.registeredBy.avatarUrl, email: null }
+        ? {
+            id: p.registeredBy.id,
+            fullName: p.registeredBy.fullName,
+            avatarUrl: p.registeredBy.avatarUrl,
+            email: null,
+          }
         : null,
       members: p.members.map((m) => ({
         id: m.id,
@@ -3971,7 +4059,9 @@ export class TournamentsRepository {
     data: UpdateBracketSlotsDto,
   ) {
     if (data.operations.length === 0) {
-      throw new BadRequestException('Cần ít nhất một thao tác cập nhật vị trí.');
+      throw new BadRequestException(
+        'Cần ít nhất một thao tác cập nhật vị trí.',
+      );
     }
 
     return this.db.transaction(async (tx) => {
@@ -4014,15 +4104,23 @@ export class TournamentsRepository {
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-            notInArray(schema.tournamentParticipants.teamStatus, ['REJECTED', 'WITHDRAWN', 'KICKED']),
+            notInArray(schema.tournamentParticipants.teamStatus, [
+              'REJECTED',
+              'WITHDRAWN',
+              'KICKED',
+            ]),
           ),
         );
-      const participantIds = new Set(participants.map((participant) => participant.id));
+      const participantIds = new Set(
+        participants.map((participant) => participant.id),
+      );
       const changedMatchIds = new Set<string>();
 
       const getMatch = (matchId: string | undefined) => {
         if (!matchId) {
-          throw new BadRequestException('Thiếu mã trận đấu trong thao tác bracket.');
+          throw new BadRequestException(
+            'Thiếu mã trận đấu trong thao tác bracket.',
+          );
         }
         const match = matchesById.get(matchId);
         if (!match) {
@@ -4031,19 +4129,27 @@ export class TournamentsRepository {
         return match;
       };
 
-      const assertEditable = (match: typeof matches[number]) => {
+      const assertEditable = (match: (typeof matches)[number]) => {
         const status = match.status.toUpperCase();
-        if (status === 'IN_PROGRESS' || status === 'ONGOING' || status === 'LIVE') {
-          throw new BadRequestException('Không thể thay đổi participant của trận đang thi đấu');
+        if (
+          status === 'IN_PROGRESS' ||
+          status === 'ONGOING' ||
+          status === 'LIVE'
+        ) {
+          throw new BadRequestException(
+            'Không thể thay đổi participant của trận đang thi đấu',
+          );
         }
       };
 
       const getSlotValue = (
-        match: typeof matches[number],
+        match: (typeof matches)[number],
         slot: BracketSlotName | undefined,
       ) => {
         if (!slot) {
-          throw new BadRequestException('Thiếu vị trí participant trong thao tác bracket.');
+          throw new BadRequestException(
+            'Thiếu vị trí participant trong thao tác bracket.',
+          );
         }
         return slot === BracketSlotName.PARTICIPANT1
           ? match.participant1Id
@@ -4051,12 +4157,14 @@ export class TournamentsRepository {
       };
 
       const setSlotValue = (
-        match: typeof matches[number],
+        match: (typeof matches)[number],
         slot: BracketSlotName | undefined,
         participantId: string | null,
       ) => {
         if (!slot) {
-          throw new BadRequestException('Thiếu vị trí participant trong thao tác bracket.');
+          throw new BadRequestException(
+            'Thiếu vị trí participant trong thao tác bracket.',
+          );
         }
         if (slot === BracketSlotName.PARTICIPANT1) {
           match.participant1Id = participantId;
@@ -4093,25 +4201,42 @@ export class TournamentsRepository {
             if (getSlotValue(target, operation.slot) !== null) {
               throw new BadRequestException('Vị trí bracket đã có participant');
             }
-            const existingLocation = findParticipantLocation(operation.participantId as string);
+            const existingLocation = findParticipantLocation(
+              operation.participantId as string,
+            );
             if (existingLocation) {
-              throw new BadRequestException('Participant đã được xếp trong bracket');
+              throw new BadRequestException(
+                'Participant đã được xếp trong bracket',
+              );
             }
-            setSlotValue(target, operation.slot, operation.participantId as string);
+            setSlotValue(
+              target,
+              operation.slot,
+              operation.participantId as string,
+            );
             break;
           }
           case BracketSlotMutationOperation.REPLACE: {
             const target = getMatch(operation.matchId);
             assertEditable(target);
             assertParticipant(operation.participantId);
-            const existingLocation = findParticipantLocation(operation.participantId as string);
+            const existingLocation = findParticipantLocation(
+              operation.participantId as string,
+            );
             if (
               existingLocation &&
-              (existingLocation.match.id !== target.id || existingLocation.slot !== operation.slot)
+              (existingLocation.match.id !== target.id ||
+                existingLocation.slot !== operation.slot)
             ) {
-              throw new BadRequestException('Participant đã được xếp ở vị trí khác');
+              throw new BadRequestException(
+                'Participant đã được xếp ở vị trí khác',
+              );
             }
-            setSlotValue(target, operation.slot, operation.participantId as string);
+            setSlotValue(
+              target,
+              operation.slot,
+              operation.participantId as string,
+            );
             break;
           }
           case BracketSlotMutationOperation.UNASSIGN: {
@@ -4125,10 +4250,16 @@ export class TournamentsRepository {
             const target = getMatch(operation.toMatchId);
             assertEditable(source);
             assertEditable(target);
-            if (source.id === target.id && operation.fromSlot === operation.toSlot) break;
+            if (
+              source.id === target.id &&
+              operation.fromSlot === operation.toSlot
+            )
+              break;
             const sourceParticipant = getSlotValue(source, operation.fromSlot);
             if (!sourceParticipant) {
-              throw new BadRequestException('Vị trí nguồn không có participant');
+              throw new BadRequestException(
+                'Vị trí nguồn không có participant',
+              );
             }
             if (getSlotValue(target, operation.toSlot) !== null) {
               throw new BadRequestException('Vị trí đích đã có participant');
@@ -4142,11 +4273,17 @@ export class TournamentsRepository {
             const target = getMatch(operation.toMatchId);
             assertEditable(source);
             assertEditable(target);
-            if (source.id === target.id && operation.fromSlot === operation.toSlot) break;
+            if (
+              source.id === target.id &&
+              operation.fromSlot === operation.toSlot
+            )
+              break;
             const sourceParticipant = getSlotValue(source, operation.fromSlot);
             const targetParticipant = getSlotValue(target, operation.toSlot);
             if (!sourceParticipant || !targetParticipant) {
-              throw new BadRequestException('Cần hai participant để hoán đổi vị trí');
+              throw new BadRequestException(
+                'Cần hai participant để hoán đổi vị trí',
+              );
             }
             setSlotValue(source, operation.fromSlot, targetParticipant);
             setSlotValue(target, operation.toSlot, sourceParticipant);
@@ -4985,17 +5122,57 @@ export class TournamentsRepository {
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
-      // Check division if divisionId provided, else use tournament matchType
+      // Resolve the target division before deriving the participant format.
+      // Never silently fall back to tournament.matchType for a multi-division
+      // tournament: that can turn a singles mock into a doubles team.
+      const divisionOwnerIds = [tournament.id, tournament.parentId].filter(
+        (value): value is string => Boolean(value),
+      );
+      let effectiveDivisionId = divisionId;
       let matchType = tournament.matchType;
+
       if (divisionId) {
         const division = await tx
           .select()
           .from(schema.tournamentDivisions)
-          .where(eq(schema.tournamentDivisions.id, divisionId))
+          .where(
+            and(
+              eq(schema.tournamentDivisions.id, divisionId),
+              inArray(
+                schema.tournamentDivisions.tournamentId,
+                divisionOwnerIds,
+              ),
+            ),
+          )
           .limit(1)
           .then((res) => res[0]);
-        if (division) {
-          matchType = division.matchType;
+
+        if (!division) {
+          throw new BadRequestException(
+            'Nội dung thi đấu không thuộc giải này',
+          );
+        }
+        matchType = division.matchType;
+      } else {
+        const divisions = await tx
+          .select({
+            id: schema.tournamentDivisions.id,
+            matchType: schema.tournamentDivisions.matchType,
+          })
+          .from(schema.tournamentDivisions)
+          .where(
+            inArray(schema.tournamentDivisions.tournamentId, divisionOwnerIds),
+          )
+          .orderBy(schema.tournamentDivisions.createdAt);
+
+        if (divisions.length > 1) {
+          throw new BadRequestException(
+            'Giải có nhiều nội dung thi đấu, bắt buộc chọn divisionId khi sinh dữ liệu ảo',
+          );
+        }
+        if (divisions.length === 1) {
+          effectiveDivisionId = divisions[0].id;
+          matchType = divisions[0].matchType;
         }
       }
 
@@ -5035,7 +5212,7 @@ export class TournamentsRepository {
             .insert(schema.tournamentParticipants)
             .values({
               tournamentId,
-              tournamentDivisionId: divisionId ?? null,
+              tournamentDivisionId: effectiveDivisionId ?? null,
               registeredBy: user1.id,
               teamName,
               isPaid: true,
@@ -5075,7 +5252,7 @@ export class TournamentsRepository {
             .insert(schema.tournamentParticipants)
             .values({
               tournamentId,
-              tournamentDivisionId: divisionId ?? null,
+              tournamentDivisionId: effectiveDivisionId ?? null,
               registeredBy: user.id,
               teamName: name,
               isPaid: true,
@@ -5111,17 +5288,74 @@ export class TournamentsRepository {
 
   async clearMockParticipants(tournamentId: string, divisionId?: string) {
     return await this.db.transaction(async (tx) => {
+      const tournament = await tx
+        .select({
+          id: schema.tournaments.id,
+          parentId: schema.tournaments.parentId,
+        })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1)
+        .then((res) => res[0]);
+
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
+
+      const divisionOwnerIds = [tournament.id, tournament.parentId].filter(
+        (value): value is string => Boolean(value),
+      );
+      let effectiveDivisionId = divisionId;
+
+      if (divisionId) {
+        const division = await tx
+          .select({ id: schema.tournamentDivisions.id })
+          .from(schema.tournamentDivisions)
+          .where(
+            and(
+              eq(schema.tournamentDivisions.id, divisionId),
+              inArray(
+                schema.tournamentDivisions.tournamentId,
+                divisionOwnerIds,
+              ),
+            ),
+          )
+          .limit(1)
+          .then((res) => res[0]);
+
+        if (!division) {
+          throw new BadRequestException(
+            'Nội dung thi đấu không thuộc giải này',
+          );
+        }
+      } else {
+        const divisions = await tx
+          .select({ id: schema.tournamentDivisions.id })
+          .from(schema.tournamentDivisions)
+          .where(
+            inArray(schema.tournamentDivisions.tournamentId, divisionOwnerIds),
+          )
+          .orderBy(schema.tournamentDivisions.createdAt);
+
+        if (divisions.length > 1) {
+          throw new BadRequestException(
+            'Giải có nhiều nội dung thi đấu, bắt buộc chọn divisionId khi dọn dữ liệu ảo',
+          );
+        }
+        if (divisions.length === 1) {
+          effectiveDivisionId = divisions[0].id;
+        }
+      }
+
       const mockParts = await tx
         .select({ id: schema.tournamentParticipants.id })
         .from(schema.tournamentParticipants)
         .where(
-          divisionId
+          effectiveDivisionId
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.isMock, true),
                 eq(
                   schema.tournamentParticipants.tournamentDivisionId,
-                  divisionId,
+                  effectiveDivisionId,
                 ),
               )
             : and(
@@ -5429,11 +5663,22 @@ export class TournamentsRepository {
         [entry] = await tx
           .select()
           .from(schema.tournamentTeamEntries)
-          .where(and(
-            eq(schema.tournamentTeamEntries.tournamentId, participant.tournamentId),
-            eq(schema.tournamentTeamEntries.divisionId, participant.tournamentDivisionId),
-            eq(schema.tournamentTeamEntries.teamId, participant.footballTeamId),
-          ))
+          .where(
+            and(
+              eq(
+                schema.tournamentTeamEntries.tournamentId,
+                participant.tournamentId,
+              ),
+              eq(
+                schema.tournamentTeamEntries.divisionId,
+                participant.tournamentDivisionId,
+              ),
+              eq(
+                schema.tournamentTeamEntries.teamId,
+                participant.footballTeamId,
+              ),
+            ),
+          )
           .for('update')
           .limit(1);
       }
@@ -5636,8 +5881,14 @@ export class TournamentsRepository {
         .from(schema.tournamentTeamEntries)
         .where(
           and(
-            eq(schema.tournamentTeamEntries.tournamentId, participant.tournamentId),
-            eq(schema.tournamentTeamEntries.divisionId, participant.tournamentDivisionId),
+            eq(
+              schema.tournamentTeamEntries.tournamentId,
+              participant.tournamentId,
+            ),
+            eq(
+              schema.tournamentTeamEntries.divisionId,
+              participant.tournamentDivisionId,
+            ),
             eq(schema.tournamentTeamEntries.teamId, participant.footballTeamId),
           ),
         )
@@ -5711,11 +5962,17 @@ export class TournamentsRepository {
         .from(schema.tournamentRosters)
         .innerJoin(
           schema.tournamentParticipants,
-          eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+          eq(
+            schema.tournamentRosters.participantId,
+            schema.tournamentParticipants.id,
+          ),
         )
         .where(
           and(
-            eq(schema.tournamentParticipants.tournamentId, participant.tournamentId),
+            eq(
+              schema.tournamentParticipants.tournamentId,
+              participant.tournamentId,
+            ),
             ne(schema.tournamentParticipants.id, participantId),
             inArray(schema.tournamentRosters.userId, roster.allMemberIds),
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
@@ -5758,8 +6015,13 @@ export class TournamentsRepository {
         snapshots.map((userId) => ({
           entryId: entry.id,
           userId,
-          role: roster.mainMemberIds.includes(userId) ? ('MAIN' as const) : ('RESERVE' as const),
-          confirmationStatus: userId === participant.registeredBy ? ('CONFIRMED' as const) : ('PENDING' as const),
+          role: roster.mainMemberIds.includes(userId)
+            ? ('MAIN' as const)
+            : ('RESERVE' as const),
+          confirmationStatus:
+            userId === participant.registeredBy
+              ? ('CONFIRMED' as const)
+              : ('PENDING' as const),
         })),
       );
       const requiredMainRosterCount = this.getRequiredFootballMainRosterCount(
@@ -5768,7 +6030,8 @@ export class TournamentsRepository {
       const nextStatus =
         roster.mainMemberIds.length < requiredMainRosterCount
           ? 'DRAFT'
-          : roster.mainMemberIds.length === 1 && roster.reserveMemberIds.length === 0
+          : roster.mainMemberIds.length === 1 &&
+              roster.reserveMemberIds.length === 0
             ? 'CONFIRMED'
             : 'PENDING_CONFIRMATION';
       const registrationConfig =
@@ -5809,7 +6072,8 @@ export class TournamentsRepository {
         roster: snapshots.map((userId) => ({
           userId,
           role: roster.mainMemberIds.includes(userId) ? 'MAIN' : 'RESERVE',
-          confirmationStatus: userId === participant.registeredBy ? 'CONFIRMED' : 'PENDING',
+          confirmationStatus:
+            userId === participant.registeredBy ? 'CONFIRMED' : 'PENDING',
         })),
       };
     });
@@ -6516,12 +6780,16 @@ export class TournamentsRepository {
         { entryFee: tournament?.entryFee ?? null },
         nextWaitlisted.tournamentDivisionId,
       );
-      const promotionConfig = (tournament?.tournamentConfig || {}) as Record<string, unknown>;
-      const regMode = promotionConfig.isLite === true
-        ? 'OPEN'
-        : promotionConfig.registrationMode === 'APPROVAL'
-          ? 'APPROVAL'
-          : 'OPEN';
+      const promotionConfig = (tournament?.tournamentConfig || {}) as Record<
+        string,
+        unknown
+      >;
+      const regMode =
+        promotionConfig.isLite === true
+          ? 'OPEN'
+          : promotionConfig.registrationMode === 'APPROVAL'
+            ? 'APPROVAL'
+            : 'OPEN';
       const promotedStatus =
         isDoubles && Number(rosterCount.count) < 2
           ? 'PENDING_PARTNER'
@@ -6788,7 +7056,10 @@ export class TournamentsRepository {
         );
       return Number(result?.value ?? 0);
     } catch (error) {
-      console.error(`Failed to count participants for division ${divisionId}:`, error);
+      console.error(
+        `Failed to count participants for division ${divisionId}:`,
+        error,
+      );
       return 0;
     }
   }
@@ -7865,9 +8136,8 @@ export class TournamentsRepository {
       const rawRegistrationMode =
         (((tournament.tournamentConfig || {}) as Record<string, unknown>)
           .registrationMode as string) || 'OPEN';
-      const registrationMode = rawRegistrationMode === 'APPROVAL'
-        ? 'OPEN'
-        : rawRegistrationMode;
+      const registrationMode =
+        rawRegistrationMode === 'APPROVAL' ? 'OPEN' : rawRegistrationMode;
 
       // Query pending participants INSIDE the transaction with FOR UPDATE (fixes TOCTOU + no lock outside tx)
       const pendingParticipants = await tx
@@ -8257,7 +8527,9 @@ export class TournamentsRepository {
           .then((res) => res[0]);
 
         if (!division) {
-          throw new BadRequestException('Nội dung thi đấu không thuộc giải này');
+          throw new BadRequestException(
+            'Nội dung thi đấu không thuộc giải này',
+          );
         }
         divisionMatchType = division.matchType;
       }
@@ -8277,7 +8549,12 @@ export class TournamentsRepository {
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             ...(divisionId
-              ? [eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)]
+              ? [
+                  eq(
+                    schema.tournamentParticipants.tournamentDivisionId,
+                    divisionId,
+                  ),
+                ]
               : []),
             ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
             ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
@@ -8285,14 +8562,19 @@ export class TournamentsRepository {
           ),
         );
       const maxParticipants = divisionId
-        ? (await tx
-            .select({ maxParticipants: schema.tournamentDivisions.maxParticipants })
+        ? await tx
+            .select({
+              maxParticipants: schema.tournamentDivisions.maxParticipants,
+            })
             .from(schema.tournamentDivisions)
             .where(eq(schema.tournamentDivisions.id, divisionId))
             .limit(1)
-            .then((rows) => rows[0]?.maxParticipants ?? null))
+            .then((rows) => rows[0]?.maxParticipants ?? null)
         : tournament.maxParticipants;
-      if (maxParticipants != null && existingCount.count + items.length > maxParticipants) {
+      if (
+        maxParticipants != null &&
+        existingCount.count + items.length > maxParticipants
+      ) {
         throw new BadRequestException(
           `Số lượng nhập vượt quá giới hạn nội dung thi đấu (${maxParticipants})`,
         );
@@ -8300,7 +8582,11 @@ export class TournamentsRepository {
 
       const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       const results: (typeof schema.tournamentParticipants.$inferSelect)[] = [];
-      const unregisteredEmails: Array<{ email: string; name: string; teamName: string }> = [];
+      const unregisteredEmails: Array<{
+        email: string;
+        name: string;
+        teamName: string;
+      }> = [];
 
       for (const [itemIndex, item] of items.entries()) {
         const player1Name = item.player1Name?.trim();
@@ -8313,19 +8599,32 @@ export class TournamentsRepository {
         const hasPlayer2Data = Boolean(player2Name || p2Email || p2Phone);
 
         if (!player1Name) {
-          throw new BadRequestException(`Dòng ${itemIndex + 1} thiếu tên VĐV 1`);
+          throw new BadRequestException(
+            `Dòng ${itemIndex + 1} thiếu tên VĐV 1`,
+          );
         }
         if (isDoubles && !player2Name) {
-          throw new BadRequestException(`Dòng ${itemIndex + 1} của nội dung đôi thiếu VĐV 2`);
+          throw new BadRequestException(
+            `Dòng ${itemIndex + 1} của nội dung đôi thiếu VĐV 2`,
+          );
         }
         if (!isDoubles && hasPlayer2Data) {
-          throw new BadRequestException(`Dòng ${itemIndex + 1} của nội dung đơn có dữ liệu VĐV 2`);
+          throw new BadRequestException(
+            `Dòng ${itemIndex + 1} của nội dung đơn có dữ liệu VĐV 2`,
+          );
         }
-        if ((p1Email && !emailPattern.test(p1Email)) || (p2Email && !emailPattern.test(p2Email))) {
-          throw new BadRequestException(`Dòng ${itemIndex + 1} có email không hợp lệ`);
+        if (
+          (p1Email && !emailPattern.test(p1Email)) ||
+          (p2Email && !emailPattern.test(p2Email))
+        ) {
+          throw new BadRequestException(
+            `Dòng ${itemIndex + 1} có email không hợp lệ`,
+          );
         }
         if (p1Email && p2Email && p1Email === p2Email) {
-          throw new BadRequestException(`Dòng ${itemIndex + 1} dùng trùng email cho hai VĐV`);
+          throw new BadRequestException(
+            `Dòng ${itemIndex + 1} dùng trùng email cho hai VĐV`,
+          );
         }
 
         // 1. Resolve User 1
@@ -8360,7 +8659,9 @@ export class TournamentsRepository {
           if (foundUser) {
             user1Id = foundUser.id;
           } else {
-            const guestEmail = p1Email || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
+            const guestEmail =
+              p1Email ||
+              `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
             const [newUser] = await tx
               .insert(schema.users)
               .values({
@@ -8396,10 +8697,10 @@ export class TournamentsRepository {
             })
             .returning();
 
-            await tx.insert(schema.profiles).values({
-              userId: newUser.id,
-              fullName: player1Name,
-            });
+          await tx.insert(schema.profiles).values({
+            userId: newUser.id,
+            fullName: player1Name,
+          });
           user1Id = newUser.id;
         }
 
@@ -8436,7 +8737,9 @@ export class TournamentsRepository {
             if (foundUser2) {
               user2Id = foundUser2.id;
             } else {
-              const guestEmail2 = p2Email || `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
+              const guestEmail2 =
+                p2Email ||
+                `guest_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@guest.sporto.asia`;
               const [newUser2] = await tx
                 .insert(schema.users)
                 .values({
@@ -8480,9 +8783,10 @@ export class TournamentsRepository {
           }
         }
 
-        const teamStatus = item.autoApprove && (item.isPaid ?? true)
-          ? 'COMPLETE'
-          : 'PENDING_APPROVAL';
+        const teamStatus =
+          item.autoApprove && (item.isPaid ?? true)
+            ? 'COMPLETE'
+            : 'PENDING_APPROVAL';
 
         const [participant] = await tx
           .insert(schema.tournamentParticipants)

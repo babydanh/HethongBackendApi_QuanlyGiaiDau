@@ -11,8 +11,13 @@ import {
   ParseIntPipe,
   Req,
   UnauthorizedException,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
 } from '@nestjs/common';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
@@ -870,6 +875,33 @@ export class TournamentsController {
       dto.names,
       this.getSystemRoles(user),
       dto.divisionId,
+    );
+  }
+
+  @Post(':id/registration-attachment')
+  @Verified()
+  @ApiBearerAuth()
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Tải tệp đính kèm cho biểu mẫu đăng ký nâng cao' })
+  @ApiResponse({ status: 201, description: 'Tệp đã được tải lên Cloudinary' })
+  async uploadRegistrationAttachment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('fieldId') fieldId: string | undefined,
+    @CurrentUser() user: JwtPayload,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.tournamentsService.uploadRegistrationAttachment(
+      id,
+      user.sub,
+      fieldId,
+      file,
     );
   }
 
