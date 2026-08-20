@@ -17,7 +17,7 @@ export class UpdateMemberTagsDto {
   @ApiProperty({
     description:
       'Danh sách tag BQT (tối đa 3). Mỗi tag 1-15 ký tự.',
-    example: ['Nòng cốt', '⚡ Smash sấm sét', 'VĐV xuất sắc'],
+    example: ['Nòng cốt', 'Smash sấm sét', 'VĐV xuất sắc'],
     type: [String],
   })
   @Transform(({ value }) =>
