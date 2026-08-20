@@ -135,12 +135,13 @@ async function main() {
         for (const d of p.districts) {
           if (d.wards && Array.isArray(d.wards)) {
             for (const w of d.wards) {
+              const fullDisplay = `${w.name}, ${d.name}`;
               wardsToInsert.push({
                 code: String(w.code),
                 name: w.name,
                 name_en: w.name_en || null,
-                full_name: w.name,
-                full_name_en: w.name_en || null,
+                full_name: fullDisplay,
+                full_name_en: w.name_en ? `${w.name_en}, ${d.name_en || d.name}` : null,
                 code_name: w.codename,
                 province_code: String(p.code),
                 district_code: null,
