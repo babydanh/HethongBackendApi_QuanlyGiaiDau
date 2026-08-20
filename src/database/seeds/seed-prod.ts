@@ -321,7 +321,10 @@ async function main() {
   }
 
   // Lấy ID của một admin làm người cập nhật cho System Configs
-  const [defaultAdmin] = await db.select().from(schema.users).where(eq(schema.users.email, 'macter.970@gmail.com')).limit(1);
+  let [defaultAdmin] = await db.select().from(schema.users).where(eq(schema.users.email, 'macter.970@gmail.com')).limit(1);
+  if (!defaultAdmin) {
+    [defaultAdmin] = await db.select().from(schema.users).limit(1);
+  }
 
   // 5. Setup System Configs
   console.log('\n5. Đang khởi tạo cấu hình hệ thống mặc định (System Configs)...');
@@ -336,12 +339,12 @@ async function main() {
 
   for (const config of systemConfigsList) {
     const [existing] = await db.select().from(schema.systemConfigs).where(eq(schema.systemConfigs.key, config.key)).limit(1);
-    if (!existing) {
+    if (!existing && defaultAdmin?.id) {
       await db.insert(schema.systemConfigs).values({
         key: config.key,
         value: config.value,
         description: config.description,
-        updatedBy: defaultAdmin?.id // Gán người cập nhật là tài khoản Admin hệ thống
+        updatedBy: defaultAdmin.id,
       });
       console.log(`   ➜ Đã tạo cấu hình: ${config.key} = ${config.value}`);
     } else {
