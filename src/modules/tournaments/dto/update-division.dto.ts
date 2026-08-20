@@ -72,6 +72,11 @@ export class UpdateDivisionDto {
   @IsOptional()
   startDate?: string | null;
 
+  @ApiPropertyOptional({ example: '2026-07-22T18:00:00Z', nullable: true })
+  @IsDateString()
+  @IsOptional()
+  endDate?: string | null;
+
   @ApiPropertyOptional({ example: '2026-07-15T23:59:59Z', nullable: true })
   @IsDateString()
   @IsOptional()
