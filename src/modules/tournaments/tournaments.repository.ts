@@ -2362,7 +2362,7 @@ export class TournamentsRepository {
         );
       }
 
-      if (participant.partnerUserId !== partnerUserId) {
+      if (participant.partnerUserId && participant.partnerUserId !== partnerUserId) {
         throw new BadRequestException(
           'Chỉ đúng tài khoản đồng đội được mời mới có thể xác nhận lời mời này.',
         );
@@ -2489,6 +2489,7 @@ export class TournamentsRepository {
         .update(schema.tournamentParticipants)
         .set({
           teamStatus: targetStatus,
+          partnerUserId: participant.partnerUserId || partnerUserId,
           partnerInviteExpiresAt: null,
         })
         .where(eq(schema.tournamentParticipants.id, participantId))
@@ -2518,7 +2519,7 @@ export class TournamentsRepository {
           'Lời mời ghép đôi không tồn tại hoặc đã bị hủy.',
         );
       }
-      if (participant.partnerUserId !== partnerUserId) {
+      if (participant.partnerUserId && participant.partnerUserId !== partnerUserId) {
         throw new BadRequestException(
           'Chỉ đúng tài khoản đồng đội được mời mới có thể từ chối lời mời này.',
         );
