@@ -1,7 +1,13 @@
-import { db } from '../src/database/db';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import * as dotenv from 'dotenv';
+import { createPostgresClientFromEnv } from '../src/database/postgres-client';
 import { tournaments } from '../src/database/schema';
 import { eq, ne } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
+
+dotenv.config();
+const sqlClient = createPostgresClientFromEnv();
+const db = drizzle(sqlClient);
 
 async function main() {
   console.log('Fixing stuck divisions...');
@@ -21,7 +27,7 @@ async function main() {
     WHERE t.status = 'DRAFT' AND p.max_status != 'DRAFT';
   `);
   
-  const rows = result.rows || result; // depending on pg driver vs postgres.js
+  const rows = ((result as unknown as { rows?: unknown[] }).rows || (result as unknown as unknown[])) as Record<string, any>[];
   const divisionsToFix = Array.isArray(rows) ? rows : [];
   
   console.log(`Found ${divisionsToFix.length} divisions stuck in DRAFT.`);
