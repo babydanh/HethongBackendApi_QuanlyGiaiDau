@@ -27,6 +27,7 @@ import {
   asc,
   gt,
   notExists,
+  notInArray,
 } from 'drizzle-orm';
 import { AuditService, Transaction } from '../audit/audit.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
@@ -3985,6 +3986,7 @@ export class TournamentsRepository {
           and(
             eq(schema.tournamentParticipants.tournamentId, tournamentId),
             eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+            notInArray(schema.tournamentParticipants.teamStatus, ['REJECTED', 'WITHDRAWN', 'KICKED']),
           ),
         );
       const participantIds = new Set(participants.map((participant) => participant.id));
