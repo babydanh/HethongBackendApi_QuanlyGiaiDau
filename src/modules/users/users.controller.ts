@@ -28,6 +28,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUserDto } from './dto/query-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateReportDto } from './dto/create-report.dto';
+import { CreateChangeRequestDto } from './dto/create-change-request.dto';
 import { QueryMyReportsDto } from './dto/query-my-reports.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
@@ -204,7 +205,7 @@ export class UsersController {
   @ApiOperation({ summary: 'Gửi yêu cầu thay đổi giới tính / email nhạy cảm' })
   async createChangeRequest(
     @CurrentUser() user: { id: string },
-    @Body() body: { requestType: 'GENDER' | 'EMAIL'; newValue: string },
+    @Body() body: CreateChangeRequestDto,
   ) {
     return this.usersService.createChangeRequest(user.id, body.requestType, body.newValue);
   }

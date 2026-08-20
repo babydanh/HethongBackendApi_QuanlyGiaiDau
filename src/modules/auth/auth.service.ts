@@ -348,12 +348,13 @@ export class AuthService {
       // 3.1. Tạo userRanks mặc định nếu chưa có
       await this.authRepository.createDefaultUserRanks(user.id);
 
-      // 3.2. Nếu user đã tồn tại nhưng chưa xác minh email, tự động xác minh email vì họ đã chứng minh sở hữu qua OAuth2
+      // Không được tự động xác minh một email chỉ vì provider trả về cùng chuỗi email.
+      // Nếu email đang lưu chưa xác minh, người dùng phải xác minh qua mailbox trước;
+      // nếu không, việc đổi email chưa xác minh có thể bị dùng để nhập nhầm vào tài khoản.
       if (!user.isEmailVerified) {
-        await this.db.update(schema.users)
-          .set({ isEmailVerified: true })
-          .where(eq(schema.users.id, user.id));
-        user.isEmailVerified = true;
+        throw new UnauthorizedException(
+          'Email tài khoản chưa được xác minh. Vui lòng xác minh email trước khi đăng nhập bằng OAuth.',
+        );
       }
 
       // 3.3. Nếu là Admin đăng nhập mà chưa có đủ quyền ADMIN hoặc ORGANIZER, gán bổ sung luôn
