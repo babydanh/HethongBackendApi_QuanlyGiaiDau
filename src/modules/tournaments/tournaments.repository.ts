@@ -3724,9 +3724,15 @@ export class TournamentsRepository {
         ? { id: p.registeredBy.id, fullName: p.registeredBy.fullName, avatarUrl: p.registeredBy.avatarUrl, email: null }
         : null,
       members: p.members.map((m) => ({
+        id: m.id,
         userId: m.userId,
         fullName: m.fullName,
         avatarUrl: m.avatarUrl,
+        teamRole: m.teamRole,
+        isTemporary: m.isTemporary,
+        confirmedAt: m.confirmedAt,
+        invitationToken: m.invitationToken,
+        createdAt: m.createdAt,
       })),
     }));
   }

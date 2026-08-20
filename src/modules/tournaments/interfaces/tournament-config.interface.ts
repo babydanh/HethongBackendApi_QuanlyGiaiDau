@@ -82,7 +82,7 @@ export interface RosterMember {
   phoneNumber?: string | null;
   gender?: string | null;
   fullName: string | null;
-    avatarUrl: string | null;
+  avatarUrl: string | null;
   role: string;
 
   teamRole?: string | null;
