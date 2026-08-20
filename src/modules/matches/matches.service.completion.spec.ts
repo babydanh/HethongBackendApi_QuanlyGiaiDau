@@ -58,7 +58,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       del: jest.fn().mockResolvedValue(undefined),
       delByPattern: jest.fn().mockResolvedValue(undefined),
       hset: jest.fn().mockResolvedValue(undefined),
-      getClient: jest.fn(() => ({ expire: jest.fn().mockResolvedValue(undefined) })),
+      getClient: jest.fn(() => ({ expire: jest.fn().mockResolvedValue(undefined) }) as any),
     };
 
     service = new MatchesService(
@@ -78,6 +78,8 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
 
       await expect(
         service['finalizeCompletedMatch'](existingMatch as never, 'match-1', 'p1', 'referee-1', {
+          p1SetsWon: 2,
+          p2SetsWon: 1,
           expectedRevision: 7,
         }),
       ).rejects.toThrow(ConflictException);
@@ -111,6 +113,8 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       mockRepo.completeMatch = jest.fn().mockResolvedValue(existingMatch);
 
       await service['finalizeCompletedMatch'](existingMatch as never, 'match-1', 'p1', 'referee-1', {
+        p1SetsWon: 2,
+        p2SetsWon: 1,
         expectedRevision: 7,
       });
 

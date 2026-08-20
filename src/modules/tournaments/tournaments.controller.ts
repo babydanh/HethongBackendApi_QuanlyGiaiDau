@@ -99,7 +99,6 @@ export class TournamentsController {
   }
 
   @Post('join/:inviteCode')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tham gia giải đấu qua mã mời' })
   async joinByInviteCode(
@@ -346,7 +345,6 @@ export class TournamentsController {
   }
 
   @Post('lite')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo giải đấu nhanh trong CLB (Lite) — chỉ cần sport slug, không cần categoryId UUID' })
   async createLite(
@@ -391,7 +389,6 @@ export class TournamentsController {
   }
 
   @Post('lite/join/:inviteCode')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tham gia Lite tournament 1 chạm' })
   async joinLite(@Param('inviteCode') inviteCode: string, @CurrentUser() user: JwtPayload) {
@@ -619,7 +616,6 @@ export class TournamentsController {
   }
 
   @Post(':id/register')
-  @Verified()
   @ApiBearerAuth()
   @Throttle({ sensitive: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Đăng ký tham gia giải đấu' })
@@ -633,7 +629,6 @@ export class TournamentsController {
   }
 
   @Post(':id/join-team')
-  @Verified()
   @ApiBearerAuth()
   @Throttle({ sensitive: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Đồng đội tham gia nhóm thi đấu đánh đôi' })
@@ -647,7 +642,6 @@ export class TournamentsController {
   }
 
   @Post('participants/:participantId/accept-partner')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Chấp nhận lời mời ghép đôi (tối đa 1 giờ hoặc đến hạn đóng đăng ký)' })
   async acceptPartnerInvite(
@@ -658,7 +652,6 @@ export class TournamentsController {
   }
 
   @Post('participants/:participantId/reject-partner')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Từ chối lời mời ghép đôi' })
   async rejectPartnerInvite(
@@ -669,7 +662,6 @@ export class TournamentsController {
   }
 
   @Post(':id/withdraw')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Rút lui khỏi giải đấu' })
   async withdraw(
@@ -879,7 +871,6 @@ export class TournamentsController {
   }
 
   @Post(':id/registration-attachment')
-  @Verified()
   @ApiBearerAuth()
   @UseInterceptors(FileInterceptor('file'))
   @ApiOperation({ summary: 'Tải tệp đính kèm cho biểu mẫu đăng ký nâng cao' })

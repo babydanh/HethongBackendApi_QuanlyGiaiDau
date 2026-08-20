@@ -911,6 +911,7 @@ export class BracketGeneratorService {
             loserNextMatchId: null,
             tournamentId,
             stageId: stage.id,
+            leg: scheduled.leg,
             updatedAt: new Date(),
           });
         }
@@ -1376,6 +1377,7 @@ export class BracketGeneratorService {
             loserNextMatchId: null,
             tournamentId,
             stageId: stage1.id,
+            leg: scheduled.leg,
             updatedAt: new Date(),
           });
         }

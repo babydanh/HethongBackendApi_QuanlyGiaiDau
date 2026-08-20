@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
@@ -185,8 +185,8 @@ export class TournamentSchedulerService {
           and(
             isNull(schema.tournaments.deletedAt),
             ne(schema.tournaments.status, 'CANCELLED'),
-            sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'enabled')::boolean = true`,
-            sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt')::timestamptz <= ${now}`
+            sql`${schema.tournaments.tournamentConfig} @> '{"recurring": {"enabled": true}}'::jsonb`,
+            sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '')::timestamptz <= ${now}`
           )
         );
 
@@ -248,8 +248,8 @@ export class TournamentSchedulerService {
                 eq(schema.tournaments.id, t.id),
                 isNull(schema.tournaments.deletedAt),
                 ne(schema.tournaments.status, 'CANCELLED'),
-                sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'enabled')::boolean = true`,
-                sql`(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt')::timestamptz <= ${now}`,
+                sql`${schema.tournaments.tournamentConfig} @> '{"recurring": {"enabled": true}}'::jsonb`,
+                sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '')::timestamptz <= ${now}`,
               ),
             )
             .for('update');
@@ -331,7 +331,6 @@ export class TournamentSchedulerService {
 
         if (!generated) continue;
         const newTournament = generated.tournament;
-        const template = generated.template;
 
         if (t.communityId) {
           const members = await this.db

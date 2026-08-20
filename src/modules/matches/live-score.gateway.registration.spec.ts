@@ -2,7 +2,7 @@ import { LiveScoreGateway } from './live-score.gateway';
 
 describe('LiveScoreGateway registration updates', () => {
   it('publishes a scoped event to the tournament room', () => {
-    const gateway = new LiveScoreGateway();
+    const gateway = new LiveScoreGateway({} as any, {} as any);
     const emit = jest.fn();
     const to = jest.fn(() => ({ emit }));
     (gateway as unknown as { server: unknown }).server = { to };
