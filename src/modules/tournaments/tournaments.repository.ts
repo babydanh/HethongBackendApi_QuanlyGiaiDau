@@ -2480,11 +2480,9 @@ export class TournamentsRepository {
         unknown
       >;
       const targetStatus =
-        partnerConfig.isLite === true
-          ? 'COMPLETE'
-          : partnerConfig.registrationMode === 'APPROVAL'
-            ? 'PENDING_APPROVAL'
-            : 'COMPLETE';
+        partnerConfig.registrationMode === 'APPROVAL'
+          ? 'PENDING_APPROVAL'
+          : 'COMPLETE';
 
       const [updated] = await tx
         .update(schema.tournamentParticipants)

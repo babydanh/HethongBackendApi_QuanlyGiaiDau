@@ -3539,13 +3539,6 @@ export class TournamentsService {
     if (!tournament) {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
-    const config = (tournament.tournamentConfig || {}) as Record<
-      string,
-      unknown
-    >;
-    if (config.isLite === true) {
-      return this.tournamentsRepository.findLiteParticipantsWithRosters(id);
-    }
     return this.tournamentsRepository.findPublicParticipants(
       id,
       tournament.categoryId,
