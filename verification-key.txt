@@ -1,0 +1,117 @@
+﻿D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\roles.guard.spec.ts:54:it('confirms a currently assigned organizer role in DB', async () => {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\roles.guard.spec.ts:55:const reflector = { getAllAndOverride: jest.fn().mockReturnValue([UserRole.ORGANIZER, UserRole.ADMIN]) } as unknown as Reflector;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\roles.guard.spec.ts:79:it.each([UserRole.ORGANIZER, UserRole.REFEREE])('rejects stale %s role claims', async (role) => {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\security-guards.spec.ts:109:createContext({ user: { isEmailVerified: false, isMock: false } }),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\security-guards.spec.ts:121:createContext({ user: { isEmailVerified: true, isMock: false } }),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\security-guards.spec.ts:131:createContext({ user: { isEmailVerified: false, isMock: true } }),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\security-guards.spec.ts:144:createContext({ user: { isEmailVerified: false, isMock: true } }),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\guards\verified.guard.ts:51:if (user.isEmailVerified !== true) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\admin_tables.schema.ts:15:export const verificationTickets = pgTable('verification_tickets', {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\users.schema.ts:21:isEmailVerified: boolean('is_email_verified').default(false).notNull(),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\admin.seed.ts:41:isEmailVerified: true,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\admin.seed.ts:51:isEmailVerified: true
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\admin.seed.ts:89:let organizerRole = await db.select().from(roles).where(eq(roles.name, 'ORGANIZER')).limit(1).then(rows => rows[0]);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\admin.seed.ts:90:if (!organizerRole) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\admin.seed.ts:96:organizerRole = newRole;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\admin.seed.ts:106:isEmailVerified: true
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\admin.seed.ts:114:roleId: organizerRole.id
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-data-prod.ts:105:isEmailVerified: true,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-data-prod.ts:114:.set({ passwordHash: bcrypt.hashSync(password, 12), isEmailVerified: true })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-data-prod.ts:878:const adminId = await getOrCreateUser('vndcsport@gmail.com', 'Admin@123', 'Sporto Admin', ['admin', 'organizer', 'player'], roleMap);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-data-prod.ts:881:const org1Id = await getOrCreateUser('macter.970@gmail.com', 'Test@123', 'macter.970', ['organizer', 'player'], roleMap);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-data-prod.ts:882:const org2Id = await getOrCreateUser('hxlinh1683@gmail.com', 'Test@123', 'hxlinh1683', ['organizer', 'player'], roleMap);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-prod.ts:292:const organizerRoleId = roleMap.get('organizer');
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-prod.ts:301:isEmailVerified: true,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-prod.ts:318:// Gán ORGANIZER role
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-prod.ts:319:if (organizerRoleId) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\seed-prod.ts:320:await db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRoleId }).onConflictDoNothing();
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-tickets.controller.ts:12:@Controller('admin/verification-tickets')
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-tickets.controller.ts:23:return this.adminService.submitVerificationTicket(user.sub, dto.evidenceUrls, dto.contactPhone);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-tickets.controller.ts:29:return this.adminService.getUserVerificationTickets(user.sub);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-tickets.controller.ts:47:return this.adminService.listVerificationTickets(status, pageNum, limitNum, cursor);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-tickets.controller.ts:57:return this.adminService.approveVerificationTicket(id, admin.sub);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-tickets.controller.ts:68:return this.adminService.rejectVerificationTicket(id, admin.sub, dto.rejectReason);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:376:// ─── Verification Tickets ─────────────────────────────────────
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:378:async submitVerificationTicket(userId: string, evidenceUrls: string[], contactPhone: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:380:.insert(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:400:async listVerificationTickets(status?: string, page = 1, limit = 10, cursor?: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:403:conditions.push(eq(schema.verificationTickets.status, status));
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:419:sql`(${schema.verificationTickets.createdAt} < ${cursorDate} OR (${schema.verificationTickets.createdAt} = ${cursorDate} AND ${schema.verificationTickets.id} < ${ticketCursor.id}))`,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:425:.from(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:430:ticket: schema.verificationTickets,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:437:.from(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:438:.innerJoin(schema.users, eq(schema.verificationTickets.userId, schema.users.id))
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:441:.orderBy(desc(schema.verificationTickets.createdAt), desc(schema.verificationTickets.id))
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:464:async approveVerificationTicket(ticketId: string, adminId: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:467:.from(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:468:.where(eq(schema.verificationTickets.id, ticketId))
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:471:if (!ticket) throw new NotFoundException('Verification ticket not found');
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:480:.update(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:486:.where(eq(schema.verificationTickets.id, ticketId))
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:497:// Auto-assign ORGANIZER role
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:498:const [organizerRole] = await tx
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:504:if (organizerRole) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:511:eq(schema.userToRoles.roleId, organizerRole.id)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:519:roleId: organizerRole.id,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:541:async rejectVerificationTicket(ticketId: string, adminId: string, rejectReason: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:544:.from(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:545:.where(eq(schema.verificationTickets.id, ticketId))
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:548:if (!ticket) throw new NotFoundException('Verification ticket not found');
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:552:.update(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:559:.where(eq(schema.verificationTickets.id, ticketId))
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1822:async getUserVerificationTickets(userId: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1825:.from(schema.verificationTickets)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1826:.where(eq(schema.verificationTickets.userId, userId))
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1827:.orderBy(desc(schema.verificationTickets.createdAt));
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\ai\ai-tool.router.ts:260:const sources = role === 'organizer' ? workspace?.organizedTournaments : role === 'co_organizer' ? workspace?.coOrganizerTournaments : role === 'referee' ? workspace?.refereeTournaments : [
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\interfaces\jwt-payload.interface.ts:7:isEmailVerified?: boolean;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\strategies\jwt.strategy.ts:25:isEmailVerified?: boolean;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\strategies\jwt.strategy.ts:36:isEmailVerified: payload.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.repository.ts:193:isEmailVerified: userData.isEmailVerified ?? true,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:142:user.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:190:.select({ email: schema.users.email, isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:201:isEmailVerified: userRecord?.isEmailVerified ?? false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:212:isEmailVerified: userRecord?.isEmailVerified ?? false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:241:.select({ isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:252:userRecord?.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:300:.select({ isEmailVerified: schema.users.isEmailVerified, isMock: schema.users.isMock })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:310:if (existingUser && !existingUser.isEmailVerified && !isVirtualOAuthEmail) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:312:.set({ isEmailVerified: true })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:314:existingUser.isEmailVerified = true;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:323:existingUser?.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:344:// Nếu email có đuôi @vndcsport.vn (email ảo tự sinh), ta để isEmailVerified: false
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:351:isEmailVerified: !isVirtualEmail,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:363:const organizerRole = await this.authRepository.findRoleByName(UserRole.ORGANIZER);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:364:if (organizerRole) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:365:await this.db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRole.id }).onConflictDoNothing();
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:383:if (!user.isEmailVerified) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:391:const organizerRole = await this.authRepository.findRoleByName(UserRole.ORGANIZER);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:395:if (organizerRole && !roles.includes(UserRole.ORGANIZER)) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:396:await this.db.insert(schema.userToRoles).values({ userId: user.id, roleId: organizerRole.id }).onConflictDoNothing();
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:448:user.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:465:isEmailVerified?: boolean,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:473:isEmailVerified: isEmailVerified ?? false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:516:isEmailVerified: isEmailVerified ?? false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\live-score.gateway.authorization.spec.ts:82:isEmailVerified: true,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.controller.ts:136:@Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.controller.ts:148:@Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.controller.ts:160:@Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.repository.ts:2125:* Object-level tournament authority. A global ORGANIZER role is not enough
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.authorization.spec.ts:75:{ sub: 'co-organizer-1', roles: ['PLAYER'] } as never,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.authorization.spec.ts:85:{ sub: 'other-organizer', roles: ['ORGANIZER'] } as never,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\series\series-staff.controller.ts:48:@Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\series\series.controller.ts:91:@Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.controller.ts:764:return this.tournamentsService.findParticipantsForOrganizer(id, divisionId, user.sub, this.getSystemRoles(user));
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.repository.ts:8701:isEmailVerified: false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.repository.ts:8727:isEmailVerified: false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.repository.ts:8779:isEmailVerified: false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.repository.ts:8805:isEmailVerified: false,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:3549:async findParticipantsForOrganizer(id: string, divisionId: string | undefined, userId: string, systemRoles: string[] = []) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\dto\query-user.dto.spec.ts:9:const valid = Object.assign(new QueryUserDto(), { role: UserRole.ORGANIZER });
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\users.repository.ts:224:isEmailVerified: schema.users.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\users.repository.ts:301:isEmailVerified: row.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\users.repository.ts:335:isEmailVerified: schema.users.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\users.repository.ts:380:.set({ email, isEmailVerified: false, updatedAt: new Date() })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\users.repository.ts:385:isEmailVerified: schema.users.isEmailVerified,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\users.repository.ts:406:.set({ isEmailVerified: true, updatedAt: new Date() })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\users.service.ts:109:if (currentUser.isEmailVerified) {
