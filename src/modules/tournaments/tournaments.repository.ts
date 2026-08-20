@@ -35,6 +35,11 @@ import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
+import {
+  BracketSlotMutationOperation,
+  BracketSlotName,
+  UpdateBracketSlotsDto,
+} from './dto/update-bracket-slots.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
@@ -3928,6 +3933,237 @@ export class TournamentsRepository {
         groups: groupsMap.get(s.id) || [],
       })),
     };
+  }
+
+  async updateBracketSlots(
+    tournamentId: string,
+    divisionId: string,
+    userId: string,
+    data: UpdateBracketSlotsDto,
+  ) {
+    if (data.operations.length === 0) {
+      throw new BadRequestException('Cần ít nhất một thao tác cập nhật vị trí.');
+    }
+
+    return this.db.transaction(async (tx) => {
+      const stages = await tx
+        .select({ id: schema.tournamentStages.id })
+        .from(schema.tournamentStages)
+        .where(
+          and(
+            eq(schema.tournamentStages.tournamentId, tournamentId),
+            eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+            isNull(schema.tournamentStages.deletedAt),
+          ),
+        );
+
+      if (stages.length === 0) {
+        throw new NotFoundException('Không tìm thấy bảng đấu cho giải đấu này');
+      }
+
+      const stageIds = stages.map((stage) => stage.id);
+      const matches = await tx
+        .select()
+        .from(schema.matches)
+        .where(
+          and(
+            eq(schema.matches.tournamentId, tournamentId),
+            inArray(schema.matches.stageId, stageIds),
+            isNull(schema.matches.deletedAt),
+          ),
+        )
+        .for('update');
+
+      const matchesById = new Map(matches.map((match) => [match.id, match]));
+      const originalMatches = new Map(
+        matches.map((match) => [match.id, { ...match }]),
+      );
+      const participants = await tx
+        .select({ id: schema.tournamentParticipants.id })
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+          ),
+        );
+      const participantIds = new Set(participants.map((participant) => participant.id));
+      const changedMatchIds = new Set<string>();
+
+      const getMatch = (matchId: string | undefined) => {
+        if (!matchId) {
+          throw new BadRequestException('Thiếu mã trận đấu trong thao tác bracket.');
+        }
+        const match = matchesById.get(matchId);
+        if (!match) {
+          throw new NotFoundException('Trận đấu không thuộc bảng đấu này');
+        }
+        return match;
+      };
+
+      const assertEditable = (match: typeof matches[number]) => {
+        const status = match.status.toUpperCase();
+        if (status === 'IN_PROGRESS' || status === 'ONGOING' || status === 'LIVE') {
+          throw new BadRequestException('Không thể thay đổi participant của trận đang thi đấu');
+        }
+      };
+
+      const getSlotValue = (
+        match: typeof matches[number],
+        slot: BracketSlotName | undefined,
+      ) => {
+        if (!slot) {
+          throw new BadRequestException('Thiếu vị trí participant trong thao tác bracket.');
+        }
+        return slot === BracketSlotName.PARTICIPANT1
+          ? match.participant1Id
+          : match.participant2Id;
+      };
+
+      const setSlotValue = (
+        match: typeof matches[number],
+        slot: BracketSlotName | undefined,
+        participantId: string | null,
+      ) => {
+        if (!slot) {
+          throw new BadRequestException('Thiếu vị trí participant trong thao tác bracket.');
+        }
+        if (slot === BracketSlotName.PARTICIPANT1) {
+          match.participant1Id = participantId;
+        } else {
+          match.participant2Id = participantId;
+        }
+        changedMatchIds.add(match.id);
+      };
+
+      const assertParticipant = (participantId: string | undefined) => {
+        if (!participantId || !participantIds.has(participantId)) {
+          throw new BadRequestException('Participant không thuộc bảng đấu này');
+        }
+      };
+
+      const findParticipantLocation = (participantId: string) => {
+        for (const match of matchesById.values()) {
+          if (match.participant1Id === participantId) {
+            return { match, slot: BracketSlotName.PARTICIPANT1 };
+          }
+          if (match.participant2Id === participantId) {
+            return { match, slot: BracketSlotName.PARTICIPANT2 };
+          }
+        }
+        return null;
+      };
+
+      for (const operation of data.operations) {
+        switch (operation.operation) {
+          case BracketSlotMutationOperation.ASSIGN: {
+            const target = getMatch(operation.matchId);
+            assertEditable(target);
+            assertParticipant(operation.participantId);
+            if (getSlotValue(target, operation.slot) !== null) {
+              throw new BadRequestException('Vị trí bracket đã có participant');
+            }
+            const existingLocation = findParticipantLocation(operation.participantId as string);
+            if (existingLocation) {
+              throw new BadRequestException('Participant đã được xếp trong bracket');
+            }
+            setSlotValue(target, operation.slot, operation.participantId as string);
+            break;
+          }
+          case BracketSlotMutationOperation.REPLACE: {
+            const target = getMatch(operation.matchId);
+            assertEditable(target);
+            assertParticipant(operation.participantId);
+            const existingLocation = findParticipantLocation(operation.participantId as string);
+            if (
+              existingLocation &&
+              (existingLocation.match.id !== target.id || existingLocation.slot !== operation.slot)
+            ) {
+              throw new BadRequestException('Participant đã được xếp ở vị trí khác');
+            }
+            setSlotValue(target, operation.slot, operation.participantId as string);
+            break;
+          }
+          case BracketSlotMutationOperation.UNASSIGN: {
+            const target = getMatch(operation.matchId);
+            assertEditable(target);
+            setSlotValue(target, operation.slot, null);
+            break;
+          }
+          case BracketSlotMutationOperation.MOVE: {
+            const source = getMatch(operation.fromMatchId);
+            const target = getMatch(operation.toMatchId);
+            assertEditable(source);
+            assertEditable(target);
+            if (source.id === target.id && operation.fromSlot === operation.toSlot) break;
+            const sourceParticipant = getSlotValue(source, operation.fromSlot);
+            if (!sourceParticipant) {
+              throw new BadRequestException('Vị trí nguồn không có participant');
+            }
+            if (getSlotValue(target, operation.toSlot) !== null) {
+              throw new BadRequestException('Vị trí đích đã có participant');
+            }
+            setSlotValue(source, operation.fromSlot, null);
+            setSlotValue(target, operation.toSlot, sourceParticipant);
+            break;
+          }
+          case BracketSlotMutationOperation.SWAP: {
+            const source = getMatch(operation.fromMatchId);
+            const target = getMatch(operation.toMatchId);
+            assertEditable(source);
+            assertEditable(target);
+            if (source.id === target.id && operation.fromSlot === operation.toSlot) break;
+            const sourceParticipant = getSlotValue(source, operation.fromSlot);
+            const targetParticipant = getSlotValue(target, operation.toSlot);
+            if (!sourceParticipant || !targetParticipant) {
+              throw new BadRequestException('Cần hai participant để hoán đổi vị trí');
+            }
+            setSlotValue(source, operation.fromSlot, targetParticipant);
+            setSlotValue(target, operation.toSlot, sourceParticipant);
+            break;
+          }
+          default:
+            throw new BadRequestException('Thao tác bracket không hợp lệ');
+        }
+      }
+
+      const updatedMatches: typeof matches = [];
+      for (const matchId of changedMatchIds) {
+        const match = matchesById.get(matchId);
+        const oldMatch = originalMatches.get(matchId);
+        if (!match || !oldMatch) continue;
+        const winnerStillPresent =
+          !match.winnerId ||
+          match.winnerId === match.participant1Id ||
+          match.winnerId === match.participant2Id;
+        const [updated] = await tx
+          .update(schema.matches)
+          .set({
+            participant1Id: match.participant1Id,
+            participant2Id: match.participant2Id,
+            ...(winnerStillPresent ? {} : { winnerId: null }),
+            revision: match.revision + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.matches.id, match.id))
+          .returning();
+        await this.auditService.logUpdate(
+          tx,
+          userId,
+          'matches',
+          match.id,
+          oldMatch,
+          updated,
+        );
+        updatedMatches.push(updated);
+      }
+
+      return {
+        success: true,
+        updatedMatchIds: updatedMatches.map((match) => match.id),
+        matches: updatedMatches,
+      };
+    });
   }
 
   async findByInviteCode(inviteCode: string) {

@@ -32,6 +32,8 @@ import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
+import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
+
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
@@ -517,7 +519,27 @@ export class TournamentsController {
     );
   }
 
+    @Patch(':id/divisions/:divisionId/bracket/slots')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật participant trong các slot bracket' })
+  async updateBracketSlots(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('divisionId', ParseUUIDPipe) divisionId: string,
+    @Body() data: UpdateBracketSlotsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateBracketSlots(
+      id,
+      divisionId,
+      user.sub,
+      data,
+      this.getSystemRoles(user),
+    );
+  }
+
   @Post(':id/publish')
+
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Công bố giải đấu từ DRAFT -> REGISTRATION_OPEN' })
