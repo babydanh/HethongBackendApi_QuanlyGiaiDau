@@ -174,10 +174,14 @@ async function run() {
   let fkTriggersDisabled = false;
 
   try {
-    // Step 1: Enable PostGIS
+    // Step 1: Enable PostGIS (optional if DB supports it)
     console.log('\n[1/4] Enabling PostGIS extension...');
-    await sql`CREATE EXTENSION IF NOT EXISTS postgis`;
-    console.log('  ✓ PostGIS ready');
+    try {
+      await sql`CREATE EXTENSION IF NOT EXISTS postgis`;
+      console.log('  ✓ PostGIS ready');
+    } catch (postgisErr) {
+      console.log('  ⚠ PostGIS extension not available on this Postgres server, continuing without spatial index...');
+    }
 
     // Step 2: Disable FK triggers for the session to avoid ordering issues
     console.log('\n[2/4] Disabling FK constraint triggers...');
