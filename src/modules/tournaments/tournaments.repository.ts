@@ -6758,6 +6758,26 @@ export class TournamentsRepository {
     }
   }
 
+  async countDivisionParticipants(divisionId: string): Promise<number> {
+    try {
+      const [result] = await this.db
+        .select({ value: count() })
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          ),
+        );
+      return Number(result?.value ?? 0);
+    } catch (error) {
+      console.error(`Failed to count participants for division ${divisionId}:`, error);
+      return 0;
+    }
+  }
+
   async createDivision(
     division: CreateDivisionDto & { tournamentId: string },
     userId: string | null,

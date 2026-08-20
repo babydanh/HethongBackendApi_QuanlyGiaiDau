@@ -926,7 +926,7 @@ export class TournamentsService {
     // Category preset is the shared, editable source of defaults. Keep the
     // built-in sport preset only as a backwards-compatible fallback for old
     // categories that do not yet have defaultSportRules.
-    const presetRules = builtInLitePreset.sportRules as Record<string, unknown>;
+    const presetRules = builtInLitePreset.sportRules;
     const litePreset = {
       sportPreset: categoryDefaults ? `CATEGORY_${sport.toUpperCase()}` : builtInLitePreset.sportPreset,
       sportRules: {
@@ -5496,9 +5496,9 @@ export class TournamentsService {
       (tournament.status === 'REGISTRATION_OPEN' ||
         tournament.status === 'REGISTRATION_CLOSED')
     ) {
-      const divisionParticipants =
-        await this.tournamentsRepository.getParticipants(divisionId);
-      if (divisionParticipants && divisionParticipants.length > 0) {
+      const participantCount =
+        await this.tournamentsRepository.countDivisionParticipants(divisionId);
+      if (participantCount > 0) {
         throw new BadRequestException(
           'Không thể thay đổi hình thức thi đấu khi bảng đấu đã có vận động viên đăng ký',
         );
