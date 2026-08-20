@@ -2743,6 +2743,111 @@ export class TournamentsService {
     }
   }
 
+  async uploadRegistrationAttachment(
+    tournamentId: string,
+    userId: string,
+    fieldId: string | undefined,
+    file: Express.Multer.File,
+  ) {
+    void userId;
+
+    if (!file?.buffer || !file.originalname || !file.mimetype) {
+      throw new BadRequestException('Tệp tải lên không hợp lệ');
+    }
+    if (!fieldId) {
+      throw new BadRequestException('Thiếu mã trường tệp đăng ký');
+    }
+
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) {
+      throw new NotFoundException('Giải đấu không tồn tại');
+    }
+    this.assertRegistrationAccessible(tournament);
+
+    const tournamentConfig = (tournament.tournamentConfig ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const registrationForm =
+      tournamentConfig.registrationForm &&
+      typeof tournamentConfig.registrationForm === 'object' &&
+      !Array.isArray(tournamentConfig.registrationForm)
+        ? (tournamentConfig.registrationForm as Record<string, unknown>)
+        : null;
+    if (!registrationForm || registrationForm.status !== 'PUBLISHED') {
+      throw new BadRequestException('Biểu mẫu đăng ký nâng cao chưa được phát hành');
+    }
+
+    const fields = Array.isArray(registrationForm.fields)
+      ? registrationForm.fields.filter(
+          (field): field is Record<string, unknown> =>
+            Boolean(field && typeof field === 'object' && !Array.isArray(field)),
+        )
+      : [];
+    const field = fields.find((candidate) => candidate.id === fieldId);
+    if (!field || field.type !== 'FILE') {
+      throw new BadRequestException('Trường tải tệp không hợp lệ');
+    }
+
+    const configuredMaxMb =
+      typeof field.maxFileSizeMb === 'number' &&
+      Number.isFinite(field.maxFileSizeMb) &&
+      field.maxFileSizeMb > 0
+        ? field.maxFileSizeMb
+        : 10;
+    const maxBytes = Math.min(configuredMaxMb, 10) * 1024 * 1024;
+    if (file.size > maxBytes) {
+      throw new BadRequestException(
+        `Tệp vượt quá giới hạn ${Math.min(configuredMaxMb, 10)} MB`,
+      );
+    }
+
+    const acceptedFileTypes = Array.isArray(field.acceptedFileTypes)
+      ? field.acceptedFileTypes.filter(
+          (type): type is string => typeof type === 'string' && type.trim().length > 0,
+        )
+      : [];
+    if (acceptedFileTypes.length > 0) {
+      const mimeType = file.mimetype.toLowerCase();
+      const originalName = file.originalname.toLowerCase();
+      const matchesAcceptedType = acceptedFileTypes.some((rawType) =>
+        rawType
+          .split(',')
+          .map((value) => value.trim().toLowerCase())
+          .filter(Boolean)
+          .some((acceptedType) => {
+            if (acceptedType === '*/*') return true;
+            if (acceptedType.endsWith('/*')) {
+              return mimeType.startsWith(`${acceptedType.slice(0, -1)}`);
+            }
+            if (acceptedType.startsWith('.')) {
+              return originalName.endsWith(acceptedType);
+            }
+            return mimeType === acceptedType;
+          }),
+      );
+      if (!matchesAcceptedType) {
+        throw new BadRequestException('Định dạng tệp không được chấp nhận');
+      }
+    }
+
+    const result = await this.storageService.uploadFile(
+      file,
+      'tournahub/registration-attachments',
+    );
+    if (!('secure_url' in result) || !result.secure_url || !result.public_id) {
+      throw new BadRequestException('Không thể tải tệp lên bộ nhớ');
+    }
+
+    return {
+      url: result.secure_url,
+      publicId: result.public_id,
+      originalName: file.originalname,
+      size: file.size,
+      mimeType: file.mimetype,
+    };
+  }
+
   private assertRegistrationAccessible(
     tournament: {
       status?: string | null;
