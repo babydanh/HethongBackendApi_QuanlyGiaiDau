@@ -107,6 +107,16 @@ async function main() {
     console.warn('⚠️ Lỗi kiểm tra bảng:', tableErr.message);
   }
 
+  // 0. Xóa sạch dữ liệu địa giới cũ để loại bỏ hoàn toàn các bản ghi rác trùng lặp từ trước
+  console.log('🧹 Đang làm sạch bảng provinces và wards cũ...');
+  try {
+    await sql`DELETE FROM "wards"`;
+    await sql`DELETE FROM "provinces"`;
+    console.log('✅ Đã làm sạch toàn bộ dữ liệu địa giới cũ.');
+  } catch (cleanErr) {
+    console.warn('⚠️ Ghi chú làm sạch:', cleanErr.message);
+  }
+
   console.log('🔄 Đang tải toàn bộ dữ liệu địa giới 2 cấp (v2) từ https://provinces.open-api.vn/api/v2/ ...');
 
   try {
