@@ -367,7 +367,7 @@ export class TournamentsService {
     try {
       const cached = await this.redisService.get(cacheKey);
       if (cached) return JSON.parse(cached);
-    } catch (e) {
+    } catch {
       // Redis down — ignore cache, fall through to DB
     }
 
@@ -397,7 +397,7 @@ export class TournamentsService {
 
     try {
       await this.redisService.set(cacheKey, JSON.stringify(result), 60);
-    } catch (e) {
+    } catch {
       // Redis down — ignore
     }
 
@@ -761,7 +761,7 @@ export class TournamentsService {
     try {
       await this.redisService.delByPattern('tournaments:list:*');
       await this.redisService.delByPattern('matches:list:*');
-    } catch (e) {
+    } catch {
       // Redis down — ignore
     }
 
@@ -1330,7 +1330,7 @@ export class TournamentsService {
     try {
       await this.redisService.delByPattern('tournaments:list:*');
       await this.redisService.delByPattern('matches:list:*');
-    } catch (e) {
+    } catch {
       // Redis down — ignore
     }
 
@@ -2001,7 +2001,7 @@ export class TournamentsService {
     try {
       await this.redisService.delByPattern('tournaments:list:*');
       await this.redisService.delByPattern('matches:list:*');
-    } catch (e) {
+    } catch {
       // Redis down — ignore
     }
 
@@ -2067,7 +2067,7 @@ export class TournamentsService {
       try {
         await this.redisService.delByPattern('tournaments:list:*');
         await this.redisService.delByPattern('matches:list:*');
-      } catch (e) {
+      } catch {
         // Redis down - ignore
       }
       return {
@@ -2091,7 +2091,7 @@ export class TournamentsService {
       try {
         await this.redisService.delByPattern('tournaments:list:*');
         await this.redisService.delByPattern('matches:list:*');
-      } catch (e) {
+      } catch {
         // Redis down — ignore
       }
       return result;
@@ -2135,7 +2135,7 @@ export class TournamentsService {
     try {
       await this.redisService.delByPattern('tournaments:list:*');
       await this.redisService.delByPattern('matches:list:*');
-    } catch (e) {
+    } catch {
       // Redis down — ignore
     }
 
@@ -2191,7 +2191,7 @@ export class TournamentsService {
       try {
         await this.redisService.delByPattern('tournaments:list:*');
         await this.redisService.delByPattern('matches:list:*');
-      } catch (e) {
+      } catch {
         // Redis down - ignore
       }
       return {
@@ -2213,14 +2213,14 @@ export class TournamentsService {
       // Soft-delete associated community posts
       try {
         await this.communitySocialRepository.softDeletePostsByTournamentId(id);
-      } catch (e) {
+      } catch {
         // ignore
       }
       // Invalidate tournament list cache
       try {
         await this.redisService.delByPattern('tournaments:list:*');
         await this.redisService.delByPattern('matches:list:*');
-      } catch (e) {
+      } catch {
         // Redis down — ignore
       }
       return result;
@@ -2262,7 +2262,7 @@ export class TournamentsService {
     try {
       await this.redisService.delByPattern('tournaments:list:*');
       await this.redisService.delByPattern('matches:list:*');
-    } catch (e) {
+    } catch {
       // Redis down — ignore
     }
 
@@ -2274,7 +2274,7 @@ export class TournamentsService {
     // Soft-delete associated community posts & polls
     try {
       await this.communitySocialRepository.softDeletePostsByTournamentId(id);
-    } catch (e) {
+    } catch {
       // ignore
     }
 
@@ -2538,7 +2538,8 @@ export class TournamentsService {
     // Calculate ELO for each participant
     const eloEntries: Array<{ participantId: string; elo: number }> = [];
     for (const p of participants) {
-      const members = (p as any).members || [];
+      const members =
+        (p as { members?: Array<{ userId: string }> }).members || [];
       if (members.length === 0) {
         eloEntries.push({ participantId: p.id, elo: 1000 });
         continue;
@@ -2868,7 +2869,6 @@ export class TournamentsService {
           'Đội bóng không cùng môn thể thao với giải đấu.',
         );
       }
-      const minTeamSize = footballTeamConfig.mainSize;
       const selectedTeamSize = footballTeamConfig.mainSize;
       const maxReserve = footballTeamConfig.maxReserve;
       const maxTeamSize = footballTeamConfig.maxTotalSize;
@@ -4076,7 +4076,7 @@ export class TournamentsService {
         throw new NotFoundException('Hạng đấu không tồn tại');
       }
 
-      validateSportRuleConfig(data.roundConfig as Record<string, unknown>, {
+      validateSportRuleConfig(data.roundConfig, {
         expectedKind: inferExpectedSportRuleKind({
           categoryConfig: category.categoryConfig as
             | Record<string, unknown>
@@ -5492,7 +5492,7 @@ export class TournamentsService {
     // Keep the registration lock scoped to an actual format change where participants already registered.
     if (
       updateDivisionDto.matchType &&
-      updateDivisionDto.matchType !== currentDivision.matchType &&
+      updateDivisionDto.matchType !== (currentDivision.matchType as MatchType) &&
       (tournament.status === 'REGISTRATION_OPEN' ||
         tournament.status === 'REGISTRATION_CLOSED')
     ) {

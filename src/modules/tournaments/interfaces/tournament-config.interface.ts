@@ -76,14 +76,22 @@ export interface CategoryConfig {
 }
 
 export interface RosterMember {
+  id?: string;
   userId: string;
   email?: string | null;
   phoneNumber?: string | null;
   gender?: string | null;
   fullName: string | null;
-  avatarUrl: string | null;
+    avatarUrl: string | null;
   role: string;
+
+  teamRole?: string | null;
+  isTemporary?: boolean;
+  confirmedAt?: Date | null;
+  invitationToken?: string | null;
+  createdAt?: Date | null;
   isMock?: boolean;
+
   elo: {
     eloPoints: number;
     tierName: string;
