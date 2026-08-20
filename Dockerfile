@@ -1,6 +1,7 @@
 # Base image
 FROM node:22-alpine AS base
-RUN npm install -g pnpm
+RUN npm install -g pnpm@9.15.4
+RUN pnpm config set package-import-method copy
 
 # Install dependencies
 FROM base AS dependencies
