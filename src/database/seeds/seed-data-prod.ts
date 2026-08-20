@@ -694,10 +694,171 @@ async function createTournament(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-seed core roles, categories and elo tiers if missing
+// ---------------------------------------------------------------------------
+async function ensureCoreDataSeeded() {
+  console.log('=> Checking & Seeding Core Roles, Categories & ELO tiers...');
+
+  // 1. Roles
+  await db
+    .insert(schema.roles)
+    .values([
+      { name: 'ADMIN', slug: 'admin', description: 'Administrator' },
+      { name: 'MODERATOR', slug: 'moderator', description: 'System Moderator' },
+      { name: 'ORGANIZER', slug: 'organizer', description: 'Tournament Organizer' },
+      { name: 'REFEREE', slug: 'referee', description: 'Match Referee' },
+      { name: 'PLAYER', slug: 'player', description: 'Player' },
+    ])
+    .onConflictDoNothing();
+
+  // 2. Categories (Pickleball, Badminton, Table Tennis, Tennis, Football)
+  const categoriesToSeed = [
+    {
+      name: 'Pickleball',
+      slug: 'pickleball',
+      description: 'Môn thể thao dùng vợt, bóng nhựa đục lỗ',
+      categoryConfig: {
+        ruleKind: 'PICKLEBALL_RALLY',
+        allowedRuleKinds: ['PICKLEBALL_RALLY', 'PICKLEBALL_SIDE_OUT'],
+        defaultSportRules: {
+          setsToWin: 2,
+          pointsPerSet: 11,
+          mustWinByTwo: true,
+          maxPointsPerSet: 15,
+          serveSwitchEvery: 1,
+          switchSidesBetweenSets: true,
+          switchSidesAtTiebreakPoints: 6,
+        },
+        supportedMatchTypes: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'],
+        description: 'Môn thể thao dùng vợt, bóng nhựa đục lỗ',
+      },
+    },
+    {
+      name: 'Cầu lông',
+      slug: 'badminton',
+      description: 'Môn thể thao dùng vợt và quả cầu lông',
+      categoryConfig: {
+        ruleKind: 'BADMINTON',
+        allowedRuleKinds: ['BADMINTON'],
+        defaultSportRules: {
+          setsToWin: 2,
+          pointsPerSet: 21,
+          mustWinByTwo: true,
+          maxPointsPerSet: 30,
+          serveSwitchEvery: 1,
+          switchSidesBetweenSets: true,
+        },
+        supportedMatchTypes: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'],
+        description: 'Môn thể thao dùng vợt và quả cầu lông',
+      },
+    },
+    {
+      name: 'Bóng bàn',
+      slug: 'table_tennis',
+      description: 'Môn thể thao bóng bàn (Ping Pong)',
+      categoryConfig: {
+        ruleKind: 'TABLE_TENNIS',
+        allowedRuleKinds: ['TABLE_TENNIS'],
+        defaultSportRules: {
+          setsToWin: 3,
+          pointsPerSet: 11,
+          mustWinByTwo: true,
+          maxPointsPerSet: 99,
+          serveSwitchEvery: 2,
+          switchSidesBetweenSets: true,
+        },
+        supportedMatchTypes: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'],
+        description: 'Môn thể thao bóng bàn (Ping Pong)',
+      },
+    },
+    {
+      name: 'Tennis',
+      slug: 'tennis',
+      description: 'Quần vợt truyền thống',
+      categoryConfig: {
+        ruleKind: 'TENNIS',
+        allowedRuleKinds: ['TENNIS'],
+        defaultSportRules: {
+          setsToWin: 2,
+          pointsPerSet: 6,
+          mustWinByTwo: true,
+          maxPointsPerSet: 7,
+          tiebreakPoints: 7,
+          serveSwitchEvery: 1,
+          switchSidesBetweenSets: true,
+        },
+        supportedMatchTypes: ['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'],
+        description: 'Quần vợt truyền thống',
+      },
+    },
+    {
+      name: 'Bóng đá',
+      slug: 'football',
+      description: 'Bóng đá sân cỏ',
+      categoryConfig: {
+        ruleKind: 'FOOTBALL',
+        allowedRuleKinds: ['FOOTBALL'],
+        defaultSportRules: {
+          setsToWin: 1,
+          pointsPerSet: 1,
+          mustWinByTwo: false,
+          maxPointsPerSet: 99,
+          format: { halvesCount: 2, halfDuration: 20, allowDraw: true },
+        },
+        supportedMatchTypes: ['SINGLES', 'DOUBLES'],
+        description: 'Bóng đá sân cỏ',
+      },
+    },
+  ];
+
+  for (const cat of categoriesToSeed) {
+    const [savedCat] = await db
+      .insert(schema.categories)
+      .values(cat as any)
+      .onConflictDoUpdate({
+        target: schema.categories.slug,
+        set: {
+          name: cat.name,
+          categoryConfig: cat.categoryConfig as any,
+          description: cat.description,
+        },
+      })
+      .returning();
+
+    // Seed default ELO tiers for each category
+    const tiers = [
+      { name: 'Tập sự', minElo: 0, maxElo: 1199, iconUrl: 'https://placehold.co/100x100?text=Novice', color: '#9E9E9E' },
+      { name: 'Đồng', minElo: 1200, maxElo: 1399, iconUrl: 'https://placehold.co/100x100?text=Bronze', color: '#CD7F32' },
+      { name: 'Bạc', minElo: 1400, maxElo: 1599, iconUrl: 'https://placehold.co/100x100?text=Silver', color: '#C0C0C0' },
+      { name: 'Vàng', minElo: 1600, maxElo: 1799, iconUrl: 'https://placehold.co/100x100?text=Gold', color: '#FFD700' },
+      { name: 'Bạch Kim', minElo: 1800, maxElo: 1999, iconUrl: 'https://placehold.co/100x100?text=Platinum', color: '#E5E4E2' },
+      { name: 'Kim Cương', minElo: 2000, maxElo: 2199, iconUrl: 'https://placehold.co/100x100?text=Diamond', color: '#B9F2FF' },
+      { name: 'Cao Thủ', minElo: 2200, maxElo: 2399, iconUrl: 'https://placehold.co/100x100?text=Master', color: '#9932CC' },
+      { name: 'Đại Cao Thủ', minElo: 2400, maxElo: 2599, iconUrl: 'https://placehold.co/100x100?text=Grandmaster', color: '#FF4500' },
+      { name: 'Thách Đấu', minElo: 2600, maxElo: 9999, iconUrl: 'https://placehold.co/100x100?text=Challenger', color: '#00FFFF' },
+    ];
+
+    for (const tier of tiers) {
+      await db
+        .insert(schema.eloTiers)
+        .values({
+          id: uuidv4(),
+          categoryId: savedCat.id,
+          ...tier,
+        })
+        .onConflictDoNothing();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // MAIN
 // ---------------------------------------------------------------------------
 async function main() {
   console.log('=== SEED DATA PRODUCTION — 13 TOURNAMENTS WITH BRACKETS ===\n');
+
+  // Đảm bảo Roles, Categories và ELO Tiers luôn có sẵn
+  await ensureCoreDataSeeded();
 
   // 1. Pickleball category
   const pickleballCat = await db
@@ -706,19 +867,11 @@ async function main() {
     .where(eq(schema.categories.slug, 'pickleball'))
     .limit(1)
     .then((r) => r[0]);
-  if (!pickleballCat) {
-    console.error('ERROR: Pickleball category not found. Run seed-prod.ts first.');
-    return;
-  }
 
   // 2. Roles
   const roles = await db.select().from(schema.roles);
   const roleMap = new Map<string, string>();
   for (const r of roles) roleMap.set(r.slug, r.id);
-  if (!roleMap.has('admin') || !roleMap.has('organizer') || !roleMap.has('player')) {
-    console.error('ERROR: Required roles missing. Run seed-prod.ts first.');
-    return;
-  }
 
   // 3. Users
   console.log('=> Creating / verifying users...');

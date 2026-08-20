@@ -5,9 +5,9 @@ import * as path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
 const host = process.env.DB_HOST || 'localhost';
-const port = process.env.DB_PORT || '5432';
+const port = process.env.DB_PORT || '5433';
 const user = process.env.DB_USERNAME || 'postgres';
-const password = encodeURIComponent(process.env.DB_PASSWORD || 'postgres');
+const password = encodeURIComponent(process.env.DB_PASSWORD || 'your_password');
 const database = process.env.DB_DATABASE || 'tournament_db';
 const sslMode = process.env.DB_SSL === 'true' ? 'require' : 'disable';
 
