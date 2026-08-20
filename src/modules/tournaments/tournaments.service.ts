@@ -5489,18 +5489,20 @@ export class TournamentsService {
       throw new NotFoundException('Bảng đấu không tồn tại');
     }
 
-    // Keep the registration lock scoped to an actual format change. The web
-    // configuration save sends the current matchType together with scoring
-    // rules; merely repeating that value must not block a preset/rules update.
+    // Keep the registration lock scoped to an actual format change where participants already registered.
     if (
       updateDivisionDto.matchType &&
       updateDivisionDto.matchType !== currentDivision.matchType &&
       (tournament.status === 'REGISTRATION_OPEN' ||
         tournament.status === 'REGISTRATION_CLOSED')
     ) {
-      throw new BadRequestException(
-        'Không thể thay đổi hình thức thi đấu khi giải đấu đang mở đăng ký',
-      );
+      const divisionParticipants =
+        await this.tournamentsRepository.getParticipants(divisionId);
+      if (divisionParticipants && divisionParticipants.length > 0) {
+        throw new BadRequestException(
+          'Không thể thay đổi hình thức thi đấu khi bảng đấu đã có vận động viên đăng ký',
+        );
+      }
     }
 
     const category = await this.tournamentsRepository.findCategory(
