@@ -174,33 +174,24 @@ async function run() {
   let fkTriggersDisabled = false;
 
   try {
-    // Step 1: Enable PostGIS extension
-    console.log('\n[1/4] Enabling PostGIS extension...');
-    try {
-      await sql`CREATE EXTENSION IF NOT EXISTS postgis`;
-      console.log('  ✓ PostGIS ready');
-    } catch (e) {
-      console.warn('  ⚠ PostGIS extension note:', e.message);
-    }
-
-    // Step 2: Disable FK triggers for the session to avoid ordering issues
-    console.log('\n[2/4] Disabling FK constraint triggers...');
+    // Step 1: Disable FK triggers for the session to avoid ordering issues
+    console.log('\n[1/3] Disabling FK constraint triggers...');
     await sql`SET session_replication_role = 'replica'`;
     fkTriggersDisabled = true;
     console.log('  ✓ FK triggers disabled');
 
-    // Step 3: Ensure migrations tracking table exists
+    // Step 2: Ensure migrations tracking table exists
     await ensureMigrationsTable();
     const applied = await getAppliedMigrations();
 
-    // Step 4: Read migration files
-    console.log(`\n[3/4] Reading migrations from: ${migrationsDir}`);
+    // Step 3: Read migration files
+    console.log(`\n[2/3] Reading migrations from: ${migrationsDir}`);
     const migrationFiles = discoverMigrationFiles(migrationsDir);
 
     console.log(`  Found ${migrationFiles.length} migration files`);
 
-    // Step 5: Run each migration
-    console.log('\n[4/4] Running migrations...');
+    // Step 4: Run each migration
+    console.log('\n[3/3] Running migrations...');
     let ran = 0;
     let skipped = 0;
 
