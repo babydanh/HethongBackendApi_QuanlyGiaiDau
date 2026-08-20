@@ -668,6 +668,8 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
         venueName: parsed.venueName || null,
         locationAddress: parsed.locationAddress || null,
         province: parsed.province || null,
+        district: parsed.district || null,
+        ward: parsed.ward || null,
         description: parsed.description || null,
         bannerUrl: parsed.bannerUrl || null,
         formats: Array.isArray(parsed.formats) && parsed.formats.length > 0
