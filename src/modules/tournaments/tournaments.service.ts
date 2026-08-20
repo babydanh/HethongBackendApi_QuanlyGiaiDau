@@ -3074,19 +3074,7 @@ export class TournamentsService {
         );
       }
 
-      if (result.teamInviteLink) {
-        // VĐV 1 chưa có partner — thông báo cho VĐV 1 chờ đồng đội join
-        notifications.push(
-          this.notificationsService.sendNotification(
-            buildParticipantPendingTeammateNotification({
-              receiverId: userId,
-              tournamentId: id,
-              tournamentName: tournament.name,
-              divisionId: result.participant.tournamentDivisionId,
-            }),
-          ),
-        );
-      } else if (
+      if (
         result.participant.teamStatus === 'PENDING_PARTNER' &&
         partnerUser
       ) {
@@ -3100,6 +3088,18 @@ export class TournamentsService {
               senderId: userId,
               teamName: result.participant.teamName,
               participantId: result.participant.id,
+            }),
+          ),
+        );
+      } else if (result.teamInviteLink) {
+        // VĐV 1 chưa có partner (chọn mời sau qua link/QR) — thông báo cho VĐV 1 chờ đồng đội join
+        notifications.push(
+          this.notificationsService.sendNotification(
+            buildParticipantPendingTeammateNotification({
+              receiverId: userId,
+              tournamentId: id,
+              tournamentName: tournament.name,
+              divisionId: result.participant.tournamentDivisionId,
             }),
           ),
         );
