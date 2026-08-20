@@ -702,6 +702,19 @@ export class TournamentsController {
     return this.tournamentsService.regenerateInviteCode(id, user.sub, this.getSystemRoles(user));
   }
 
+  @Post(':id/reopen-registration')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Mở lại đăng ký có kiểm soát trước khi tạo sơ đồ' })
+  async reopenRegistration(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.reopenRegistration(id, user.sub, this.getSystemRoles(user));
+  }
+
+
+
   @Public()
   @Get(':id/gallery')
   @ApiOperation({ summary: 'Lấy danh sách ảnh gallery của giải đấu (PUBLIC)' })

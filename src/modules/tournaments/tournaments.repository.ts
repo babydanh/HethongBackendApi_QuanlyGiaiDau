@@ -1216,6 +1216,19 @@ export class TournamentsRepository {
       .returning();
   }
 
+  async reopenRegistration(id: string) {
+    const [updated] = await this.db
+      .update(schema.tournaments)
+      .set({
+        status: 'REGISTRATION_OPEN',
+        isRegistrationLocked: false,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.tournaments.id, id))
+      .returning();
+    return updated;
+  }
+
   async registerParticipant(
     tournamentId: string,
     userId: string,

@@ -1,7 +1,14 @@
-import { IsString, IsOptional, Matches, IsDateString, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsDateString, IsEmail, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 
 export class UpdateUserDto {
+  @ApiPropertyOptional({ example: 'user@example.com', description: 'Địa chỉ email mới. Chỉ được đổi khi email hiện tại chưa xác minh.' })
+  @IsEmail({}, { message: 'Email không hợp lệ.' })
+  @MaxLength(255, { message: 'Email không được vượt quá 255 ký tự.' })
+  @IsOptional()
+  email?: string;
+
+
   @ApiPropertyOptional({ example: 'John Doe Updated' })
   @IsString()
   @IsOptional()

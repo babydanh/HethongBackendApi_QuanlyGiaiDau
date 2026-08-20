@@ -1590,6 +1590,41 @@ export class TournamentsService {
     >;
     const incomingConfigPatch = updateTournamentDto.tournamentConfig;
 
+    // Once registration is closed or explicitly locked, registration controls
+    // must not be changed as an accidental way to reopen or extend the roster.
+    if (existing.status === 'REGISTRATION_CLOSED' || existing.isRegistrationLocked) {
+      const lockedRegistrationFields: (keyof UpdateTournamentDto)[] = [
+        'registrationStartDate',
+        'registrationEndDate',
+        'maxParticipants',
+        'visibility',
+      ];
+      for (const field of lockedRegistrationFields) {
+        if (
+          updateTournamentDto[field] !== undefined &&
+          updateTournamentDto[field] !==
+            (existing as Record<string, unknown>)[field]
+        ) {
+          throw new BadRequestException(
+            'Đăng ký đã được khóa. Hãy dùng thao tác mở lại đăng ký được kiểm soát trước khi thay đổi thời gian hoặc số lượng.',
+          );
+        }
+      }
+
+      if (incomingConfigPatch) {
+        for (const key of ['registrationMode', 'registrationForm']) {
+          if (
+            incomingConfigPatch[key] !== undefined &&
+            !isDeepStrictEqual(incomingConfigPatch[key], existingConfig[key])
+          ) {
+            throw new BadRequestException(
+              'Đăng ký đã được khóa. Không thể thay đổi chế độ hoặc biểu mẫu đăng ký ở giai đoạn này.',
+            );
+          }
+        }
+      }
+    }
+
     const categoryId = updateTournamentDto.categoryId ?? existing.categoryId;
     const category = await this.tournamentsRepository.findCategory(categoryId);
     if (!category) {
@@ -3494,6 +3529,46 @@ export class TournamentsService {
     }
   }
 
+  async reopenRegistration(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) {
+      throw new NotFoundException('Giải đấu không tồn tại');
+    }
+
+    const isAuthorized = await this.isManager(tournament, userId, systemRoles);
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền mở lại đăng ký');
+    }
+
+    if (tournament.status !== 'REGISTRATION_CLOSED') {
+      throw new BadRequestException(
+        'Chỉ có thể mở lại đăng ký từ trạng thái Đã khóa đăng ký.',
+      );
+    }
+    if (tournament.startDate && new Date(tournament.startDate) <= new Date()) {
+      throw new BadRequestException(
+        'Không thể mở lại đăng ký sau thời điểm giải bắt đầu.',
+      );
+    }
+
+    const bracket = await this.tournamentsRepository.findBracket(id);
+    if (bracket?.stages?.length) {
+      throw new BadRequestException(
+        'Không thể mở lại đăng ký sau khi sơ đồ thi đấu đã được tạo. Hãy xử lý lại sơ đồ theo quy trình riêng để tránh kết quả cũ bị lệch.',
+      );
+    }
+
+    const updated = await this.tournamentsRepository.reopenRegistration(id);
+    if (!updated) {
+      throw new NotFoundException('Giải đấu không tồn tại');
+    }
+    return this.mapTournamentFormat(updated);
+  }
+
   async regenerateInviteCode(
     id: string,
     userId: string,
@@ -3508,6 +3583,11 @@ export class TournamentsService {
     const isAuthorized = await this.isManager(tournament, userId, systemRoles);
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền tạo lại mã mời');
+    }
+    if (tournament.status === 'REGISTRATION_CLOSED' || tournament.isRegistrationLocked) {
+      throw new BadRequestException(
+        'Đăng ký đã được khóa. Không thể tạo mã mời mới ở giai đoạn này.',
+      );
     }
 
     const updated = await this.tournamentsRepository.regenerateInviteCode(
@@ -6226,6 +6306,11 @@ export class TournamentsService {
 
     if (tournament.status === 'COMPLETED') {
       throw new BadRequestException('Giải đấu đã kết thúc');
+    }
+    if (tournament.status === 'REGISTRATION_CLOSED' || tournament.isRegistrationLocked) {
+      throw new BadRequestException(
+        'Đăng ký đã được khóa. Không thể nhập thêm VĐV hoặc gửi lời mời mới.',
+      );
     }
 
     const result = await this.tournamentsRepository.importParticipants(

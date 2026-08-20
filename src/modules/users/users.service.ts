@@ -99,14 +99,36 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, updateUserDto: UpdateUserDto) {
-    // Check if user exists and get current profile data
+    // Email lives in users, while the remaining editable fields live in profiles.
     const currentUser = await this.findOne(userId);
+    const { email: requestedEmail, ...profileDto } = updateUserDto;
+    const normalizedEmail = requestedEmail?.trim().toLowerCase();
+    const currentEmail = currentUser.email.trim().toLowerCase();
 
-    // Only pass defined values, also convert date format if necessary
+    if (normalizedEmail !== undefined && normalizedEmail !== currentEmail) {
+      if (currentUser.isEmailVerified) {
+        throw new ForbiddenException(
+          'Email đã được xác minh nên không thể thay đổi. Vui lòng liên hệ hỗ trợ nếu cần cập nhật.',
+        );
+      }
+
+      try {
+        await this.usersRepository.updateEmail(userId, normalizedEmail);
+        // A verification token created for the previous address must never
+        // verify the newly selected address.
+        await this.usersRepository.invalidateEmailVerificationTokens(userId);
+      } catch (error: unknown) {
+        if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
+          throw new ConflictException('Email này đã được sử dụng bởi tài khoản khác.');
+        }
+        throw error;
+      }
+    }
+
     if (
-      updateUserDto.gender !== undefined &&
+      profileDto.gender !== undefined &&
       currentUser.profile?.isGenderLocked &&
-      this.normalizeGenderValue(updateUserDto.gender) !==
+      this.normalizeGenderValue(profileDto.gender) !==
         this.normalizeGenderValue(currentUser.profile.gender)
     ) {
       throw new BadRequestException(
@@ -114,7 +136,7 @@ export class UsersService {
       );
     }
 
-    const updateData = { ...updateUserDto } as Partial<
+    const updateData = { ...profileDto } as Partial<
       typeof schema.profiles.$inferInsert
     >;
 
@@ -324,9 +346,16 @@ export class UsersService {
     if (request.requestType === 'GENDER') {
       await this.usersRepository.updateProfile(request.userId, { gender: request.newValue });
     } else if (request.requestType === 'EMAIL') {
-      // Direct SQL email update isn't in UsersRepository yet, let's write it in service or repository
-      await this.usersRepository.verifyEmail(request.userId); // set verified
-      await this.usersRepository.updateProfile(request.userId, { address: request.newValue }); // or write an email update
+      const normalizedEmail = request.newValue.trim().toLowerCase();
+      try {
+        await this.usersRepository.updateEmail(request.userId, normalizedEmail);
+        await this.usersRepository.invalidateEmailVerificationTokens(request.userId);
+      } catch (error: unknown) {
+        if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
+          throw new ConflictException('Email này đã được sử dụng bởi tài khoản khác.');
+        }
+        throw error;
+      }
     }
 
     const [updated] = await this.usersRepository.updateChangeRequestStatus(id, 'APPROVED', adminNote);

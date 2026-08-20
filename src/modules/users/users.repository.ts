@@ -374,7 +374,33 @@ export class UsersRepository {
       .returning();
   }
 
+  async updateEmail(userId: string, email: string) {
+    return await this.db
+      .update(schema.users)
+      .set({ email, isEmailVerified: false, updatedAt: new Date() })
+      .where(eq(schema.users.id, userId))
+      .returning({
+        id: schema.users.id,
+        email: schema.users.email,
+        isEmailVerified: schema.users.isEmailVerified,
+      });
+  }
+
+  async invalidateEmailVerificationTokens(userId: string) {
+    return await this.db
+      .update(schema.otpCodes)
+      .set({ isUsed: true })
+      .where(
+        and(
+          eq(schema.otpCodes.userId, userId),
+          eq(schema.otpCodes.type, 'EMAIL_VERIFY'),
+          eq(schema.otpCodes.isUsed, false),
+        ),
+      );
+  }
+
   async verifyEmail(userId: string) {
+
     return await this.db
       .update(schema.users)
       .set({ isEmailVerified: true, updatedAt: new Date() })
