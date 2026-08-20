@@ -12,6 +12,8 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
+    "db:migrate": "node run-prod-migration.js",
+    "db:push": "npx drizzle-kit push",
     "seed:prod": "npx ts-node src/database/seeds/seed-prod.ts",
     "seed:roles": "npx ts-node src/database/seeds/roles.seed.ts",
     "seed:categories": "npx ts-node src/database/seeds/categories.seed.ts",
