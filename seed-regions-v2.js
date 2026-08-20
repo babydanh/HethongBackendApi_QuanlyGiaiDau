@@ -107,21 +107,18 @@ async function main() {
     console.warn('⚠️ Lỗi kiểm tra bảng:', tableErr.message);
   }
 
-  console.log('🔄 Đang tải toàn bộ dữ liệu địa giới từ https://provinces.open-api.vn/api/?depth=3 ...');
+  console.log('🔄 Đang tải toàn bộ dữ liệu địa giới 2 cấp (v2) từ https://provinces.open-api.vn/api/v2/ ...');
 
   try {
-    const res = await fetch('https://provinces.open-api.vn/api/?depth=3');
-    if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`);
-    }
-
-    const allData = await res.json();
-    console.log(`✅ Đã tải về ${allData.length} Tỉnh/Thành phố.`);
+    const provRes = await fetch('https://provinces.open-api.vn/api/v2/p/');
+    if (!provRes.ok) throw new Error(`HTTP error! status: ${provRes.status}`);
+    const provincesList = await provRes.json();
+    console.log(`✅ Đã tải về ${provincesList.length} Tỉnh/Thành phố.`);
 
     const provincesToInsert = [];
     const wardsToInsert = [];
 
-    for (const p of allData) {
+    for (const p of provincesList) {
       provincesToInsert.push({
         code: String(p.code),
         name: p.name,
@@ -131,17 +128,18 @@ async function main() {
         code_name: p.codename,
       });
 
-      if (p.districts && Array.isArray(p.districts)) {
-        for (const d of p.districts) {
-          if (d.wards && Array.isArray(d.wards)) {
-            for (const w of d.wards) {
-              const fullDisplay = `${w.name}, ${d.name}`;
+      try {
+        const detailRes = await fetch(`https://provinces.open-api.vn/api/v2/p/${p.code}?depth=2`);
+        if (detailRes.ok) {
+          const detailData = await detailRes.json();
+          if (detailData.wards && Array.isArray(detailData.wards)) {
+            for (const w of detailData.wards) {
               wardsToInsert.push({
                 code: String(w.code),
                 name: w.name,
                 name_en: w.name_en || null,
-                full_name: fullDisplay,
-                full_name_en: w.name_en ? `${w.name_en}, ${d.name_en || d.name}` : null,
+                full_name: w.name,
+                full_name_en: w.name_en || null,
                 code_name: w.codename,
                 province_code: String(p.code),
                 district_code: null,
@@ -149,8 +147,14 @@ async function main() {
             }
           }
         }
+      } catch (err) {
+        console.warn(`   ⚠️ Lỗi lấy xã phường tỉnh ${p.name}:`, err.message);
       }
     }
+
+    // Sắp xếp danh sách theo thứ tự bảng chữ cái tiếng Việt (A-Z)
+    provincesToInsert.sort((a, b) => a.name.localeCompare(b.name, 'vi-VN'));
+    wardsToInsert.sort((a, b) => a.name.localeCompare(b.name, 'vi-VN'));
 
     console.log(`📊 Chuẩn bị nạp: ${provincesToInsert.length} Tỉnh/Thành, ${wardsToInsert.length} Phường/Xã...`);
 

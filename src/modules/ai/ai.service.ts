@@ -467,6 +467,8 @@ ${divisionsStr}
     venueName?: string | null;
     locationAddress?: string | null;
     province?: string | null;
+    district?: string | null;
+    ward?: string | null;
     description?: string | null;
     bannerUrl?: string | null;
     formats: Array<{
@@ -542,9 +544,11 @@ Quy tắc phân loại:
 4. "venueName": Tên sân vận động / cụm sân.
 5. "locationAddress": Địa chỉ sân.
 6. "province": Tỉnh / Thành phố diễn ra giải (VD: "Hồ Chí Minh", "Hà Nội", "Đà Nẵng",...).
-7. "description": Tóm tắt quy định, điều lệ hoặc thông tin giải đấu.
-8. "bannerUrl": Link ảnh banner/poster nếu tìm thấy trong văn bản (hoặc null).
-9. "formats": Danh sách các nội dung thi đấu (Divisions). Mỗi mục gồm:
+7. "district": Quận / huyện / thị xã nếu nguồn có nêu rõ, nếu không thì null.
+8. "ward": Phường / xã / thị trấn nếu nguồn có nêu rõ, nếu không thì null.
+9. "description": Tóm tắt quy định, điều lệ hoặc thông tin giải đấu.
+10. "bannerUrl": Link ảnh banner/poster nếu tìm thấy trong văn bản (hoặc null).
+11. "formats": Danh sách các nội dung thi đấu (Divisions). Mỗi mục gồm:
    - "name": Tên hiển thị (VD: "Đôi Nam 6.5", "Đôi Nam Nữ Open", "Đơn Nam 3.0", "Đôi Nữ")
    - "formatKey": Chuẩn hóa theo một trong các giá trị:
      + "SINGLES_MALE", "SINGLES_FEMALE", "DOUBLES_MALE", "DOUBLES_FEMALE", "MIXED_DOUBLES"
@@ -576,6 +580,8 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
         venueName: null,
         locationAddress: null,
         province: null,
+        district: null,
+        ward: null,
         description: sourceContent.slice(0, 500),
         bannerUrl: null,
         formats: [
