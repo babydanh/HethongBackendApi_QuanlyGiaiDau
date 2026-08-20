@@ -244,16 +244,7 @@ async function main() {
         await db
           .insert(schema.provinces)
           .values(chunk)
-          .onConflictDoUpdate({
-            target: schema.provinces.code,
-            set: {
-              name: dsql`EXCLUDED.name`,
-              nameEn: dsql`EXCLUDED.name_en`,
-              fullName: dsql`EXCLUDED.full_name`,
-              fullNameEn: dsql`EXCLUDED.full_name_en`,
-              codeName: dsql`EXCLUDED.code_name`,
-            },
-          });
+          .onConflictDoNothing();
       }
     }
 
@@ -263,17 +254,7 @@ async function main() {
         await db
           .insert(schema.wards)
           .values(chunk)
-          .onConflictDoUpdate({
-            target: schema.wards.code,
-            set: {
-              name: dsql`EXCLUDED.name`,
-              nameEn: dsql`EXCLUDED.name_en`,
-              fullName: dsql`EXCLUDED.full_name`,
-              fullNameEn: dsql`EXCLUDED.full_name_en`,
-              codeName: dsql`EXCLUDED.code_name`,
-              provinceCode: dsql`EXCLUDED.province_code`,
-            },
-          });
+          .onConflictDoNothing();
       }
     }
 
