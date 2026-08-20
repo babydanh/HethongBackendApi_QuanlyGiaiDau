@@ -5338,17 +5338,10 @@ export class TournamentsService {
         throw new NotFoundException('Hạng đấu không tồn tại');
       }
 
-      // A quick-created tournament may already be open with zero participants.
-      // Allow completing its formats in that safe window; once registration is
-      // locked/closed or a participant exists, the division structure is fixed.
-      if (tournament.isRegistrationLocked || ['REGISTRATION_CLOSED', 'UPCOMING', 'IN_PROGRESS', 'ONGOING', 'COMPLETED', 'CANCELLED'].includes(tournament.status)) {
-        throw new BadRequestException('Không thể thêm hình thức sau khi danh sách hoặc giải đấu đã được chốt.');
-      }
-      if (tournament.status === 'REGISTRATION_OPEN') {
-        const participants = await this.tournamentsRepository.findParticipants(tournamentId, tournament.categoryId);
-        if (participants.length > 0) {
-          throw new BadRequestException('Không thể thêm hình thức sau khi đã có người đăng ký.');
-        }
+      // Allow adding new divisions while tournament is in DRAFT, REGISTRATION_OPEN, etc.
+      // Only block when the tournament is locked, completed or cancelled.
+      if (tournament.isRegistrationLocked || ['COMPLETED', 'CANCELLED'].includes(tournament.status)) {
+        throw new BadRequestException('Không thể thêm nội dung thi đấu khi giải đấu đã khóa hoặc kết thúc.');
       }
 
       const categoryConfig = category.categoryConfig as
