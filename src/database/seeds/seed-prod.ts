@@ -185,15 +185,32 @@ async function main() {
     }
   }
 
-  // 4. Setup Tỉnh/Thành phố/Phường/Xã Việt Nam từ Open API v2 (2 cấp)
-  console.log('\n4. Đang tải và khởi tạo dữ liệu hành chính Việt Nam v2 (Provinces/Wards)...');
+  // 4. Setup Tỉnh/Thành phố/Phường/Xã Việt Nam từ Open API (kèm Quận/Huyện trong fullName để phân biệt rõ ràng)
+  console.log('\n4. Đang tải và khởi tạo dữ liệu hành chính Việt Nam (Provinces/Wards)...');
   try {
-    interface ApiProv { code: number | string; name: string; name_en?: string; codename?: string; }
-    interface ApiWrd { code: number | string; name: string; name_en?: string; codename?: string; }
-    interface ApiProvDetail extends ApiProv { wards?: ApiWrd[]; }
+    interface ApiWardItem {
+      code: number | string;
+      name: string;
+      name_en?: string;
+      codename?: string;
+    }
+    interface ApiDistrictItem {
+      code: number | string;
+      name: string;
+      name_en?: string;
+      codename?: string;
+      wards?: ApiWardItem[];
+    }
+    interface ApiProvinceItem {
+      code: number | string;
+      name: string;
+      name_en?: string;
+      codename?: string;
+      districts?: ApiDistrictItem[];
+    }
 
-    const res = await fetch('https://provinces.open-api.vn/api/v2/p/');
-    const provincesList = (await res.json()) as ApiProv[];
+    const res = await fetch('https://provinces.open-api.vn/api/?depth=3');
+    const provincesList = (await res.json()) as ApiProvinceItem[];
     
     const provincesToInsert: (typeof schema.provinces.$inferInsert)[] = [];
     const wardsToInsert: (typeof schema.wards.$inferInsert)[] = [];
@@ -208,26 +225,23 @@ async function main() {
         codeName: p.codename,
       });
 
-      try {
-        const detailRes = await fetch(`https://provinces.open-api.vn/api/v2/p/${p.code}?depth=2`);
-        if (detailRes.ok) {
-          const detailData = (await detailRes.json()) as ApiProvDetail;
-          if (detailData.wards && Array.isArray(detailData.wards)) {
-            for (const w of detailData.wards) {
+      if (p.districts && Array.isArray(p.districts)) {
+        for (const dst of p.districts) {
+          if (dst.wards && Array.isArray(dst.wards)) {
+            for (const w of dst.wards) {
+              const fullDisplay = `${w.name}, ${dst.name}`;
               wardsToInsert.push({
                 code: String(w.code),
                 name: w.name,
                 nameEn: w.name_en || null,
-                fullName: w.name,
-                fullNameEn: w.name_en || null,
+                fullName: fullDisplay,
+                fullNameEn: w.name_en ? `${w.name_en}, ${dst.name_en || dst.name}` : null,
                 codeName: w.codename,
                 provinceCode: String(p.code),
               });
             }
           }
         }
-      } catch (err: unknown) {
-        console.warn(`   ⚠️ Không thể lấy xã/phường của tỉnh ${p.name}:`, err);
       }
     }
 
@@ -259,7 +273,14 @@ async function main() {
         await db
           .insert(schema.wards)
           .values(chunk)
-          .onConflictDoNothing();
+          .onConflictDoUpdate({
+            target: schema.wards.code,
+            set: {
+              fullName: dsql`EXCLUDED.full_name`,
+              fullNameEn: dsql`EXCLUDED.full_name_en`,
+              name: dsql`EXCLUDED.name`,
+            },
+          });
       }
     }
 
