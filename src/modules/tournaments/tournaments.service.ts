@@ -29,6 +29,7 @@ import {
 } from './interfaces/tournament-config.interface';
 import { EloCapViolationException } from './exceptions/elo-cap-violation.exception';
 import * as schema from '../../database/schema';
+import { PaymentStatus } from '../../common/constants/enums';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Cron } from '@nestjs/schedule';
 import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
@@ -3560,13 +3561,19 @@ export class TournamentsService {
     if (!(await this.isManager(tournament, userId, systemRoles))) {
       throw new ForbiddenException('Bạn không có quyền xem hồ sơ đăng ký của giải đấu này.');
     }
-    return this.tournamentsRepository.findParticipants(
+    const participants = await this.tournamentsRepository.findParticipants(
       id,
       tournament.categoryId,
       divisionId,
       false,
       true,
     );
+
+    return participants.map((participant) => ({
+      ...participant,
+      isPaid:
+        participant.isPaid || participant.payment?.status === PaymentStatus.COMPLETED,
+    }));
   }
 
   async findBracket(id: string, divisionId?: string) {
@@ -4596,6 +4603,17 @@ export class TournamentsService {
     }
 
     if (status === 'COMPLETE') {
+      if (!participant.isPaid) {
+        const completedPayment =
+          await this.tournamentsRepository.findCompletedParticipantPayment(
+            participant.id,
+          );
+        if (completedPayment) {
+          await this.tournamentsRepository.markParticipantPaid(participant.id);
+          participant.isPaid = true;
+        }
+      }
+
       const division = participant.tournamentDivisionId
         ? await this.tournamentsRepository.findDivisionById(
             participant.tournamentDivisionId,

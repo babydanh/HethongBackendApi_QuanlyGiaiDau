@@ -880,6 +880,7 @@ export class TournamentsRepository {
           ...(data.startDate && { startDate: new Date(data.startDate) }),
           ...(data.endDate && { endDate: new Date(data.endDate) }),
           ...(data.venueId !== undefined && { venueId: data.venueId }),
+          ...(data.city !== undefined && { city: data.city || null }),
           ...(data.tournamentType && { tournamentType: data.tournamentType }),
           ...(data.bannerUrl !== undefined && { bannerUrl: data.bannerUrl }),
           ...(data.logoUrl !== undefined && { logoUrl: data.logoUrl }),
@@ -4450,6 +4451,7 @@ export class TournamentsRepository {
       endDate: schema.tournaments.endDate,
       registrationEndDate: schema.tournaments.registrationEndDate,
       locationAddress: schema.tournamentVenues.locationAddress,
+      city: schema.tournaments.city,
       matchType: schema.tournaments.matchType,
       tournamentType: schema.tournaments.tournamentType,
       logoUrl: schema.tournaments.logoUrl,
@@ -4603,6 +4605,9 @@ export class TournamentsRepository {
           tournamentName: schema.tournaments.name,
           logoUrl: schema.tournaments.logoUrl,
           categoryName: schema.categories.name,
+          venueName: schema.tournamentVenues.name,
+          venueAddress: schema.tournamentVenues.locationAddress,
+          city: schema.tournaments.city,
           stageName: schema.tournamentStages.name,
           groupName: schema.tournamentGroups.name,
           roundNumber: schema.matches.roundNumber,
@@ -4629,6 +4634,10 @@ export class TournamentsRepository {
         .leftJoin(
           schema.categories,
           eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournaments.venueId, schema.tournamentVenues.id),
         )
         .where(
           and(
@@ -6141,6 +6150,30 @@ export class TournamentsRepository {
       .where(eq(schema.tournamentParticipants.id, participantId))
       .limit(1);
     return participant;
+  }
+
+  async findCompletedParticipantPayment(participantId: string) {
+    const [payment] = await this.db
+      .select()
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.participantId, participantId),
+          eq(schema.payments.status, PaymentStatus.COMPLETED),
+        ),
+      )
+      .orderBy(desc(schema.payments.paidAt), desc(schema.payments.createdAt))
+      .limit(1);
+    return payment;
+  }
+
+  async markParticipantPaid(participantId: string) {
+    const [updated] = await this.db
+      .update(schema.tournamentParticipants)
+      .set({ isPaid: true })
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .returning({ id: schema.tournamentParticipants.id });
+    return updated ?? null;
   }
 
   async getParticipantRosters(participantId: string) {
