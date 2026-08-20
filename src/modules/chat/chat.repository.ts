@@ -89,6 +89,8 @@ export class ChatRepository {
       updatedAt: string;
       unreadCount: number;
       communityId: string | null;
+      canSendMessages?: boolean;
+      messageRestriction?: 'STRANGER' | 'BLOCKED' | null;
     }[] = [];
 
     for (const room of roomsWithMembership) {
@@ -151,6 +153,24 @@ export class ChatRepository {
         unread = 0;
       }
 
+      let canSendMessages = true;
+      let messageRestriction: 'STRANGER' | 'BLOCKED' | null = null;
+      if (room.type === 'DIRECT') {
+        const otherParticipant = participants.find((participant) => participant.id !== userId);
+        if (otherParticipant) {
+          if (await this.isBlockedBetween(userId, otherParticipant.id)) {
+            canSendMessages = false;
+            messageRestriction = 'BLOCKED';
+          } else if (
+            !(await this.getAllowStrangerMessages(otherParticipant.id)) &&
+            !(await this.isAcquainted(userId, otherParticipant.id))
+          ) {
+            canSendMessages = false;
+            messageRestriction = 'STRANGER';
+          }
+        }
+      }
+
       roomsList.push({
         ...room,
         unreadCount: unread,
@@ -169,6 +189,8 @@ export class ChatRepository {
             }
           : undefined,
         updatedAt: lastMsgDateIso || roomCreatedDateIso,
+        canSendMessages,
+        messageRestriction,
       });
     }
 
