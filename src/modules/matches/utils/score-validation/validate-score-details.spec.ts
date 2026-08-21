@@ -69,6 +69,35 @@ describe('validateScoreDetails', () => {
     ).toThrow(BadRequestException);
   });
 
+  it('accepts Lite Tennis scores without standard game or tie-break constraints', () => {
+    const result = validateScoreDetails(
+      {
+        sets: [
+          { team1Score: 6, team2Score: 6, isFinished: true },
+          { team1Score: 8, team2Score: 7, isFinished: true },
+        ],
+      },
+      buildResolvedConfig({
+        kind: 'TENNIS',
+        scoringModel: 'TENNIS_SET',
+        mode: 'LITE',
+        bestOf: 1,
+        setsToWin: 1,
+        pointsPerSet: 6,
+        maxPoints: 7,
+        tiebreakAt: 6,
+        tiebreakPoints: 7,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 1,
+      p2SetsWon: 0,
+      setsToWin: 1,
+      totalSets: 2,
+    });
+  });
+
   it('accepts tennis scoreDetails with the final set still in progress', () => {
     const result = validateScoreDetails(
       {

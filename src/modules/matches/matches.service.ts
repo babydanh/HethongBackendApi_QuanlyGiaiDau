@@ -953,6 +953,7 @@ export class MatchesService {
       }
 
       if (
+        resolvedMatchConfig.mode !== 'LITE' &&
         !isShootoutDecided &&
         winnerId === existing.participant1Id &&
         p1SetsWon <= p2SetsWon
@@ -963,6 +964,7 @@ export class MatchesService {
       }
 
       if (
+        resolvedMatchConfig.mode !== 'LITE' &&
         !isShootoutDecided &&
         winnerId === existing.participant2Id &&
         p2SetsWon <= p1SetsWon
