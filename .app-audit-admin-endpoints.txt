@@ -1,0 +1,16 @@
+﻿src\modules\communities\communities.service.ts:1007:    return await this.communitiesRepository.getGallery(id);
+src\modules\communities\communities.service.ts:1018:    return await this.communitiesRepository.addGalleryItem(
+src\modules\communities\communities.service.ts:1035:    const item = await this.communitiesRepository.findGalleryItemById(
+src\modules\communities\communities.service.ts:1050:    return await this.communitiesRepository.removeGalleryItem(id, imageId);
+src\modules\communities\communities.controller.ts:422:    return await this.communitiesService.getGallery(id, user);
+src\modules\communities\communities.controller.ts:433:    return await this.communitiesService.addGalleryItem(user.id, id, body.imageUrl, body.caption, user.roles);
+src\modules\communities\communities.controller.ts:444:    return await this.communitiesService.removeGalleryItem(user.id, id, imageId, user.roles);
+src\modules\communities\communities-mentions.spec.ts:29:    expect(communitiesRepository.getMembers).toHaveBeenCalledWith(
+src\modules\communities\communities-mentions.spec.ts:61:    expect(communitiesRepository.updateMemberTags).toHaveBeenCalledWith(
+src\modules\tournaments\tournaments.controller.ts:447:  @Post('lite/:id/bracket')
+src\modules\tournaments\tournaments.controller.ts:462:  @Post('lite/:id/bracket/reset')
+src\modules\tournaments\tournaments.controller.ts:607:  @Post(':id/confirm-roster')
+src\modules\users\users.controller.ts:213:  @Get('admin/change-requests')
+src\modules\users\users.controller.ts:220:  @Patch('admin/change-requests/:id/approve')
+src\modules\users\users.controller.ts:230:  @Patch('admin/change-requests/:id/reject')
+src\modules\admin\admin-tickets.controller.ts:12:@Controller('admin/verification-tickets')

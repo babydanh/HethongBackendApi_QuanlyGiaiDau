@@ -1,0 +1,108 @@
+﻿D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\common\constants\enums.ts:26:DISPUTED = 'DISPUTED',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\admin_tables.schema.ts:24:reviewedBy: uuid('reviewed_by').references(() => users.id, {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\admin_tables.schema.ts:109:sql`${table.source} in ('USER_REPORT', 'LEGACY_DISPUTE')`,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\admin_tables.schema.ts:117:sql`${table.status} in ('SUBMITTED', 'TRIAGED', 'UNDER_REVIEW', 'ESCALATED', 'RESOLVED', 'REJECTED')`,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\communities.schema.ts:48:reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\matches.schema.ts:146:export const matchDisputes = pgTable('match_disputes', {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\users.schema.ts:132:export const organizerReviews = pgTable('organizer_reviews', {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\schema\users.schema.ts:135:reviewerId: uuid('reviewer_id').references(() => users.id, { onDelete: 'restrict' }).notNull(),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\delete-old-rr.ts:44:await db.delete(schema.matchDisputes)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\database\seeds\delete-old-rr.ts:45:.where(inArray(schema.matchDisputes.matchId, matchIds));
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-moderation.controller.ts:67:@Post('reports/:id/start-review')
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-moderation.controller.ts:70:async startReportReview(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin-moderation.controller.ts:75:return this.adminService.startReportReview(id, moderator.sub, dto.note);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:483:reviewedBy: adminId,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:556:reviewedBy: adminId,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1138:UNDER_REVIEW: 'Báo cáo của bạn đang được xác minh.',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1168:async startReportReview(reportId: string, moderatorId: string, note: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1172:action: 'START_REVIEW',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1174:targetStatus: 'UNDER_REVIEW',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1184:expectedStatuses: ['SUBMITTED', 'TRIAGED', 'UNDER_REVIEW'],
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1199:? ['SUBMITTED', 'TRIAGED', 'UNDER_REVIEW', 'ESCALATED']
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\admin\admin.service.ts:1200:: ['SUBMITTED', 'TRIAGED', 'UNDER_REVIEW'];
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\ai\ai.service.ts:494:needsReview?: boolean;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\ai\ai.service.ts:569:- "confidence": số từ 0 đến 1 cho độ chắc chắn; "needsReview": true nếu câu hỏi mơ hồ hoặc không chắc loại trường/ràng buộc.
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\ai\ai.service.ts:655:needsReview: field.needsReview === true || (typeof field.confidence === 'number' && field.confidence < 0.8),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\auth\auth.service.ts:624:// server log so Apple review failures can be diagnosed safely.
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.controller.ts:165:@Get('link-preview')
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.controller.ts:166:@ApiOperation({ summary: 'Trích xuất thông tin xem trước của liên kết (OpenGraph preview)' })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.controller.ts:167:async getLinkPreview(@Query('url') url: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.controller.ts:168:return this.chatService.getLinkPreview(url);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.repository.ts:199:// conversation, while preserving the freshest preview and unread state.
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.service.ts:14:import { extractLinkPreview } from './utils/link-preview.util';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.service.ts:544:async getLinkPreview(url: string) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.service.ts:548:const preview = await extractLinkPreview(url);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\chat.service.ts:549:return { data: preview };
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\dto\create-message.dto.ts:39:description: 'Loại tin nhắn (TEXT, POLL, TOURNAMENT_SHARE, LINK_PREVIEW)',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\utils\link-preview.util.ts:1:export interface LinkPreviewData {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\utils\link-preview.util.ts:9:export async function extractLinkPreview(targetUrl: string): Promise<LinkPreviewData | null> {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\chat\utils\link-preview.util.ts:22:'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 SportoPreviewBot/1.0',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:25:import { ReviewCommunityDto } from './dto/review-community.dto';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:31:import { ReviewJoinDto } from './dto/review-join.dto';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:161:@Patch(':id/review')
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:165:async review(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:168:@Body() reviewDto: ReviewCommunityDto,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:170:return await this.communitiesService.review(user.id, id, reviewDto, user.roles);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:332:async reviewJoinRequest(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:336:@Body() body: ReviewJoinDto
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.controller.ts:338:return await this.communitiesService.reviewJoinRequest(user.id, id, memberId, body.action, user.roles);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.service.ts:16:import { ReviewCommunityDto } from './dto/review-community.dto';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.service.ts:272:async review(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.service.ts:275:dto: ReviewCommunityDto,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.service.ts:283:reviewedAt: new Date(),
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.service.ts:287:const reviewed = await this.communitiesRepository.update(id, updateData);
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.service.ts:289:return reviewed;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\communities.service.ts:587:async reviewJoinRequest(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\community-social.repository.ts:345:.set({ status, resolvedAt: status === 'OPEN' || status === 'REVIEWING' ? null : new Date() })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\dto\review-community.dto.ts:4:export class ReviewCommunityDto {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\dto\review-join.dto.ts:4:export class ReviewJoinDto {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\dto\update-community-report-status.dto.ts:4:@IsIn(['OPEN', 'REVIEWING', 'RESOLVED', 'DISMISSED'])
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\communities\dto\update-community-report-status.dto.ts:5:status!: 'OPEN' | 'REVIEWING' | 'RESOLVED' | 'DISMISSED';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.repository.ts:2012:* assign a new time; ABANDON uses DISPUTED so standings, bracket promotion,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.repository.ts:2019:status: 'SCHEDULED' | 'DISPUTED';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.completion.spec.ts:607:it('marks an abandoned fixture disputed without awarding a winner', async () => {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.completion.spec.ts:617:.mockResolvedValue({ ...ongoingMatch, status: 'DISPUTED' });
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.completion.spec.ts:629:status: 'DISPUTED',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.ts:1358:// An abandoned fixture is marked DISPUTED so a manager/admin must resolve
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.ts:1397:status: data.action === 'POSTPONE' ? 'SCHEDULED' : 'DISPUTED',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\matches.service.ts:1451:type: 'MATCH_DISPUTED',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\matches\dto\update-match-status.dto.ts:10:@IsIn(['SCHEDULED', 'ONGOING', 'COMPLETED', 'DISPUTED'])
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\notifications\notification-builder.ts:679:export const buildPayoutReviewedNotification = (params: {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:7:import { ReviewPayoutDto } from './dto/review-payout.dto';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:39:@Patch('admin/payouts/:id/review')
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:43:async reviewPayout(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:45:@Body() reviewPayoutDto: ReviewPayoutDto,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:48:return this.paymentsService.reviewPayout(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:51:reviewPayoutDto.status,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:52:reviewPayoutDto.transactionProofUrl,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts:53:reviewPayoutDto.note,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.repository.ts:8:import type { PayoutReviewStatus } from './dto/review-payout.dto';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.repository.ts:25:'UNDER_REVIEW',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.repository.ts:371:'UNDER_REVIEW',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.repository.ts:431:status: PayoutReviewStatus,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:15:buildPayoutReviewedNotification,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:21:import type { PayoutReviewStatus } from './dto/review-payout.dto';
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:33:const payoutExpectedStatuses: Record<PayoutReviewStatus, string[]> = {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:34:UNDER_REVIEW: ['REQUESTED', 'PENDING'],
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:35:APPROVED: ['UNDER_REVIEW'],
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:38:REJECTED: ['REQUESTED', 'PENDING', 'UNDER_REVIEW'],
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:390:async reviewPayout(
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:393:status: PayoutReviewStatus,
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts:419:buildPayoutReviewedNotification({
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts:4:export const payoutReviewStatuses = [
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts:5:'UNDER_REVIEW',
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts:11:export type PayoutReviewStatus = (typeof payoutReviewStatuses)[number];
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts:13:export class ReviewPayoutDto {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts:14:@ApiProperty({ enum: payoutReviewStatuses })
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts:17:@IsIn(payoutReviewStatuses)
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts:18:status: PayoutReviewStatus;
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournament-scheduler.service.ts:466:AND ${schema.paymentRefunds.status} IN ('REQUESTED', 'UNDER_REVIEW', 'APPROVED', 'PROCESSING')
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournament-scheduler.service.ts:538:AND ${schema.paymentRefunds.status} IN ('REQUESTED', 'UNDER_REVIEW', 'APPROVED', 'PROCESSING')
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:965:// APPROVAL; silently collapsing it to OPEN made the UI promise review
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:2101:// Non-draft tournaments with participants or locked/live states must go through admin review
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:2105:const requiresReview =
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:2116:if (requiresReview) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:2230:// Parent tournaments with participants or locked/live child divisions must go through admin review
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:2235:const requiresReview =
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\tournaments\tournaments.service.ts:2246:if (requiresReview) {
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\users\dto\query-my-reports.dto.ts:15:'UNDER_REVIEW',

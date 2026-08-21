@@ -386,9 +386,9 @@ export class MatchesRepository {
       conditions.push(eq(schema.matches.tournamentId, tId));
     }
 
-    // Stage filters (only if specific filters like matchType, genderRestriction, bracketType, isRanked are supplied)
+    // Stage filters (only if specific filters like divisionId, matchType, genderRestriction, bracketType, isRanked are supplied)
     const hasStageFilters = Boolean(
-      matchType || genderRestriction || bracketType || isRanked !== undefined,
+      divisionId || matchType || genderRestriction || bracketType || isRanked !== undefined,
     );
     if (hasStageFilters) {
       const stageConditions: SQL[] = [
@@ -500,13 +500,29 @@ export class MatchesRepository {
       const groupIds = groups.map((g) => g.id);
 
       const matchScope: SQL[] = [];
-      if (groupIds.length > 0)
+      if (groupIds.length > 0) {
         matchScope.push(inArray(schema.matches.groupId, groupIds));
-      if (tournamentIds.length > 0)
+      }
+      // Only include tournament-level matches if not filtering by a specific division
+      if (!divisionId && tournamentIds.length > 0) {
         matchScope.push(inArray(schema.matches.tournamentId, tournamentIds));
+      }
 
       if (matchScope.length > 0) {
         conditions.push(or(...matchScope) as SQL);
+      } else if (divisionId) {
+        // If division has no groups/matches, return empty immediately
+        return {
+          data: [],
+          meta: {
+            total: 0,
+            page,
+            limit,
+            totalPages: 0,
+            nextCursor: null,
+            hasMore: false,
+          },
+        };
       }
     }
 

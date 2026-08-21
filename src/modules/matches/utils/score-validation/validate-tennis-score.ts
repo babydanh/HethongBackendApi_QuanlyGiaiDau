@@ -41,6 +41,7 @@ function validateTennisSetScore(
 export function validateTennisScoreDetails(context: ScoreValidationContext): ScoreValidationSummary {
   const { resolvedConfig, normalizedEntries } = context;
   const setsToWin = Math.ceil(resolvedConfig.bestOf / 2);
+  const isLite = resolvedConfig.mode === 'LITE';
   let p1SetsWon = 0;
   let p2SetsWon = 0;
   let winnerReachedAtSetIndex: number | null = null;
@@ -59,17 +60,22 @@ export function validateTennisScoreDetails(context: ScoreValidationContext): Sco
 
     const winner = entry.p1 > entry.p2 ? 'P1' : entry.p2 > entry.p1 ? 'P2' : null;
     if (!winner) {
-      throw new BadRequestException(`Set ${entry.key}: Không được phép hòa ${entry.scoreStr}.`);
+      if (!isLite) {
+        throw new BadRequestException(`Set ${entry.key}: Không được phép hòa ${entry.scoreStr}.`);
+      }
+      continue;
     }
 
-    validateTennisSetScore(
-      entry.key,
-      entry.scoreStr,
-      entry.p1,
-      entry.p2,
-      resolvedConfig.pointsPerSet,
-      resolvedConfig.maxPoints,
-    );
+    if (!isLite) {
+      validateTennisSetScore(
+        entry.key,
+        entry.scoreStr,
+        entry.p1,
+        entry.p2,
+        resolvedConfig.pointsPerSet,
+        resolvedConfig.maxPoints,
+      );
+    }
 
     if (winner === 'P1') {
       p1SetsWon += 1;
@@ -79,12 +85,12 @@ export function validateTennisScoreDetails(context: ScoreValidationContext): Sco
 
     if (winnerReachedAtSetIndex === null && (p1SetsWon >= setsToWin || p2SetsWon >= setsToWin)) {
       winnerReachedAtSetIndex = index;
-    } else if (winnerReachedAtSetIndex !== null && resolvedConfig.mode !== 'LITE') {
+    } else if (winnerReachedAtSetIndex !== null && !isLite) {
       throw new BadRequestException(`Không được nhập thêm ${entry.key} sau khi trận đã chốt người thắng từ trước.`);
     }
   }
 
-  if (resolvedConfig.mode !== 'LITE') {
+  if (!isLite) {
     if (p1SetsWon > setsToWin || p2SetsWon > setsToWin) {
       throw new BadRequestException('Số set thắng đang vượt quá cấu hình tennis hiện tại.');
     }

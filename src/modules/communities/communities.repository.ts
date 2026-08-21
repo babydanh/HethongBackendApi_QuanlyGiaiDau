@@ -930,10 +930,20 @@ export class CommunitiesRepository {
   }
 
   // --- TOURNAMENTS ---
-  async getTournaments(communityId: string, status?: string) {
+  async getTournaments(
+    communityId: string,
+    status?: string,
+    includePrivate = false,
+  ) {
+    const visibilityCondition = includePrivate
+      ? or(
+          eq(schema.tournaments.visibility, 'PUBLIC'),
+          eq(schema.tournaments.visibility, 'PRIVATE'),
+        )
+      : eq(schema.tournaments.visibility, 'PUBLIC');
     let condition = and(
       eq(schema.tournaments.communityId, communityId),
-      eq(schema.tournaments.visibility, 'PUBLIC'),
+      visibilityCondition,
       isNull(schema.tournaments.deletedAt),
       sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`,
     ) as SQL;

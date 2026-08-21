@@ -1,0 +1,10 @@
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payment-eligibility.spec.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.controller.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.module.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.repository.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\payments.service.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\confirm-refund.dto.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\create-payment.dto.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\payout-request.dto.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\review-payout.dto.ts
+D:\Duancanhan\Project_QuanLyGiaiDau\HethongBackendApi_QuanlyGiaiDau\src\modules\payments\dto\webhook.dto.ts

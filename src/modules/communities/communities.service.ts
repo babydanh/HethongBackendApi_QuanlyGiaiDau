@@ -1057,7 +1057,11 @@ export class CommunitiesService {
     if (!access.isMember && !access.isAdmin) {
       throw new ForbiddenException('Danh sách giải đấu chỉ dành cho thành viên CLB.');
     }
-    return await this.communitiesRepository.getTournaments(id, status);
+    return await this.communitiesRepository.getTournaments(
+      id,
+      status,
+      true,
+    );
   }
 
   // --- RANKINGS ---
