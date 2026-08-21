@@ -36,6 +36,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { UserRole } from '../../common/constants/enums';
 import { UpdateSystemRolesDto } from './dto/update-system-roles.dto';
+import { SkipThrottle } from '@nestjs/throttler';
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -85,6 +86,7 @@ export class UsersController {
   }
 
   @Public()
+  @SkipThrottle()
   @Get(':id/public')
   @ApiOperation({ summary: 'Lấy thông tin hồ sơ công khai của người dùng' })
   @ApiResponse({ status: 200, description: 'Trả về hồ sơ công khai của người dùng' })

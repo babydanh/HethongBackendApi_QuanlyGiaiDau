@@ -5548,6 +5548,66 @@ export class TournamentsRepository {
     });
   }
 
+  /**
+   * Assign the next available seed to an approved participant without
+   * changing any existing seed positions. The tournament-level advisory lock
+   * prevents two approvals from receiving the same next seed.
+   */
+  async assignNextAvailableSeed(tournamentId: string, participantId: string) {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`tournament-seeding:${tournamentId}`}))`,
+      );
+
+      const [participant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.id, participantId),
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+
+      if (!participant || participant.seed != null) {
+        return participant ?? null;
+      }
+
+      const [highestSeed] = await tx
+        .select({ maxSeed: sql<number | null>`max(${schema.tournamentParticipants.seed})` })
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            participant.tournamentDivisionId
+              ? eq(
+                  schema.tournamentParticipants.tournamentDivisionId,
+                  participant.tournamentDivisionId,
+                )
+              : isNull(schema.tournamentParticipants.tournamentDivisionId),
+            sql`${schema.tournamentParticipants.seed} IS NOT NULL`,
+          ),
+        );
+
+      const nextSeed = Number(highestSeed?.maxSeed ?? 0) + 1;
+      const [updated] = await tx
+        .update(schema.tournamentParticipants)
+        .set({ seed: nextSeed })
+        .where(
+          and(
+            eq(schema.tournamentParticipants.id, participantId),
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            isNull(schema.tournamentParticipants.seed),
+          ),
+        )
+        .returning();
+
+      return updated ?? participant;
+    });
+  }
+
   async lockParticipantRoster(participantId: string, userId: string) {
     return this.db.transaction(async (tx) => {
       const [participant] = await tx
