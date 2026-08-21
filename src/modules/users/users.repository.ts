@@ -465,6 +465,7 @@ export class UsersRepository {
       .select({
         categoryId: schema.userRanks.categoryId,
         categoryName: schema.categories.name,
+        categoryConfig: schema.categories.categoryConfig,
         matchType: schema.userRanks.matchType,
         eloPoints: schema.userRanks.eloPoints,
         matchesPlayed: schema.userRanks.matchesPlayed,
@@ -493,6 +494,7 @@ export class UsersRepository {
         id: schema.pairRanks.id,
         categoryId: schema.pairRanks.categoryId,
         categoryName: schema.categories.name,
+        categoryConfig: schema.categories.categoryConfig,
         matchType: schema.pairRanks.matchType,
         eloPoints: schema.pairRanks.eloPoints,
         matchesPlayed: schema.pairRanks.matchesPlayed,
@@ -521,8 +523,16 @@ export class UsersRepository {
       )
       .orderBy(desc(schema.pairRanks.eloPoints));
 
-    const activeRanks = ranks.filter((rank) => rank.matchesPlayed > 0);
-    const activePairRanks = pairRanks.filter((rank) => rank.matchesPlayed > 0);
+    const isCategoryActive = (config: unknown) => {
+      if (!config || typeof config !== 'object') return true;
+      return (config as Record<string, unknown>).isActive !== false;
+    };
+
+    const activeCategoryRanks = ranks.filter((r) => isCategoryActive(r.categoryConfig));
+    const activeCategoryPairRanks = pairRanks.filter((r) => isCategoryActive(r.categoryConfig));
+
+    const activeRanks = activeCategoryRanks.filter((rank) => rank.matchesPlayed > 0);
+    const activePairRanks = activeCategoryPairRanks.filter((rank) => rank.matchesPlayed > 0);
     const highlightRank = [...activeRanks.map((rank) => ({ ...rank, source: 'SINGLES' as const })), ...activePairRanks.map((rank) => ({ ...rank, source: 'DOUBLES' as const }))]
       .sort((a, b) => b.eloPoints - a.eloPoints || b.matchesPlayed - a.matchesPlayed)[0] ?? null;
 
@@ -542,10 +552,10 @@ export class UsersRepository {
       ...user,
       role: rolesList[0] || 'PLAYER',
       roles: rolesList,
-      ranks: user.isMock ? [] : ranks,
-      pairRanks: user.isMock ? [] : pairRanks,
+      ranks: user.isMock ? [] : activeCategoryRanks,
+      pairRanks: user.isMock ? [] : activeCategoryPairRanks,
       highlightRank: user.isMock ? null : highlightRank,
-      achievements,
+      achievements: user.isMock ? [] : achievements,
     };
   }
 
