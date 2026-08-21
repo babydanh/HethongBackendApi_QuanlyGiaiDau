@@ -398,7 +398,6 @@ export class TournamentsController {
   // ──── Lite pairing management ────
 
   @Get('lite/:id/participants')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách participants cho ghép cặp Lite' })
   async getLiteParticipants(
@@ -409,7 +408,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ghép cặp 2 participant thủ công (Lite doubles)' })
   async pairLiteParticipants(
@@ -421,7 +419,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs/generate')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tự động ghép cặp (RANDOM hoặc ELO_BALANCED) cho Lite doubles' })
   async generateLitePairs(
@@ -433,7 +430,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs/:participantId/unpair')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tách cặp participant đã ghép (Lite doubles)' })
   async unpairLiteParticipant(
@@ -445,7 +441,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/bracket')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo hoặc lưu bracket cho giải Lite' })
   async generateLiteBracket(
@@ -460,7 +455,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/bracket/reset')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reset bracket Lite trước khi có trận bắt đầu' })
   async resetLiteBracket(

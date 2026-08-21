@@ -939,6 +939,9 @@ export class CommunitiesRepository {
       ? or(
           eq(schema.tournaments.visibility, 'PUBLIC'),
           eq(schema.tournaments.visibility, 'PRIVATE'),
+          // Club members/admins may see internal tournament visibility values.
+          eq(schema.tournaments.visibility, 'COMMUNITY'),
+          eq(schema.tournaments.visibility, 'RESTRICTED'),
         )
       : eq(schema.tournaments.visibility, 'PUBLIC');
     let condition = and(
