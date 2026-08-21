@@ -948,7 +948,9 @@ export class CommunitiesRepository {
       eq(schema.tournaments.communityId, communityId),
       visibilityCondition,
       isNull(schema.tournaments.deletedAt),
-      sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED')`,
+      // Keep list visibility consistent with tournaments.findOne(): records
+      // pending deletion are not openable for non-owners and must not appear.
+      sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'PENDING_DELETE', 'SUSPENDED', 'CANCELLED')`,
     ) as SQL;
     if (status && status !== 'ALL') {
       condition = and(condition, eq(schema.tournaments.status, status)) as SQL;

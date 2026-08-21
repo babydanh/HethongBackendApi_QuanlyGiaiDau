@@ -50,9 +50,21 @@ export class ChatService {
   /// (không cùng CLB, không là bạn bè) → chặn nhắn tin riêng.
   async assertCanDirectMessage(fromUserId: string, toUserId: string) {
     if (fromUserId === toUserId) return;
-    const allowed = await this.chatRepository.getAllowStrangerMessages(toUserId);
-    if (allowed) return;
-    if (await this.chatRepository.isAcquainted(fromUserId, toUserId)) return;
+
+    try {
+      const allowed = await this.chatRepository.getAllowStrangerMessages(toUserId);
+      if (allowed) return;
+      if (await this.chatRepository.isAcquainted(fromUserId, toUserId)) return;
+    } catch (error) {
+      // A privacy-check failure must never become a server error for the
+      // sender. Treat it as a restricted recipient and preserve the same
+      // user-facing policy response as the normal denial path.
+      this.logger.warn(
+        `Unable to complete stranger-message policy check for ${toUserId}; denying direct room creation.`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
     throw new ForbiddenException('Người dùng này không nhận tin nhắn từ người lạ.');
   }
 

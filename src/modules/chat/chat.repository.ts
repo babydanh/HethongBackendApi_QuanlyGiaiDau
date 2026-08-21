@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -9,6 +9,8 @@ import { CreateMessageDto } from './dto/create-message.dto';
 
 @Injectable()
 export class ChatRepository {
+  private readonly logger = new Logger(ChatRepository.name);
+
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
@@ -370,45 +372,66 @@ export class ChatRepository {
 
   /// Cài đặt riêng tư của người nhận: cho phép người lạ nhắn tin (mặc định true).
   async getAllowStrangerMessages(userId: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ allow: schema.profiles.allowStrangerMessages })
-      .from(schema.profiles)
-      .where(eq(schema.profiles.userId, userId))
-      .limit(1);
-    return row?.allow ?? true;
+    try {
+      const [row] = await this.db
+        .select({ allow: schema.profiles.allowStrangerMessages })
+        .from(schema.profiles)
+        .where(eq(schema.profiles.userId, userId))
+        .limit(1);
+      return row?.allow ?? true;
+    } catch (error) {
+      // The privacy column was introduced by an operational migration. Keep the
+      // historical default (allow strangers) if an older deployment has not
+      // applied that migration yet, while leaving an actionable server log.
+      this.logger.warn(
+        `Falling back to allow stranger messages for ${userId}; apply the allow_stranger_messages migration.`,
+        error instanceof Error ? error.message : String(error),
+      );
+      return true;
+    }
   }
 
   /// Hai người "quen nhau" nếu cùng là thành viên JOINED của ít nhất 1 CLB
   /// hoặc đã là bạn bè (friendship ACCEPTED). Ngược lại là người lạ.
   async isAcquainted(firstUserId: string, secondUserId: string): Promise<boolean> {
-    const [sharedCommunity] = await this.db
-      .select({ one: sql<number>`1` })
-      .from(schema.communityMembers)
-      .where(and(
-        eq(schema.communityMembers.userId, firstUserId),
-        eq(schema.communityMembers.status, 'JOINED'),
-        sql`EXISTS (
-          SELECT 1 FROM ${schema.communityMembers} cm2
-          WHERE cm2.community_id = ${schema.communityMembers.communityId}
-            AND cm2.user_id = ${secondUserId}
-            AND cm2.status = 'JOINED'
-        )`,
-      ))
-      .limit(1);
-    if (sharedCommunity) return true;
+    try {
+      const [sharedCommunity] = await this.db
+        .select({ one: sql<number>`1` })
+        .from(schema.communityMembers)
+        .where(and(
+          eq(schema.communityMembers.userId, firstUserId),
+          eq(schema.communityMembers.status, 'JOINED'),
+          sql`EXISTS (
+            SELECT 1 FROM ${schema.communityMembers} cm2
+            WHERE cm2.community_id = ${schema.communityMembers.communityId}
+              AND cm2.user_id = ${secondUserId}
+              AND cm2.status = 'JOINED'
+          )`,
+        ))
+        .limit(1);
+      if (sharedCommunity) return true;
 
-    const [friend] = await this.db
-      .select({ id: schema.friendships.id })
-      .from(schema.friendships)
-      .where(and(
-        eq(schema.friendships.status, 'ACCEPTED'),
-        or(
-          and(eq(schema.friendships.senderId, firstUserId), eq(schema.friendships.receiverId, secondUserId)),
-          and(eq(schema.friendships.senderId, secondUserId), eq(schema.friendships.receiverId, firstUserId)),
-        ),
-      ))
-      .limit(1);
-    return !!friend;
+      const [friend] = await this.db
+        .select({ id: schema.friendships.id })
+        .from(schema.friendships)
+        .where(and(
+          eq(schema.friendships.status, 'ACCEPTED'),
+          or(
+            and(eq(schema.friendships.senderId, firstUserId), eq(schema.friendships.receiverId, secondUserId)),
+            and(eq(schema.friendships.senderId, secondUserId), eq(schema.friendships.receiverId, firstUserId)),
+          ),
+        ))
+        .limit(1);
+      return !!friend;
+    } catch (error) {
+      // If acquaintance data cannot be read, fail closed: the service will
+      // return its normal 403 for a restricted recipient rather than a 500.
+      this.logger.warn(
+        `Unable to verify acquaintance for ${firstUserId} and ${secondUserId}.`,
+        error instanceof Error ? error.message : String(error),
+      );
+      return false;
+    }
   }
 
   async createBlock(blockerId: string, blockedId: string) {

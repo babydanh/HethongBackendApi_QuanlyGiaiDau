@@ -4623,12 +4623,29 @@ export class TournamentsService {
       }
     }
 
-    const updated = await this.tournamentsRepository.updateParticipantStatus(
+    let updated = await this.tournamentsRepository.updateParticipantStatus(
       participantId,
       status,
     );
     if (!updated) {
       throw new NotFoundException('Người tham gia không tồn tại');
+    }
+
+    if (status === 'COMPLETE') {
+      try {
+        updated =
+          (await this.tournamentsRepository.assignNextAvailableSeed(
+            tournamentId,
+            updated.id,
+          )) ?? updated;
+      } catch (err) {
+        // Approval is already persisted; seed assignment is deliberately
+        // best-effort so a transient seed-write failure cannot undo approval.
+        console.error(
+          'Failed to assign next available seed after participant approval:',
+          err,
+        );
+      }
     }
 
     try {
