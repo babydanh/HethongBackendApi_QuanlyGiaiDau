@@ -13,6 +13,17 @@ export class UserAwareThrottlerGuard extends ThrottlerGuard {
     if (type === 'ws') return true;
     const req = context.switchToHttp().getRequest();
     if (req?.url?.includes('/socket.io/')) return true;
+
+    // Check reflector for @SkipThrottle()
+    const handler = context.getHandler();
+    const classRef = context.getClass();
+    const skipHandler = this.reflector.get<boolean | Record<string, boolean>>('THROTTLER:SKIP', handler);
+    const skipClass = this.reflector.get<boolean | Record<string, boolean>>('THROTTLER:SKIP', classRef);
+
+    if (skipHandler === true || skipClass === true) return true;
+    if (typeof skipHandler === 'object' && skipHandler['default']) return true;
+    if (typeof skipClass === 'object' && skipClass['default']) return true;
+
     return super.shouldSkip(context);
   }
 
