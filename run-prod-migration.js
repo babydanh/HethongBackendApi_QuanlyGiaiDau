@@ -38,18 +38,22 @@ const sql = postgres({
   connection: { search_path: 'public' },
 });
 
-// Errors that are safe to ignore (object already exists or already dropped)
-const IGNORABLE_CODES = new Set([
-  '42P07', // duplicate_table
-  '42701', // duplicate_column
-  '42710', // duplicate_object (constraint, index, extension...)
-  '23505', // unique_violation (on constraint creation)
-  '42P06', // duplicate_schema
-  '42723', // duplicate_function
-  '42704', // undefined_object (e.g. drop constraint if not exists)
-  '42703', // undefined_column
-  '42P01', // undefined_table (safe on conditional drops)
-]);
+function isSafeRepeatError(code, statement) {
+  const normalized = statement.replace(/\s+/g, ' ').toUpperCase();
+  if (code === '42P07' || code === '42P06' || code === '42723') {
+    return normalized.includes('IF NOT EXISTS');
+  }
+  if (code === '42701') {
+    return normalized.includes('ADD COLUMN IF NOT EXISTS');
+  }
+  if (code === '42710') {
+    return normalized.includes('IF NOT EXISTS');
+  }
+  if (code === '42704' || code === '42703' || code === '42P01') {
+    return normalized.includes('IF EXISTS');
+  }
+  return false;
+}
 
 async function runStatement(statement) {
   const trimmed = statement.trim();
@@ -57,8 +61,8 @@ async function runStatement(statement) {
   try {
     await sql.unsafe(trimmed);
   } catch (err) {
-    if (IGNORABLE_CODES.has(err.code)) {
-      console.log(`  ⚠ Skipped (already exists): ${trimmed.substring(0, 80)}...`);
+    if (isSafeRepeatError(err.code, trimmed)) {
+      console.log(`  ⚠ Skipped (already satisfied): ${trimmed.substring(0, 80)}...`);
     } else {
       console.error(`  ✗ Error [${err.code}]: ${err.message}`);
       console.error(`    Statement: ${trimmed.substring(0, 120)}`);
@@ -166,7 +170,11 @@ function runDryRun(migrationsDir) {
 async function run() {
   const migrationsDir = path.resolve(__dirname, 'src/database/migrations');
   if (DRY_RUN) {
-    runDryRun(migrationsDir);
+    try {
+      runDryRun(migrationsDir);
+    } finally {
+      await sql.end();
+    }
     return;
   }
 
@@ -203,8 +211,7 @@ async function run() {
       }
 
       if (!fs.existsSync(m.file)) {
-        console.log(`  ⚠ File not found, skipping: ${m.file}`);
-        continue;
+        throw new Error(`Migration file not found: ${m.file}`);
       }
 
       console.log(`  → Running: ${m.tag}`);

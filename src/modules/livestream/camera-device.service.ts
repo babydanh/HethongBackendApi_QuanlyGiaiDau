@@ -128,16 +128,17 @@ export class CameraDeviceService {
       throw new ForbiddenException('Thiết bị đã được gán cho operator khác.');
     }
 
-    const paired = await this.repository.updateCameraDevice(device.id, {
-      pairingTokenHash: null,
-      pairingTokenExpiresAt: null,
-      deviceFingerprintHash: this.hashToken(data.deviceFingerprint),
-      assignedOperatorId: device.assignedOperatorId ?? user.sub,
-      pairedAt: new Date(),
-      status: 'READY',
-    });
+    const paired = await this.repository.consumeCameraDevicePairingToken(
+      device.id,
+      pairingTokenHash,
+      this.hashToken(data.deviceFingerprint),
+      device.assignedOperatorId ?? user.sub,
+    );
     if (!paired) {
-      throw new NotFoundException('Không tìm thấy thiết bị camera.');
+      throw this.domainError(
+        'CAMERA_NOT_READY',
+        'Mã ghép đôi không hợp lệ hoặc đã được sử dụng.',
+      );
     }
     return this.toPublicDevice(paired);
   }
