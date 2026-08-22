@@ -2,6 +2,8 @@ import { Injectable, InternalServerErrorException, BadRequestException, Logger }
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import OpenAI from 'openai';
 import { TournamentsService } from '../tournaments/tournaments.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -22,6 +24,8 @@ export class AiService {
   private readonly maxMessageChars = 6000;
   private readonly maxHistoryChars = 24000;
   private readonly maxToolRounds = 4;
+  private readonly maxTournamentSourceChars = 24000;
+  private readonly maxTournamentFetchBytes = 1_000_000;
 
   constructor(
     private readonly configService: ConfigService,
@@ -455,6 +459,53 @@ ${divisionsStr}
     }
   }
 
+  private isPrivateOrReservedIp(address: string): boolean {
+    const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
+    const ipVersion = isIP(normalized);
+    if (ipVersion === 0) return false;
+    if (ipVersion === 4) {
+      const octets = normalized.split('.').map(Number);
+      const [first, second] = octets;
+      return first === 0 || first === 10 || first === 127 || first >= 224 ||
+        (first === 100 && second >= 64 && second <= 127) ||
+        (first === 169 && second === 254) ||
+        (first === 172 && second >= 16 && second <= 31) ||
+        (first === 192 && second === 168);
+    }
+    if (isIP(normalized) === 6) {
+      return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:') || normalized.startsWith('::ffff:10.') || normalized.startsWith('::ffff:192.168.');
+    }
+    return true;
+  }
+
+  private async assertSafeTournamentSourceUrl(rawUrl: string): Promise<void> {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      throw new BadRequestException('Link nguồn không hợp lệ. Vui lòng dùng link HTTP hoặc HTTPS công khai.');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+      throw new BadRequestException('Link nguồn chỉ được dùng HTTP/HTTPS công khai và không chứa thông tin đăng nhập.');
+    }
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname === 'metadata.google.internal') {
+      throw new BadRequestException('Link nguồn phải trỏ đến một địa chỉ công khai.');
+    }
+    if (this.isPrivateOrReservedIp(hostname)) {
+      throw new BadRequestException('Link nguồn phải trỏ đến một địa chỉ công khai.');
+    }
+    try {
+      const addresses = await lookup(hostname, { all: true, verbatim: true });
+      if (addresses.some(({ address }) => this.isPrivateOrReservedIp(address))) {
+        throw new BadRequestException('Link nguồn phải trỏ đến một địa chỉ công khai.');
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('Không thể xác minh địa chỉ công khai của link nguồn.');
+    }
+  }
+
   async parseTournamentSource(dto: {
     sourceUrl?: string;
     rawText?: string;
@@ -494,12 +545,18 @@ ${divisionsStr}
       needsReview?: boolean;
     }>;
   }> {
-    let sourceContent = dto.rawText?.trim() || '';
+    const rawText = dto.rawText?.trim() || '';
+    if (rawText.length > this.maxTournamentSourceChars) {
+      throw new BadRequestException(`Nội dung điều lệ không được vượt quá ${this.maxTournamentSourceChars} ký tự.`);
+    }
+    let sourceContent = rawText;
 
-    // If a URL is provided, try to fetch its text content
-    if (dto.sourceUrl?.trim()) {
+    // If a URL is provided, fetch only a bounded public source.
+    const sourceUrl = dto.sourceUrl?.trim();
+    if (sourceUrl) {
+      await this.assertSafeTournamentSourceUrl(sourceUrl);
       try {
-        const response = await fetch(dto.sourceUrl.trim(), {
+        const response = await fetch(sourceUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -507,7 +564,11 @@ ${divisionsStr}
           signal: AbortSignal.timeout(10000),
         });
         if (response.ok) {
-          const html = await response.text();
+          const contentLength = Number(response.headers.get('content-length') || 0);
+          if (contentLength > this.maxTournamentFetchBytes) {
+            throw new BadRequestException('Nội dung link nguồn vượt quá giới hạn cho phép.');
+          }
+          const html = (await response.text()).slice(0, this.maxTournamentFetchBytes);
           // Google Forms keeps question labels/options in an embedded JSON payload,
           // not only in visible HTML. Preserve that payload for semantic extraction.
           const embeddedData = Array.from(html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi))
@@ -522,7 +583,7 @@ ${divisionsStr}
             .replace(/\s+/g, ' ')
             .trim();
           if (textOnly.length > 50) {
-            sourceContent = `[NỘI DUNG TẢI TỪ URL: ${dto.sourceUrl}]\n${textOnly.slice(0, 24000)}\n${embeddedData ? `\n[DỮ LIỆU NHÚNG CỦA GOOGLE FORM]\n${embeddedData}` : ''}\n\n${sourceContent}`;
+            sourceContent = `[NỘI DUNG TẢI TỪ URL: ${sourceUrl}]\n${textOnly.slice(0, 24000)}\n${embeddedData ? `\n[DỮ LIỆU NHÚNG CỦA GOOGLE FORM]\n${embeddedData}` : ''}\n\n${sourceContent}`;
           }
         }
       } catch (err: any) {
@@ -621,6 +682,27 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
       const cleanJson = jsonMatch ? jsonMatch[0] : rawResult;
 
       const parsed = JSON.parse(cleanJson);
+      const allowedSports = ['pickleball', 'badminton', 'tennis', 'table_tennis', 'football'] as const;
+      const allowedFormatKeys = new Set(['SINGLES_MALE', 'SINGLES_FEMALE', 'DOUBLES_MALE', 'DOUBLES_FEMALE', 'MIXED_DOUBLES', 'FOOTBALL_MALE', 'FOOTBALL_FEMALE', 'FOOTBALL_MIXED', 'FOOTBALL_OPEN']);
+      const allowedBracketTypes = new Set(['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT']);
+      const normalizeText = (value: unknown, maxLength: number) => typeof value === 'string' ? value.trim().slice(0, maxLength) : null;
+      const normalizeDate = (value: unknown, endOfDay = false) => {
+        const text = normalizeText(value, 80);
+        if (!text) return null;
+        const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text);
+        const date = new Date(dateOnly ? `${text}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z` : text);
+        return Number.isNaN(date.getTime()) ? null : date.toISOString();
+      };
+      const normalizeHttpUrl = (value: unknown) => {
+        const text = normalizeText(value, 2048);
+        if (!text) return null;
+        try {
+          const url = new URL(text);
+          return ['http:', 'https:'].includes(url.protocol) ? url.toString() : null;
+        } catch {
+          return null;
+        }
+      };
       const rawFields = Array.isArray(parsed.registrationFormFields) ? parsed.registrationFormFields : [];
       const allowedTypes = new Set(['TEXT', 'TEXTAREA', 'EMAIL', 'PHONE', 'NUMBER', 'SELECT', 'MULTI_SELECT', 'CHECKBOX', 'FILE']);
       const usedIds = new Set<string>();
@@ -640,7 +722,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
           const type = requestedType === 'CHECKBOX' && options && options.length > 1 ? 'MULTI_SELECT' : requestedType;
           return {
             id,
-            label: String(field.label || `Câu hỏi ${index + 1}`).trim().slice(0, 300),
+            label: normalizeText(field.label, 300) || `Câu hỏi ${index + 1}`,
             type,
             required: field.required === true,
             helpText: field.helpText ? String(field.helpText).trim().slice(0, 1000) : undefined,
@@ -659,28 +741,33 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
         .slice(0, 100);
 
       return {
-        name: parsed.name || 'Giải đấu thể thao',
-        sport: ['pickleball', 'badminton', 'tennis', 'table_tennis', 'football'].includes(parsed.sport)
-          ? parsed.sport
-          : (dto.sportHint as any) || 'pickleball',
-        startDate: parsed.startDate || null,
-        endDate: parsed.endDate || null,
-        venueName: parsed.venueName || null,
-        locationAddress: parsed.locationAddress || null,
-        province: parsed.province || null,
-        district: parsed.district || null,
-        ward: parsed.ward || null,
-        description: parsed.description || null,
-        bannerUrl: parsed.bannerUrl || null,
+        name: normalizeText(parsed.name, 200) || 'Giải đấu thể thao',
+        sport: allowedSports.includes(parsed.sport) ? parsed.sport : (allowedSports.includes(dto.sportHint as (typeof allowedSports)[number]) ? dto.sportHint : 'pickleball'),
+        startDate: normalizeDate(parsed.startDate),
+        endDate: normalizeDate(parsed.endDate, true),
+        venueName: normalizeText(parsed.venueName, 200),
+        locationAddress: normalizeText(parsed.locationAddress, 500),
+        province: normalizeText(parsed.province, 120),
+        district: normalizeText(parsed.district, 120),
+        ward: normalizeText(parsed.ward, 120),
+        description: normalizeText(parsed.description, 5000),
+        bannerUrl: normalizeHttpUrl(parsed.bannerUrl),
         formats: Array.isArray(parsed.formats) && parsed.formats.length > 0
-          ? parsed.formats.map((f: any) => ({
-              name: f.name || 'Nội dung thi đấu',
-              formatKey: f.formatKey || 'DOUBLES_MALE',
-              bracketType: f.bracketType || 'SINGLE_ELIMINATION',
-              maxParticipants: typeof f.maxParticipants === 'number' ? f.maxParticipants : 16,
-              minElo: typeof f.minElo === 'number' ? f.minElo : null,
-              maxElo: typeof f.maxElo === 'number' ? f.maxElo : null,
-            }))
+          ? parsed.formats.map((f: any) => {
+              const maxParticipants = typeof f?.maxParticipants === 'number' && Number.isFinite(f.maxParticipants)
+                ? Math.min(128, Math.max(2, Math.round(f.maxParticipants)))
+                : 16;
+              const minElo = typeof f?.minElo === 'number' && Number.isFinite(f.minElo) ? Math.max(0, f.minElo) : null;
+              const maxElo = typeof f?.maxElo === 'number' && Number.isFinite(f.maxElo) ? Math.max(0, f.maxElo) : null;
+              return {
+                name: normalizeText(f?.name, 160) || 'Nội dung thi đấu',
+                formatKey: allowedFormatKeys.has(f?.formatKey) ? f.formatKey : 'DOUBLES_MALE',
+                bracketType: allowedBracketTypes.has(f?.bracketType) ? f.bracketType : 'SINGLE_ELIMINATION',
+                maxParticipants,
+                minElo: minElo !== null && maxElo !== null && minElo > maxElo ? maxElo : minElo,
+                maxElo,
+              };
+            })
           : [
               {
                 name: 'Đôi Nam',
@@ -694,8 +781,8 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
         registrationFormFields,
       };
     } catch (error: any) {
-      this.logger.error(`Lỗi phân tích AI Tournament: ${error.message}`);
-      throw new InternalServerErrorException(`Không thể phân tích nội dung giải: ${error.message}`);
+      this.logger.error(`Lỗi phân tích AI Tournament: ${error instanceof Error ? error.message : String(error)}`);
+      throw new InternalServerErrorException('Không thể phân tích nội dung giải lúc này. Vui lòng kiểm tra nguồn và thử lại.');
     }
   }
 }

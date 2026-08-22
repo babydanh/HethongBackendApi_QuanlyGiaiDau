@@ -1,7 +1,9 @@
 import { Controller, Post, Body, Req, Res, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { AiService } from './ai.service';
+import { ParseTournamentSourceDto } from './dto/parse-tournament-source.dto';
+
 import type { Request, Response } from 'express';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
@@ -98,20 +100,13 @@ export class AiController {
     return { success: true, reply: result.content, data: result.content, ui_blocks: result.uiBlocks, tool_events: result.toolEvents };
   }
 
-  @Public()
-  @Post('parse-tournament-source')
+    @Post('parse-tournament-source')
   @UseGuards(new RateLimitGuard(15, 60000))
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Phân tích Link Google Form / Điều lệ giải đấu để trích xuất thông tin tự động' })
-  async parseTournamentSource(
-    @Body('sourceUrl') sourceUrl?: string,
-    @Body('rawText') rawText?: string,
-    @Body('sportHint') sportHint?: string,
-  ) {
-    const data = await this.aiService.parseTournamentSource({
-      sourceUrl,
-      rawText,
-      sportHint,
-    });
+  async parseTournamentSource(@Body() dto: ParseTournamentSourceDto) {
+    const data = await this.aiService.parseTournamentSource(dto);
+
     return { success: true, data };
   }
 }

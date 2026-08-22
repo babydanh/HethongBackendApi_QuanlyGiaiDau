@@ -358,6 +358,8 @@ export class TournamentsController {
       user.sub,
       dto,
       this.getSystemRoles(user),
+      user.isEmailVerified,
+      user.isMock,
     );
   }
 

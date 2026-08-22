@@ -674,7 +674,9 @@ export class TournamentsService {
         );
       }
 
-      // Authorization for club tournament creation: System Admin/Organizer OR community Owner/Admin/Moderator
+      // Club creation is community-scoped: ADMIN bypasses; otherwise the
+      // caller must be a joined community OWNER or MODERATOR. The global
+      // ORGANIZER role is intentionally for out-of-club creation only.
       if (!systemRoles.includes('ADMIN')) {
         const member = await this.tournamentsRepository.findCommunityMember(
           createTournamentDto.communityId,
@@ -851,7 +853,35 @@ export class TournamentsService {
     userId: string,
     dto: CreateLiteTournamentDto,
     systemRoles: string[] = [],
+    isEmailVerified?: boolean,
+    isMock?: boolean,
   ) {
+    // A Lite tournament is either explicitly club-scoped or standalone/public;
+    // never silently reinterpret an inconsistent caller payload.
+    if (dto.communityId && dto.tournamentType === 'PUBLIC') {
+      throw new BadRequestException(
+        'Giải nhanh có communityId phải có loại CLUB.',
+      );
+    }
+    if (!dto.communityId && dto.tournamentType === 'CLUB') {
+      throw new BadRequestException(
+        'Giải nhanh loại CLUB phải gắn với một câu lạc bộ.',
+      );
+    }
+
+    // Standalone/public creation is a platform-level organizer action. Keep
+    // internal club quick-create low-friction, but require verified email for
+    // the broader public surface just like advanced public creation.
+    if (
+      !dto.communityId &&
+      !isMock &&
+      isEmailVerified !== true
+    ) {
+      throw new ForbiddenException(
+        'Bạn cần xác minh email để tạo giải nhanh ngoài câu lạc bộ.',
+      );
+    }
+
     // 0. Hard limit check: Max 100 tournaments per creator (except ADMIN)
     const isAdmin = systemRoles.includes('ADMIN');
     if (!isAdmin) {
