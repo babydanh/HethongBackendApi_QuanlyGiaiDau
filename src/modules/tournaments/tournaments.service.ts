@@ -5615,22 +5615,6 @@ export class TournamentsService {
       throw new NotFoundException('Bảng đấu không tồn tại');
     }
 
-    // Keep the registration lock scoped to an actual format change where participants already registered.
-    if (
-      updateDivisionDto.matchType &&
-      updateDivisionDto.matchType !== (currentDivision.matchType as MatchType) &&
-      (tournament.status === 'REGISTRATION_OPEN' ||
-        tournament.status === 'REGISTRATION_CLOSED')
-    ) {
-      const participantCount =
-        await this.tournamentsRepository.countDivisionParticipants(divisionId);
-      if (participantCount > 0) {
-        throw new BadRequestException(
-          'Không thể thay đổi hình thức thi đấu khi bảng đấu đã có vận động viên đăng ký',
-        );
-      }
-    }
-
     const category = await this.tournamentsRepository.findCategory(
       tournament.categoryId,
     );
@@ -5658,6 +5642,27 @@ export class TournamentsService {
     ) {
       nextGenderRestriction = null;
       updateDivisionDto.genderRestriction = null;
+    }
+
+    const formatChanged =
+      nextMatchType !== (currentDivision.matchType as MatchType) ||
+      nextGenderRestriction !== currentDivision.genderRestriction;
+    if (formatChanged) {
+      const participantCount =
+        await this.tournamentsRepository.countDivisionParticipants(divisionId);
+      if (participantCount > 0) {
+        throw new BadRequestException(
+          'Không thể thay đổi hình thức thi đấu khi bảng đấu đã có vận động viên đăng ký',
+        );
+      }
+      if (
+        tournament.status !== 'DRAFT' &&
+        tournament.status !== 'REGISTRATION_OPEN'
+      ) {
+        throw new BadRequestException(
+          'Chỉ được thay đổi hình thức thi đấu trước khi đóng đăng ký và tạo lịch thi đấu',
+        );
+      }
     }
 
     const categoryConfig = category.categoryConfig as

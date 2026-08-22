@@ -43,6 +43,7 @@ import { LivestreamModule } from './modules/livestream/livestream.module';
 import { AppVersionModule } from './modules/app-version/app-version.module';
 import { FootballTeamsModule } from './modules/football-teams/football-teams.module';
 import { FirebaseModule } from './modules/firebase/firebase.module';
+import { SponsorsModule } from './modules/sponsors/sponsors.module';
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { FirebaseModule } from './modules/firebase/firebase.module';
     AppVersionModule,
     FootballTeamsModule,
     FirebaseModule,
+    SponsorsModule,
   ],
   controllers: [AppController],
   providers: [

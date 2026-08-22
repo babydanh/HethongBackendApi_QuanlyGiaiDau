@@ -10,6 +10,7 @@ export * from './social.schema';
 export * from './notifications.schema';
 export * from './livestream.schema';
 export * from './advertisements.schema';
+export * from './tournament_sponsors.schema';
 export * from './audit.schema';
 export * from './community_gallery.schema';
 export * from './regions.schema';
