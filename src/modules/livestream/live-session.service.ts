@@ -14,6 +14,7 @@ import {
 import {
   type CreateLiveSessionInput,
   LiveSessionRepository,
+  type LiveSessionMonitorRow,
   type LiveSessionRow,
 } from './live-session.repository';
 import {
@@ -95,7 +96,11 @@ export class LiveSessionService {
           : 'Bạn không có quyền điều khiển camera chưa được phân công.',
       );
     }
-    if (!['READY', 'ONLINE', 'OFFLINE'].includes(device.status)) {
+    if (
+      !device.deviceFingerprintHash ||
+      !device.pairedAt ||
+      !['READY', 'ONLINE', 'OFFLINE'].includes(device.status)
+    ) {
       throw this.domainError(
         'CAMERA_NOT_READY',
         'Camera chưa được ghép với điện thoại.',
@@ -173,6 +178,7 @@ export class LiveSessionService {
           input.idempotencyKey,
         );
       if (conflicted) {
+        await this.assertSessionAccess(conflicted.id, user);
         return { session: conflicted };
       }
       throw this.domainError(
@@ -562,7 +568,7 @@ export class LiveSessionService {
   async listSessions(
     tournamentId: string,
     user: JwtPayload,
-  ): Promise<LiveSessionRow[]> {
+  ): Promise<LiveSessionMonitorRow[]> {
     await this.assertTournamentOperator(tournamentId, user);
     return this.liveSessionRepository.listLiveSessionsByTournamentId(
       tournamentId,
@@ -624,7 +630,7 @@ export class LiveSessionService {
       session.session.tournamentId,
       user,
     );
-    if (hasTournamentOperatorAccess || session.session.createdBy === user.sub) {
+    if (hasTournamentOperatorAccess) {
       return;
     }
     if (session.session.cameraDeviceId) {

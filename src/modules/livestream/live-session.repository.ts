@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -10,6 +10,28 @@ import {
 } from './livestream-contracts';
 
 export type LiveSessionRow = typeof schema.liveSessions.$inferSelect;
+export type LiveSessionMonitorRow = Pick<
+  LiveSessionRow,
+  | 'id'
+  | 'tournamentId'
+  | 'courtId'
+  | 'matchId'
+  | 'cameraDeviceId'
+  | 'provider'
+  | 'status'
+  | 'title'
+  | 'description'
+  | 'startedAt'
+  | 'endedAt'
+  | 'lastProviderCheckAt'
+  | 'replayUrl'
+  | 'replayProvider'
+  | 'youtubeVideoId'
+  | 'failureCode'
+  | 'failureMessage'
+  | 'createdAt'
+  | 'updatedAt'
+>;
 export type CameraDeviceRow = typeof schema.cameraDevices.$inferSelect;
 export type FacebookPageConnectionRow =
   typeof schema.facebookPageConnections.$inferSelect;
@@ -235,11 +257,36 @@ export class LiveSessionRepository {
 
   async listLiveSessionsByTournamentId(
     tournamentId: string,
-  ): Promise<LiveSessionRow[]> {
+  ): Promise<LiveSessionMonitorRow[]> {
     return this.db
-      .select()
+      .select({
+        id: schema.liveSessions.id,
+        tournamentId: schema.liveSessions.tournamentId,
+        courtId: schema.liveSessions.courtId,
+        matchId: schema.liveSessions.matchId,
+        cameraDeviceId: schema.liveSessions.cameraDeviceId,
+        provider: schema.liveSessions.provider,
+        status: schema.liveSessions.status,
+        title: schema.liveSessions.title,
+        description: schema.liveSessions.description,
+        startedAt: schema.liveSessions.startedAt,
+        endedAt: schema.liveSessions.endedAt,
+        lastProviderCheckAt: schema.liveSessions.lastProviderCheckAt,
+        replayUrl: schema.liveSessions.replayUrl,
+        replayProvider: schema.liveSessions.replayProvider,
+        youtubeVideoId: schema.liveSessions.youtubeVideoId,
+        failureCode: schema.liveSessions.failureCode,
+        failureMessage: schema.liveSessions.failureMessage,
+        createdAt: schema.liveSessions.createdAt,
+        updatedAt: schema.liveSessions.updatedAt,
+      })
       .from(schema.liveSessions)
-      .where(eq(schema.liveSessions.tournamentId, tournamentId))
+      .where(
+        and(
+          eq(schema.liveSessions.tournamentId, tournamentId),
+          eq(schema.liveSessions.provider, 'FACEBOOK'),
+        ),
+      )
       .orderBy(desc(schema.liveSessions.updatedAt));
   }
 
@@ -371,6 +418,39 @@ export class LiveSessionRepository {
         ),
       )
       .limit(1);
+
+    return device ?? null;
+  }
+
+  async consumeCameraDevicePairingToken(
+    id: string,
+    pairingTokenHash: string,
+    deviceFingerprintHash: string,
+    assignedOperatorId: string,
+  ): Promise<CameraDeviceRow | null> {
+    const [device] = await this.db
+      .update(schema.cameraDevices)
+      .set({
+        pairingTokenHash: null,
+        pairingTokenExpiresAt: null,
+        deviceFingerprintHash,
+        assignedOperatorId,
+        pairedAt: new Date(),
+        status: 'READY',
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.cameraDevices.id, id),
+          eq(schema.cameraDevices.pairingTokenHash, pairingTokenHash),
+          or(
+            isNull(schema.cameraDevices.pairingTokenExpiresAt),
+            gt(schema.cameraDevices.pairingTokenExpiresAt, new Date()),
+          ),
+          isNull(schema.cameraDevices.deletedAt),
+        ),
+      )
+      .returning();
 
     return device ?? null;
   }
