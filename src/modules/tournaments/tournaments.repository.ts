@@ -7231,6 +7231,31 @@ export class TournamentsRepository {
             ? undefined
             : this.mergeRoundConfig(oldRecord.roundConfig, dto.roundConfig);
 
+        const [tournamentRecord] = await tx
+          .select({
+            matchType: schema.tournaments.matchType,
+            genderRestriction: schema.tournaments.genderRestriction,
+            tournamentConfig: schema.tournaments.tournamentConfig,
+          })
+          .from(schema.tournaments)
+          .where(eq(schema.tournaments.id, oldRecord.tournamentId))
+          .limit(1);
+
+        const [divisionCount] = await tx
+          .select({ value: count() })
+          .from(schema.tournamentDivisions)
+          .where(
+            eq(schema.tournamentDivisions.tournamentId, oldRecord.tournamentId),
+          );
+
+        const tournamentConfig = tournamentRecord?.tournamentConfig as
+          | Record<string, unknown>
+          | null
+          | undefined;
+        const isLiteTournament =
+          tournamentConfig?.mode === 'LITE' &&
+          tournamentConfig?.hideAdvancedSettings === true;
+
         const [updated] = await tx
           .update(schema.tournamentDivisions)
           .set({
@@ -7272,6 +7297,33 @@ export class TournamentsRepository {
           })
           .where(eq(schema.tournamentDivisions.id, id))
           .returning();
+
+        if (
+          updated &&
+          isLiteTournament &&
+          divisionCount.value === 1 &&
+          (updated.matchType !== oldRecord.matchType ||
+            updated.genderRestriction !== oldRecord.genderRestriction)
+        ) {
+          const [updatedTournament] = await tx
+            .update(schema.tournaments)
+            .set({
+              matchType: updated.matchType,
+              genderRestriction: updated.genderRestriction,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.tournaments.id, oldRecord.tournamentId))
+            .returning();
+
+          await this.auditService.logUpdate(
+            tx,
+            userId,
+            'tournaments',
+            oldRecord.tournamentId,
+            tournamentRecord,
+            updatedTournament,
+          );
+        }
 
         await this.auditService.logUpdate(
           tx,
