@@ -471,6 +471,7 @@ export class UsersRepository {
         matchesPlayed: schema.userRanks.matchesPlayed,
         matchesWon: schema.userRanks.matchesWon,
         winStreak: schema.userRanks.winStreak,
+        genderRestriction: schema.userRanks.genderRestriction,
         tierName: schema.eloTiers.name,
       })
       .from(schema.userRanks)
@@ -533,7 +534,87 @@ export class UsersRepository {
 
     const activeRanks = activeCategoryRanks.filter((rank) => rank.matchesPlayed > 0);
     const activePairRanks = activeCategoryPairRanks.filter((rank) => rank.matchesPlayed > 0);
-    const highlightRank = [...activeRanks.map((rank) => ({ ...rank, source: 'SINGLES' as const })), ...activePairRanks.map((rank) => ({ ...rank, source: 'DOUBLES' as const }))]
+
+    const streakMatchRows = await this.db
+      .select({
+        categoryId: schema.eloHistoryLogs.categoryId,
+        matchId: schema.eloHistoryLogs.matchId,
+        changedPoints: schema.eloHistoryLogs.changedPoints,
+        createdAt: schema.eloHistoryLogs.createdAt,
+        matchType: schema.tournaments.matchType,
+        genderRestriction: schema.tournaments.genderRestriction,
+      })
+      .from(schema.eloHistoryLogs)
+      .innerJoin(schema.matches, eq(schema.eloHistoryLogs.matchId, schema.matches.id))
+      .innerJoin(schema.tournaments, eq(schema.matches.tournamentId, schema.tournaments.id))
+      .where(
+        and(
+          eq(schema.eloHistoryLogs.userId, userId),
+          eq(schema.matches.status, 'COMPLETED'),
+          eq(schema.tournaments.tournamentType, 'PUBLIC'),
+        ),
+      )
+      .orderBy(desc(schema.eloHistoryLogs.createdAt));
+
+    const streakMatchIds = streakMatchRows
+      .map((row) => row.matchId)
+      .filter((matchId): matchId is string => Boolean(matchId));
+    const streakPlayers = streakMatchIds.length > 0
+      ? await this.db
+          .select({ matchId: schema.matchPlayers.matchId, userId: schema.matchPlayers.userId })
+          .from(schema.matchPlayers)
+          .where(inArray(schema.matchPlayers.matchId, streakMatchIds))
+      : [];
+    const usersByStreakMatch = new Map<string, Set<string>>();
+    for (const player of streakPlayers) {
+      const users = usersByStreakMatch.get(player.matchId) ?? new Set<string>();
+      users.add(player.userId);
+      usersByStreakMatch.set(player.matchId, users);
+    }
+
+    const getStreak = (events: typeof streakMatchRows) => {
+      const firstResult = events[0]
+        ? events[0].changedPoints > 0
+          ? 'WIN'
+          : events[0].changedPoints < 0
+            ? 'LOSS'
+            : 'DRAW'
+        : 'NONE';
+      if (firstResult === 'NONE' || firstResult === 'DRAW') {
+        return { currentStreakType: 'NONE' as const, currentStreakCount: 0 };
+      }
+      let count = 0;
+      for (const event of events) {
+        const result = event.changedPoints > 0 ? 'WIN' : event.changedPoints < 0 ? 'LOSS' : 'DRAW';
+        if (result !== firstResult) break;
+        count += 1;
+      }
+      return {
+        currentStreakType: firstResult as 'WIN' | 'LOSS',
+        currentStreakCount: count,
+      };
+    };
+
+    const withStreak = (
+      rank: (typeof activeRanks)[number] | (typeof activePairRanks)[number],
+    ) => {
+      const partnerId = 'partnerId' in rank && typeof rank.partnerId === 'string'
+        ? rank.partnerId
+        : null;
+      const events = streakMatchRows.filter((event) =>
+        event.categoryId === rank.categoryId &&
+        event.matchType === rank.matchType &&
+        ('genderRestriction' in rank
+          ? (rank.genderRestriction ?? null) === (event.genderRestriction ?? null)
+          : true) &&
+        (!partnerId || (event.matchId && usersByStreakMatch.get(event.matchId)?.has(partnerId))),
+      );
+      return { ...rank, ...getStreak(events) };
+    };
+
+    const ranksWithStreak = activeRanks.map(withStreak);
+    const pairRanksWithStreak = activePairRanks.map(withStreak);
+    const highlightRank = [...ranksWithStreak.map((rank) => ({ ...rank, source: 'SINGLES' as const })), ...pairRanksWithStreak.map((rank) => ({ ...rank, source: 'DOUBLES' as const }))]
       .sort((a, b) => b.eloPoints - a.eloPoints || b.matchesPlayed - a.matchesPlayed)[0] ?? null;
 
     const userRoles = await this.db
@@ -552,8 +633,8 @@ export class UsersRepository {
       ...user,
       role: rolesList[0] || 'PLAYER',
       roles: rolesList,
-      ranks: user.isMock ? [] : activeCategoryRanks,
-      pairRanks: user.isMock ? [] : activeCategoryPairRanks,
+      ranks: user.isMock ? [] : ranksWithStreak,
+      pairRanks: user.isMock ? [] : pairRanksWithStreak,
       highlightRank: user.isMock ? null : highlightRank,
       achievements: user.isMock ? [] : achievements,
     };

@@ -284,7 +284,11 @@ export class RankingsRepository {
       .from(schema.userRanks)
       .innerJoin(schema.categories, eq(schema.userRanks.categoryId, schema.categories.id))
       .leftJoin(schema.eloTiers, eq(schema.userRanks.tierId, schema.eloTiers.id))
-      .where(and(eq(schema.userRanks.userId, userId), isNull(schema.userRanks.communityId)));
+      .where(and(
+        eq(schema.userRanks.userId, userId),
+        isNull(schema.userRanks.communityId),
+        gt(schema.userRanks.matchesPlayed, 0),
+      ));
 
     const communityRanks = await this.db
       .select({
@@ -306,7 +310,10 @@ export class RankingsRepository {
       .from(schema.communityRankings)
       .innerJoin(schema.communities, eq(schema.communityRankings.communityId, schema.communities.id))
       .innerJoin(schema.categories, eq(schema.communityRankings.categoryId, schema.categories.id))
-      .where(eq(schema.communityRankings.userId, userId));
+      .where(and(
+        eq(schema.communityRankings.userId, userId),
+        gt(schema.communityRankings.matchesPlayed, 0),
+      ));
 
     return {
       publicRanks,
@@ -320,16 +327,53 @@ export class RankingsRepository {
       categoryId?: string;
       scope?: 'PUBLIC' | 'COMMUNITY';
       communityId?: string;
+      matchType?: string;
+      genderRestriction?: string;
+      partnerId?: string;
       page?: number;
       limit?: number;
       cursor?: string;
     },
   ) {
-    const { categoryId, scope = 'PUBLIC', communityId, page = 1, limit = 20, cursor } = query;
+    const {
+      categoryId,
+      scope = 'PUBLIC',
+      communityId,
+      matchType,
+      genderRestriction,
+      partnerId,
+      page = 1,
+      limit = 20,
+      cursor,
+    } = query;
 
     const conditions: SQL[] = [eq(schema.eloHistoryLogs.userId, userId)];
     if (categoryId) {
       conditions.push(eq(schema.eloHistoryLogs.categoryId, categoryId));
+    }
+    if (matchType) {
+      conditions.push(
+        sql`COALESCE(${schema.tournamentDivisions.matchType}, ${schema.tournaments.matchType}) = ${matchType}`,
+      );
+    }
+    if (genderRestriction === '__NONE__') {
+      conditions.push(
+        sql`COALESCE(${schema.tournamentDivisions.genderRestriction}, ${schema.tournaments.genderRestriction}) IS NULL`,
+      );
+    } else if (genderRestriction) {
+      conditions.push(
+        sql`COALESCE(${schema.tournamentDivisions.genderRestriction}, ${schema.tournaments.genderRestriction}) = ${genderRestriction}`,
+      );
+    }
+    if (partnerId) {
+      conditions.push(
+        sql`EXISTS (
+          SELECT 1
+          FROM match_players AS elo_scope_partner
+          WHERE elo_scope_partner.match_id = ${schema.eloHistoryLogs.matchId}
+            AND elo_scope_partner.user_id = ${partnerId}
+        )`,
+      );
     }
 
     if (scope === 'COMMUNITY') {
@@ -386,6 +430,7 @@ export class RankingsRepository {
       .leftJoin(schema.matches, eq(schema.eloHistoryLogs.matchId, schema.matches.id))
       .leftJoin(schema.tournamentGroups, eq(schema.matches.groupId, schema.tournamentGroups.id))
       .leftJoin(schema.tournamentStages, eq(schema.tournamentGroups.stageId, schema.tournamentStages.id))
+      .leftJoin(schema.tournamentDivisions, eq(schema.tournamentDivisions.id, schema.tournamentStages.tournamentDivisionId))
       .leftJoin(schema.tournaments, eq(schema.tournamentStages.tournamentId, schema.tournaments.id))
       .where(historyWhere)
       .orderBy(desc(schema.eloHistoryLogs.createdAt), desc(schema.eloHistoryLogs.id))
@@ -396,8 +441,84 @@ export class RankingsRepository {
     const historyItems = historyHasMore ? historyData.slice(0, limit) : historyData;
     const historyLast = historyItems.at(-1);
 
+    const currentPlayer = aliasedTable(schema.matchPlayers, 'elo_history_current_player');
+    const participant1 = aliasedTable(schema.tournamentParticipants, 'elo_history_participant_1');
+    const participant2 = aliasedTable(schema.tournamentParticipants, 'elo_history_participant_2');
+    const historyMatchIds = historyItems
+      .map((item) => item.matchId)
+      .filter((matchId): matchId is string => Boolean(matchId));
+    const historyMatchRows = historyMatchIds.length > 0
+      ? await this.db
+          .select({
+            matchId: schema.matches.id,
+            currentParticipantId: currentPlayer.participantId,
+            status: schema.matches.status,
+            completedAt: schema.matches.completedAt,
+            winnerId: schema.matches.winnerId,
+            p1SetsWon: schema.matches.p1SetsWon,
+            p2SetsWon: schema.matches.p2SetsWon,
+            scoreDetails: schema.matches.scoreDetails,
+            participant1: {
+              id: participant1.id,
+              teamName: participant1.teamName,
+            },
+            participant2: {
+              id: participant2.id,
+              teamName: participant2.teamName,
+            },
+          })
+          .from(schema.matches)
+          .leftJoin(
+            currentPlayer,
+            and(
+              eq(currentPlayer.matchId, schema.matches.id),
+              eq(currentPlayer.userId, userId),
+            ),
+          )
+          .leftJoin(participant1, eq(participant1.id, schema.matches.participant1Id))
+          .leftJoin(participant2, eq(participant2.id, schema.matches.participant2Id))
+          .where(inArray(schema.matches.id, historyMatchIds))
+      : [];
+
+    const historyMatchById = new Map(
+      historyMatchRows.map((row) => {
+        const currentParticipant = row.currentParticipantId;
+        const opponent = currentParticipant === row.participant1?.id
+          ? row.participant2
+          : row.participant1;
+        const result = !row.winnerId
+          ? 'DRAW'
+          : !currentParticipant
+            ? null
+            : row.winnerId === currentParticipant
+              ? 'WIN'
+              : 'LOSS';
+        return [row.matchId, {
+          status: row.status,
+          completedAt: row.completedAt,
+          winnerId: row.winnerId,
+          p1SetsWon: row.p1SetsWon,
+          p2SetsWon: row.p2SetsWon,
+          scoreDetails: row.scoreDetails,
+          result,
+          opponent: opponent
+            ? { id: opponent.id, name: opponent.teamName }
+            : null,
+        }];
+      }),
+    );
+    const enrichedHistoryItems = historyItems.map((item) => {
+      const details = item.matchId ? historyMatchById.get(item.matchId) : undefined;
+      return {
+        ...item,
+        match: item.match
+          ? { ...item.match, ...details }
+          : details ?? null,
+      };
+    });
+
     return {
-      data: historyItems,
+      data: enrichedHistoryItems,
       meta: {
         page,
         limit,

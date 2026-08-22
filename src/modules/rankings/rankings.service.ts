@@ -124,6 +124,9 @@ export class RankingsService {
       categoryId?: string;
       scope?: 'PUBLIC' | 'COMMUNITY';
       communityId?: string;
+      matchType?: string;
+      genderRestriction?: string;
+      partnerId?: string;
       page?: number;
       limit?: number;
       cursor?: string;
@@ -1704,6 +1707,7 @@ export class RankingsService {
         participant1Id: schema.matches.participant1Id,
         participant2Id: schema.matches.participant2Id,
         tournamentId: schema.matches.tournamentId,
+        stageId: schema.matches.stageId,
       })
       .from(schema.matches)
       .where(eq(schema.matches.id, matchId))
@@ -1725,12 +1729,16 @@ export class RankingsService {
     const [tournament] = await this.db
       .select({
         categoryId: schema.tournaments.categoryId,
-        matchType: schema.tournaments.matchType,
+        tournamentMatchType: schema.tournaments.matchType,
         tournamentType: schema.tournaments.tournamentType,
         communityId: schema.tournaments.communityId,
-        genderRestriction: schema.tournaments.genderRestriction,
+        tournamentGenderRestriction: schema.tournaments.genderRestriction,
+        divisionMatchType: schema.tournamentDivisions.matchType,
+        divisionGenderRestriction: schema.tournamentDivisions.genderRestriction,
       })
       .from(schema.tournaments)
+      .leftJoin(schema.tournamentStages, eq(schema.tournamentStages.id, match.stageId))
+      .leftJoin(schema.tournamentDivisions, eq(schema.tournamentDivisions.id, schema.tournamentStages.tournamentDivisionId))
       .where(eq(schema.tournaments.id, match.tournamentId))
       .limit(1);
 
@@ -1738,6 +1746,8 @@ export class RankingsService {
       throw new Error(`Tournament ${match.tournamentId} not found for ELO outbox processing`);
     }
 
+    const effectiveMatchType = tournament.divisionMatchType ?? tournament.tournamentMatchType;
+    const effectiveGenderRestriction = tournament.divisionGenderRestriction ?? tournament.tournamentGenderRestriction;
     const scope =
       tournament.tournamentType === 'CLUB' && tournament.communityId ? 'COMMUNITY' : 'PUBLIC';
 
@@ -1746,10 +1756,10 @@ export class RankingsService {
       match.winnerId,
       loserId,
       tournament.categoryId,
-      tournament.matchType,
+      effectiveMatchType,
       scope,
       tournament.communityId || undefined,
-      tournament.genderRestriction || undefined,
+      effectiveGenderRestriction || undefined,
     );
   }
 }
