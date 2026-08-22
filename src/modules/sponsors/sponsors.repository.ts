@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lte, ne, or } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -113,8 +113,8 @@ export class SponsorsRepository {
           ne(schema.tournaments.status, 'DRAFT'),
           ne(schema.tournaments.status, 'CANCELLED'),
           isNull(schema.tournaments.deletedAt),
-          or(isNull(schema.tournamentSponsors.startAt), lt(schema.tournamentSponsors.startAt, now)),
-          or(isNull(schema.tournamentSponsors.endAt), gt(schema.tournamentSponsors.endAt, now)),
+          or(isNull(schema.tournamentSponsors.startAt), lte(schema.tournamentSponsors.startAt, now)),
+          or(isNull(schema.tournamentSponsors.endAt), gte(schema.tournamentSponsors.endAt, now)),
         ),
       )
       .orderBy(asc(schema.tournamentSponsors.displayOrder), asc(schema.tournamentSponsors.createdAt));

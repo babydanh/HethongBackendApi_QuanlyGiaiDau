@@ -138,6 +138,23 @@ describe('SponsorsService', () => {
     expect(repository.update).not.toHaveBeenCalled();
   });
 
+  it('rejects a partial update that reverses the stored display window', async () => {
+    const { service, repository } = makeService();
+    repository.findTournamentForAccess.mockResolvedValue(tournament);
+    repository.findById.mockResolvedValue({
+      ...baseSponsor,
+      startAt: new Date('2026-09-02T00:00:00.000Z'),
+      endAt: new Date('2026-09-10T00:00:00.000Z'),
+    });
+
+    await expect(
+      service.update('tournament-1', 'sponsor-1', owner, {
+        endAt: '2026-09-01T00:00:00.000Z',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
   it('rejects unsafe URLs and reversed display windows', async () => {
     const { service, repository } = makeService();
     repository.findTournamentForAccess.mockResolvedValue(tournament);
