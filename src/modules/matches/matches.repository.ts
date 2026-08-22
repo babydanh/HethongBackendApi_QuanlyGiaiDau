@@ -104,9 +104,13 @@ export class MatchesRepository {
     const privileged = isAdmin || isOwner;
 
     if (
-      ['DRAFT', 'PENDING_APPROVAL', 'PENDING_DELETE', 'SUSPENDED', 'CANCELLED'].includes(
-        tournament.status,
-      )
+      [
+        'DRAFT',
+        'PENDING_APPROVAL',
+        'PENDING_DELETE',
+        'SUSPENDED',
+        'CANCELLED',
+      ].includes(tournament.status)
     ) {
       return privileged;
     }
@@ -191,7 +195,11 @@ export class MatchesRepository {
       .limit(1);
 
     if (!match) return false;
-    return this.canAccessLiveTournament(match.tournamentId, userId, systemRoles);
+    return this.canAccessLiveTournament(
+      match.tournamentId,
+      userId,
+      systemRoles,
+    );
   }
 
   async findAll(query: QueryMatchDto) {
@@ -388,7 +396,11 @@ export class MatchesRepository {
 
     // Stage filters (only if specific filters like divisionId, matchType, genderRestriction, bracketType, isRanked are supplied)
     const hasStageFilters = Boolean(
-      divisionId || matchType || genderRestriction || bracketType || isRanked !== undefined,
+      divisionId ||
+      matchType ||
+      genderRestriction ||
+      bracketType ||
+      isRanked !== undefined,
     );
     if (hasStageFilters) {
       const stageConditions: SQL[] = [
@@ -570,11 +582,13 @@ export class MatchesRepository {
 
     const participantIds = new Set<string>();
     const groupIdsForMatches = new Set<string>();
+    const stageIdsForMatches = new Set<string>();
     const tournamentIdsForMatches = new Set<string>();
     for (const match of data) {
       if (match.participant1Id) participantIds.add(match.participant1Id);
       if (match.participant2Id) participantIds.add(match.participant2Id);
       if (match.groupId) groupIdsForMatches.add(match.groupId);
+      if (match.stageId) stageIdsForMatches.add(match.stageId);
       if (match.tournamentId) tournamentIdsForMatches.add(match.tournamentId);
     }
 
@@ -677,6 +691,35 @@ export class MatchesRepository {
         participantsMap.set(p.id, {
           ...p,
           members: rostersMap.get(p.id) || [],
+        });
+      }
+    }
+
+    const stagesMap = new Map<
+      string,
+      {
+        name: string;
+        type?: string | null;
+        roundConfig?: Record<string, unknown> | null;
+      }
+    >();
+    if (stageIdsForMatches.size > 0) {
+      const stagesData = await this.db
+        .select({
+          id: schema.tournamentStages.id,
+          name: schema.tournamentStages.name,
+          type: schema.tournamentStages.type,
+          roundConfig: schema.tournamentStages.roundConfig,
+        })
+        .from(schema.tournamentStages)
+        .where(
+          inArray(schema.tournamentStages.id, Array.from(stageIdsForMatches)),
+        );
+      for (const stage of stagesData) {
+        stagesMap.set(stage.id, {
+          name: stage.name,
+          type: stage.type,
+          roundConfig: stage.roundConfig as Record<string, unknown> | null,
         });
       }
     }
@@ -795,6 +838,7 @@ export class MatchesRepository {
         ? participantsMap.get(match.participant2Id)
         : null;
       const groupStage = match.groupId ? groupsMap.get(match.groupId) : null;
+      const matchStage = match.stageId ? stagesMap.get(match.stageId) : null;
 
       return {
         ...match,
@@ -813,6 +857,13 @@ export class MatchesRepository {
               teamName: p2.teamName,
               seed: p2.seed,
               members: p2.members,
+            }
+          : null,
+        stage: matchStage
+          ? {
+              name: matchStage.name,
+              type: matchStage.type,
+              roundConfig: matchStage.roundConfig,
             }
           : null,
         group: groupStage

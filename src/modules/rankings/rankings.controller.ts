@@ -53,6 +53,9 @@ export class RankingsController {
     @Query('categoryId') categoryId?: string,
     @Query('scope') scope?: 'PUBLIC' | 'COMMUNITY',
     @Query('communityId') communityId?: string,
+    @Query('matchType') matchType?: string,
+    @Query('genderRestriction') genderRestriction?: string,
+    @Query('partnerId') partnerId?: string,
     @Query('limit') limit?: number,
     @Query('cursor') cursor?: string,
   ) {
@@ -60,6 +63,9 @@ export class RankingsController {
       categoryId,
       scope,
       communityId,
+      matchType,
+      genderRestriction,
+      partnerId,
       limit: limit ? Number(limit) : 20,
       cursor,
     });
