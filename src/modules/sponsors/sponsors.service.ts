@@ -75,6 +75,10 @@ export class SponsorsService {
     if (!existing) throw new NotFoundException('Sponsor not found');
 
     const normalized = this.normalizePayload(dto);
+    this.validateDateRange(
+      normalized.startAt !== undefined ? normalized.startAt : existing.startAt,
+      normalized.endAt !== undefined ? normalized.endAt : existing.endAt,
+    );
     const sponsor = await this.sponsorsRepository.update(tournamentId, sponsorId, {
       ...normalized,
       updatedBy: user.sub,
@@ -182,11 +186,15 @@ export class SponsorsService {
     const endAt = this.parseDate(source.endAt, 'endAt');
     if ('startAt' in source) result.startAt = startAt;
     if ('endAt' in source) result.endAt = endAt;
+    this.validateDateRange(startAt, endAt);
+
+    return result;
+  }
+
+  private validateDateRange(startAt: Date | null | undefined, endAt: Date | null | undefined) {
     if (startAt && endAt && startAt > endAt) {
       throw new BadRequestException('startAt must be before or equal to endAt');
     }
-
-    return result;
   }
 
   private parseDate(value: unknown, field: string) {

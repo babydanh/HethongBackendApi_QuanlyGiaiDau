@@ -4081,6 +4081,26 @@ export class TournamentsRepository {
       }
 
       const stageIds = stages.map((stage) => stage.id);
+      const [tournament] = await tx
+        .select({ status: schema.tournaments.status })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1);
+      if (!tournament) {
+        throw new NotFoundException('Giải đấu không tồn tại');
+      }
+      const tournamentStatus = tournament.status.toUpperCase();
+      if (
+        tournamentStatus === 'IN_PROGRESS' ||
+        tournamentStatus === 'ONGOING' ||
+        tournamentStatus === 'COMPLETED' ||
+        tournamentStatus === 'CANCELLED'
+      ) {
+        throw new BadRequestException(
+          'Không thể thay đổi participant sau khi giải đã bắt đầu hoặc kết thúc',
+        );
+      }
+
       const matches = await tx
         .select()
         .from(schema.matches)
@@ -4134,7 +4154,8 @@ export class TournamentsRepository {
         if (
           status === 'IN_PROGRESS' ||
           status === 'ONGOING' ||
-          status === 'LIVE'
+          status === 'LIVE' ||
+          status === 'COMPLETED'
         ) {
           throw new BadRequestException(
             'Không thể thay đổi participant của trận đang thi đấu',

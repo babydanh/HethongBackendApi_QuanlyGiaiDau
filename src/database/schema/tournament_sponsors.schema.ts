@@ -65,6 +65,14 @@ export const tournamentSponsors = pgTable(
       'tournament_sponsors_display_window_valid',
       sql`${table.startAt} IS NULL OR ${table.endAt} IS NULL OR ${table.startAt} <= ${table.endAt}`,
     ),
+    tierValid: check(
+      'tournament_sponsors_tier_valid',
+      sql`${table.tier} IN ('TITLE', 'DIAMOND', 'GOLD', 'SILVER', 'BRONZE', 'IN_KIND')`,
+    ),
+    statusValid: check(
+      'tournament_sponsors_status_valid',
+      sql`${table.status} IN ('DRAFT', 'PUBLISHED', 'HIDDEN', 'ARCHIVED')`,
+    ),
   }),
 );
 
