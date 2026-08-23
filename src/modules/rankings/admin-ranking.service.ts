@@ -223,6 +223,8 @@ export class AdminRankingService {
   }
 
   async listPlayers(query: AdminEloPlayerQueryDto) {
+    if (query.scope === 'PUBLIC' && query.communityId)
+      throw new BadRequestException('ELO_PUBLIC_COMMUNITY_FORBIDDEN');
     await this.assertActiveCategory(query.categoryId);
     const limit = Math.min(query.limit ?? 50, 100);
     const cursor = this.decodePlayerCursor(query.cursor);
@@ -348,7 +350,13 @@ export class AdminRankingService {
       })
       .from(schema.users)
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .where(eq(schema.users.id, userId))
+      .where(
+        and(
+          eq(schema.users.id, userId),
+          eq(schema.users.isMock, false),
+          isNull(schema.users.deletedAt),
+        ),
+      )
       .limit(1);
     if (!user || rows.length === 0)
       throw new NotFoundException('RANKING_PLAYER_NOT_FOUND');

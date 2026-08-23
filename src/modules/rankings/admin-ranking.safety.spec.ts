@@ -37,12 +37,27 @@ describe('admin Elo safety guardrails', () => {
     const adminRouteBlocks = controllerSource.match(
       /@(Get|Post)\('admin\/[^']+'\)[\s\S]*?@Roles\(UserRole\.ADMIN\)/g,
     );
-    expect(adminRouteBlocks).toHaveLength(3);
+    expect(adminRouteBlocks).toHaveLength(5);
+    expect(controllerSource).toContain(
+      "@Get('admin/players')\n  @ApiBearerAuth()",
+    );
+    expect(controllerSource).toContain(
+      "@Get('admin/players/:userId/detail')\n  @ApiBearerAuth()",
+    );
     expect(controllerSource).toContain(
       "@Get('admin/contexts')\n  @ApiBearerAuth()",
     );
     expect(controllerSource).toContain(
       "@Post('admin/operations')\n  @ApiBearerAuth()",
+    );
+  });
+
+  it('requires active categories and keeps grouped player filters scoped', () => {
+    expect(serviceSource).toContain('assertActiveCategory(query.categoryId)');
+    expect(serviceSource).toContain('ELO_PUBLIC_COMMUNITY_FORBIDDEN');
+    expect(serviceSource).toContain("COUNT(*) FILTER (WHERE scope = 'PUBLIC')");
+    expect(serviceSource).toContain(
+      "COUNT(*) FILTER (WHERE scope = 'COMMUNITY')",
     );
   });
 
