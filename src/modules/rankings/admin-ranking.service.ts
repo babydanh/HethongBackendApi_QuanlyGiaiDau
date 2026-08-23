@@ -46,6 +46,7 @@ type OperationResult = {
   newElo: number | null;
   changedPoints: number | null;
   status: RankingVisibilityStatus;
+  leaderboardEligible: boolean;
 };
 type RankSnapshot = {
   id: string;
@@ -59,6 +60,7 @@ type RankSnapshot = {
   winStreak: number;
   peakElo: number;
   shieldActive?: boolean;
+  adminLeaderboardEligible: boolean;
   tierId?: string | null;
 };
 type StatusSnapshot = {
@@ -102,6 +104,8 @@ type AdminPlayerRow = {
   visibleContextCount: number;
   hiddenContextCount: number;
   bannedContextCount: number;
+  eligibleContextCount: number;
+  ineligibleContextCount: number;
   highestElo: number | null;
   lastUpdatedAt: Date | null;
 };
@@ -116,6 +120,8 @@ type AdminPlayerSqlRow = {
   visible_context_count: number | string;
   hidden_context_count: number | string;
   banned_context_count: number | string;
+  eligible_context_count: number | string;
+  ineligible_context_count: number | string;
   highest_elo: number | string | null;
   last_updated_at: Date | string;
 };
@@ -136,6 +142,7 @@ type AdminPlayerContextDetail = {
   tierName: string | null;
   status: RankingVisibilityStatus;
   statusExpiresAt: Date | null;
+  leaderboardEligible: boolean;
   updatedAt: Date;
 };
 
@@ -159,6 +166,8 @@ type AdminPlayerDetail = {
     changedPoints: number | null;
     previousStatus: string | null;
     newStatus: string | null;
+    previousLeaderboardEligible: boolean | null;
+    newLeaderboardEligible: boolean | null;
     reason: string;
     createdAt: Date;
   }>;
@@ -244,9 +253,10 @@ export class AdminRankingService {
       );
     }
     const rows = (await this.db.execute(sql`
-      WITH contexts AS (
+      WITH           contexts AS (
         SELECT ur.user_id, ur.id AS context_id, ur.category_id, 'PUBLIC'::text AS scope,
-          NULL::uuid AS community_id, ur.match_type, ur.elo_points, ur.updated_at,
+
+          NULL::uuid AS community_id, ur.match_type, ur.elo_points, ur.matches_played, ur.admin_leaderboard_eligible, ur.updated_at,
           COALESCE(u.email, '') AS email,
           COALESCE(pr.full_name, u.email, '') AS full_name,
           pr.avatar_url,
@@ -259,7 +269,7 @@ export class AdminRankingService {
         WHERE ur.category_id = ${query.categoryId}
         UNION ALL
         SELECT cr.user_id, cr.id AS context_id, cr.category_id, 'COMMUNITY'::text AS scope,
-          cr.community_id, cr.match_type, cr.elo_points, cr.updated_at,
+          cr.community_id, cr.match_type, cr.elo_points, cr.matches_played, cr.admin_leaderboard_eligible, cr.updated_at,
           COALESCE(u.email, '') AS email,
           COALESCE(pr.full_name, u.email, '') AS full_name,
           pr.avatar_url,
@@ -278,6 +288,8 @@ export class AdminRankingService {
         COUNT(*) FILTER (WHERE status = 'VISIBLE')::int AS visible_context_count,
         COUNT(*) FILTER (WHERE status = 'HIDDEN')::int AS hidden_context_count,
         COUNT(*) FILTER (WHERE status = 'BANNED')::int AS banned_context_count,
+        COUNT(*) FILTER (WHERE matches_played > 0 OR admin_leaderboard_eligible)::int AS eligible_context_count,
+        COUNT(*) FILTER (WHERE matches_played = 0 AND NOT admin_leaderboard_eligible)::int AS ineligible_context_count,
         MAX(elo_points)::int AS highest_elo,
         MAX(updated_at) AS last_updated_at
       FROM contexts
@@ -298,7 +310,10 @@ export class AdminRankingService {
       visibleContextCount: Number(row.visible_context_count),
       hiddenContextCount: Number(row.hidden_context_count),
       bannedContextCount: Number(row.banned_context_count),
+      eligibleContextCount: Number(row.eligible_context_count),
+      ineligibleContextCount: Number(row.ineligible_context_count),
       highestElo: row.highest_elo === null ? null : Number(row.highest_elo),
+
       lastUpdatedAt: new Date(row.last_updated_at),
     }));
     const last = data.at(-1);
@@ -325,7 +340,7 @@ export class AdminRankingService {
     const category = await this.assertActiveCategory(query.categoryId);
     const rows = (await this.db.execute(sql`
       SELECT ur.id AS context_id, 'PUBLIC'::text AS scope, NULL::uuid AS community_id, NULL::text AS community_name,
-        ur.category_id, ur.match_type, ur.gender_restriction, ur.elo_points, ur.matches_played, ur.matches_won, ur.win_streak, ur.peak_elo,
+        ur.category_id, ur.match_type, ur.gender_restriction, ur.elo_points, ur.matches_played, ur.matches_won, ur.win_streak, ur.peak_elo, ur.admin_leaderboard_eligible,
         COALESCE(t.name, NULL) AS tier_name, CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status, st.expires_at AS status_expires_at, ur.updated_at
       FROM user_ranks ur
       LEFT JOIN elo_tiers t ON t.id = ur.tier_id
@@ -333,7 +348,7 @@ export class AdminRankingService {
       WHERE ur.user_id = ${userId} AND ur.category_id = ${query.categoryId}
       UNION ALL
       SELECT cr.id AS context_id, 'COMMUNITY'::text AS scope, cr.community_id, c.name AS community_name,
-        cr.category_id, cr.match_type, cr.gender_restriction, cr.elo_points, cr.matches_played, cr.matches_won, cr.win_streak, cr.peak_elo,
+        cr.category_id, cr.match_type, cr.gender_restriction, cr.elo_points, cr.matches_played, cr.matches_won, cr.win_streak, cr.peak_elo, cr.admin_leaderboard_eligible,
         NULL::text AS tier_name, CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status, st.expires_at AS status_expires_at, cr.updated_at
       FROM community_rankings cr
       LEFT JOIN communities c ON c.id = cr.community_id
@@ -372,6 +387,8 @@ export class AdminRankingService {
         changedPoints: schema.adminEloOperations.changedPoints,
         previousStatus: schema.adminEloOperations.previousStatus,
         newStatus: schema.adminEloOperations.newStatus,
+        previousLeaderboardEligible: schema.adminEloOperations.previousLeaderboardEligible,
+        newLeaderboardEligible: schema.adminEloOperations.newLeaderboardEligible,
         reason: schema.adminEloOperations.reason,
         createdAt: schema.adminEloOperations.createdAt,
       })
@@ -412,6 +429,10 @@ export class AdminRankingService {
         statusExpiresAt: row.status_expires_at
           ? new Date(String(row.status_expires_at))
           : null,
+        leaderboardEligible:
+          Number(row.matches_played) > 0 ||
+          row.admin_leaderboard_eligible === true ||
+          String(row.admin_leaderboard_eligible) === 'true',
         updatedAt: new Date(String(row.updated_at)),
       })),
       recentOperations: operations.map((operation) => ({
@@ -511,6 +532,8 @@ export class AdminRankingService {
       let newElo: number | null = null;
       let changedPoints: number | null = null;
       let nextStatus = previousStatus;
+      const previousLeaderboardEligible = rank.adminLeaderboardEligible;
+      let nextLeaderboardEligible = previousLeaderboardEligible;
 
       if (ratingOperation) {
         previousElo = rank.eloPoints;
@@ -520,12 +543,19 @@ export class AdminRankingService {
           normalized.requestedValue,
         );
         changedPoints = newElo - previousElo;
+        if (
+          normalized.operation === 'ADD' &&
+          rank.matchesPlayed === 0
+        ) {
+          nextLeaderboardEligible = true;
+        }
         await this.updateRank(
           tx,
           normalized.scope,
           rank.id,
           newElo,
           rank.peakElo,
+          nextLeaderboardEligible,
         );
         if (normalized.scope === 'PUBLIC') {
           await this.rankingsService.recalculateUserRankTier(
@@ -586,6 +616,8 @@ export class AdminRankingService {
           changedPoints,
           previousStatus,
           newStatus: nextStatus,
+          previousLeaderboardEligible,
+          newLeaderboardEligible: nextLeaderboardEligible,
         })
         .where(eq(schema.adminEloOperations.id, reservation.id))
         .returning();
@@ -620,6 +652,7 @@ export class AdminRankingService {
         newElo,
         changedPoints,
         status: nextStatus,
+        leaderboardEligible: nextLeaderboardEligible,
       } satisfies OperationResult;
     });
 
@@ -645,6 +678,8 @@ export class AdminRankingService {
         changedPoints: schema.adminEloOperations.changedPoints,
         previousStatus: schema.adminEloOperations.previousStatus,
         newStatus: schema.adminEloOperations.newStatus,
+        previousLeaderboardEligible: schema.adminEloOperations.previousLeaderboardEligible,
+        newLeaderboardEligible: schema.adminEloOperations.newLeaderboardEligible,
         reason: schema.adminEloOperations.reason,
         expiresAt: schema.adminEloOperations.expiresAt,
         adminUserId: schema.adminEloOperations.adminUserId,
@@ -1107,6 +1142,7 @@ export class AdminRankingService {
           winStreak: schema.userRanks.winStreak,
           peakElo: schema.userRanks.peakElo,
           shieldActive: schema.userRanks.shieldActive,
+          adminLeaderboardEligible: schema.userRanks.adminLeaderboardEligible,
           tierId: schema.userRanks.tierId,
         })
         .from(schema.userRanks)
@@ -1136,6 +1172,7 @@ export class AdminRankingService {
         winStreak: schema.communityRankings.winStreak,
         peakElo: schema.communityRankings.peakElo,
         shieldActive: sql<boolean>`false`,
+        adminLeaderboardEligible: schema.communityRankings.adminLeaderboardEligible,
         tierId: sql<string | null>`null`,
       })
       .from(schema.communityRankings)
@@ -1192,6 +1229,7 @@ export class AdminRankingService {
     id: string,
     newElo: number,
     peakElo: number,
+    adminLeaderboardEligible: boolean,
   ) {
     const now = new Date();
     if (scope === 'PUBLIC') {
@@ -1200,6 +1238,7 @@ export class AdminRankingService {
         .set({
           eloPoints: newElo,
           peakElo: Math.max(peakElo, newElo),
+          adminLeaderboardEligible,
           updatedAt: now,
         })
         .where(eq(schema.userRanks.id, id));
@@ -1209,6 +1248,7 @@ export class AdminRankingService {
         .set({
           eloPoints: newElo,
           peakElo: Math.max(peakElo, newElo),
+          adminLeaderboardEligible,
           updatedAt: now,
         })
         .where(eq(schema.communityRankings.id, id));

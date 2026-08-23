@@ -211,6 +211,10 @@ export class RankingsRepository {
         eq(schema.communityRankings.categoryId, categoryId),
         eq(schema.communityRankings.communityId, communityId),
         eq(schema.users.isMock, false),
+        or(
+          gt(schema.communityRankings.matchesPlayed, 0),
+          eq(schema.communityRankings.adminLeaderboardEligible, true),
+        ) as SQL,
         eq(schema.communityMembers.status, 'JOINED'),
       ];
       if (matchType) {
@@ -350,7 +354,10 @@ export class RankingsRepository {
         eq(schema.userRanks.categoryId, categoryId),
         isNull(schema.userRanks.communityId),
         eq(schema.users.isMock, false),
-        gt(schema.userRanks.matchesPlayed, 0),
+        or(
+          gt(schema.userRanks.matchesPlayed, 0),
+          eq(schema.userRanks.adminLeaderboardEligible, true),
+        ) as SQL,
       ];
       if (matchType) {
         conditions.push(eq(schema.userRanks.matchType, matchType));
@@ -508,7 +515,10 @@ export class RankingsRepository {
         and(
           eq(schema.userRanks.userId, userId),
           isNull(schema.userRanks.communityId),
-          gt(schema.userRanks.matchesPlayed, 0),
+          or(
+            gt(schema.userRanks.matchesPlayed, 0),
+            eq(schema.userRanks.adminLeaderboardEligible, true),
+          ) as SQL,
           notExists(
             this.db
               .select({ id: schema.rankingContextStatuses.id })
@@ -573,7 +583,10 @@ export class RankingsRepository {
       .where(
         and(
           eq(schema.communityRankings.userId, userId),
-          gt(schema.communityRankings.matchesPlayed, 0),
+          or(
+            gt(schema.communityRankings.matchesPlayed, 0),
+            eq(schema.communityRankings.adminLeaderboardEligible, true),
+          ) as SQL,
           notExists(
             this.db
               .select({ id: schema.rankingContextStatuses.id })

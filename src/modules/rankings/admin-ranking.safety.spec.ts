@@ -76,6 +76,14 @@ describe('admin Elo safety guardrails', () => {
     expect(serviceSource).not.toContain('lastDecayAt: now');
   });
 
+  it('requires at least one completed match for public and community leaderboard reads', () => {
+    expect(repositorySource).toContain(
+      'gt(schema.communityRankings.matchesPlayed, 0)',
+    );
+    expect(repositorySource).toContain('gt(schema.userRanks.matchesPlayed, 0)');
+    expect(repositorySource).toContain('gt(schema.pairRanks.matchesPlayed, 0)');
+  });
+
   it('keeps active hidden and banned contexts out of public and pair reads', () => {
     expect(repositorySource).toContain('notExists(');
     expect(repositorySource).toContain("'HIDDEN'");

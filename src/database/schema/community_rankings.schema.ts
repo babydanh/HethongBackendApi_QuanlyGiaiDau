@@ -4,6 +4,7 @@ import {
   integer,
   timestamp,
   varchar,
+  boolean,
   uniqueIndex,
   check,
 } from 'drizzle-orm/pg-core';
@@ -21,6 +22,7 @@ export const communityRankings = pgTable('community_rankings', {
   genderRestriction: varchar('gender_restriction', { length: 20 }),
   eloPoints: integer('elo_points').default(1000).notNull(),
   matchesPlayed: integer('matches_played').default(0).notNull(),
+  adminLeaderboardEligible: boolean('admin_leaderboard_eligible').default(false).notNull(),
   matchesWon: integer('matches_won').default(0).notNull(),
   winStreak: integer('win_streak').default(0).notNull(),
   peakElo: integer('peak_elo').default(1000).notNull(),

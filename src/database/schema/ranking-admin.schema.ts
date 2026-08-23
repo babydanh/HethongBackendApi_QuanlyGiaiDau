@@ -8,6 +8,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  boolean,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
@@ -108,6 +109,8 @@ export const adminEloOperations = pgTable(
     changedPoints: integer('changed_points'),
     previousStatus: varchar('previous_status', { length: 20 }),
     newStatus: varchar('new_status', { length: 20 }),
+    previousLeaderboardEligible: boolean('previous_leaderboard_eligible'),
+    newLeaderboardEligible: boolean('new_leaderboard_eligible'),
     reason: text('reason').notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
