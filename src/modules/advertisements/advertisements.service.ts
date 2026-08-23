@@ -11,6 +11,7 @@ export class AdvertisementsService {
 
   async create(dto: CreateAdvertisementDto): Promise<Advertisement> {
     this.validateDates(dto.startDate, dto.endDate);
+    await this.validateCategoryId(dto.categoryId);
 
     const data = {
       title: dto.title.trim(),
@@ -21,6 +22,7 @@ export class AdvertisementsService {
       ctaText: dto.ctaText?.trim() || null,
       customHtml: dto.customHtml || null,
       placementSlot: dto.placementSlot,
+      categoryId: dto.categoryId ?? null,
       displayOrder: dto.displayOrder ?? 0,
       isActive: dto.isActive ?? true,
       startDate: dto.startDate ? new Date(dto.startDate) : null,
@@ -40,6 +42,8 @@ export class AdvertisementsService {
     const endDate = dto.endDate !== undefined ? (dto.endDate ? new Date(dto.endDate) : null) : existing.endDate;
     this.validateDates(startDate?.toISOString(), endDate?.toISOString());
 
+    await this.validateCategoryId(dto.categoryId);
+
     const updateData: Record<string, unknown> = {};
     if (dto.title !== undefined) updateData.title = dto.title.trim();
     if (dto.description !== undefined) updateData.description = dto.description?.trim() || null;
@@ -49,6 +53,7 @@ export class AdvertisementsService {
     if (dto.ctaText !== undefined) updateData.ctaText = dto.ctaText?.trim() || null;
     if (dto.customHtml !== undefined) updateData.customHtml = dto.customHtml || null;
     if (dto.placementSlot !== undefined) updateData.placementSlot = dto.placementSlot;
+    if (dto.categoryId !== undefined) updateData.categoryId = dto.categoryId || null;
     if (dto.displayOrder !== undefined) updateData.displayOrder = dto.displayOrder;
     if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
     if (dto.startDate !== undefined) updateData.startDate = dto.startDate ? new Date(dto.startDate) : null;
@@ -90,8 +95,8 @@ export class AdvertisementsService {
     return ad;
   }
 
-  async getActiveBySlot(placementSlot: string): Promise<Advertisement[]> {
-    return this.repository.findActiveBySlot(placementSlot);
+  async getActiveBySlot(placementSlot: string, categoryId?: string): Promise<Advertisement[]> {
+    return this.repository.findActiveBySlot(placementSlot, categoryId);
   }
 
   async findAll(query: QueryAdvertisementDto) {
@@ -104,6 +109,14 @@ export class AdvertisementsService {
 
   async recordClick(id: string): Promise<void> {
     await this.repository.incrementClicks(id);
+  }
+
+  private async validateCategoryId(categoryId?: string | null) {
+    if (!categoryId) return;
+    const category = await this.repository.findCategoryById(categoryId);
+    if (!category) {
+      throw new BadRequestException('Môn thể thao được chọn không tồn tại');
+    }
   }
 
   private validateDates(startDate?: string | null, endDate?: string | null) {

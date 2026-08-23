@@ -61,6 +61,7 @@ async function bootstrap() {
   // Security Headers
   app.use(
     helmet({
+      hidePoweredBy: true,
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );

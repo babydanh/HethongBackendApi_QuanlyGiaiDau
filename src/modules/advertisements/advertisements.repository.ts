@@ -18,13 +18,22 @@ export class AdvertisementsRepository {
     return ad;
   }
 
-  async findById(id: string): Promise<Advertisement | null> {
+    async findById(id: string): Promise<Advertisement | null> {
     const [ad] = await this.db
       .select()
       .from(schema.advertisements)
       .where(eq(schema.advertisements.id, id))
       .limit(1);
     return ad ?? null;
+  }
+
+  async findCategoryById(categoryId: string) {
+    const [category] = await this.db
+      .select({ id: schema.categories.id })
+      .from(schema.categories)
+      .where(eq(schema.categories.id, categoryId))
+      .limit(1);
+    return category ?? null;
   }
 
   async update(id: string, data: Partial<NewAdvertisement>): Promise<Advertisement | null> {
@@ -58,7 +67,15 @@ export class AdvertisementsRepository {
       .where(eq(schema.advertisements.id, id));
   }
 
-  async findActiveBySlot(placementSlot: string, now = new Date()): Promise<Advertisement[]> {
+  async findActiveBySlot(
+    placementSlot: string,
+    categoryId?: string,
+    now = new Date(),
+  ): Promise<Advertisement[]> {
+    const targetCondition = categoryId
+      ? or(isNull(schema.advertisements.categoryId), eq(schema.advertisements.categoryId, categoryId))
+      : isNull(schema.advertisements.categoryId);
+
     return this.db
       .select()
       .from(schema.advertisements)
@@ -66,6 +83,7 @@ export class AdvertisementsRepository {
         and(
           eq(schema.advertisements.placementSlot, placementSlot),
           eq(schema.advertisements.isActive, true),
+          targetCondition,
           or(isNull(schema.advertisements.startDate), lte(schema.advertisements.startDate, now)),
           or(isNull(schema.advertisements.endDate), gte(schema.advertisements.endDate, now)),
         ),
@@ -74,7 +92,7 @@ export class AdvertisementsRepository {
   }
 
   async findAll(query: QueryAdvertisementDto): Promise<{ items: Advertisement[]; total: number; page: number; limit: number; totalPages: number }> {
-    const { placementSlot, isActive, search, page, limit } = query;
+    const { placementSlot, isActive, search, categoryId, page, limit } = query;
     const conditions: SQL[] = [];
 
     if (placementSlot) {
@@ -82,6 +100,9 @@ export class AdvertisementsRepository {
     }
     if (typeof isActive === 'boolean') {
       conditions.push(eq(schema.advertisements.isActive, isActive));
+    }
+    if (categoryId) {
+      conditions.push(eq(schema.advertisements.categoryId, categoryId));
     }
     if (search && search.trim()) {
       const searchPattern = `%${search.trim()}%`;

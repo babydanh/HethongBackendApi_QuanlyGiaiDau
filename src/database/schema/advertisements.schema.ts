@@ -7,8 +7,10 @@ import {
   boolean,
   timestamp,
   check,
+  index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { categories } from './categories.schema';
 
 export const advertisements = pgTable(
   'advertisements',
@@ -22,6 +24,9 @@ export const advertisements = pgTable(
     ctaText: varchar('cta_text', { length: 100 }),
     customHtml: text('custom_html'),
     placementSlot: varchar('placement_slot', { length: 100 }).notNull(),
+    categoryId: uuid('category_id').references(() => categories.id, {
+      onDelete: 'set null',
+    }),
     displayOrder: integer('display_order').default(0).notNull(),
     viewsCount: integer('views_count').default(0).notNull(),
     clicksCount: integer('clicks_count').default(0).notNull(),
@@ -40,6 +45,7 @@ export const advertisements = pgTable(
       'ads_date_valid',
       sql`${table.startDate} IS NULL OR ${table.endDate} IS NULL OR ${table.startDate} < ${table.endDate}`,
     ),
+    categoryIdIdx: index('advertisements_category_id_idx').on(table.categoryId),
   }),
 );
 

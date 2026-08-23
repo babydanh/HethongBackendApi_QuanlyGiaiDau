@@ -18,9 +18,11 @@ import {
   sql,
 } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
+import { AuditService } from '../audit/audit.service';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
+import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import { RankingsService } from './rankings.service';
 import {
   calculateAdminElo,
@@ -31,6 +33,8 @@ import {
   AdminEloOperation,
   AdminEloOperationDto,
   AdminEloQueryDto,
+  AdminEloPlayerQueryDto,
+  AdminEloPlayerDetailQueryDto,
   RankingVisibilityStatus,
 } from './dto/admin-elo-operation.dto';
 
@@ -63,6 +67,9 @@ type StatusSnapshot = {
   expiresAt: Date | null;
 };
 
+type AdminContextCursor = { updatedAt: Date; id: string };
+type AdminHistoryCursor = { createdAt: Date; id: string };
+
 type AdminContextRow = {
   contextId: string;
   userId: string;
@@ -84,14 +91,90 @@ type AdminContextRow = {
   statusExpiresAt: Date | null;
 };
 
+type AdminPlayerRow = {
+  userId: string;
+  email: string;
+  fullName: string;
+  avatarUrl: string | null;
+  contextCount: number;
+  publicContextCount: number;
+  communityContextCount: number;
+  visibleContextCount: number;
+  hiddenContextCount: number;
+  bannedContextCount: number;
+  highestElo: number | null;
+  lastUpdatedAt: Date | null;
+};
+type AdminPlayerSqlRow = {
+  user_id: string;
+  email: string;
+  full_name: string;
+  avatar_url: string | null;
+  context_count: number | string;
+  public_context_count: number | string;
+  community_context_count: number | string;
+  visible_context_count: number | string;
+  hidden_context_count: number | string;
+  banned_context_count: number | string;
+  highest_elo: number | string | null;
+  last_updated_at: Date | string;
+};
+
+type AdminPlayerContextDetail = {
+  contextId: string;
+  scope: RankingScope;
+  communityId: string | null;
+  communityName: string | null;
+  categoryId: string;
+  matchType: string;
+  genderRestriction: string | null;
+  eloPoints: number;
+  matchesPlayed: number;
+  matchesWon: number;
+  winStreak: number;
+  peakElo: number;
+  tierName: string | null;
+  status: RankingVisibilityStatus;
+  statusExpiresAt: Date | null;
+  updatedAt: Date;
+};
+
+type AdminPlayerDetail = {
+  user: {
+    id: string;
+    email: string;
+    fullName: string;
+    avatarUrl: string | null;
+  };
+  category: { id: string; name: string; slug: string };
+  contexts: AdminPlayerContextDetail[];
+  recentOperations: Array<{
+    id: string;
+    operation: AdminEloOperation;
+    scope: RankingScope;
+    communityId: string | null;
+    matchType: string;
+    previousElo: number | null;
+    newElo: number | null;
+    changedPoints: number | null;
+    previousStatus: string | null;
+    newStatus: string | null;
+    reason: string;
+    createdAt: Date;
+  }>;
+};
+
 @Injectable()
 export class AdminRankingService {
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly rankingsService: RankingsService,
+    private readonly auditService: AuditService,
   ) {}
 
   async listContexts(query: AdminEloQueryDto) {
+    if (query.direction && query.direction !== 'next')
+      throw new BadRequestException('ELO_CURSOR_DIRECTION_UNSUPPORTED');
     const limit = Math.min(query.limit ?? 50, 100);
     if (query.scope === 'COMMUNITY' && !query.communityId) {
       throw new BadRequestException(
@@ -111,12 +194,13 @@ export class AdminRankingService {
       throw new BadRequestException('minElo cannot be greater than maxElo');
     }
 
+    const cursor = this.decodeContextCursor(query.cursor);
     const rows =
       query.scope === 'COMMUNITY'
-        ? await this.listCommunityContexts(query, limit)
-        : await this.listPublicContexts(query, limit);
-
-    const data = rows.map((row) => ({
+        ? await this.listCommunityContexts(query, limit + 1, cursor)
+        : await this.listPublicContexts(query, limit + 1, cursor);
+    const hasMore = rows.length > limit;
+    const data = rows.slice(0, limit).map((row) => ({
       ...row,
       status: this.resolveStatus(row.status, row.statusExpiresAt),
     }));
@@ -126,17 +210,227 @@ export class AdminRankingService {
       data,
       meta: {
         limit,
-        hasMore: rows.length === limit,
-        nextCursor: last
-          ? Buffer.from(
-              JSON.stringify({
+        hasMore,
+        nextCursor:
+          hasMore && last
+            ? CursorPaginationHelper.encodeCursor({
                 updatedAt: last.updatedAt.toISOString(),
                 id: last.contextId,
-              }),
-            ).toString('base64url')
-          : null,
+              })
+            : null,
       },
     };
+  }
+
+  async listPlayers(query: AdminEloPlayerQueryDto) {
+    await this.assertActiveCategory(query.categoryId);
+    const limit = Math.min(query.limit ?? 50, 100);
+    const cursor = this.decodePlayerCursor(query.cursor);
+    const filters = [sql`category_id = ${query.categoryId}`];
+    if (query.scope) filters.push(sql`scope = ${query.scope}`);
+    if (query.communityId)
+      filters.push(sql`community_id = ${query.communityId}`);
+    if (query.matchType) filters.push(sql`match_type = ${query.matchType}`);
+    if (query.search?.trim()) {
+      const search = `%${query.search.trim()}%`;
+      filters.push(sql`(email ILIKE ${search} OR full_name ILIKE ${search})`);
+    }
+    if (query.status) filters.push(sql`status = ${query.status}`);
+    if (cursor) {
+      filters.push(
+        sql`(last_updated_at < ${cursor.updatedAt} OR (last_updated_at = ${cursor.updatedAt} AND user_id < ${cursor.id}))`,
+      );
+    }
+    const rows = (await this.db.execute(sql`
+      WITH contexts AS (
+        SELECT ur.user_id, ur.id AS context_id, ur.category_id, 'PUBLIC'::text AS scope,
+          NULL::uuid AS community_id, ur.match_type, ur.elo_points, ur.updated_at,
+          COALESCE(u.email, '') AS email,
+          COALESCE(pr.full_name, u.email, '') AS full_name,
+          pr.avatar_url,
+          CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status
+        FROM user_ranks ur
+        INNER JOIN users u ON u.id = ur.user_id AND u.is_mock = false AND u.deleted_at IS NULL
+        LEFT JOIN profiles pr ON pr.user_id = u.id
+        LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = ur.user_id AND s.category_id = ur.category_id AND s.scope = 'PUBLIC' AND s.community_id IS NULL AND s.match_type = ur.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(ur.gender_restriction, '') LIMIT 1) st ON true
+        INNER JOIN categories c ON c.id = ur.category_id AND COALESCE(c.category_config->>'isActive', 'true') <> 'false'
+        WHERE ur.category_id = ${query.categoryId}
+        UNION ALL
+        SELECT cr.user_id, cr.id AS context_id, cr.category_id, 'COMMUNITY'::text AS scope,
+          cr.community_id, cr.match_type, cr.elo_points, cr.updated_at,
+          COALESCE(u.email, '') AS email,
+          COALESCE(pr.full_name, u.email, '') AS full_name,
+          pr.avatar_url,
+          CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status
+        FROM community_rankings cr
+        INNER JOIN users u ON u.id = cr.user_id AND u.is_mock = false AND u.deleted_at IS NULL
+        LEFT JOIN profiles pr ON pr.user_id = u.id
+        LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = cr.user_id AND s.category_id = cr.category_id AND s.scope = 'COMMUNITY' AND s.community_id = cr.community_id AND s.match_type = cr.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(cr.gender_restriction, '') LIMIT 1) st ON true
+        INNER JOIN categories c ON c.id = cr.category_id AND COALESCE(c.category_config->>'isActive', 'true') <> 'false'
+        WHERE cr.category_id = ${query.categoryId}
+      )
+      SELECT user_id, email, full_name, avatar_url,
+        COUNT(*)::int AS context_count,
+        COUNT(*) FILTER (WHERE scope = 'PUBLIC')::int AS public_context_count,
+        COUNT(*) FILTER (WHERE scope = 'COMMUNITY')::int AS community_context_count,
+        COUNT(*) FILTER (WHERE status = 'VISIBLE')::int AS visible_context_count,
+        COUNT(*) FILTER (WHERE status = 'HIDDEN')::int AS hidden_context_count,
+        COUNT(*) FILTER (WHERE status = 'BANNED')::int AS banned_context_count,
+        MAX(elo_points)::int AS highest_elo,
+        MAX(updated_at) AS last_updated_at
+      FROM contexts
+      WHERE ${sql.join(filters, sql` AND `)}
+      GROUP BY user_id, email, full_name, avatar_url
+      ORDER BY MAX(updated_at) DESC, user_id DESC
+      LIMIT ${limit + 1}
+    `)) as unknown as AdminPlayerSqlRow[];
+    const hasMore = rows.length > limit;
+    const data = rows.slice(0, limit).map((row) => ({
+      userId: row.user_id,
+      email: row.email,
+      fullName: row.full_name,
+      avatarUrl: row.avatar_url,
+      contextCount: Number(row.context_count),
+      publicContextCount: Number(row.public_context_count),
+      communityContextCount: Number(row.community_context_count),
+      visibleContextCount: Number(row.visible_context_count),
+      hiddenContextCount: Number(row.hidden_context_count),
+      bannedContextCount: Number(row.banned_context_count),
+      highestElo: row.highest_elo === null ? null : Number(row.highest_elo),
+      lastUpdatedAt: new Date(row.last_updated_at),
+    }));
+    const last = data.at(-1);
+    return {
+      data,
+      meta: {
+        limit,
+        hasMore,
+        nextCursor:
+          hasMore && last && last.lastUpdatedAt
+            ? CursorPaginationHelper.encodeCursor({
+                updatedAt: last.lastUpdatedAt.toISOString(),
+                id: last.userId,
+              })
+            : null,
+      },
+    };
+  }
+
+  async getPlayerDetail(
+    userId: string,
+    query: AdminEloPlayerDetailQueryDto,
+  ): Promise<AdminPlayerDetail> {
+    const category = await this.assertActiveCategory(query.categoryId);
+    const rows = (await this.db.execute(sql`
+      SELECT ur.id AS context_id, 'PUBLIC'::text AS scope, NULL::uuid AS community_id, NULL::text AS community_name,
+        ur.category_id, ur.match_type, ur.gender_restriction, ur.elo_points, ur.matches_played, ur.matches_won, ur.win_streak, ur.peak_elo,
+        COALESCE(t.name, NULL) AS tier_name, CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status, st.expires_at AS status_expires_at, ur.updated_at
+      FROM user_ranks ur
+      LEFT JOIN elo_tiers t ON t.id = ur.tier_id
+      LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = ur.user_id AND s.category_id = ur.category_id AND s.scope = 'PUBLIC' AND s.community_id IS NULL AND s.match_type = ur.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(ur.gender_restriction, '') LIMIT 1) st ON true
+      WHERE ur.user_id = ${userId} AND ur.category_id = ${query.categoryId}
+      UNION ALL
+      SELECT cr.id AS context_id, 'COMMUNITY'::text AS scope, cr.community_id, c.name AS community_name,
+        cr.category_id, cr.match_type, cr.gender_restriction, cr.elo_points, cr.matches_played, cr.matches_won, cr.win_streak, cr.peak_elo,
+        NULL::text AS tier_name, CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status, st.expires_at AS status_expires_at, cr.updated_at
+      FROM community_rankings cr
+      LEFT JOIN communities c ON c.id = cr.community_id
+      LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = cr.user_id AND s.category_id = cr.category_id AND s.scope = 'COMMUNITY' AND s.community_id = cr.community_id AND s.match_type = cr.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(cr.gender_restriction, '') LIMIT 1) st ON true
+      WHERE cr.user_id = ${userId} AND cr.category_id = ${query.categoryId}
+      ORDER BY updated_at DESC
+    `)) as unknown as Array<Record<string, unknown>>;
+    const [user] = await this.db
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        fullName: sql<string>`coalesce(${schema.profiles.fullName}, ${schema.users.email})`,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.users)
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    if (!user || rows.length === 0)
+      throw new NotFoundException('RANKING_PLAYER_NOT_FOUND');
+    const operations = await this.db
+      .select({
+        id: schema.adminEloOperations.id,
+        operation: schema.adminEloOperations.operation,
+        scope: schema.adminEloOperations.scope,
+        communityId: schema.adminEloOperations.communityId,
+        matchType: schema.adminEloOperations.matchType,
+        previousElo: schema.adminEloOperations.previousElo,
+        newElo: schema.adminEloOperations.newElo,
+        changedPoints: schema.adminEloOperations.changedPoints,
+        previousStatus: schema.adminEloOperations.previousStatus,
+        newStatus: schema.adminEloOperations.newStatus,
+        reason: schema.adminEloOperations.reason,
+        createdAt: schema.adminEloOperations.createdAt,
+      })
+      .from(schema.adminEloOperations)
+      .where(
+        and(
+          eq(schema.adminEloOperations.userId, userId),
+          eq(schema.adminEloOperations.categoryId, query.categoryId),
+        ),
+      )
+      .orderBy(desc(schema.adminEloOperations.createdAt))
+      .limit(20);
+    return {
+      user: {
+        id: user.id,
+        email: user.email ?? '',
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
+      },
+      category: { id: category.id, name: category.name, slug: category.slug },
+      contexts: rows.map((row) => ({
+        contextId: String(row.context_id),
+        scope: String(row.scope) as RankingScope,
+        communityId: row.community_id ? String(row.community_id) : null,
+        communityName: row.community_name ? String(row.community_name) : null,
+        categoryId: String(row.category_id),
+        matchType: String(row.match_type),
+        genderRestriction: row.gender_restriction
+          ? String(row.gender_restriction)
+          : null,
+        eloPoints: Number(row.elo_points),
+        matchesPlayed: Number(row.matches_played),
+        matchesWon: Number(row.matches_won),
+        winStreak: Number(row.win_streak),
+        peakElo: Number(row.peak_elo),
+        tierName: row.tier_name ? String(row.tier_name) : null,
+        status: String(row.status) as RankingVisibilityStatus,
+        statusExpiresAt: row.status_expires_at
+          ? new Date(String(row.status_expires_at))
+          : null,
+        updatedAt: new Date(String(row.updated_at)),
+      })),
+      recentOperations: operations.map((operation) => ({
+        ...operation,
+        operation: operation.operation as AdminEloOperation,
+        scope: operation.scope as RankingScope,
+        createdAt: operation.createdAt,
+      })),
+    };
+  }
+
+  private async assertActiveCategory(categoryId: string) {
+    const [category] = await this.db
+      .select({
+        id: schema.categories.id,
+        name: schema.categories.name,
+        slug: schema.categories.slug,
+        categoryConfig: schema.categories.categoryConfig,
+      })
+      .from(schema.categories)
+      .where(eq(schema.categories.id, categoryId))
+      .limit(1);
+    const config =
+      (category?.categoryConfig as Record<string, unknown> | null) ?? {};
+    if (!category || config.isActive === false)
+      throw new NotFoundException('RANKING_CATEGORY_NOT_ACTIVE');
+    return category;
   }
 
   async applyOperation(
@@ -157,6 +451,9 @@ export class AdminRankingService {
       return this.resolveExistingOperation(existing[0], fingerprint);
 
     const result = await this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`admin-elo:${normalized.userId}:${normalized.categoryId}:${normalized.scope}:${normalized.communityId ?? ''}:${normalized.matchType}:${normalized.genderRestriction ?? ''}`}))`,
+      );
       const [reservation] = await tx
         .insert(schema.adminEloOperations)
         .values({
@@ -287,6 +584,27 @@ export class AdminRankingService {
 
       if (!updatedOperation)
         throw new ConflictException('ELO_OPERATION_COMMIT_FAILED');
+      await this.auditService.logCreate(
+        tx,
+        adminUserId,
+        'admin_elo_operations',
+        updatedOperation.id,
+        {
+          operationKey: updatedOperation.operationKey,
+          targetUserId: updatedOperation.userId,
+          categoryId: updatedOperation.categoryId,
+          scope: updatedOperation.scope,
+          communityId: updatedOperation.communityId,
+          operation: updatedOperation.operation,
+          previousElo: updatedOperation.previousElo,
+          newElo: updatedOperation.newElo,
+          changedPoints: updatedOperation.changedPoints,
+          previousStatus: updatedOperation.previousStatus,
+          newStatus: updatedOperation.newStatus,
+          reason: updatedOperation.reason,
+          expiresAt: updatedOperation.expiresAt,
+        },
+      );
       return {
         operationId: updatedOperation.id,
         operation: normalized.operation,
@@ -303,8 +621,9 @@ export class AdminRankingService {
     return result;
   }
 
-  async getHistory(contextId: string, limit = 50) {
+  async getHistory(contextId: string, limit = 50, cursorValue?: string) {
     const normalizedLimit = Math.min(Math.max(limit, 1), 100);
+    const cursor = this.decodeHistoryCursor(cursorValue);
     const context = await this.findContextById(contextId);
     if (!context) throw new NotFoundException('ELO_RANK_CONTEXT_NOT_FOUND');
     const rows = await this.db
@@ -339,19 +658,32 @@ export class AdminRankingService {
                 context.genderRestriction,
               )
             : isNull(schema.adminEloOperations.genderRestriction),
+          cursor
+            ? sql`(${schema.adminEloOperations.createdAt} < ${cursor.createdAt} OR (${schema.adminEloOperations.createdAt} = ${cursor.createdAt} AND ${schema.adminEloOperations.id} < ${cursor.id}))`
+            : undefined,
         ),
       )
       .orderBy(
         desc(schema.adminEloOperations.createdAt),
         desc(schema.adminEloOperations.id),
       )
-      .limit(normalizedLimit);
+      .limit(normalizedLimit + 1);
+    const hasMore = rows.length > normalizedLimit;
+    const data = rows.slice(0, normalizedLimit);
+    const last = data.at(-1);
 
     return {
-      data: rows,
+      data,
       meta: {
         limit: normalizedLimit,
-        hasMore: rows.length === normalizedLimit,
+        hasMore,
+        nextCursor:
+          hasMore && last
+            ? CursorPaginationHelper.encodeCursor({
+                createdAt: last.createdAt.toISOString(),
+                id: last.id,
+              })
+            : null,
       },
     };
   }
@@ -359,6 +691,7 @@ export class AdminRankingService {
   private async listPublicContexts(
     query: AdminEloQueryDto,
     limit: number,
+    cursor?: AdminContextCursor,
   ): Promise<AdminContextRow[]> {
     const genderCondition = query.genderRestriction
       ? eq(schema.userRanks.genderRestriction, query.genderRestriction)
@@ -369,6 +702,9 @@ export class AdminRankingService {
       isNull(schema.userRanks.communityId),
       eq(schema.users.isMock, false),
       isNull(schema.users.deletedAt),
+      cursor
+        ? sql`(${schema.userRanks.updatedAt} < ${cursor.updatedAt} OR (${schema.userRanks.updatedAt} = ${cursor.updatedAt} AND ${schema.userRanks.id} < ${cursor.id}))`
+        : undefined,
       query.categoryId
         ? eq(schema.userRanks.categoryId, query.categoryId)
         : undefined,
@@ -507,11 +843,15 @@ export class AdminRankingService {
   private async listCommunityContexts(
     query: AdminEloQueryDto,
     limit: number,
+    cursor?: AdminContextCursor,
   ): Promise<AdminContextRow[]> {
     const communityConditions = [
       eq(schema.communityRankings.communityId, query.communityId as string),
       eq(schema.users.isMock, false),
       isNull(schema.users.deletedAt),
+      cursor
+        ? sql`(${schema.communityRankings.updatedAt} < ${cursor.updatedAt} OR (${schema.communityRankings.updatedAt} = ${cursor.updatedAt} AND ${schema.communityRankings.id} < ${cursor.id}))`
+        : undefined,
       query.categoryId
         ? eq(schema.communityRankings.categoryId, query.categoryId)
         : undefined,
@@ -627,7 +967,7 @@ export class AdminRankingService {
         matchesPlayed: schema.communityRankings.matchesPlayed,
         matchesWon: schema.communityRankings.matchesWon,
         winStreak: schema.communityRankings.winStreak,
-        peakElo: sql<number>`1000`,
+        peakElo: schema.communityRankings.peakElo,
         updatedAt: schema.communityRankings.updatedAt,
         status: schema.rankingContextStatuses.status,
         statusExpiresAt: schema.rankingContextStatuses.expiresAt,
@@ -786,7 +1126,7 @@ export class AdminRankingService {
         matchesPlayed: schema.communityRankings.matchesPlayed,
         matchesWon: schema.communityRankings.matchesWon,
         winStreak: schema.communityRankings.winStreak,
-        peakElo: sql<number>`1000`,
+        peakElo: schema.communityRankings.peakElo,
         shieldActive: sql<boolean>`false`,
         tierId: sql<string | null>`null`,
       })
@@ -853,8 +1193,6 @@ export class AdminRankingService {
           eloPoints: newElo,
           peakElo: Math.max(peakElo, newElo),
           updatedAt: now,
-          lastActiveAt: now,
-          lastDecayAt: now,
         })
         .where(eq(schema.userRanks.id, id));
     } else {
@@ -862,9 +1200,8 @@ export class AdminRankingService {
         .update(schema.communityRankings)
         .set({
           eloPoints: newElo,
+          peakElo: Math.max(peakElo, newElo),
           updatedAt: now,
-          lastActiveAt: now,
-          lastDecayAt: now,
         })
         .where(eq(schema.communityRankings.id, id));
     }
@@ -915,18 +1252,29 @@ export class AdminRankingService {
       ...dto,
       operationKey: dto.operationKey.trim(),
       matchType: dto.matchType.trim(),
+      genderRestriction: dto.genderRestriction?.trim() || undefined,
       reason: dto.reason.trim(),
     };
+    if (
+      normalized.operationKey.length < 16 ||
+      normalized.operationKey.length > 128
+    )
+      throw new BadRequestException('ELO_OPERATION_KEY_INVALID');
+    if (normalized.matchType.length === 0)
+      throw new BadRequestException('ELO_MATCH_TYPE_REQUIRED');
+    if (normalized.reason.length < 5)
+      throw new BadRequestException('ELO_REASON_REQUIRED');
     if (normalized.scope === 'COMMUNITY' && !normalized.communityId)
       throw new BadRequestException('ELO_COMMUNITY_REQUIRED');
     if (normalized.scope === 'PUBLIC' && normalized.communityId)
       throw new BadRequestException('ELO_PUBLIC_COMMUNITY_FORBIDDEN');
+    const ratingOperation = this.isRatingOperation(operation);
     if (
-      normalized.matchType === 'DOUBLES' ||
-      normalized.matchType === 'MIXED_DOUBLES'
+      (normalized.matchType === 'DOUBLES' ||
+        normalized.matchType === 'MIXED_DOUBLES') &&
+      ratingOperation
     )
       throw new BadRequestException('ELO_PAIR_OPERATION_NOT_SUPPORTED');
-    const ratingOperation = this.isRatingOperation(operation);
     if (ratingOperation && normalized.expiresAt)
       throw new BadRequestException('ELO_EXPIRY_NOT_ALLOWED');
     if (
@@ -947,8 +1295,6 @@ export class AdminRankingService {
       normalized.requestedValue !== undefined
     )
       throw new BadRequestException('ELO_VALUE_NOT_ALLOWED');
-    if (['HIDE', 'BAN'].includes(operation) && normalized.reason.length < 5)
-      throw new BadRequestException('ELO_REASON_REQUIRED');
     if (operation === 'RESTORE' && normalized.expiresAt)
       throw new BadRequestException('ELO_EXPIRY_NOT_ALLOWED');
     if (
@@ -1017,6 +1363,59 @@ export class AdminRankingService {
       operation === 'SET' ||
       operation === 'RESET'
     );
+  }
+
+  private decodeContextCursor(cursor?: string): AdminContextCursor | undefined {
+    if (!cursor) return undefined;
+    const decoded = CursorPaginationHelper.decodeCursor<{
+      updatedAt: string;
+      id: string;
+    }>(cursor);
+    if (
+      !decoded ||
+      typeof decoded.id !== 'string' ||
+      typeof decoded.updatedAt !== 'string' ||
+      !Number.isFinite(Date.parse(decoded.updatedAt))
+    ) {
+      throw new BadRequestException('ELO_CURSOR_INVALID');
+    }
+    return { updatedAt: new Date(decoded.updatedAt), id: decoded.id };
+  }
+
+  private decodePlayerCursor(
+    cursor?: string,
+  ): { updatedAt: Date; id: string } | undefined {
+    if (!cursor) return undefined;
+    const decoded = CursorPaginationHelper.decodeCursor<{
+      updatedAt: string;
+      id: string;
+    }>(cursor);
+    if (
+      !decoded ||
+      typeof decoded.id !== 'string' ||
+      typeof decoded.updatedAt !== 'string' ||
+      !Number.isFinite(Date.parse(decoded.updatedAt))
+    ) {
+      throw new BadRequestException('ELO_CURSOR_INVALID');
+    }
+    return { updatedAt: new Date(decoded.updatedAt), id: decoded.id };
+  }
+
+  private decodeHistoryCursor(cursor?: string): AdminHistoryCursor | undefined {
+    if (!cursor) return undefined;
+    const decoded = CursorPaginationHelper.decodeCursor<{
+      createdAt: string;
+      id: string;
+    }>(cursor);
+    if (
+      !decoded ||
+      typeof decoded.id !== 'string' ||
+      typeof decoded.createdAt !== 'string' ||
+      !Number.isFinite(Date.parse(decoded.createdAt))
+    ) {
+      throw new BadRequestException('ELO_CURSOR_INVALID');
+    }
+    return { createdAt: new Date(decoded.createdAt), id: decoded.id };
   }
 
   private resolveStatus(

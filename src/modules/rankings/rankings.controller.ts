@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Query,
@@ -13,6 +14,9 @@ import { AdminRankingService } from './admin-ranking.service';
 import {
   AdminEloOperationDto,
   AdminEloQueryDto,
+  AdminEloHistoryQueryDto,
+  AdminEloPlayerQueryDto,
+  AdminEloPlayerDetailQueryDto,
 } from './dto/admin-elo-operation.dto';
 import { FootballTeamEloService } from './football-team-elo.service';
 import { QueryRankingDto } from './dto/query-ranking.dto';
@@ -53,7 +57,31 @@ export class RankingsController {
     return this.rankingsService.getLeaderboard(query);
   }
 
+  @Get('admin/players')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Danh sách người chơi Elo đã nhóm theo bộ môn (Admin)',
+  })
+  async listAdminEloPlayers(@Query() query: AdminEloPlayerQueryDto) {
+    return this.adminRankingService.listPlayers(query);
+  }
+
+  @Get('admin/players/:userId/detail')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Hồ sơ Elo chi tiết của người chơi theo bộ môn (Admin)',
+  })
+  async getAdminEloPlayerDetail(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query() query: AdminEloPlayerDetailQueryDto,
+  ) {
+    return this.adminRankingService.getPlayerDetail(userId, query);
+  }
+
   @Get('admin/contexts')
+  @ApiBearerAuth()
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Danh sách context ELO để quản trị (Admin)' })
   async listAdminRankingContexts(@Query() query: AdminEloQueryDto) {
@@ -61,19 +89,24 @@ export class RankingsController {
   }
 
   @Get('admin/contexts/:contextId/history')
+  @ApiBearerAuth()
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Lịch sử điều chỉnh ELO của context (Admin)' })
   async getAdminRankingHistory(
     @Param('contextId', ParseUUIDPipe) contextId: string,
-    @Query('limit') limit?: number,
+    @Query() query: AdminEloHistoryQueryDto,
   ) {
+    if (query.direction && query.direction !== 'next')
+      throw new BadRequestException('ELO_CURSOR_DIRECTION_UNSUPPORTED');
     return this.adminRankingService.getHistory(
       contextId,
-      limit ? Number(limit) : 50,
+      query.limit,
+      query.cursor,
     );
   }
 
   @Post('admin/operations')
+  @ApiBearerAuth()
   @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Điều chỉnh ELO hoặc trạng thái bảng xếp hạng (Admin)',
