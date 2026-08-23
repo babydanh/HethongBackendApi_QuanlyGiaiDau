@@ -29,8 +29,8 @@ export class FootballTeamsController {
   }
 
   @Get(':id')
-  get(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.get(id);
+  get(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.get(user.sub, id);
   }
 
   @Patch(':id')

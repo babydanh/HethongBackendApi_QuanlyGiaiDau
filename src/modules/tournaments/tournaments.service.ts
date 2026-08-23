@@ -4935,6 +4935,22 @@ export class TournamentsService {
     if (entryResult.entry.status === 'LOCKED' || participant.rosterLockedAt) {
       throw new BadRequestException('Roster đã khóa, không thể thay đổi.');
     }
+    if (
+      !['PENDING', 'PENDING_APPROVAL', 'COMPLETE', 'APPROVED'].includes(
+        participant.teamStatus,
+      )
+    ) {
+      throw new BadRequestException(
+        'Đăng ký đội bóng đã kết thúc hoặc không còn hiệu lực, không thể sửa roster.',
+      );
+    }
+
+    const previousRoster = await this.tournamentsRepository.getFootballEntryRoster(
+      entryResult.entry.id,
+    );
+    const previousConfirmationByUser = new Map(
+      previousRoster.map((member) => [member.userId, member.confirmationStatus]),
+    );
 
     const manager = await this.isManager(tournament, userId, systemRoles);
     if (!manager) {
@@ -4956,6 +4972,38 @@ export class TournamentsService {
       dto.reserveMemberIds ?? [],
       userId,
     );
+
+    const newlyPendingMemberIds = (updated.roster ?? [])
+      .filter(
+        (member) =>
+          member.confirmationStatus === 'PENDING' &&
+          member.userId !== userId &&
+          previousConfirmationByUser.get(member.userId) !== 'PENDING',
+      )
+      .map((member) => member.userId);
+    if (newlyPendingMemberIds.length > 0) {
+      try {
+        await this.sendNotificationBatch(
+          newlyPendingMemberIds.map((receiverId) =>
+            this.notificationsService.sendNotification(
+              buildFootballRosterConfirmationNotification({
+                receiverId,
+                tournamentId,
+                tournamentName: tournament.name,
+                divisionId: participant.tournamentDivisionId ?? undefined,
+                participantId,
+              }),
+            ),
+          ),
+        );
+      } catch (error) {
+        console.error(
+          'Failed to send football roster update confirmation notifications:',
+          error,
+        );
+      }
+    }
+
     this.broadcastRegistrationChanged(tournamentId, {
       participantId,
       divisionId: participant.tournamentDivisionId,

@@ -20,6 +20,22 @@ describe('FootballTeamsService permissions', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
+  it('denies team detail to a non-member before loading member rows', async () => {
+    repository.findMember.mockResolvedValue(undefined);
+
+    await expect(service.get('outsider', 'team')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.findById).not.toHaveBeenCalled();
+  });
+
+  it('loads team detail for an active member', async () => {
+    const detail = { id: 'team', name: 'FC Test', members: [] };
+    repository.findMember.mockResolvedValue({ status: 'ACTIVE', role: 'PLAYER' });
+    repository.findById.mockResolvedValue(detail);
+
+    await expect(service.get('member', 'team')).resolves.toEqual(detail);
+    expect(repository.findById).toHaveBeenCalledWith('team');
+  });
+
   it('allows only an active captain or manager to search candidates', async () => {
     repository.findMember.mockResolvedValue({ status: 'ACTIVE', role: 'PLAYER' });
 

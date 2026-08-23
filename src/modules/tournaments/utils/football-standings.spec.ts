@@ -11,6 +11,18 @@ const row = (participantId: string, overrides: Partial<FootballStandingRow> = {}
 });
 
 describe('sortFootballStandings', () => {
+  it('prioritizes total points before goal difference', () => {
+    const standings = [
+      row('team-high-diff', { totalPoints: 6, pointsFor: 10, pointsAgainst: 1 }),
+      row('team-low-diff', { totalPoints: 7, pointsFor: 2, pointsAgainst: 1 }),
+    ];
+
+    expect(sortFootballStandings(standings, []).map((item) => item.participantId)).toEqual([
+      'team-low-diff',
+      'team-high-diff',
+    ]);
+  });
+
   it('uses head-to-head points after aggregate points, goal difference and goals for', () => {
     const standings = [row('team-b'), row('team-a')];
     const matches: FootballStandingMatch[] = [{
