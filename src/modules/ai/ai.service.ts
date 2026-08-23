@@ -594,7 +594,8 @@ ${divisionsStr}
           throw new BadRequestException('Nội dung link nguồn vượt quá giới hạn cho phép.');
         }
         const html = (await response.text()).slice(0, this.maxTournamentFetchBytes);
-        const isGoogleFormUrl = parsed.hostname.toLowerCase() === 'docs.google.com' || parsed.hostname.toLowerCase().endsWith('.docs.google.com');
+        const parsedUrl = new URL(sourceUrl);
+        const isGoogleFormUrl = parsedUrl.hostname.toLowerCase() === 'docs.google.com' || parsedUrl.hostname.toLowerCase().endsWith('.docs.google.com');
         const redirectedToGoogleAuth = response.url.toLowerCase().includes('accounts.google.com') || response.url.toLowerCase().includes('/servicelogin');
         const googleFormRequiresAuth = isGoogleFormUrl && (
           response.status === 401 ||
