@@ -76,12 +76,17 @@ describe('admin Elo safety guardrails', () => {
     expect(serviceSource).not.toContain('lastDecayAt: now');
   });
 
-  it('requires at least one completed match for public and community leaderboard reads', () => {
+  it('uses real matches or an explicit admin bootstrap flag for eligible singles reads', () => {
     expect(repositorySource).toContain(
-      'gt(schema.communityRankings.matchesPlayed, 0)',
+      'eq(schema.communityRankings.adminLeaderboardEligible, true)',
     );
-    expect(repositorySource).toContain('gt(schema.userRanks.matchesPlayed, 0)');
+    expect(repositorySource).toContain(
+      'eq(schema.userRanks.adminLeaderboardEligible, true)',
+    );
     expect(repositorySource).toContain('gt(schema.pairRanks.matchesPlayed, 0)');
+    expect(serviceSource).toContain("normalized.operation === 'ADD'");
+    expect(serviceSource).toContain('rank.matchesPlayed === 0');
+    expect(serviceSource).toContain('nextLeaderboardEligible = true');
   });
 
   it('keeps active hidden and banned contexts out of public and pair reads', () => {

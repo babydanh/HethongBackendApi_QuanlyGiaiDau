@@ -53,8 +53,9 @@ export const userRanks = pgTable(
     categoryId: uuid('category_id')
       .references(() => categories.id, { onDelete: 'cascade' })
       .notNull(),
-    communityId: uuid('community_id')
-      .references(() => communities.id, { onDelete: 'cascade' }),
+    communityId: uuid('community_id').references(() => communities.id, {
+      onDelete: 'cascade',
+    }),
     matchType: varchar('match_type', { length: 50 }).notNull(),
     genderRestriction: varchar('gender_restriction', { length: 20 }),
     eloPoints: integer('elo_points').default(1000).notNull(),
@@ -63,7 +64,9 @@ export const userRanks = pgTable(
     }),
     shieldActive: boolean('shield_active').default(false).notNull(),
     matchesPlayed: integer('matches_played').default(0).notNull(),
-    adminLeaderboardEligible: boolean('admin_leaderboard_eligible').default(false).notNull(),
+    adminLeaderboardEligible: boolean('admin_leaderboard_eligible')
+      .default(false)
+      .notNull(),
     matchesWon: integer('matches_won').default(0).notNull(),
     winStreak: integer('win_streak').default(0).notNull(),
     peakElo: integer('peak_elo').default(1000).notNull(),
@@ -83,11 +86,21 @@ export const userRanks = pgTable(
       'wins_lte_played',
       sql`${table.matchesWon} <= ${table.matchesPlayed}`,
     ),
-    userCategoryRankNullGenderIdx: uniqueIndex('user_category_rank_null_gender_idx')
+    userCategoryRankNullGenderIdx: uniqueIndex(
+      'user_category_rank_null_gender_idx',
+    )
       .on(table.userId, table.categoryId, table.matchType, table.communityId)
       .where(sql`${table.genderRestriction} IS NULL`),
-    userCategoryRankWithGenderIdx: uniqueIndex('user_category_rank_with_gender_idx')
-      .on(table.userId, table.categoryId, table.matchType, table.genderRestriction, table.communityId)
+    userCategoryRankWithGenderIdx: uniqueIndex(
+      'user_category_rank_with_gender_idx',
+    )
+      .on(
+        table.userId,
+        table.categoryId,
+        table.matchType,
+        table.genderRestriction,
+        table.communityId,
+      )
       .where(sql`${table.genderRestriction} IS NOT NULL`),
   }),
 );
@@ -124,22 +137,40 @@ export const pairRanks = pgTable(
   'pair_ranks',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    user1Id: uuid('user1_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-    user2Id: uuid('user2_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'cascade' }).notNull(),
-    matchType: varchar('match_type', { length: 50 }).default('DOUBLES').notNull(),
+    user1Id: uuid('user1_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    user2Id: uuid('user2_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    categoryId: uuid('category_id')
+      .references(() => categories.id, { onDelete: 'cascade' })
+      .notNull(),
+    matchType: varchar('match_type', { length: 50 })
+      .default('DOUBLES')
+      .notNull(),
     genderRestriction: varchar('gender_restriction', { length: 20 }),
     scope: varchar('scope', { length: 20 }).default('PUBLIC').notNull(),
-    communityId: uuid('community_id').references(() => communities.id, { onDelete: 'cascade' }),
+    communityId: uuid('community_id').references(() => communities.id, {
+      onDelete: 'cascade',
+    }),
     eloPoints: integer('elo_points').default(1000).notNull(),
     peakElo: integer('peak_elo').default(1000).notNull(),
-    lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow().notNull(),
-    lastDecayAt: timestamp('last_decay_at', { withTimezone: true }).defaultNow().notNull(),
+    lastActiveAt: timestamp('last_active_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastDecayAt: timestamp('last_decay_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
     matchesPlayed: integer('matches_played').default(0).notNull(),
-    adminLeaderboardEligible: boolean('admin_leaderboard_eligible').default(false).notNull(),
+    adminLeaderboardEligible: boolean('admin_leaderboard_eligible')
+      .default(false)
+      .notNull(),
     matchesWon: integer('matches_won').default(0).notNull(),
     winStreak: integer('win_streak').default(0).notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => ({
     userPairUnique: uniqueIndex('user_pair_rank_context_idx').on(
@@ -151,5 +182,5 @@ export const pairRanks = pgTable(
       sql`COALESCE(${table.genderRestriction}, '')`,
       sql`COALESCE(${table.communityId}::text, '')`,
     ),
-  })
+  }),
 );

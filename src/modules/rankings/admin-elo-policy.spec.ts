@@ -2,6 +2,7 @@ import {
   ADMIN_STARTING_ELO,
   calculateAdminElo,
   resolveRankingVisibility,
+  shouldGrantAdminLeaderboardBootstrap,
 } from './admin-elo-policy';
 
 describe('admin Elo policy', () => {
@@ -23,6 +24,14 @@ describe('admin Elo policy', () => {
 
   it('requires a value for non-reset rating operations', () => {
     expect(() => calculateAdminElo(1000, 'ADD')).toThrow('ELO_VALUE_REQUIRED');
+  });
+
+  it('grants bootstrap eligibility only for ADD on a zero-match profile', () => {
+    expect(shouldGrantAdminLeaderboardBootstrap('ADD', 0, false)).toBe(true);
+    expect(shouldGrantAdminLeaderboardBootstrap('ADD', 0, true)).toBe(false);
+    expect(shouldGrantAdminLeaderboardBootstrap('ADD', 1, false)).toBe(false);
+    expect(shouldGrantAdminLeaderboardBootstrap('SET', 0, false)).toBe(false);
+    expect(shouldGrantAdminLeaderboardBootstrap('RESET', 0, false)).toBe(false);
   });
 
   it('treats missing and expired visibility statuses as visible', () => {

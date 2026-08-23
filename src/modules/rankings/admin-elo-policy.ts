@@ -22,6 +22,14 @@ export function calculateAdminElo(
   return nextElo;
 }
 
+export function shouldGrantAdminLeaderboardBootstrap(
+  operation: AdminEloOperation,
+  matchesPlayed: number,
+  currentEligibility: boolean,
+): boolean {
+  return operation === 'ADD' && matchesPlayed === 0 && !currentEligibility;
+}
+
 export function resolveRankingVisibility(
   status: string | null,
   expiresAt: Date | null,

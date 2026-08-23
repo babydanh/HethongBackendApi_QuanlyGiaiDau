@@ -27,6 +27,7 @@ import { RankingsService } from './rankings.service';
 import {
   calculateAdminElo,
   resolveRankingVisibility,
+  shouldGrantAdminLeaderboardBootstrap,
 } from './admin-elo-policy';
 import {
   ADMIN_ELO_OPERATIONS,
@@ -143,6 +144,7 @@ type AdminPlayerContextDetail = {
   status: RankingVisibilityStatus;
   statusExpiresAt: Date | null;
   leaderboardEligible: boolean;
+  adminBootstrapEligible: boolean;
   updatedAt: Date;
 };
 
@@ -387,8 +389,10 @@ export class AdminRankingService {
         changedPoints: schema.adminEloOperations.changedPoints,
         previousStatus: schema.adminEloOperations.previousStatus,
         newStatus: schema.adminEloOperations.newStatus,
-        previousLeaderboardEligible: schema.adminEloOperations.previousLeaderboardEligible,
-        newLeaderboardEligible: schema.adminEloOperations.newLeaderboardEligible,
+        previousLeaderboardEligible:
+          schema.adminEloOperations.previousLeaderboardEligible,
+        newLeaderboardEligible:
+          schema.adminEloOperations.newLeaderboardEligible,
         reason: schema.adminEloOperations.reason,
         createdAt: schema.adminEloOperations.createdAt,
       })
@@ -431,6 +435,9 @@ export class AdminRankingService {
           : null,
         leaderboardEligible:
           Number(row.matches_played) > 0 ||
+          row.admin_leaderboard_eligible === true ||
+          String(row.admin_leaderboard_eligible) === 'true',
+        adminBootstrapEligible:
           row.admin_leaderboard_eligible === true ||
           String(row.admin_leaderboard_eligible) === 'true',
         updatedAt: new Date(String(row.updated_at)),
@@ -544,8 +551,11 @@ export class AdminRankingService {
         );
         changedPoints = newElo - previousElo;
         if (
-          normalized.operation === 'ADD' &&
-          rank.matchesPlayed === 0
+          shouldGrantAdminLeaderboardBootstrap(
+            normalized.operation,
+            rank.matchesPlayed,
+            previousLeaderboardEligible,
+          )
         ) {
           nextLeaderboardEligible = true;
         }
@@ -678,8 +688,10 @@ export class AdminRankingService {
         changedPoints: schema.adminEloOperations.changedPoints,
         previousStatus: schema.adminEloOperations.previousStatus,
         newStatus: schema.adminEloOperations.newStatus,
-        previousLeaderboardEligible: schema.adminEloOperations.previousLeaderboardEligible,
-        newLeaderboardEligible: schema.adminEloOperations.newLeaderboardEligible,
+        previousLeaderboardEligible:
+          schema.adminEloOperations.previousLeaderboardEligible,
+        newLeaderboardEligible:
+          schema.adminEloOperations.newLeaderboardEligible,
         reason: schema.adminEloOperations.reason,
         expiresAt: schema.adminEloOperations.expiresAt,
         adminUserId: schema.adminEloOperations.adminUserId,
@@ -1172,7 +1184,8 @@ export class AdminRankingService {
         winStreak: schema.communityRankings.winStreak,
         peakElo: schema.communityRankings.peakElo,
         shieldActive: sql<boolean>`false`,
-        adminLeaderboardEligible: schema.communityRankings.adminLeaderboardEligible,
+        adminLeaderboardEligible:
+          schema.communityRankings.adminLeaderboardEligible,
         tierId: sql<string | null>`null`,
       })
       .from(schema.communityRankings)
@@ -1386,6 +1399,7 @@ export class AdminRankingService {
       newElo: operation.newElo,
       changedPoints: operation.changedPoints,
       status,
+      leaderboardEligible: operation.newLeaderboardEligible ?? false,
     };
   }
 
