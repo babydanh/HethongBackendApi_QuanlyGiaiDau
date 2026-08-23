@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS "ranking_context_statuses" (
   "updated_at" timestamptz DEFAULT now() NOT NULL,
   CONSTRAINT "ranking_context_status_state_valid" CHECK ("status" IN ('VISIBLE', 'HIDDEN', 'BANNED')),
   CONSTRAINT "ranking_context_status_scope_valid" CHECK (("scope" = 'PUBLIC' AND "community_id" IS NULL) OR ("scope" = 'COMMUNITY' AND "community_id" IS NOT NULL)),
-  CONSTRAINT "ranking_context_status_expiry_valid" CHECK ("expires_at" IS NULL OR "status" IN ('HIDDEN', 'BANNED'))
+  CONSTRAINT "ranking_context_status_expiry_valid" CHECK ("expires_at" IS NULL OR "status" IN ('HIDDEN', 'BANNED')),
+  CONSTRAINT "ranking_context_status_reason_valid" CHECK ("status" = 'VISIBLE' OR ("reason" IS NOT NULL AND char_length(btrim("reason")) BETWEEN 5 AND 500))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "ranking_context_status_context_idx"
@@ -46,7 +47,11 @@ CREATE TABLE IF NOT EXISTS "admin_elo_operations" (
   "created_at" timestamptz DEFAULT now() NOT NULL,
   CONSTRAINT "admin_elo_operations_operation_valid" CHECK ("operation" IN ('ADD', 'SUBTRACT', 'SET', 'RESET', 'HIDE', 'BAN', 'RESTORE')),
   CONSTRAINT "admin_elo_operations_scope_valid" CHECK (("scope" = 'PUBLIC' AND "community_id" IS NULL) OR ("scope" = 'COMMUNITY' AND "community_id" IS NOT NULL)),
-  CONSTRAINT "admin_elo_operations_elo_non_negative" CHECK (("previous_elo" IS NULL OR "previous_elo" >= 0) AND ("new_elo" IS NULL OR "new_elo" >= 0))
+  CONSTRAINT "admin_elo_operations_elo_non_negative" CHECK (("previous_elo" IS NULL OR "previous_elo" >= 0) AND ("new_elo" IS NULL OR "new_elo" >= 0)),
+  CONSTRAINT "admin_elo_operations_requested_value_valid" CHECK (("operation" IN ('ADD', 'SUBTRACT', 'SET') AND "requested_value" > 0 AND "requested_value" <= 10000) OR ("operation" IN ('RESET', 'HIDE', 'BAN', 'RESTORE') AND "requested_value" IS NULL)),
+  CONSTRAINT "admin_elo_operations_reason_valid" CHECK (char_length(btrim("reason")) BETWEEN 5 AND 500),
+  CONSTRAINT "admin_elo_operations_expiry_valid" CHECK ("expires_at" IS NULL OR "operation" IN ('HIDE', 'BAN')),
+  CONSTRAINT "admin_elo_operations_status_valid" CHECK (("previous_status" IS NULL OR "previous_status" IN ('VISIBLE', 'HIDDEN', 'BANNED')) AND ("new_status" IS NULL OR "new_status" IN ('VISIBLE', 'HIDDEN', 'BANNED')))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "admin_elo_operations_key_idx"

@@ -71,6 +71,10 @@ export const rankingContextStatuses = pgTable(
       'ranking_context_status_expiry_valid',
       sql`${table.expiresAt} is null or ${table.status} in ('HIDDEN', 'BANNED')`,
     ),
+    reasonValid: check(
+      'ranking_context_status_reason_valid',
+      sql`${table.status} = 'VISIBLE' or (${table.reason} is not null and char_length(btrim(${table.reason})) between 5 and 500)`,
+    ),
   }),
 );
 
@@ -133,6 +137,22 @@ export const adminEloOperations = pgTable(
     eloNonNegative: check(
       'admin_elo_operations_elo_non_negative',
       sql`(${table.previousElo} is null or ${table.previousElo} >= 0) and (${table.newElo} is null or ${table.newElo} >= 0)`,
+    ),
+    requestedValueValid: check(
+      'admin_elo_operations_requested_value_valid',
+      sql`( ${table.operation} in ('ADD', 'SUBTRACT', 'SET') and ${table.requestedValue} > 0 and ${table.requestedValue} <= 10000 ) or ( ${table.operation} in ('RESET', 'HIDE', 'BAN', 'RESTORE') and ${table.requestedValue} is null )`,
+    ),
+    reasonValid: check(
+      'admin_elo_operations_reason_valid',
+      sql`char_length(btrim(${table.reason})) between 5 and 500`,
+    ),
+    expiryValid: check(
+      'admin_elo_operations_expiry_valid',
+      sql`${table.expiresAt} is null or ${table.operation} in ('HIDE', 'BAN')`,
+    ),
+    statusValid: check(
+      'admin_elo_operations_status_valid',
+      sql`(${table.previousStatus} is null or ${table.previousStatus} in ('VISIBLE', 'HIDDEN', 'BANNED')) and (${table.newStatus} is null or ${table.newStatus} in ('VISIBLE', 'HIDDEN', 'BANNED'))`,
     ),
   }),
 );

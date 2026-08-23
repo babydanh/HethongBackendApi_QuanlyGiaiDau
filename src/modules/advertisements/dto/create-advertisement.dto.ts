@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -18,6 +19,10 @@ export const AD_PLACEMENT_SLOTS = [
   'TOURNAMENTS_BOTTOM',
   'MATCHES_BOTTOM',
   'GLOBAL_HEADER',
+  'APP_HOME_FEED',
+  'APP_MATCHES_BOTTOM',
+  'APP_COMMUNITY_FEED',
+  'APP_TOURNAMENT_DETAIL',
 ] as const;
 
 export type AdPlacementSlot = (typeof AD_PLACEMENT_SLOTS)[number];
@@ -70,6 +75,11 @@ export class CreateAdvertisementDto {
   @ApiProperty({ enum: AD_PLACEMENT_SLOTS, example: 'HOMEPAGE_SIDEBAR' })
   @IsIn(AD_PLACEMENT_SLOTS)
   placementSlot!: AdPlacementSlot;
+
+  @ApiPropertyOptional({ description: 'Optional sport/category target. Null means all sports.' })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 
   @ApiPropertyOptional({ default: 0, minimum: 0, maximum: 9999 })
   @IsOptional()

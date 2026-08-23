@@ -1250,6 +1250,9 @@ export class RankingsService {
     matchType: string,
     genderRestriction?: string,
   ) {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`elo-tier:${categoryId}:${matchType}:${genderRestriction ?? ''}`}))`,
+    );
     const genderCondition = genderRestriction
       ? eq(schema.userRanks.genderRestriction, genderRestriction)
       : isNull(schema.userRanks.genderRestriction);

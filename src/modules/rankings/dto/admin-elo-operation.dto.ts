@@ -87,6 +87,16 @@ export class AdminEloOperationDto {
   expiresAt?: string;
 }
 
+export class AdminEloHistoryQueryDto extends CursorPaginationDto {
+  @ApiPropertyOptional({ minimum: 1, maximum: 100, default: 50 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 50;
+}
+
 export class AdminEloQueryDto extends CursorPaginationDto {
   @ApiPropertyOptional({ maxLength: 120 })
   @IsOptional()
@@ -139,4 +149,43 @@ export class AdminEloQueryDto extends CursorPaginationDto {
   @IsInt()
   @Min(0)
   maxElo?: number;
+}
+
+export class AdminEloPlayerQueryDto extends CursorPaginationDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  categoryId: string;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  search?: string;
+
+  @ApiPropertyOptional({ enum: ['PUBLIC', 'COMMUNITY'] })
+  @IsOptional()
+  @IsIn(['PUBLIC', 'COMMUNITY'])
+  scope?: 'PUBLIC' | 'COMMUNITY';
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  communityId?: string;
+
+  @ApiPropertyOptional({ maxLength: 50 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  matchType?: string;
+
+  @ApiPropertyOptional({ enum: ['VISIBLE', 'HIDDEN', 'BANNED'] })
+  @IsOptional()
+  @IsIn(['VISIBLE', 'HIDDEN', 'BANNED'])
+  status?: RankingVisibilityStatus;
+}
+
+export class AdminEloPlayerDetailQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  categoryId: string;
 }

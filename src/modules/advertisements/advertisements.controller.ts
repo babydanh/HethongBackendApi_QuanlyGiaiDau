@@ -11,7 +11,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -31,11 +31,15 @@ export class AdvertisementsController {
   @Public()
   @SkipThrottle()
   @Get('active')
-  @ApiOperation({ summary: 'Lấy danh sách banner quảng cáo đang hoạt động theo vị trí' })
+  @ApiOperation({ summary: 'Lấy banner quảng cáo active theo vị trí và môn thể thao tùy chọn' })
+  @ApiQuery({ name: 'categoryId', required: false, description: 'Mã môn thể thao; bỏ trống để chỉ lấy banner dùng chung.' })
   @ApiResponse({ status: 200, description: 'Danh sách banner quảng cáo đang active' })
-  async getActiveBySlot(@Query('slot') slot: string) {
+  async getActiveBySlot(
+    @Query('slot') slot: string,
+    @Query('categoryId', new ParseUUIDPipe({ optional: true })) categoryId?: string,
+  ) {
     if (!slot) return [];
-    return this.advertisementsService.getActiveBySlot(slot);
+    return this.advertisementsService.getActiveBySlot(slot, categoryId);
   }
 
   @Public()
