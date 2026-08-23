@@ -27,7 +27,11 @@ export class FootballTeamsService {
     return this.repository.listMine(userId);
   }
 
-  get(teamId: string) {
+  async get(userId: string, teamId: string) {
+    const member = await this.repository.findMember(teamId, userId);
+    if (!member || member.status !== 'ACTIVE') {
+      throw new ForbiddenException('Bạn không có quyền xem chi tiết đội bóng này.');
+    }
     return this.repository.findById(teamId);
   }
 

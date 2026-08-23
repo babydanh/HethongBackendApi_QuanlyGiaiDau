@@ -23,12 +23,26 @@ import {
   resolveRoundsToPlay,
 } from './utils/round-robin-config';
 import { sortFootballStandings } from './utils/football-standings';
+import { resolveFootballTeamConfig } from './utils/football-team-config';
 
 @Injectable()
 export class BracketGeneratorService {
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
+
+  private getEligibleParticipantStatus(tournamentConfig: unknown) {
+    const isFootballTeamTournament = resolveFootballTeamConfig(
+      asConfigRecord(tournamentConfig) || {},
+    ).isTeamSport;
+    const completeStatus = eq(
+      schema.tournamentParticipants.teamStatus,
+      'COMPLETE',
+    );
+    return isFootballTeamTournament
+      ? and(completeStatus, eq(schema.tournamentParticipants.isPaid, true))
+      : completeStatus;
+  }
 
   async generateSingleElimination(
     tournamentId: string,
@@ -46,6 +60,8 @@ export class BracketGeneratorService {
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
+      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
         .select()
@@ -57,14 +73,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                  eligibleParticipantStatus,
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                  eligibleParticipantStatus,
                 ),
               ),
         );
@@ -276,6 +292,8 @@ export class BracketGeneratorService {
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
+      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
         .select()
@@ -287,14 +305,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                  eligibleParticipantStatus,
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                  eligibleParticipantStatus,
                 ),
               ),
         );
@@ -703,6 +721,8 @@ export class BracketGeneratorService {
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
+      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
         .select()
@@ -714,14 +734,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                  eligibleParticipantStatus,
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
-                  eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                  eligibleParticipantStatus,
                 ),
               ),
         );
@@ -1114,6 +1134,8 @@ export class BracketGeneratorService {
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
+      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
         .select()
@@ -1126,7 +1148,7 @@ export class BracketGeneratorService {
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
                   and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eligibleParticipantStatus,
                     eq(schema.tournamentParticipants.isPaid, true),
                   ),
                 ),
@@ -1136,7 +1158,7 @@ export class BracketGeneratorService {
                 or(
                   eq(schema.tournamentParticipants.isMock, true),
                   and(
-                    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                    eligibleParticipantStatus,
                     eq(schema.tournamentParticipants.isPaid, true),
                   ),
                 ),
@@ -1733,7 +1755,13 @@ export class BracketGeneratorService {
 
       // Wildcard: best third-place
       if (allowWildcard && wildcardTeams > 0) {
-        const thirdPlaced: Array<{ participantId: string; pointsFor: number; pointsAgainst: number }> = [];
+        const thirdPlaced: Array<{
+          participantId: string;
+          totalPoints: number;
+          pointsFor: number;
+          pointsAgainst: number;
+          won: number;
+        }> = [];
         for (let gi = 0; gi < groups.length; gi++) {
           const group = groups[gi];
           const groupStandings = allStandings.filter((s) => s.groupId === group.id);
@@ -1742,16 +1770,22 @@ export class BracketGeneratorService {
           if (groupStandings.length >= 3) {
             thirdPlaced.push({
               participantId: groupStandings[2].participantId,
+              totalPoints: groupStandings[2].totalPoints,
               pointsFor: groupStandings[2].pointsFor,
               pointsAgainst: groupStandings[2].pointsAgainst,
+              won: groupStandings[2].won,
             });
           }
         }
         thirdPlaced.sort((a, b) => {
+          if (b.totalPoints !== a.totalPoints) {
+            return b.totalPoints - a.totalPoints;
+          }
           const diffA = a.pointsFor - a.pointsAgainst;
           const diffB = b.pointsFor - b.pointsAgainst;
           if (diffB !== diffA) return diffB - diffA;
           if (b.pointsFor !== a.pointsFor) return b.pointsFor - a.pointsFor;
+          if (b.won !== a.won) return b.won - a.won;
           return a.participantId.localeCompare(b.participantId);
         });
         for (let i = 0; i < Math.min(wildcardTeams, thirdPlaced.length); i++) {

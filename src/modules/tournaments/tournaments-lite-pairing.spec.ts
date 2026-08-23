@@ -98,7 +98,9 @@ describe('TournamentsService — Lite pairing guards', () => {
       generateRoundRobin: jest.fn(),
       generateGroupStageKnockout: jest.fn(),
     };
-    mockNotifications = {};
+    mockNotifications = {
+      sendNotification: jest.fn().mockResolvedValue(undefined),
+    };
     mockStorage = {};
     mockRedis = {
       delByPattern: jest.fn(),
@@ -250,6 +252,72 @@ describe('TournamentsService — Lite pairing guards', () => {
         ),
       ).rejects.toThrow();
       expect(mockRepo.lockParticipantRoster).not.toHaveBeenCalled();
+    });
+
+    it('rejects roster edits for withdrawn or otherwise terminal registrations', async () => {
+      mockRepo.findById.mockResolvedValue(tournament);
+      mockRepo.findParticipantById.mockResolvedValue({
+        ...participant,
+        teamStatus: 'WITHDRAWN',
+      });
+      mockRepo.findFootballEntryForParticipant.mockResolvedValue({
+        entry: { id: 'entry-1', status: 'DRAFT' },
+      });
+
+      await expect(
+        (service as any).updateFootballRoster(
+          'tournament-1',
+          'participant-1',
+          { memberIds: ['player-1'] },
+          'creator-1',
+          [],
+        ),
+      ).rejects.toThrow('đã kết thúc hoặc không còn hiệu lực');
+      expect(mockRepo.updateFootballRoster).not.toHaveBeenCalled();
+    });
+
+    it('notifies only members newly moved to pending confirmation after a roster update', async () => {
+      mockRepo.findById.mockResolvedValue({
+        ...tournament,
+        createdBy: 'creator-1',
+        name: 'Football Cup',
+      });
+      mockRepo.findParticipantById.mockResolvedValue({
+        ...participant,
+        teamStatus: 'COMPLETE',
+      });
+      mockRepo.findFootballEntryForParticipant.mockResolvedValue({
+        entry: { id: 'entry-1', status: 'PENDING_CONFIRMATION' },
+      });
+      mockRepo.getFootballEntryRoster.mockResolvedValue([
+        { userId: 'already-pending', confirmationStatus: 'PENDING' },
+        { userId: 'already-confirmed', confirmationStatus: 'CONFIRMED' },
+      ]);
+      mockRepo.updateFootballRoster.mockResolvedValue({
+        roster: [
+          { userId: 'already-pending', confirmationStatus: 'PENDING' },
+          { userId: 'new-member', confirmationStatus: 'PENDING' },
+          { userId: 'creator-1', confirmationStatus: 'CONFIRMED' },
+        ],
+      });
+
+      await expect(
+        (service as any).updateFootballRoster(
+          'tournament-1',
+          'participant-1',
+          { memberIds: ['already-pending', 'new-member', 'creator-1'] },
+          'creator-1',
+          [],
+        ),
+      ).resolves.toEqual(expect.objectContaining({ roster: expect.any(Array) }));
+
+      expect(mockNotifications.sendNotification).toHaveBeenCalledTimes(1);
+      expect(mockNotifications.sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          receiverId: 'new-member',
+          redirectUrl: '/tournaments/tournament-1?tab=teams&divisionId=division-1&participantId=participant-1',
+        }),
+      );
     });
 
     it('does not allow roster edits after the entry is locked', async () => {
