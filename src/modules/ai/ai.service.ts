@@ -589,12 +589,23 @@ ${divisionsStr}
           },
           signal: AbortSignal.timeout(10000),
         });
+        const contentLength = Number(response.headers.get('content-length') || 0);
+        if (contentLength > this.maxTournamentFetchBytes) {
+          throw new BadRequestException('Nội dung link nguồn vượt quá giới hạn cho phép.');
+        }
+        const html = (await response.text()).slice(0, this.maxTournamentFetchBytes);
+        const isGoogleFormUrl = parsed.hostname.toLowerCase() === 'docs.google.com' || parsed.hostname.toLowerCase().endsWith('.docs.google.com');
+        const redirectedToGoogleAuth = response.url.toLowerCase().includes('accounts.google.com') || response.url.toLowerCase().includes('/servicelogin');
+        const googleFormRequiresAuth = isGoogleFormUrl && (
+          response.status === 401 ||
+          response.status === 403 ||
+          redirectedToGoogleAuth ||
+          /\b(sign in|login to google|google forms: sign-in)\b/i.test(html)
+        );
+        if (googleFormRequiresAuth) {
+          throw new BadRequestException('Google Form này yêu cầu đăng nhập. Hãy bật chế độ cho bất kỳ ai có liên kết xem được hoặc dán trực tiếp nội dung câu hỏi vào ô điều lệ.');
+        }
         if (response.ok) {
-          const contentLength = Number(response.headers.get('content-length') || 0);
-          if (contentLength > this.maxTournamentFetchBytes) {
-            throw new BadRequestException('Nội dung link nguồn vượt quá giới hạn cho phép.');
-          }
-          const html = (await response.text()).slice(0, this.maxTournamentFetchBytes);
           // Google Forms keeps question labels/options in an embedded JSON payload,
           // not only in visible HTML. Preserve that payload for semantic extraction.
           const embeddedData = Array.from(html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi))
@@ -613,6 +624,7 @@ ${divisionsStr}
           }
         }
       } catch (err: any) {
+        if (err instanceof BadRequestException) throw err;
         this.logger.warn(`Could not fetch tournament sourceUrl (${dto.sourceUrl}): ${err.message}`);
       }
     }

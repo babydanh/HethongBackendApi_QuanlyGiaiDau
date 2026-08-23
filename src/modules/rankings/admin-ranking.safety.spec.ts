@@ -84,8 +84,7 @@ describe('admin Elo safety guardrails', () => {
       'eq(schema.userRanks.adminLeaderboardEligible, true)',
     );
     expect(repositorySource).toContain('gt(schema.pairRanks.matchesPlayed, 0)');
-    expect(serviceSource).toContain("normalized.operation === 'ADD'");
-    expect(serviceSource).toContain('rank.matchesPlayed === 0');
+    expect(serviceSource).toContain('shouldGrantAdminLeaderboardBootstrap');
     expect(serviceSource).toContain('nextLeaderboardEligible = true');
   });
 

@@ -89,6 +89,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       getFootballEntryRoster: jest.fn(),
       findFootballTeamForRegistration: jest.fn(),
       updateFootballRoster: jest.fn(),
+      getDivisionsByTournament: jest.fn().mockResolvedValue([{ id: 'division-1', name: 'Division 1' }]),
     };
 
     mockBracketGenerator = {
