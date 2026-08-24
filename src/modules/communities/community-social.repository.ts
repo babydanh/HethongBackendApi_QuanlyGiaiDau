@@ -126,6 +126,17 @@ export class CommunitySocialRepository {
           bannerUrl: schema.tournaments.bannerUrl,
           maxParticipants: schema.tournaments.maxParticipants,
           inviteCode: schema.tournaments.inviteCode,
+          hasBracket: sql<boolean>`EXISTS (
+            SELECT 1
+            FROM ${schema.tournamentStages}
+            WHERE ${schema.tournamentStages.tournamentId} = ${schema.tournaments.id}
+              AND ${schema.tournamentStages.deletedAt} IS NULL
+          ) OR EXISTS (
+            SELECT 1
+            FROM ${schema.matches}
+            WHERE ${schema.matches.tournamentId} = ${schema.tournaments.id}
+              AND ${schema.matches.deletedAt} IS NULL
+          )`,
         },
         viewerReaction: viewerId
           ? sql<string | null>`(
