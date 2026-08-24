@@ -700,6 +700,7 @@ export class MatchesRepository {
       {
         name: string;
         type?: string | null;
+        divisionId?: string | null;
         roundConfig?: Record<string, unknown> | null;
       }
     >();
@@ -709,6 +710,7 @@ export class MatchesRepository {
           id: schema.tournamentStages.id,
           name: schema.tournamentStages.name,
           type: schema.tournamentStages.type,
+          divisionId: schema.tournamentStages.tournamentDivisionId,
           roundConfig: schema.tournamentStages.roundConfig,
         })
         .from(schema.tournamentStages)
@@ -719,6 +721,7 @@ export class MatchesRepository {
         stagesMap.set(stage.id, {
           name: stage.name,
           type: stage.type,
+          divisionId: stage.divisionId,
           roundConfig: stage.roundConfig as Record<string, unknown> | null,
         });
       }
@@ -732,6 +735,7 @@ export class MatchesRepository {
         stageName: string;
         stageType?: string;
         stageRoundConfig?: Record<string, unknown> | null;
+        divisionId?: string | null;
         groupRoundConfig?: Record<string, unknown> | null;
         tournamentName?: string;
         categoryId?: string;
@@ -748,6 +752,7 @@ export class MatchesRepository {
         .select({
           groupId: schema.tournamentGroups.id,
           groupName: schema.tournamentGroups.name,
+          divisionId: schema.tournamentStages.tournamentDivisionId,
           stageName: schema.tournamentStages.name,
           stageType: schema.tournamentStages.type,
           stageRoundConfig: schema.tournamentStages.roundConfig,
@@ -809,6 +814,7 @@ export class MatchesRepository {
           name: g.groupName,
           stageName: g.stageName,
           stageType: g.stageType || undefined,
+          divisionId: g.divisionId || undefined,
           stageRoundConfig: g.stageRoundConfig as Record<
             string,
             unknown
@@ -843,6 +849,7 @@ export class MatchesRepository {
       return {
         ...match,
         cheerCount: match.cheerCount ?? 0,
+        divisionId: groupStage?.divisionId ?? matchStage?.divisionId ?? null,
         participant1: p1
           ? {
               id: p1.id,
