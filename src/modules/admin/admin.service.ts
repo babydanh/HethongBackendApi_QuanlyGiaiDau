@@ -754,26 +754,78 @@ export class AdminService {
 
   // ─── System Configs ───────────────────────────────────────────
 
+  private static readonly BOOLEAN_CONFIG_KEYS = new Set([
+    'ALLOW_TOURNAMENT_ENTRY_FEES',
+    'PAYMENT_SANDBOX_ENABLED',
+  ]);
+
+  private static readonly INTEGER_MONEY_CONFIG_KEYS = new Set([
+    'PLATFORM_FEE_LOW_ENTRY_THRESHOLD',
+    'PLATFORM_FEE_LOW_ENTRY_FIXED_AMOUNT',
+  ]);
+
+  private static readonly PERCENTAGE_CONFIG_KEYS = new Set([
+    'PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED',
+    'PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED',
+    'PLATFORM_FEE_PERCENTAGE_CLUB',
+  ]);
+
   async getConfigs() {
     await this.getOrInitConfig(
       'ALLOW_TOURNAMENT_ENTRY_FEES',
       'true',
       'Cho phép ban tổ chức đặt lệ phí đăng ký cho giải đấu mới hoặc khi chỉnh sửa giải.',
     );
+    await this.getOrInitConfig(
+      'PAYMENT_SANDBOX_ENABLED',
+      'false',
+      'Chỉ cho phép mock verify có kiểm soát; không thay thế PayOS và không ảnh hưởng thanh toán thật.',
+    );
+    await this.getOrInitConfig(
+      'PLATFORM_FEE_LOW_ENTRY_THRESHOLD',
+      '100000',
+      'Ngưỡng lệ phí đăng ký; từ mức này trở lên áp dụng phần trăm phí nền tảng cho giải mới.',
+    );
+    await this.getOrInitConfig(
+      'PLATFORM_FEE_LOW_ENTRY_FIXED_AMOUNT',
+      '5000',
+      'Phí nền tảng cố định cho lệ phí đăng ký dương nhưng thấp hơn ngưỡng của giải mới.',
+    );
     return this.db.select().from(schema.systemConfigs);
   }
 
   async updateConfig(key: string, value: string, description: string, adminId: string) {
+    const trimmedValue = value.trim();
     if (
-      key === 'ALLOW_TOURNAMENT_ENTRY_FEES' &&
-      !['true', 'false'].includes(value.trim().toLowerCase())
+      AdminService.BOOLEAN_CONFIG_KEYS.has(key) &&
+      !['true', 'false'].includes(trimmedValue.toLowerCase())
     ) {
-      throw new BadRequestException('ALLOW_TOURNAMENT_ENTRY_FEES chỉ nhận giá trị true hoặc false');
+      throw new BadRequestException(`${key} chỉ nhận giá trị true hoặc false`);
     }
 
-    const normalizedValue = key === 'ALLOW_TOURNAMENT_ENTRY_FEES'
-      ? value.trim().toLowerCase()
-      : value;
+    if (AdminService.INTEGER_MONEY_CONFIG_KEYS.has(key)) {
+      const parsedValue = Number(trimmedValue);
+      if (
+        !Number.isSafeInteger(parsedValue) ||
+        parsedValue < 0 ||
+        parsedValue > 9_999_999_999
+      ) {
+        throw new BadRequestException(
+          `${key} phải là số nguyên VND từ 0 đến 9.999.999.999`,
+        );
+      }
+    }
+
+    if (AdminService.PERCENTAGE_CONFIG_KEYS.has(key)) {
+      const parsedValue = Number(trimmedValue);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0 || parsedValue > 100) {
+        throw new BadRequestException(`${key} phải nằm trong khoảng từ 0 đến 100`);
+      }
+    }
+
+    const normalizedValue = AdminService.BOOLEAN_CONFIG_KEYS.has(key)
+      ? trimmedValue.toLowerCase()
+      : trimmedValue;
     const [existing] = await this.db
       .select()
       .from(schema.systemConfigs)
@@ -816,6 +868,11 @@ export class AdminService {
     return configRecord;
   }
 
+  private safeConfigInteger(value: string, fallback: number): number {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
   async getOrInitConfig(key: string, defaultValue: string, description?: string): Promise<string> {
     const [existing] = await this.db
       .select()
@@ -851,6 +908,22 @@ export class AdminService {
       pctPublicRanked: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED', '5')),
       pctPublicUnranked: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED', '5')),
       pctClub: parseFloat(await this.getOrInitConfig('PLATFORM_FEE_PERCENTAGE_CLUB', '0')),
+      platformFeeThreshold: this.safeConfigInteger(
+        await this.getOrInitConfig(
+          'PLATFORM_FEE_LOW_ENTRY_THRESHOLD',
+          '100000',
+          'Ngưỡng lệ phí đăng ký; từ mức này trở lên áp dụng phần trăm phí nền tảng cho giải mới.',
+        ),
+        100000,
+      ),
+      platformFeeFixedAmount: this.safeConfigInteger(
+        await this.getOrInitConfig(
+          'PLATFORM_FEE_LOW_ENTRY_FIXED_AMOUNT',
+          '5000',
+          'Phí nền tảng cố định cho lệ phí đăng ký dương nhưng thấp hơn ngưỡng của giải mới.',
+        ),
+        5000,
+      ),
       allowEntryFees: (await this.getOrInitConfig(
         'ALLOW_TOURNAMENT_ENTRY_FEES',
         'true',

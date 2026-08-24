@@ -95,6 +95,24 @@ export class PaymentsRepository {
     return result?.count ?? 0;
   }
 
+  async sumCompletedRegistrationPlatformFees(tournamentId: string): Promise<number> {
+    const [result] = await this.db
+      .select({
+        total: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), 0)`,
+      })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.purpose, PaymentPurpose.REGISTRATION_FEE),
+          eq(schema.payments.status, 'COMPLETED'),
+          isNotNull(schema.payments.platformFeeAmount),
+        ),
+      );
+    const total = Number(result?.total ?? 0);
+    return Number.isFinite(total) && total >= 0 ? total : 0;
+  }
+
   async findReusablePayment(
     userId: string,
     purpose: PaymentPurpose,
@@ -282,7 +300,7 @@ export class PaymentsRepository {
         });
 
         const retainedAmount =
-          updated.purpose === PaymentPurpose.REGISTRATION_FEE
+          updated.purpose === 'REGISTRATION_FEE'
             ? Number(updated.platformFeeAmount ?? 0)
             : Number(updated.amount);
         if (retainedAmount > 0) {

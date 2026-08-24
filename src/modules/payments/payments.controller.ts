@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Patch, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -6,9 +6,10 @@ import { PayoutRequestDto } from './dto/payout-request.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { ReviewPayoutDto } from './dto/review-payout.dto';
 import { ConfirmRefundDto } from './dto/confirm-refund.dto';
+import { MockVerifyPaymentDto } from './dto/mock-verify-payment.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { Verified } from '../../common/decorators/verified.decorator';
+
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -102,12 +103,15 @@ export class PaymentsController {
     return this.paymentsService.handleWebhook(webhookDto);
   }
 
-  @Public()
-  @SkipAppKey()
+  @ApiBearerAuth()
+  @Roles(UserRole.PLAYER, UserRole.ORGANIZER)
   @Post('mock-verify')
-  @ApiOperation({ summary: 'Mock verify payment (for demo)' })
-  async mockVerify(@Body() body: { paymentId: string }) {
-    return this.paymentsService.mockVerify(body.paymentId);
+  @ApiOperation({ summary: 'Mock verify payment for controlled sandbox testing' })
+  async mockVerify(
+    @Body() body: MockVerifyPaymentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.paymentsService.mockVerify(user.sub, body.paymentId);
   }
 
   @Post('payout')

@@ -8,7 +8,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PayOS } from '@payos/node';
 import { randomInt, randomUUID, timingSafeEqual } from 'crypto';
-import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
+import {
+  calcPlatformFee,
+  DEFAULT_PLATFORM_FEE_RULE,
+  type PlatformFeeRule,
+} from '../../common/helpers/platform-fee.helper';
 import {
   buildOrganizerPaymentCompletedNotification,
   buildParticipantPaymentCompletedNotification,
@@ -291,21 +295,22 @@ export class PaymentsService {
     return { accepted: true, completed: true, idempotent: false };
   }
 
-  async mockVerify(paymentId: string, suppliedSecret?: string) {
+  async mockVerify(userId: string, paymentId: string) {
     const nodeEnv = this.configService.get<string>('NODE_ENV');
-    const enabled = this.configService.get<string>('ENABLE_MOCK_PAYMENT') === 'true';
-    if (nodeEnv !== 'test' && !enabled) {
+    const envMockEnabled = this.configService.get<string>('ENABLE_MOCK_PAYMENT') === 'true';
+    const systemSandboxEnabled = (await this.paymentsRepository.getConfigValue(
+      'PAYMENT_SANDBOX_ENABLED',
+      'false',
+    )).trim().toLowerCase() === 'true';
+    if (nodeEnv !== 'test' && (!envMockEnabled || !systemSandboxEnabled)) {
       throw new NotFoundException('Endpoint không tồn tại.');
-    }
-    if (nodeEnv !== 'test') {
-      const configuredSecret = this.configService.get<string>('MOCK_PAYMENT_SECRET');
-      if (!configuredSecret || !suppliedSecret || !this.secretsMatch(configuredSecret, suppliedSecret)) {
-        throw new ForbiddenException('Mock payment secret không hợp lệ.');
-      }
     }
 
     const payment = await this.paymentsRepository.findPaymentById(paymentId);
     if (!payment) throw new NotFoundException('Không tìm thấy giao dịch.');
+    if (payment.userId !== userId) {
+      throw new ForbiddenException('Bạn không có quyền xác minh giao dịch này.');
+    }
     if (payment.status === 'COMPLETED') {
       return { completed: true, idempotent: true };
     }
@@ -500,12 +505,16 @@ export class PaymentsService {
         throw new BadRequestException('Lệ phí đăng ký phải là số nguyên dương.');
       }
 
-      const percentage = await this.registrationPlatformFeePercentage(tournament);
+      const percentage = this.registrationPlatformFeePercentage(tournament);
+      const feeRule = this.registrationPlatformFeeRule(tournament);
       const playerCount = Math.max(
         1,
         await this.paymentsRepository.countParticipantPlayers(participant.id),
       );
-      const fee = Math.min(amount, calcPlatformFee(amount, percentage) * playerCount);
+      const fee = Math.min(
+        amount,
+        calcPlatformFee(amount, percentage, feeRule) * playerCount,
+      );
       return {
         amount,
         platformFeeAmount: fee,
@@ -533,9 +542,12 @@ export class PaymentsService {
     if (tournament.status !== 'REGISTRATION_CLOSED') {
       throw new BadRequestException('Phí nền tảng chỉ được thanh toán sau khi chốt đăng ký.');
     }
-    const players = await this.paymentsRepository.countTournamentPlayers(tournament.id);
-    const percentage = await this.registrationPlatformFeePercentage(tournament);
-    const amount = players * calcPlatformFee(Number(tournament.entryFee), percentage);
+    // Registration payments already persist the authoritative, division-aware
+    // platform fee (including the per-payment cap). Aggregate those completed
+    // rows rather than recomputing from the legacy tournament entry fee.
+    const amount = await this.paymentsRepository.sumCompletedRegistrationPlatformFees(
+      tournament.id,
+    );
     if (amount <= 0) throw new BadRequestException('Không có phí nền tảng cần thanh toán.');
     return { amount, platformFeeAmount: amount };
   }
@@ -556,22 +568,33 @@ export class PaymentsService {
     return amount;
   }
 
-  private async registrationPlatformFeePercentage(
+  private registrationPlatformFeePercentage(
     tournament: NonNullable<Awaited<ReturnType<PaymentsRepository['findTournamentById']>>>,
-  ): Promise<number> {
-    const key = tournament.tournamentType === 'PUBLIC'
-      ? tournament.isRanked
-        ? 'PLATFORM_FEE_PERCENTAGE_PUBLIC_RANKED'
-        : 'PLATFORM_FEE_PERCENTAGE_PUBLIC_UNRANKED'
-      : 'PLATFORM_FEE_PERCENTAGE_CLUB';
-    const fallback = tournament.tournamentType === 'PUBLIC'
-      ? tournament.platformFeePercentage
-      : '0';
-    const percentage = Number(await this.paymentsRepository.getConfigValue(key, fallback));
+  ): number {
+    // The percentage is snapshotted when the tournament is created. Never read
+    // the mutable global default here, otherwise an admin edit changes charges
+    // for already-created tournaments while the organizer UI still shows the snapshot.
+    const percentage = Number(tournament.platformFeePercentage);
     if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) {
-      throw new BadRequestException(`Cấu hình ${key} không hợp lệ.`);
+      throw new BadRequestException('Tỷ lệ phí nền tảng của giải đấu không hợp lệ.');
     }
     return percentage;
+  }
+
+  private registrationPlatformFeeRule(
+    tournament: NonNullable<Awaited<ReturnType<PaymentsRepository['findTournamentById']>>>,
+  ): PlatformFeeRule {
+    const thresholdAmount = Number(tournament.platformFeeThreshold);
+    const fixedAmount = Number(tournament.platformFeeFixedAmount);
+    if (
+      !Number.isSafeInteger(thresholdAmount) ||
+      thresholdAmount < 0 ||
+      !Number.isSafeInteger(fixedAmount) ||
+      fixedAmount < 0
+    ) {
+      return DEFAULT_PLATFORM_FEE_RULE;
+    }
+    return { thresholdAmount, fixedAmount };
   }
 
   private assertPublishConfiguration(
