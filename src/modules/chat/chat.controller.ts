@@ -50,6 +50,15 @@ export class ChatController {
     return this.chatService.getUserRooms(user.sub);
   }
 
+  @Get('direct-policy/:userId')
+  @ApiOperation({ summary: 'Kiểm tra quyền nhắn tin riêng trước khi mở phòng' })
+  async getDirectMessagePolicy(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.getDirectMessagePolicy(user.sub, userId);
+  }
+
   @Post('rooms')
   @ApiOperation({ summary: 'Tạo phòng chat mới (Direct hoặc Group)' })
   async createRoom(

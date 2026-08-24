@@ -52,13 +52,14 @@ describe('admin Elo safety guardrails', () => {
     );
   });
 
-  it('requires active categories and keeps grouped player filters scoped', () => {
+  it('requires active categories and keeps Admin queries PUBLIC-only', () => {
     expect(serviceSource).toContain('assertActiveCategory(query.categoryId)');
-    expect(serviceSource).toContain('ELO_PUBLIC_COMMUNITY_FORBIDDEN');
+    expect(serviceSource).toContain('assertPublicAdminQuery');
+    expect(serviceSource).toContain('ELO_ADMIN_PUBLIC_ONLY');
     expect(serviceSource).toContain("COUNT(*) FILTER (WHERE scope = 'PUBLIC')");
-    expect(serviceSource).toContain(
-      "COUNT(*) FILTER (WHERE scope = 'COMMUNITY')",
-    );
+    expect(serviceSource).toContain('0::int AS community_context_count');
+    expect(serviceSource).not.toContain('listCommunityContexts');
+    expect(serviceSource).not.toContain('schema.communityRankings');
   });
 
   it('rejects malformed context and history cursors instead of restarting pagination', () => {
@@ -67,11 +68,11 @@ describe('admin Elo safety guardrails', () => {
     );
   });
 
-  it('uses persisted community peak Elo and does not turn admin changes into activity', () => {
-    expect(serviceSource).toContain(
-      'peakElo: schema.communityRankings.peakElo',
-    );
-    expect(serviceSource).not.toContain('peakElo: sql<number>`1000`');
+  it('keeps Admin rank changes on PUBLIC user profiles and does not turn them into activity', () => {
+    expect(serviceSource).toContain('update(schema.userRanks)');
+    expect(serviceSource).toContain('recalculateUserRankTier');
+    expect(serviceSource).not.toContain('recalculateCommunityRankTier');
+    expect(serviceSource).not.toContain('schema.communityRankings');
     expect(serviceSource).not.toContain('lastActiveAt: now');
     expect(serviceSource).not.toContain('lastDecayAt: now');
   });

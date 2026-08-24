@@ -42,11 +42,15 @@ export class AdminEloOperationDto {
   @IsUUID()
   categoryId: string;
 
-  @ApiProperty({ enum: ['PUBLIC', 'COMMUNITY'] })
-  @IsIn(['PUBLIC', 'COMMUNITY'])
-  scope: 'PUBLIC' | 'COMMUNITY';
+  @ApiProperty({ enum: ['PUBLIC'], default: 'PUBLIC' })
+  @IsIn(['PUBLIC'])
+  scope: 'PUBLIC';
 
-  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  /**
+   * Kept only so direct legacy callers receive the stable domain rejection
+   * from AdminRankingService rather than silently crossing the tenant boundary.
+   */
+  @ApiPropertyOptional({ format: 'uuid', nullable: true, deprecated: true })
   @IsOptional()
   @IsUUID()
   communityId?: string;
@@ -109,10 +113,10 @@ export class AdminEloQueryDto extends CursorPaginationDto {
   @IsUUID()
   categoryId?: string;
 
-  @ApiPropertyOptional({ enum: ['PUBLIC', 'COMMUNITY'], default: 'PUBLIC' })
+  @ApiPropertyOptional({ enum: ['PUBLIC'], default: 'PUBLIC' })
   @IsOptional()
-  @IsIn(['PUBLIC', 'COMMUNITY'])
-  scope: 'PUBLIC' | 'COMMUNITY' = 'PUBLIC';
+  @IsIn(['PUBLIC'])
+  scope: 'PUBLIC' = 'PUBLIC';
 
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
@@ -162,10 +166,10 @@ export class AdminEloPlayerQueryDto extends CursorPaginationDto {
   @MaxLength(120)
   search?: string;
 
-  @ApiPropertyOptional({ enum: ['PUBLIC', 'COMMUNITY'] })
+  @ApiPropertyOptional({ enum: ['PUBLIC'], default: 'PUBLIC' })
   @IsOptional()
-  @IsIn(['PUBLIC', 'COMMUNITY'])
-  scope?: 'PUBLIC' | 'COMMUNITY';
+  @IsIn(['PUBLIC'])
+  scope?: 'PUBLIC';
 
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
