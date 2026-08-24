@@ -784,6 +784,32 @@ export class TournamentsRepository {
             ? configRecord.value
             : defaultPct;
 
+      const feeRuleKeys = [
+        'PLATFORM_FEE_LOW_ENTRY_THRESHOLD',
+        'PLATFORM_FEE_LOW_ENTRY_FIXED_AMOUNT',
+      ] as const;
+      const feeRuleConfigRows = await tx
+        .select({
+          key: schema.systemConfigs.key,
+          value: schema.systemConfigs.value,
+        })
+        .from(schema.systemConfigs)
+        .where(inArray(schema.systemConfigs.key, [...feeRuleKeys]));
+      const feeRuleConfig = new Map(
+        feeRuleConfigRows.map((config) => [config.key, config.value]),
+      );
+      const parseNonNegativeInteger = (value: string | undefined, fallback: number) => {
+        const parsed = Number(value ?? fallback);
+        return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+      };
+      const platformFeeThreshold = parseNonNegativeInteger(
+        feeRuleConfig.get('PLATFORM_FEE_LOW_ENTRY_THRESHOLD'),
+        100000,
+      );
+      const platformFeeFixedAmount = parseNonNegativeInteger(
+        feeRuleConfig.get('PLATFORM_FEE_LOW_ENTRY_FIXED_AMOUNT'),
+        5000,
+      );
       const [record] = await tx
         .insert(schema.tournaments)
         .values({
@@ -797,6 +823,8 @@ export class TournamentsRepository {
           tournamentConfig: data.tournamentConfig,
           entryFee: (data.entryFee || 0).toString(),
           platformFeePercentage,
+          platformFeeThreshold: platformFeeThreshold.toString(),
+          platformFeeFixedAmount: platformFeeFixedAmount.toString(),
           registrationStartDate: data.registrationStartDate
             ? new Date(data.registrationStartDate)
             : null,
@@ -942,28 +970,26 @@ export class TournamentsRepository {
         data.status === 'REGISTRATION_CLOSED' &&
         oldRecord.status !== 'REGISTRATION_CLOSED'
       ) {
-        const isPaidPublic =
-          oldRecord.tournamentType === 'PUBLIC' &&
-          parseFloat(oldRecord.entryFee || '0') > 0;
+        const isPaidPublic = oldRecord.tournamentType === 'PUBLIC';
         if (isPaidPublic) {
           const [resultPayments] = await tx
             .select({
-              total: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
+              totalCollected: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
+              platformFeeRetained: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`,
             })
             .from(schema.payments)
             .where(
               and(
                 eq(schema.payments.tournamentId, id),
+                eq(schema.payments.purpose, 'REGISTRATION_FEE'),
                 eq(schema.payments.status, 'COMPLETED'),
               ),
             );
-          const totalCollected = parseFloat(resultPayments.total);
+          const totalCollected = parseFloat(resultPayments.totalCollected);
+          const platformFeeRetained = parseFloat(resultPayments.platformFeeRetained);
+          const amountRequested = totalCollected - platformFeeRetained;
 
-          if (totalCollected > 0) {
-            const platformFeeRetained =
-              totalCollected *
-              (parseFloat(oldRecord.platformFeePercentage || '0') / 100);
-            const amountRequested = totalCollected - platformFeeRetained;
+          if (totalCollected > 0 && platformFeeRetained >= 0 && amountRequested >= 0) {
 
             if (amountRequested > 0) {
               const [resultCount] = await tx
@@ -1175,6 +1201,23 @@ export class TournamentsRepository {
         ),
       );
     return result?.count || 0;
+  }
+
+  async sumCompletedRegistrationPlatformFees(tournamentId: string): Promise<number> {
+    const [result] = await this.db
+      .select({
+        total: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`,
+      })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.purpose, 'REGISTRATION_FEE'),
+          eq(schema.payments.status, 'COMPLETED'),
+        ),
+      );
+    const total = Number(result?.total ?? 0);
+    return Number.isFinite(total) && total >= 0 ? total : 0;
   }
 
   async countPendingRefunds(tournamentId: string): Promise<number> {

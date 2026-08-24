@@ -32,7 +32,7 @@ import * as schema from '../../database/schema';
 import { PaymentStatus } from '../../common/constants/enums';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Cron } from '@nestjs/schedule';
-import { calcPlatformFee } from '../../common/helpers/platform-fee.helper';
+
 import {
   CreateDivisionDto,
   DivisionBracketType,
@@ -4126,14 +4126,12 @@ export class TournamentsService {
       (sum, p) => sum + (p.members?.length || 0),
       0,
     );
-    const entryFee = Number(existing.entryFee || 0);
     const platformFeePercentage = Number(existing.platformFeePercentage || 0);
-
-    // 2-tier charging fee structure:
-    // If entryFee >= 100k, charge platformFeePercentage (default 5%) of the entry fee.
-    // If entryFee < 100k (including free tournaments), charge flat 5k.
-    const feePerPlayer = calcPlatformFee(entryFee, platformFeePercentage);
-    const totalPlatformFee = totalPlayers * feePerPlayer;
+    // Registration payments persist the authoritative fee for each division,
+    // including the per-payment cap. Use that aggregate instead of the legacy
+    // tournament-level entryFee multiplied by player count.
+    const totalPlatformFee =
+      await this.tournamentsRepository.sumCompletedRegistrationPlatformFees(id);
 
     const isClubOrFree =
       existing.tournamentType === 'CLUB' || totalPlatformFee === 0;

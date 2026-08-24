@@ -70,6 +70,18 @@ export const tournaments = pgTable(
     })
       .default('5.00')
       .notNull(),
+    platformFeeThreshold: numeric('platform_fee_threshold', {
+      precision: 12,
+      scale: 2,
+    })
+      .default('100000.00')
+      .notNull(),
+    platformFeeFixedAmount: numeric('platform_fee_fixed_amount', {
+      precision: 12,
+      scale: 2,
+    })
+      .default('5000.00')
+      .notNull(),
     registrationStartDate: timestamp('registration_start_date', { withTimezone: true }),
     registrationEndDate: timestamp('registration_end_date', { withTimezone: true }),
     maxParticipants: integer('max_participants'),
@@ -113,6 +125,14 @@ export const tournaments = pgTable(
     platformFeeValid: check(
       'platform_fee_valid',
       sql`${table.platformFeePercentage} >= 0 AND ${table.platformFeePercentage} <= 100`,
+    ),
+    platformFeeThresholdValid: check(
+      'platform_fee_threshold_valid',
+      sql`${table.platformFeeThreshold} >= 0`,
+    ),
+    platformFeeFixedAmountValid: check(
+      'platform_fee_fixed_amount_valid',
+      sql`${table.platformFeeFixedAmount} >= 0`,
     ),
     idxTournamentsStatusVisibility: index('idx_tournaments_status_visibility').on(
       table.status,
