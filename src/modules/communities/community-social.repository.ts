@@ -445,6 +445,34 @@ export class CommunitySocialRepository {
     return post;
   }
 
+  async createTournamentBracketPost(
+    communityId: string,
+    authorId: string,
+    tournamentId: string,
+    tournamentName: string,
+    divisionName: string | null,
+    bracketKey: string,
+  ) {
+    const scopeLabel = divisionName ? ` (${divisionName})` : '';
+    const body = `🏁 Sơ đồ thi đấu${scopeLabel} của giải **${tournamentName}** đã được chốt. Xem toàn bộ bracket và lịch đấu tại đây.`;
+    const idempotencyKey = `tournament-bracket:${tournamentId}:${bracketKey}`.slice(0, 128);
+    const [post] = await this.db
+      .insert(schema.communityPosts)
+      .values({
+        communityId,
+        authorId,
+        tournamentId,
+        type: 'TOURNAMENT_BRACKET',
+        body,
+        mediaUrls: [],
+        status: 'PUBLISHED',
+        idempotencyKey,
+      })
+      .onConflictDoNothing()
+      .returning();
+    return post ?? null;
+  }
+
   async createPoll(
     communityId: string,
     creatorId: string,
