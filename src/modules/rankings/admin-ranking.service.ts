@@ -39,7 +39,7 @@ import {
   RankingVisibilityStatus,
 } from './dto/admin-elo-operation.dto';
 
-type RankingScope = 'PUBLIC' | 'COMMUNITY';
+type RankingScope = 'PUBLIC';
 type OperationResult = {
   operationId: string;
   operation: AdminEloOperation;
@@ -184,19 +184,10 @@ export class AdminRankingService {
   ) {}
 
   async listContexts(query: AdminEloQueryDto) {
+    this.assertPublicAdminQuery(query.scope, query.communityId);
     if (query.direction && query.direction !== 'next')
       throw new BadRequestException('ELO_CURSOR_DIRECTION_UNSUPPORTED');
     const limit = Math.min(query.limit ?? 50, 100);
-    if (query.scope === 'COMMUNITY' && !query.communityId) {
-      throw new BadRequestException(
-        'communityId is required for COMMUNITY scope',
-      );
-    }
-    if (query.scope === 'PUBLIC' && query.communityId) {
-      throw new BadRequestException(
-        'communityId is not allowed for PUBLIC scope',
-      );
-    }
     if (
       query.minElo !== undefined &&
       query.maxElo !== undefined &&
@@ -206,10 +197,7 @@ export class AdminRankingService {
     }
 
     const cursor = this.decodeContextCursor(query.cursor);
-    const rows =
-      query.scope === 'COMMUNITY'
-        ? await this.listCommunityContexts(query, limit + 1, cursor)
-        : await this.listPublicContexts(query, limit + 1, cursor);
+    const rows = await this.listPublicContexts(query, limit + 1, cursor);
     const hasMore = rows.length > limit;
     const data = rows.slice(0, limit).map((row) => ({
       ...row,
@@ -234,15 +222,12 @@ export class AdminRankingService {
   }
 
   async listPlayers(query: AdminEloPlayerQueryDto) {
-    if (query.scope === 'PUBLIC' && query.communityId)
-      throw new BadRequestException('ELO_PUBLIC_COMMUNITY_FORBIDDEN');
+    this.assertPublicAdminQuery(query.scope, query.communityId);
     await this.assertActiveCategory(query.categoryId);
     const limit = Math.min(query.limit ?? 50, 100);
     const cursor = this.decodePlayerCursor(query.cursor);
     const filters = [sql`category_id = ${query.categoryId}`];
-    if (query.scope) filters.push(sql`scope = ${query.scope}`);
-    if (query.communityId)
-      filters.push(sql`community_id = ${query.communityId}`);
+    filters.push(sql`scope = 'PUBLIC'`);
     if (query.matchType) filters.push(sql`match_type = ${query.matchType}`);
     if (query.search?.trim()) {
       const search = `%${query.search.trim()}%`;
@@ -269,24 +254,11 @@ export class AdminRankingService {
         LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = ur.user_id AND s.category_id = ur.category_id AND s.scope = 'PUBLIC' AND s.community_id IS NULL AND s.match_type = ur.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(ur.gender_restriction, '') LIMIT 1) st ON true
         INNER JOIN categories c ON c.id = ur.category_id AND COALESCE(c.category_config->>'isActive', 'true') <> 'false'
         WHERE ur.category_id = ${query.categoryId}
-        UNION ALL
-        SELECT cr.user_id, cr.id AS context_id, cr.category_id, 'COMMUNITY'::text AS scope,
-          cr.community_id, cr.match_type, cr.elo_points, cr.matches_played, cr.admin_leaderboard_eligible, cr.updated_at,
-          COALESCE(u.email, '') AS email,
-          COALESCE(pr.full_name, u.email, '') AS full_name,
-          pr.avatar_url,
-          CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status
-        FROM community_rankings cr
-        INNER JOIN users u ON u.id = cr.user_id AND u.is_mock = false AND u.deleted_at IS NULL
-        LEFT JOIN profiles pr ON pr.user_id = u.id
-        LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = cr.user_id AND s.category_id = cr.category_id AND s.scope = 'COMMUNITY' AND s.community_id = cr.community_id AND s.match_type = cr.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(cr.gender_restriction, '') LIMIT 1) st ON true
-        INNER JOIN categories c ON c.id = cr.category_id AND COALESCE(c.category_config->>'isActive', 'true') <> 'false'
-        WHERE cr.category_id = ${query.categoryId}
       )
       SELECT user_id, email, full_name, avatar_url,
         COUNT(*)::int AS context_count,
         COUNT(*) FILTER (WHERE scope = 'PUBLIC')::int AS public_context_count,
-        COUNT(*) FILTER (WHERE scope = 'COMMUNITY')::int AS community_context_count,
+        0::int AS community_context_count,
         COUNT(*) FILTER (WHERE status = 'VISIBLE')::int AS visible_context_count,
         COUNT(*) FILTER (WHERE status = 'HIDDEN')::int AS hidden_context_count,
         COUNT(*) FILTER (WHERE status = 'BANNED')::int AS banned_context_count,
@@ -348,14 +320,6 @@ export class AdminRankingService {
       LEFT JOIN elo_tiers t ON t.id = ur.tier_id
       LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = ur.user_id AND s.category_id = ur.category_id AND s.scope = 'PUBLIC' AND s.community_id IS NULL AND s.match_type = ur.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(ur.gender_restriction, '') LIMIT 1) st ON true
       WHERE ur.user_id = ${userId} AND ur.category_id = ${query.categoryId}
-      UNION ALL
-      SELECT cr.id AS context_id, 'COMMUNITY'::text AS scope, cr.community_id, c.name AS community_name,
-        cr.category_id, cr.match_type, cr.gender_restriction, cr.elo_points, cr.matches_played, cr.matches_won, cr.win_streak, cr.peak_elo, cr.admin_leaderboard_eligible,
-        NULL::text AS tier_name, CASE WHEN st.status IS NULL OR (st.expires_at IS NOT NULL AND st.expires_at <= now()) THEN 'VISIBLE' ELSE st.status END AS status, st.expires_at AS status_expires_at, cr.updated_at
-      FROM community_rankings cr
-      LEFT JOIN communities c ON c.id = cr.community_id
-      LEFT JOIN LATERAL (SELECT s.status, s.expires_at FROM ranking_context_statuses s WHERE s.user_id = cr.user_id AND s.category_id = cr.category_id AND s.scope = 'COMMUNITY' AND s.community_id = cr.community_id AND s.match_type = cr.match_type AND COALESCE(s.gender_restriction, '') = COALESCE(cr.gender_restriction, '') LIMIT 1) st ON true
-      WHERE cr.user_id = ${userId} AND cr.category_id = ${query.categoryId}
       ORDER BY updated_at DESC
     `)) as unknown as Array<Record<string, unknown>>;
     const [user] = await this.db
@@ -401,6 +365,8 @@ export class AdminRankingService {
         and(
           eq(schema.adminEloOperations.userId, userId),
           eq(schema.adminEloOperations.categoryId, query.categoryId),
+          eq(schema.adminEloOperations.scope, 'PUBLIC'),
+          isNull(schema.adminEloOperations.communityId),
         ),
       )
       .orderBy(desc(schema.adminEloOperations.createdAt))
@@ -449,6 +415,22 @@ export class AdminRankingService {
         createdAt: operation.createdAt,
       })),
     };
+  }
+
+  private assertPublicAdminQuery(
+    scope: 'PUBLIC' | 'COMMUNITY' | undefined,
+    communityId?: string,
+    required = false,
+  ) {
+    if (
+      (required && scope !== 'PUBLIC') ||
+      (scope !== undefined && scope !== 'PUBLIC')
+    ) {
+      throw new BadRequestException('ELO_ADMIN_PUBLIC_ONLY');
+    }
+    if (communityId) {
+      throw new BadRequestException('ELO_ADMIN_PUBLIC_ONLY');
+    }
   }
 
   private async assertActiveCategory(categoryId: string) {
@@ -561,30 +543,18 @@ export class AdminRankingService {
         }
         await this.updateRank(
           tx,
-          normalized.scope,
           rank.id,
           newElo,
           rank.peakElo,
           nextLeaderboardEligible,
         );
-        if (normalized.scope === 'PUBLIC') {
-          await this.rankingsService.recalculateUserRankTier(
-            tx,
-            normalized.userId,
-            normalized.categoryId,
-            normalized.matchType,
-            normalized.genderRestriction,
-          );
-        } else {
-          await this.rankingsService.recalculateCommunityRankTier(
-            tx,
-            normalized.userId,
-            normalized.categoryId,
-            normalized.matchType,
-            normalized.communityId,
-            normalized.genderRestriction,
-          );
-        }
+        await this.rankingsService.recalculateUserRankTier(
+          tx,
+          normalized.userId,
+          normalized.categoryId,
+          normalized.matchType,
+          normalized.genderRestriction,
+        );
         await this.rankingsService.insertAdminEloHistory(tx, {
           userId: normalized.userId,
           categoryId: normalized.categoryId,
@@ -895,176 +865,6 @@ export class AdminRankingService {
     return rows;
   }
 
-  private async listCommunityContexts(
-    query: AdminEloQueryDto,
-    limit: number,
-    cursor?: AdminContextCursor,
-  ): Promise<AdminContextRow[]> {
-    const communityConditions = [
-      eq(schema.communityRankings.communityId, query.communityId as string),
-      eq(schema.users.isMock, false),
-      isNull(schema.users.deletedAt),
-      cursor
-        ? sql`(${schema.communityRankings.updatedAt} < ${cursor.updatedAt} OR (${schema.communityRankings.updatedAt} = ${cursor.updatedAt} AND ${schema.communityRankings.id} < ${cursor.id}))`
-        : undefined,
-      query.categoryId
-        ? eq(schema.communityRankings.categoryId, query.categoryId)
-        : undefined,
-      query.matchType
-        ? eq(schema.communityRankings.matchType, query.matchType)
-        : undefined,
-      query.genderRestriction
-        ? eq(
-            schema.communityRankings.genderRestriction,
-            query.genderRestriction,
-          )
-        : undefined,
-      query.minElo !== undefined
-        ? sql`${schema.communityRankings.eloPoints} >= ${query.minElo}`
-        : undefined,
-      query.maxElo !== undefined
-        ? sql`${schema.communityRankings.eloPoints} <= ${query.maxElo}`
-        : undefined,
-      query.search
-        ? or(
-            ilike(schema.users.email, `%${query.search.trim()}%`),
-            ilike(schema.profiles.fullName, `%${query.search.trim()}%`),
-          )
-        : undefined,
-    ].filter(
-      (value): value is NonNullable<typeof value> => value !== undefined,
-    );
-    if (query.status) {
-      const statusFilter =
-        query.status === 'VISIBLE'
-          ? notExists(
-              this.db
-                .select({ id: schema.rankingContextStatuses.id })
-                .from(schema.rankingContextStatuses)
-                .where(
-                  and(
-                    eq(
-                      schema.rankingContextStatuses.userId,
-                      schema.communityRankings.userId,
-                    ),
-                    eq(
-                      schema.rankingContextStatuses.categoryId,
-                      schema.communityRankings.categoryId,
-                    ),
-                    eq(schema.rankingContextStatuses.scope, 'COMMUNITY'),
-                    eq(
-                      schema.rankingContextStatuses.communityId,
-                      schema.communityRankings.communityId,
-                    ),
-                    eq(
-                      schema.rankingContextStatuses.matchType,
-                      schema.communityRankings.matchType,
-                    ),
-                    sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.communityRankings.genderRestriction}, '')`,
-                    inArray(schema.rankingContextStatuses.status, [
-                      'HIDDEN',
-                      'BANNED',
-                    ]),
-                    or(
-                      isNull(schema.rankingContextStatuses.expiresAt),
-                      sql`${schema.rankingContextStatuses.expiresAt} > now()`,
-                    ),
-                  ),
-                ),
-            )
-          : exists(
-              this.db
-                .select({ id: schema.rankingContextStatuses.id })
-                .from(schema.rankingContextStatuses)
-                .where(
-                  and(
-                    eq(
-                      schema.rankingContextStatuses.userId,
-                      schema.communityRankings.userId,
-                    ),
-                    eq(
-                      schema.rankingContextStatuses.categoryId,
-                      schema.communityRankings.categoryId,
-                    ),
-                    eq(schema.rankingContextStatuses.scope, 'COMMUNITY'),
-                    eq(
-                      schema.rankingContextStatuses.communityId,
-                      schema.communityRankings.communityId,
-                    ),
-                    eq(
-                      schema.rankingContextStatuses.matchType,
-                      schema.communityRankings.matchType,
-                    ),
-                    sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.communityRankings.genderRestriction}, '')`,
-                    eq(schema.rankingContextStatuses.status, query.status),
-                    or(
-                      isNull(schema.rankingContextStatuses.expiresAt),
-                      sql`${schema.rankingContextStatuses.expiresAt} > now()`,
-                    ),
-                  ),
-                ),
-            );
-      communityConditions.push(statusFilter);
-    }
-    const rows = await this.db
-      .select({
-        contextId: schema.communityRankings.id,
-        userId: schema.communityRankings.userId,
-        email: schema.users.email,
-        fullName: sql<string>`coalesce(${schema.profiles.fullName}, ${schema.users.email})`,
-        avatarUrl: schema.profiles.avatarUrl,
-        categoryId: schema.communityRankings.categoryId,
-        scope: sql<RankingScope>`'COMMUNITY'`,
-        communityId: schema.communityRankings.communityId,
-        matchType: schema.communityRankings.matchType,
-        genderRestriction: schema.communityRankings.genderRestriction,
-        eloPoints: schema.communityRankings.eloPoints,
-        matchesPlayed: schema.communityRankings.matchesPlayed,
-        matchesWon: schema.communityRankings.matchesWon,
-        winStreak: schema.communityRankings.winStreak,
-        peakElo: schema.communityRankings.peakElo,
-        updatedAt: schema.communityRankings.updatedAt,
-        status: schema.rankingContextStatuses.status,
-        statusExpiresAt: schema.rankingContextStatuses.expiresAt,
-      })
-      .from(schema.communityRankings)
-      .innerJoin(
-        schema.users,
-        eq(schema.communityRankings.userId, schema.users.id),
-      )
-      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-      .leftJoin(
-        schema.rankingContextStatuses,
-        and(
-          eq(
-            schema.rankingContextStatuses.userId,
-            schema.communityRankings.userId,
-          ),
-          eq(
-            schema.rankingContextStatuses.categoryId,
-            schema.communityRankings.categoryId,
-          ),
-          eq(schema.rankingContextStatuses.scope, 'COMMUNITY'),
-          eq(
-            schema.rankingContextStatuses.communityId,
-            schema.communityRankings.communityId,
-          ),
-          eq(
-            schema.rankingContextStatuses.matchType,
-            schema.communityRankings.matchType,
-          ),
-          sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.communityRankings.genderRestriction}, '')`,
-        ),
-      )
-      .where(and(...communityConditions))
-      .orderBy(
-        desc(schema.communityRankings.updatedAt),
-        desc(schema.communityRankings.id),
-      )
-      .limit(limit);
-    return rows;
-  }
-
   private async findContextById(contextId: string) {
     const [publicContext] = await this.db
       .select({
@@ -1080,20 +880,7 @@ export class AdminRankingService {
       .where(eq(schema.userRanks.id, contextId))
       .limit(1);
     if (publicContext) return publicContext;
-    const [communityContext] = await this.db
-      .select({
-        contextId: schema.communityRankings.id,
-        userId: schema.communityRankings.userId,
-        categoryId: schema.communityRankings.categoryId,
-        scope: sql<RankingScope>`'COMMUNITY'`,
-        communityId: schema.communityRankings.communityId,
-        matchType: schema.communityRankings.matchType,
-        genderRestriction: schema.communityRankings.genderRestriction,
-      })
-      .from(schema.communityRankings)
-      .where(eq(schema.communityRankings.id, contextId))
-      .limit(1);
-    return communityContext;
+    return undefined;
   }
 
   private async assertValidTarget(tx: AppTx, dto: AdminEloOperationDto) {
@@ -1114,14 +901,6 @@ export class AdminRankingService {
       .where(eq(schema.categories.id, dto.categoryId))
       .limit(1);
     if (!category) throw new NotFoundException('ELO_CATEGORY_NOT_FOUND');
-    if (dto.scope === 'COMMUNITY') {
-      const [community] = await tx
-        .select({ id: schema.communities.id })
-        .from(schema.communities)
-        .where(eq(schema.communities.id, dto.communityId as string))
-        .limit(1);
-      if (!community) throw new NotFoundException('ELO_COMMUNITY_NOT_FOUND');
-    }
   }
 
   private async findRankForUpdate(
@@ -1129,72 +908,31 @@ export class AdminRankingService {
     dto: AdminEloOperationDto,
   ): Promise<RankSnapshot | null> {
     const genderCondition = dto.genderRestriction
-      ? eq(
-          dto.scope === 'PUBLIC'
-            ? schema.userRanks.genderRestriction
-            : schema.communityRankings.genderRestriction,
-          dto.genderRestriction,
-        )
-      : isNull(
-          dto.scope === 'PUBLIC'
-            ? schema.userRanks.genderRestriction
-            : schema.communityRankings.genderRestriction,
-        );
-    if (dto.scope === 'PUBLIC') {
-      const [rank] = await tx
-        .select({
-          id: schema.userRanks.id,
-          userId: schema.userRanks.userId,
-          categoryId: schema.userRanks.categoryId,
-          matchType: schema.userRanks.matchType,
-          genderRestriction: schema.userRanks.genderRestriction,
-          eloPoints: schema.userRanks.eloPoints,
-          matchesPlayed: schema.userRanks.matchesPlayed,
-          matchesWon: schema.userRanks.matchesWon,
-          winStreak: schema.userRanks.winStreak,
-          peakElo: schema.userRanks.peakElo,
-          shieldActive: schema.userRanks.shieldActive,
-          adminLeaderboardEligible: schema.userRanks.adminLeaderboardEligible,
-          tierId: schema.userRanks.tierId,
-        })
-        .from(schema.userRanks)
-        .where(
-          and(
-            eq(schema.userRanks.userId, dto.userId),
-            eq(schema.userRanks.categoryId, dto.categoryId),
-            eq(schema.userRanks.matchType, dto.matchType),
-            isNull(schema.userRanks.communityId),
-            genderCondition,
-          ),
-        )
-        .for('update')
-        .limit(1);
-      return rank ?? null;
-    }
+      ? eq(schema.userRanks.genderRestriction, dto.genderRestriction)
+      : isNull(schema.userRanks.genderRestriction);
     const [rank] = await tx
       .select({
-        id: schema.communityRankings.id,
-        userId: schema.communityRankings.userId,
-        categoryId: schema.communityRankings.categoryId,
-        matchType: schema.communityRankings.matchType,
-        genderRestriction: schema.communityRankings.genderRestriction,
-        eloPoints: schema.communityRankings.eloPoints,
-        matchesPlayed: schema.communityRankings.matchesPlayed,
-        matchesWon: schema.communityRankings.matchesWon,
-        winStreak: schema.communityRankings.winStreak,
-        peakElo: schema.communityRankings.peakElo,
-        shieldActive: sql<boolean>`false`,
-        adminLeaderboardEligible:
-          schema.communityRankings.adminLeaderboardEligible,
-        tierId: sql<string | null>`null`,
+        id: schema.userRanks.id,
+        userId: schema.userRanks.userId,
+        categoryId: schema.userRanks.categoryId,
+        matchType: schema.userRanks.matchType,
+        genderRestriction: schema.userRanks.genderRestriction,
+        eloPoints: schema.userRanks.eloPoints,
+        matchesPlayed: schema.userRanks.matchesPlayed,
+        matchesWon: schema.userRanks.matchesWon,
+        winStreak: schema.userRanks.winStreak,
+        peakElo: schema.userRanks.peakElo,
+        shieldActive: schema.userRanks.shieldActive,
+        adminLeaderboardEligible: schema.userRanks.adminLeaderboardEligible,
+        tierId: schema.userRanks.tierId,
       })
-      .from(schema.communityRankings)
+      .from(schema.userRanks)
       .where(
         and(
-          eq(schema.communityRankings.userId, dto.userId),
-          eq(schema.communityRankings.categoryId, dto.categoryId),
-          eq(schema.communityRankings.communityId, dto.communityId as string),
-          eq(schema.communityRankings.matchType, dto.matchType),
+          eq(schema.userRanks.userId, dto.userId),
+          eq(schema.userRanks.categoryId, dto.categoryId),
+          eq(schema.userRanks.matchType, dto.matchType),
+          isNull(schema.userRanks.communityId),
           genderCondition,
         ),
       )
@@ -1218,10 +956,8 @@ export class AdminRankingService {
         and(
           eq(schema.rankingContextStatuses.userId, dto.userId),
           eq(schema.rankingContextStatuses.categoryId, dto.categoryId),
-          eq(schema.rankingContextStatuses.scope, dto.scope),
-          dto.communityId
-            ? eq(schema.rankingContextStatuses.communityId, dto.communityId)
-            : isNull(schema.rankingContextStatuses.communityId),
+          eq(schema.rankingContextStatuses.scope, 'PUBLIC'),
+          isNull(schema.rankingContextStatuses.communityId),
           eq(schema.rankingContextStatuses.matchType, dto.matchType),
           dto.genderRestriction
             ? eq(
@@ -1238,34 +974,21 @@ export class AdminRankingService {
 
   private async updateRank(
     tx: AppTx,
-    scope: RankingScope,
     id: string,
     newElo: number,
     peakElo: number,
     adminLeaderboardEligible: boolean,
   ) {
     const now = new Date();
-    if (scope === 'PUBLIC') {
-      await tx
-        .update(schema.userRanks)
-        .set({
-          eloPoints: newElo,
-          peakElo: Math.max(peakElo, newElo),
-          adminLeaderboardEligible,
-          updatedAt: now,
-        })
-        .where(eq(schema.userRanks.id, id));
-    } else {
-      await tx
-        .update(schema.communityRankings)
-        .set({
-          eloPoints: newElo,
-          peakElo: Math.max(peakElo, newElo),
-          adminLeaderboardEligible,
-          updatedAt: now,
-        })
-        .where(eq(schema.communityRankings.id, id));
-    }
+    await tx
+      .update(schema.userRanks)
+      .set({
+        eloPoints: newElo,
+        peakElo: Math.max(peakElo, newElo),
+        adminLeaderboardEligible,
+        updatedAt: now,
+      })
+      .where(eq(schema.userRanks.id, id));
   }
 
   private async upsertStatus(
@@ -1325,10 +1048,7 @@ export class AdminRankingService {
       throw new BadRequestException('ELO_MATCH_TYPE_REQUIRED');
     if (normalized.reason.length < 5)
       throw new BadRequestException('ELO_REASON_REQUIRED');
-    if (normalized.scope === 'COMMUNITY' && !normalized.communityId)
-      throw new BadRequestException('ELO_COMMUNITY_REQUIRED');
-    if (normalized.scope === 'PUBLIC' && normalized.communityId)
-      throw new BadRequestException('ELO_PUBLIC_COMMUNITY_FORBIDDEN');
+    this.assertPublicAdminQuery(normalized.scope, normalized.communityId, true);
     const ratingOperation = this.isRatingOperation(operation);
     if (
       (normalized.matchType === 'DOUBLES' ||

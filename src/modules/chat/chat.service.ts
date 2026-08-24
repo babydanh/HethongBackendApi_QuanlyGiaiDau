@@ -68,6 +68,36 @@ export class ChatService {
     throw new ForbiddenException('Người dùng này không nhận tin nhắn từ người lạ.');
   }
 
+  async getDirectMessagePolicy(fromUserId: string, toUserId: string) {
+    if (fromUserId === toUserId) {
+      return { canMessage: false, reasonCode: 'SELF' as const };
+    }
+
+    try {
+      if (!(await this.chatRepository.isActiveUser(toUserId))) {
+        return { canMessage: false, reasonCode: 'USER_NOT_FOUND' as const };
+      }
+      if (await this.chatRepository.isBlockedBetween(fromUserId, toUserId)) {
+        return { canMessage: false, reasonCode: 'BLOCKED' as const };
+      }
+      await this.assertCanDirectMessage(fromUserId, toUserId);
+      return { canMessage: true, reasonCode: null };
+    } catch (error) {
+      if (
+        error instanceof ForbiddenException &&
+        error.message.includes('Người dùng này không nhận tin nhắn từ người lạ')
+      ) {
+        return { canMessage: false, reasonCode: 'STRANGER_MESSAGES_DISABLED' as const };
+      }
+
+      this.logger.error(
+        `Unable to resolve direct-message policy for ${fromUserId} -> ${toUserId}.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return { canMessage: false, reasonCode: 'POLICY_CHECK_FAILED' as const };
+    }
+  }
+
   async createRoom(userId: string, data: CreateRoomDto) {
     if (data.type === RoomType.SUPPORT) {
       throw new ForbiddenException(
