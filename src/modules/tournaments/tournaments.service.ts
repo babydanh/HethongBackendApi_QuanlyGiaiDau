@@ -2325,6 +2325,37 @@ export class TournamentsService {
     return deleteResult;
   }
 
+  private async publishBracketUpdatePost(
+    tournament: { communityId?: string | null; tournamentType?: string | null; name: string },
+    userId: string,
+    tournamentId: string,
+    division: { id?: string; name?: string | null } | undefined,
+    generationResult: unknown,
+  ) {
+    if (tournament.tournamentType !== 'CLUB' || !tournament.communityId) return;
+
+    const result = generationResult && typeof generationResult === 'object'
+      ? generationResult as Record<string, unknown>
+      : {};
+    const stageIds = [result.stageId, result.stage1Id, result.stage2Id]
+      .filter((stageId): stageId is string => typeof stageId === 'string' && stageId.length > 0);
+    const bracketKey = stageIds.join(':') || `matches-${String(result.totalMatches ?? 'unknown')}`;
+    const divisionKey = division?.id ?? 'all';
+
+    try {
+      await this.communitySocialRepository.createTournamentBracketPost(
+        tournament.communityId,
+        userId,
+        tournamentId,
+        tournament.name,
+        division?.name ?? null,
+        `${divisionKey}:${bracketKey}`,
+      );
+    } catch (error) {
+      console.error('Failed to auto-post bracket update to community feed:', error);
+    }
+  }
+
   async generateBracket(
     id: string,
     userId: string,
@@ -2405,19 +2436,23 @@ export class TournamentsService {
     ).toUpperCase();
 
     if (bracketType === 'DOUBLE_ELIMINATION') {
-      return this.bracketGeneratorService.generateDoubleElimination(
+      const result = await this.bracketGeneratorService.generateDoubleElimination(
         id,
         userId,
         divisionId,
         seedingType,
       );
+      await this.publishBracketUpdatePost(existing, userId, id, division, result);
+      return result;
     } else if (bracketType === 'ROUND_ROBIN') {
-      return this.bracketGeneratorService.generateRoundRobin(
+      const result = await this.bracketGeneratorService.generateRoundRobin(
         id,
         userId,
         divisionId,
         seedingType,
       );
+      await this.publishBracketUpdatePost(existing, userId, id, division, result);
+      return result;
     } else if (bracketType === 'GROUP_STAGE_KNOCKOUT') {
       // Keep the organizer's saved group configuration. The generator validates
       // the capacity and advancement rules against the eligible participants.
@@ -2434,19 +2469,23 @@ export class TournamentsService {
         );
       }
 
-      return this.bracketGeneratorService.generateGroupStageKnockout(
+      const result = await this.bracketGeneratorService.generateGroupStageKnockout(
         id,
         userId,
         divisionId,
         seedingType,
       );
+      await this.publishBracketUpdatePost(existing, userId, id, division, result);
+      return result;
     } else {
-      return this.bracketGeneratorService.generateSingleElimination(
+      const result = await this.bracketGeneratorService.generateSingleElimination(
         id,
         userId,
         divisionId,
         seedingType,
       );
+      await this.publishBracketUpdatePost(existing, userId, id, division, result);
+      return result;
     }
   }
 
