@@ -66,16 +66,18 @@ export function validateRallyPointScoreDetails(context: ScoreValidationContext):
       throw new BadRequestException(`Hiệp ${entry.key}: Không được phép hòa ${entry.scoreStr}.`);
     }
 
-    if (!entry.isOverridden) validateRallyPointSetScore(
-      entry.key,
-      maxScore,
-      resolvedConfig.pointsPerSet,
-      minScore,
-      diff,
-      resolvedConfig.deuceEnabled,
-      resolvedConfig.tiebreakAt,
-      resolvedConfig.maxPoints,
-    );
+    if (!entry.isOverridden && resolvedConfig.mode !== 'LITE') {
+      validateRallyPointSetScore(
+        entry.key,
+        maxScore,
+        resolvedConfig.pointsPerSet,
+        minScore,
+        diff,
+        resolvedConfig.deuceEnabled,
+        resolvedConfig.tiebreakAt,
+        resolvedConfig.maxPoints,
+      );
+    }
 
     if (winner === 'P1') {
       p1SetsWon += 1;
