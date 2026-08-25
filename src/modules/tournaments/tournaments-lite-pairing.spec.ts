@@ -52,6 +52,7 @@ describe('TournamentsService — Lite pairing guards', () => {
   let mockStorage: any;
   let mockRedis: any;
   let mockConfig: any;
+  let mockCommunitySocial: any;
 
   const liteTournament = {
     id: 'tournament-1',
@@ -111,6 +112,9 @@ describe('TournamentsService — Lite pairing guards', () => {
         return undefined;
       }),
     };
+    mockCommunitySocial = {
+      createTournamentBracketPost: jest.fn().mockResolvedValue({ id: 'post-1' }),
+    };
     const liveScoreGateway = {
       broadcastRegistrationUpdate: jest.fn(),
     };
@@ -122,7 +126,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockStorage as any,
       mockRedis as any,
       mockConfig as any,
-      {} as any,
+      mockCommunitySocial as any,
       liveScoreGateway as any,
     );
   });
@@ -449,6 +453,7 @@ describe('TournamentsService — Lite pairing guards', () => {
     it('passes divisionId to the generator for a newly created bracket', async () => {
       mockRepo.findById!.mockResolvedValue({
         ...liteTournament,
+        tournamentType: 'CLUB',
         matchType: 'SINGLES',
       });
       mockBracketGenerator.generateSingleElimination.mockResolvedValue({
@@ -463,6 +468,14 @@ describe('TournamentsService — Lite pairing guards', () => {
         'user-1',
         'division-1',
         'RANDOM',
+      );
+      expect(mockCommunitySocial.createTournamentBracketPost).toHaveBeenCalledWith(
+        'community-1',
+        'user-1',
+        'tournament-1',
+        'Test Lite',
+        'Division 1',
+        expect.stringContaining('division-1:stage-1'),
       );
     });
 

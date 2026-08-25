@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, gte, lt, sql, type SQL } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, gte, lt, notExists, sql, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { AdminUserStatusFilter, QueryUserDto } from './dto/query-user.dto';
@@ -445,6 +445,7 @@ export class UsersRepository {
         avatarUrl: schema.profiles.avatarUrl,
         coverUrl: schema.profiles.coverUrl,
         gender: schema.profiles.gender,
+        dateOfBirth: schema.profiles.dateOfBirth,
         bio: schema.profiles.bio,
         isVerified: schema.profiles.isVerified,
         allowStrangerMessages: schema.profiles.allowStrangerMessages,
@@ -471,6 +472,7 @@ export class UsersRepository {
         matchType: schema.userRanks.matchType,
         eloPoints: schema.userRanks.eloPoints,
         matchesPlayed: schema.userRanks.matchesPlayed,
+        adminLeaderboardEligible: schema.userRanks.adminLeaderboardEligible,
         matchesWon: schema.userRanks.matchesWon,
         winStreak: schema.userRanks.winStreak,
         genderRestriction: schema.userRanks.genderRestriction,
@@ -482,8 +484,32 @@ export class UsersRepository {
       .where(
         and(
           eq(schema.userRanks.userId, userId),
-          isNull(schema.userRanks.communityId) // Global ranks only
-        )
+          isNull(schema.userRanks.communityId),
+          or(
+            gt(schema.userRanks.matchesPlayed, 0),
+            eq(schema.userRanks.adminLeaderboardEligible, true),
+          ),
+          notExists(
+            this.db
+              .select({ id: schema.rankingContextStatuses.id })
+              .from(schema.rankingContextStatuses)
+              .where(
+                and(
+                  eq(schema.rankingContextStatuses.userId, schema.userRanks.userId),
+                  eq(schema.rankingContextStatuses.categoryId, schema.userRanks.categoryId),
+                  eq(schema.rankingContextStatuses.scope, 'PUBLIC'),
+                  isNull(schema.rankingContextStatuses.communityId),
+                  eq(schema.rankingContextStatuses.matchType, schema.userRanks.matchType),
+                  sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                  inArray(schema.rankingContextStatuses.status, ['HIDDEN', 'BANNED']),
+                  or(
+                    isNull(schema.rankingContextStatuses.expiresAt),
+                    gt(schema.rankingContextStatuses.expiresAt, new Date()),
+                  ),
+                ),
+              ),
+          ),
+        ),
       );
 
     // Pair ELO is intentionally kept separate from individual ELO. It is
@@ -534,7 +560,9 @@ export class UsersRepository {
     const activeCategoryRanks = ranks.filter((r) => isCategoryActive(r.categoryConfig));
     const activeCategoryPairRanks = pairRanks.filter((r) => isCategoryActive(r.categoryConfig));
 
-    const activeRanks = activeCategoryRanks.filter((rank) => rank.matchesPlayed > 0);
+    const activeRanks = activeCategoryRanks.filter(
+      (rank) => rank.matchesPlayed > 0 || rank.adminLeaderboardEligible === true,
+    );
     const activePairRanks = activeCategoryPairRanks.filter((rank) => rank.matchesPlayed > 0);
 
     const streakMatchRows = await this.db

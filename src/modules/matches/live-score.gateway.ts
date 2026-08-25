@@ -264,10 +264,35 @@ export class LiveScoreGateway
     return { event: 'left', data: room };
   }
 
+  private normalizeMatchBroadcastData(
+    matchData: MatchBroadcastData,
+    tournamentId?: string | null,
+  ): MatchBroadcastData {
+    const participant1 = matchData.participant1;
+    const participant2 = matchData.participant2;
+    const getParticipantDivisionId = (participant: unknown) => {
+      if (!participant || typeof participant !== 'object') return null;
+      const value = (participant as { tournamentDivisionId?: unknown }).tournamentDivisionId;
+      return typeof value === 'string' && value.length > 0 ? value : null;
+    };
+    const divisionId =
+      (typeof matchData.divisionId === 'string' && matchData.divisionId.length > 0
+        ? matchData.divisionId
+        : null) ??
+      getParticipantDivisionId(participant1) ??
+      getParticipantDivisionId(participant2);
+
+    return {
+      ...matchData,
+      tournamentId: matchData.tournamentId ?? tournamentId ?? undefined,
+      divisionId,
+    };
+  }
+
   // Tối ưu hoá: Mã hóa 1 lần (Single JSON stringify) + Chống áp lực ngược (Volatile drop)
   broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
-    const rawPayload = JSON.stringify(matchData);
+    const rawPayload = JSON.stringify(this.normalizeMatchBroadcastData(matchData, tournamentId));
     this.server.to(`match:${matchId}`).emit('score:update', rawPayload);
     if (tournamentId) {
       this.server.to(`tournament:${tournamentId}`).emit('match:update', rawPayload);
@@ -276,7 +301,7 @@ export class LiveScoreGateway
 
   broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
-    const rawPayload = JSON.stringify(matchData);
+    const rawPayload = JSON.stringify(this.normalizeMatchBroadcastData(matchData, tournamentId));
     this.server.to(`match:${matchId}`).emit('match:status', rawPayload);
     if (tournamentId) {
       this.server.to(`tournament:${tournamentId}`).emit('match:update', rawPayload);

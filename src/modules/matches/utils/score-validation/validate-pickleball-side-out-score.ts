@@ -65,17 +65,19 @@ export function validatePickleballSideOutScoreDetails(
       throw new BadRequestException(`Game ${entry.key}: Không được phép hòa ${entry.scoreStr}.`);
     }
 
-    validatePickleballSideOutGameScore(
-      entry.key,
-      entry.scoreStr,
-      maxScore,
-      minScore,
-      diff,
-      resolvedConfig.pointsPerSet,
-      resolvedConfig.deuceEnabled,
-      resolvedConfig.tiebreakAt,
-      resolvedConfig.maxPoints,
-    );
+    if (!entry.isOverridden && resolvedConfig.mode !== 'LITE') {
+      validatePickleballSideOutGameScore(
+        entry.key,
+        entry.scoreStr,
+        maxScore,
+        minScore,
+        diff,
+        resolvedConfig.pointsPerSet,
+        resolvedConfig.deuceEnabled,
+        resolvedConfig.tiebreakAt,
+        resolvedConfig.maxPoints,
+      );
+    }
 
     if (winner === 'P1') {
       p1SetsWon += 1;

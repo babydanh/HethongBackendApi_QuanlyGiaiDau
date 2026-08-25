@@ -18,6 +18,7 @@ import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { LiveScoreGateway } from './live-score.gateway';
+import type { MatchBroadcastData } from './interfaces/match-broadcast.interface';
 import { RankingsService } from '../rankings/rankings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -144,6 +145,25 @@ export class MatchesService {
     return winnerId;
   }
 
+  private withBroadcastContext(
+    matchData: MatchBroadcastData,
+    existing: {
+      tournamentId?: string | null;
+      participant1?: { tournamentDivisionId?: string | null } | null;
+      participant2?: { tournamentDivisionId?: string | null } | null;
+    },
+  ): MatchBroadcastData {
+    return {
+      ...matchData,
+      tournamentId: existing.tournamentId ?? matchData.tournamentId,
+      divisionId:
+        existing.participant1?.tournamentDivisionId ??
+        existing.participant2?.tournamentDivisionId ??
+        matchData.divisionId ??
+        null,
+    };
+  }
+
   private async finalizeCompletedMatch(
     existing: Awaited<ReturnType<MatchesRepository['findById']>>,
     matchId: string,
@@ -242,12 +262,12 @@ export class MatchesService {
 
     this.liveScoreGateway.broadcastMatchStatus(
       matchId,
-      updatedMatch,
+      this.withBroadcastContext(updatedMatch, existing),
       existing.tournamentId,
     );
     this.liveScoreGateway.broadcastScoreUpdate(
       matchId,
-      updatedMatch,
+      this.withBroadcastContext(updatedMatch, existing),
       existing.tournamentId,
     );
 
@@ -313,6 +333,10 @@ export class MatchesService {
     }
 
     return resolveEffectiveSportRules({
+      tournamentConfig: match.tournament?.tournamentConfig as
+        | Record<string, unknown>
+        | null
+        | undefined,
       tournamentSportRules: match.tournament?.sportRules as
         | Record<string, unknown>
         | null
@@ -1075,7 +1099,7 @@ export class MatchesService {
     // Broadcast score real-time
     this.liveScoreGateway.broadcastScoreUpdate(
       id,
-      updatedMatch,
+      this.withBroadcastContext(updatedMatch, existing),
       existing.tournamentId,
     );
 
@@ -1317,7 +1341,7 @@ export class MatchesService {
       // Broadcast status real-time
       this.liveScoreGateway.broadcastMatchStatus(
         id,
-        updatedMatch,
+        this.withBroadcastContext(updatedMatch, existing),
         existing.tournamentId,
       );
 
@@ -1413,12 +1437,12 @@ export class MatchesService {
 
       this.liveScoreGateway.broadcastMatchStatus(
         id,
-        updated,
+        this.withBroadcastContext(updated, existing),
         existing.tournamentId,
       );
       this.liveScoreGateway.broadcastScoreUpdate(
         id,
-        updated,
+        this.withBroadcastContext(updated, existing),
         existing.tournamentId,
       );
       try {
@@ -1660,7 +1684,7 @@ export class MatchesService {
     if (updatedMatch) {
       this.liveScoreGateway.broadcastScoreUpdate(
         id,
-        updatedMatch,
+        this.withBroadcastContext(updatedMatch, existing),
         existing.tournamentId,
       );
     }

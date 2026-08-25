@@ -126,6 +126,17 @@ export class CommunitySocialRepository {
           bannerUrl: schema.tournaments.bannerUrl,
           maxParticipants: schema.tournaments.maxParticipants,
           inviteCode: schema.tournaments.inviteCode,
+          hasBracket: sql<boolean>`EXISTS (
+            SELECT 1
+            FROM ${schema.tournamentStages}
+            WHERE ${schema.tournamentStages.tournamentId} = ${schema.tournaments.id}
+              AND ${schema.tournamentStages.deletedAt} IS NULL
+          ) OR EXISTS (
+            SELECT 1
+            FROM ${schema.matches}
+            WHERE ${schema.matches.tournamentId} = ${schema.tournaments.id}
+              AND ${schema.matches.deletedAt} IS NULL
+          )`,
         },
         viewerReaction: viewerId
           ? sql<string | null>`(
@@ -443,6 +454,34 @@ export class CommunitySocialRepository {
     }
 
     return post;
+  }
+
+  async createTournamentBracketPost(
+    communityId: string,
+    authorId: string,
+    tournamentId: string,
+    tournamentName: string,
+    divisionName: string | null,
+    bracketKey: string,
+  ) {
+    const scopeLabel = divisionName ? ` (${divisionName})` : '';
+    const body = `🏁 Sơ đồ thi đấu${scopeLabel} của giải **${tournamentName}** đã được chốt. Xem toàn bộ bracket và lịch đấu tại đây.`;
+    const idempotencyKey = `tournament-bracket:${tournamentId}:${bracketKey}`.slice(0, 128);
+    const [post] = await this.db
+      .insert(schema.communityPosts)
+      .values({
+        communityId,
+        authorId,
+        tournamentId,
+        type: 'TOURNAMENT_BRACKET',
+        body,
+        mediaUrls: [],
+        status: 'PUBLISHED',
+        idempotencyKey,
+      })
+      .onConflictDoNothing()
+      .returning();
+    return post ?? null;
   }
 
   async createPoll(

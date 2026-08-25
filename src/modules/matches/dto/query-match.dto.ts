@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt, Min, IsUUID, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, IsUUID, IsBoolean, MaxLength } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
@@ -27,6 +27,16 @@ export class QueryMatchDto extends CursorPaginationDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @ApiPropertyOptional({
+    example: 'Nguyễn Văn A',
+    description: 'Tìm theo tên giải đấu hoặc tên đội/người tham gia',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 
   @ApiPropertyOptional({
     example: 'uuid-tournament',

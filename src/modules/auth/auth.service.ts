@@ -477,8 +477,18 @@ export class AuthService {
     const accessExpiresIn = this.configService.get<string>('auth.jwtAccessExpiresIn') || '15m';
     const refreshExpiresIn = this.configService.get<string>('auth.jwtRefreshExpiresIn') || '7d';
 
+        // Read the persisted profile name while issuing tokens. Registration already
+    // stores fullName in profiles, but the previous token response omitted it,
+    // leaving the Web auth store incomplete after normal password login.
+    const profileRowsPromise = this.db
+      .select({ fullName: schema.profiles.fullName })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
     // Safe cast: expiresIn string value is valid for JWT SignOptions
-    const [accessToken, newRefreshToken] = await Promise.all([
+    const [accessToken, newRefreshToken, profileRows] = await Promise.all([
+
       this.jwtService.signAsync(payload, {
         secret: this.configService.get<string>('auth.jwtAccessSecret')!,
         expiresIn: accessExpiresIn as unknown as never,
@@ -487,6 +497,7 @@ export class AuthService {
         secret: this.configService.get<string>('auth.jwtRefreshSecret')!,
         expiresIn: refreshExpiresIn as unknown as never,
       }),
+      profileRowsPromise,
     ]);
 
     // Calculate refresh token expiry date
@@ -514,8 +525,10 @@ export class AuthService {
         roles,
         // Client (web store) dựa vào đây để hiển thị trạng thái xác minh email.
         isEmailVerified: isEmailVerified ?? false,
+                fullName: profileRows[0]?.fullName ?? '',
       },
     };
+
   }
 
   async verifyGoogleIdToken(idToken: string): Promise<OAuthProfileDto> {

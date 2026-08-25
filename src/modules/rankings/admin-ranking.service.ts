@@ -898,7 +898,12 @@ export class AdminRankingService {
     const [category] = await tx
       .select({ id: schema.categories.id })
       .from(schema.categories)
-      .where(eq(schema.categories.id, dto.categoryId))
+      .where(
+        and(
+          eq(schema.categories.id, dto.categoryId),
+          sql`coalesce(${schema.categories.categoryConfig}->>'isActive', 'true') <> 'false'`,
+        ),
+      )
       .limit(1);
     if (!category) throw new NotFoundException('ELO_CATEGORY_NOT_FOUND');
   }
@@ -910,35 +915,55 @@ export class AdminRankingService {
     const genderCondition = dto.genderRestriction
       ? eq(schema.userRanks.genderRestriction, dto.genderRestriction)
       : isNull(schema.userRanks.genderRestriction);
+    const rankSelection = {
+      id: schema.userRanks.id,
+      userId: schema.userRanks.userId,
+      categoryId: schema.userRanks.categoryId,
+      matchType: schema.userRanks.matchType,
+      genderRestriction: schema.userRanks.genderRestriction,
+      eloPoints: schema.userRanks.eloPoints,
+      matchesPlayed: schema.userRanks.matchesPlayed,
+      matchesWon: schema.userRanks.matchesWon,
+      winStreak: schema.userRanks.winStreak,
+      peakElo: schema.userRanks.peakElo,
+      shieldActive: schema.userRanks.shieldActive,
+      adminLeaderboardEligible: schema.userRanks.adminLeaderboardEligible,
+      tierId: schema.userRanks.tierId,
+    };
+    const conditions = and(
+      eq(schema.userRanks.userId, dto.userId),
+      eq(schema.userRanks.categoryId, dto.categoryId),
+      eq(schema.userRanks.matchType, dto.matchType),
+      isNull(schema.userRanks.communityId),
+      genderCondition,
+    );
     const [rank] = await tx
-      .select({
-        id: schema.userRanks.id,
-        userId: schema.userRanks.userId,
-        categoryId: schema.userRanks.categoryId,
-        matchType: schema.userRanks.matchType,
-        genderRestriction: schema.userRanks.genderRestriction,
-        eloPoints: schema.userRanks.eloPoints,
-        matchesPlayed: schema.userRanks.matchesPlayed,
-        matchesWon: schema.userRanks.matchesWon,
-        winStreak: schema.userRanks.winStreak,
-        peakElo: schema.userRanks.peakElo,
-        shieldActive: schema.userRanks.shieldActive,
-        adminLeaderboardEligible: schema.userRanks.adminLeaderboardEligible,
-        tierId: schema.userRanks.tierId,
-      })
+      .select(rankSelection)
       .from(schema.userRanks)
-      .where(
-        and(
-          eq(schema.userRanks.userId, dto.userId),
-          eq(schema.userRanks.categoryId, dto.categoryId),
-          eq(schema.userRanks.matchType, dto.matchType),
-          isNull(schema.userRanks.communityId),
-          genderCondition,
-        ),
-      )
+      .where(conditions)
       .for('update')
       .limit(1);
-    return rank ?? null;
+    if (rank) return rank;
+
+    // ADD is the only operation allowed to create a missing PUBLIC singles context.
+    // The surrounding advisory lock and unique index make this idempotent per identity.
+    if (dto.operation !== 'ADD') return null;
+    const [created] = await tx
+      .insert(schema.userRanks)
+      .values({
+        userId: dto.userId,
+        categoryId: dto.categoryId,
+        matchType: dto.matchType,
+        genderRestriction: dto.genderRestriction ?? null,
+        eloPoints: 1000,
+        matchesPlayed: 0,
+        matchesWon: 0,
+        winStreak: 0,
+        peakElo: 1000,
+        adminLeaderboardEligible: false,
+      })
+      .returning(rankSelection);
+    return created ?? null;
   }
 
   private async findStatusForUpdate(

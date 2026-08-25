@@ -350,6 +350,13 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     Math.trunc(readNumber([effectiveTournamentRules], ['version']) ?? 1),
   );
 
+  const tournamentConfigObj = asRecord(input.tournamentConfig);
+  const mode = tournamentConfigObj?.mode === 'LITE'
+    ? 'LITE'
+    : scoringSources.some((s) => s?.mode === 'LITE' || s?.rulesPreset === 'LITE')
+      ? 'LITE'
+      : 'STRICT';
+
   return {
     version,
     kind,
@@ -365,5 +372,6 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     tiebreakAt,
     maxPoints,
     tiebreakPoints,
+    mode,
   };
 }

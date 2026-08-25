@@ -1,8 +1,21 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: qlgiaidau-postgres
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-your_password}
+      POSTGRES_DB: ${DB_DATABASE:-tournament_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: qlgiaidau-redis
     ports:
       - "6379:6379"
@@ -10,18 +23,7 @@ services:
       - redis_data:/data
     restart: always
 
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: qlgiaidau-backend
-    restart: always
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    depends_on:
-      - redis
-
 volumes:
+  postgres_data:
   redis_data:
+
