@@ -445,6 +445,7 @@ export class UsersRepository {
         avatarUrl: schema.profiles.avatarUrl,
         coverUrl: schema.profiles.coverUrl,
         gender: schema.profiles.gender,
+        dateOfBirth: schema.profiles.dateOfBirth,
         bio: schema.profiles.bio,
         isVerified: schema.profiles.isVerified,
         allowStrangerMessages: schema.profiles.allowStrangerMessages,
