@@ -1,6 +1,7 @@
 import type { SportRuleKind, SportScoringModel } from './sport-rule-kind.type';
 
 export interface SportRuleResolutionInput {
+  tournamentConfig?: Record<string, unknown> | null;
   tournamentSportRules?: Record<string, unknown> | null;
   categoryConfig?: Record<string, unknown> | null;
   categoryName?: string | null;
