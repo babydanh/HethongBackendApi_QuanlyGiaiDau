@@ -217,9 +217,12 @@ export class ChatRepository {
         continue;
       }
       const isFresh = new Date(room.updatedAt).getTime() >= new Date(existing.updatedAt).getTime();
+      const unreadCount = existing.id === room.id
+        ? Math.max(existing.unreadCount, room.unreadCount)
+        : existing.unreadCount + room.unreadCount;
       canonicalRooms.set(key, {
         ...(isFresh ? room : existing),
-        unreadCount: Math.max(existing.unreadCount, room.unreadCount),
+        unreadCount,
       });
     }
 
