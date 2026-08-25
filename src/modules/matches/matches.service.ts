@@ -333,6 +333,10 @@ export class MatchesService {
     }
 
     return resolveEffectiveSportRules({
+      tournamentConfig: match.tournament?.tournamentConfig as
+        | Record<string, unknown>
+        | null
+        | undefined,
       tournamentSportRules: match.tournament?.sportRules as
         | Record<string, unknown>
         | null
