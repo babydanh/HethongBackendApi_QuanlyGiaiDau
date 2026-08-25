@@ -380,14 +380,13 @@ export class ChatRepository {
         .limit(1);
       return row?.allow ?? true;
     } catch (error) {
-      // The privacy column was introduced by an operational migration. Keep the
-      // historical default (allow strangers) if an older deployment has not
-      // applied that migration yet, while leaving an actionable server log.
-      this.logger.warn(
-        `Falling back to allow stranger messages for ${userId}; apply the allow_stranger_messages migration.`,
+      // Privacy checks must fail closed. A schema/read failure must never turn
+      // a recipient who disabled stranger messages into an implicitly open inbox.
+      this.logger.error(
+        `Unable to read stranger-message privacy for ${userId}; denying stranger access. Apply the allow_stranger_messages migration.`,
         error instanceof Error ? error.message : String(error),
       );
-      return true;
+      return false;
     }
   }
 

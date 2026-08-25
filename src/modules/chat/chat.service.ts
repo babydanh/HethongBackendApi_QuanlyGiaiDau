@@ -132,7 +132,9 @@ export class ChatService {
       }
       await this.assertCanDirectMessage(userId, otherUserId);
       const room = await this.chatRepository.getOrCreateDirectRoom(userId, otherUserId);
-      return (await this.chatRepository.getUserRoomById(userId, room.id)) ?? room;
+      const requesterRoom = (await this.chatRepository.getUserRoomById(userId, room.id)) ?? room;
+      this.chatGateway.notifyDirectRoomCreated(otherUserId, room.id);
+      return requesterRoom;
     }
 
     return this.chatRepository.createRoomWithMembers({ ...data, memberIds });

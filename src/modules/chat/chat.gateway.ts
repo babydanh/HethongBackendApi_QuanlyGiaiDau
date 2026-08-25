@@ -230,6 +230,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`chat:${roomId}`).emit('chat:message', message);
   }
 
+  /** Notify an online recipient that a direct room is now available. */
+  notifyDirectRoomCreated(userId: string, roomId: string) {
+    const socketIds = ChatGateway.onlineUsers.get(userId);
+    if (!socketIds) return;
+    for (const socketId of socketIds) {
+      this.server.to(socketId).emit('chat:room:created', { roomId });
+    }
+  }
+
   /** P2D.1 — Sự kiện riêng cho kênh chat CLUB (payload kèm senderTags). */
   broadcastClubMessage(roomId: string, message: ChatMessagePayload) {
     this.server.to(`chat:${roomId}`).emit('chat:club:message', message);

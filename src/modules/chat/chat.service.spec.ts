@@ -12,6 +12,7 @@ function createService(repository: Record<string, jest.Mock>) {
     broadcastMessage: jest.fn(),
     broadcastMessagePinned: jest.fn(),
     broadcastMessageReaction: jest.fn(),
+    notifyDirectRoomCreated: jest.fn(),
   };
   const firebase = { sendPushToUsers: jest.fn() };
   return {
@@ -49,6 +50,21 @@ describe('ChatService authorization regressions', () => {
     expect(repository.getOrCreateDirectRoom).toHaveBeenCalledTimes(2);
     expect(repository.getOrCreateDirectRoom).toHaveBeenNthCalledWith(1, 'user-a', 'user-b');
     expect(repository.getOrCreateDirectRoom).toHaveBeenNthCalledWith(2, 'user-b', 'user-a');
+  });
+
+  it('denies a stranger when the recipient disabled stranger messages', async () => {
+    const repository = {
+      isActiveUser: jest.fn().mockResolvedValue(true),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+      getAllowStrangerMessages: jest.fn().mockResolvedValue(false),
+      isAcquainted: jest.fn().mockResolvedValue(false),
+    };
+    const { service } = createService(repository);
+
+    await expect(service.createRoom('user-a', {
+      type: RoomType.DIRECT,
+      memberIds: ['user-b'],
+    })).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('rejects pinning a DIRECT message by a non-member', async () => {
