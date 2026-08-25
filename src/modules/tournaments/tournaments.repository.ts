@@ -404,6 +404,8 @@ export class TournamentsRepository {
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
               ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+              ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
             ),
           );
 
@@ -443,6 +445,8 @@ export class TournamentsRepository {
                   ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
                   ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
                   ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                  ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+                  ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
                 ),
               );
             const division = {
@@ -575,6 +579,8 @@ export class TournamentsRepository {
           ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
           ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
           ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+          ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
         ),
       );
 
@@ -708,6 +714,8 @@ export class TournamentsRepository {
               ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
               ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
               ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+              ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
             ),
           );
 
@@ -7162,6 +7170,8 @@ export class TournamentsRepository {
                 ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
                 ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
                 ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+                ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+                ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
               ),
             );
 
