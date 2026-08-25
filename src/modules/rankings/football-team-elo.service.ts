@@ -98,10 +98,10 @@ export class FootballTeamEloService {
   ): Promise<{ handled: boolean; alreadyProcessed?: boolean }> {
     const [match] = await this.db
       .select({
-      participant1Id: schema.matches.participant1Id,
-      participant2Id: schema.matches.participant2Id,
-      status: schema.matches.status,
-      winnerId: schema.matches.winnerId,
+        participant1Id: schema.matches.participant1Id,
+        participant2Id: schema.matches.participant2Id,
+        status: schema.matches.status,
+        winnerId: schema.matches.winnerId,
         scoreDetails: schema.matches.scoreDetails,
         tournamentId: schema.matches.tournamentId,
       })
@@ -115,6 +115,7 @@ export class FootballTeamEloService {
       .select({
         id: schema.tournamentParticipants.id,
         footballTeamId: schema.tournamentParticipants.footballTeamId,
+        participantIsMock: schema.tournamentParticipants.isMock,
       })
       .from(schema.tournamentParticipants)
       .where(
@@ -125,6 +126,31 @@ export class FootballTeamEloService {
       );
     const p1 = participants.find((p) => p.id === match.participant1Id);
     const p2 = participants.find((p) => p.id === match.participant2Id);
+
+    // Keep football-team Elo consistent with individual/pair Elo: demo/mock
+    // users and mock tournament participants must never create ranking events.
+    const mockRosterUsers = participants.length
+      ? await this.db
+          .select({ userIsMock: schema.users.isMock })
+          .from(schema.tournamentRosters)
+          .innerJoin(
+            schema.users,
+            eq(schema.tournamentRosters.userId, schema.users.id),
+          )
+          .where(
+            inArray(
+              schema.tournamentRosters.participantId,
+              participants.map((participant) => participant.id),
+            ),
+          )
+      : [];
+    if (
+      participants.some((participant) => participant.participantIsMock) ||
+      mockRosterUsers.some((roster) => roster.userIsMock)
+    ) {
+      return { handled: true };
+    }
+
     if (
       match.winnerId &&
       match.winnerId !== match.participant1Id &&
