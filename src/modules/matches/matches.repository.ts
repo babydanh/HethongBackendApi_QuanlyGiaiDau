@@ -4,7 +4,6 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -373,6 +372,24 @@ export class MatchesRepository {
       // form. Keep mock matches available to tournament/organizer queries, but
       // exclude a user-scoped match when either participant or roster contains
       // a mock identity.
+      // A player history must contain real playable matches only. BYE and
+      // bracket placeholders are fixtures, not matches the player played.
+      conditions.push(eq(schema.matches.isBye, false));
+      conditions.push(sql`NOT EXISTS (
+        SELECT 1
+        FROM ${schema.tournamentParticipants} placeholder_participant
+        WHERE placeholder_participant.id IN (
+          ${schema.matches.participant1Id},
+          ${schema.matches.participant2Id}
+        )
+        AND lower(trim(placeholder_participant.team_name)) IN (
+          'tbd',
+          'chờ xác định',
+          'chua xac dinh',
+          'đang chờ',
+          'dang cho'
+        )
+      )`);
       conditions.push(sql`NOT EXISTS (
         SELECT 1
         FROM ${schema.tournamentParticipants} mock_participant
