@@ -7404,7 +7404,7 @@ export class TournamentsRepository {
               maxParticipants: dto.maxParticipants,
             }),
             ...(dto.entryFee !== undefined && {
-              entryFee: dto.entryFee.toString(),
+              entryFee: dto.entryFee != null ? dto.entryFee.toString() : '0',
             }),
             ...(dto.status && { status: dto.status }),
             ...(dto.isConfigOverride !== undefined && {
