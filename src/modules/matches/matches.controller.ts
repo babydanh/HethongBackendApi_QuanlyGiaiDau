@@ -70,6 +70,7 @@ export class MatchesController {
   }
 
   @Patch(':id/score')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
@@ -82,6 +83,7 @@ export class MatchesController {
   }
 
   @Patch(':id/status')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({
@@ -96,6 +98,7 @@ export class MatchesController {
   }
 
   @Patch(':id/schedule')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật lịch thi đấu, sân đấu và trọng tài' })
@@ -108,6 +111,7 @@ export class MatchesController {
   }
 
   @Patch(':id/operation')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
@@ -120,21 +124,10 @@ export class MatchesController {
   }
 
   @Patch(':id/assign-referee')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Phân công trọng tài cho trận đấu' })
-  async assignReferee(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { refereeId: string },
-    @CurrentUser() user: JwtPayload,
-  ) {
-    return await this.matchesService.assignReferee(id, body.refereeId, user);
-  }
-
-  @Post(':id/mute-user')
-  @ApiBearerAuth()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Mute/block người dùng trong trận đấu' })
   async muteUser(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { userId: string; type: 'MUTE' | 'BAN'; reason?: string },

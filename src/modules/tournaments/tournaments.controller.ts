@@ -42,6 +42,8 @@ import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/constants/enums';
 import { Public } from '../../common/decorators/public.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -118,6 +120,7 @@ export class TournamentsController {
   }
 
   @Post('parent')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo giải đấu cha (chuỗi giải đấu / nhiều thể loại)' })
@@ -154,6 +157,7 @@ export class TournamentsController {
   }
 
   @Patch('parent/:id')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật thông tin giải đấu cha' })
@@ -166,6 +170,7 @@ export class TournamentsController {
   }
 
   @Delete('parent/:id')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa giải đấu cha' })
@@ -184,6 +189,7 @@ export class TournamentsController {
   }
 
   @Post(':id/divisions')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo bảng/nội dung thi đấu cho giải' })
@@ -196,6 +202,7 @@ export class TournamentsController {
   }
 
   @Patch('divisions/:divisionId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật bảng/nội dung thi đấu' })
@@ -208,6 +215,7 @@ export class TournamentsController {
   }
 
   @Patch(':id/divisions/:divisionId/config')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Bật/tắt và cập nhật cấu hình riêng của hình thức thi đấu' })
@@ -231,6 +239,7 @@ export class TournamentsController {
   }
 
   @Delete('divisions/:divisionId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa bảng/nội dung thi đấu' })
@@ -327,6 +336,7 @@ export class TournamentsController {
   }
 
   @Post()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo giải đấu mới (hỗ trợ cả Web và App)' })
@@ -345,6 +355,7 @@ export class TournamentsController {
   }
 
   @Post('lite')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo giải đấu nhanh trong CLB (Lite) — chỉ cần sport slug, không cần categoryId UUID' })
   async createLite(
@@ -410,6 +421,7 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ghép cặp 2 participant thủ công (Lite doubles)' })
   async pairLiteParticipants(
@@ -421,6 +433,7 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs/generate')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tự động ghép cặp (RANDOM hoặc ELO_BALANCED) cho Lite doubles' })
   async generateLitePairs(
@@ -432,6 +445,7 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs/:participantId/unpair')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tách cặp participant đã ghép (Lite doubles)' })
   async unpairLiteParticipant(
@@ -443,6 +457,7 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/bracket')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo hoặc lưu bracket cho giải Lite' })
   async generateLiteBracket(
@@ -459,6 +474,7 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/bracket/reset')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reset bracket Lite trước khi có trận bắt đầu' })
   async resetLiteBracket(
@@ -476,6 +492,7 @@ export class TournamentsController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật giải đấu' })
@@ -488,6 +505,7 @@ export class TournamentsController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa giải đấu (Soft Delete)' })
@@ -501,6 +519,7 @@ export class TournamentsController {
 
 
   @Post(':id/generate-bracket')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Sinh nhánh đấu tự động (Bracket Generation)' })
@@ -521,7 +540,8 @@ export class TournamentsController {
     );
   }
 
-    @Patch(':id/divisions/:divisionId/bracket/slots')
+  @Patch(':id/divisions/:divisionId/bracket/slots')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật participant trong các slot bracket' })
@@ -541,7 +561,7 @@ export class TournamentsController {
   }
 
   @Post(':id/publish')
-
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Công bố giải đấu từ DRAFT -> REGISTRATION_OPEN' })
@@ -582,6 +602,7 @@ export class TournamentsController {
   }
 
   @Patch(':id/seeds')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật hạt giống hàng loạt cho các đội/VĐV' })
@@ -594,6 +615,7 @@ export class TournamentsController {
   }
 
   @Post(':id/lock')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Chốt danh sách VĐV, tính phí sàn và sinh bracket' })
@@ -605,6 +627,7 @@ export class TournamentsController {
   }
 
   @Post(':id/confirm-roster')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Chốt danh sách hiện tại, không tự tạo bracket' })
@@ -689,6 +712,7 @@ export class TournamentsController {
   }
 
   @Post(':id/regenerate-invite')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo lại mã mời mới' })
@@ -700,6 +724,7 @@ export class TournamentsController {
   }
 
   @Post(':id/reopen-registration')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Mở lại đăng ký có kiểm soát trước khi tạo sơ đồ' })
@@ -720,6 +745,7 @@ export class TournamentsController {
   }
 
   @Post(':id/gallery')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Thêm ảnh mới vào gallery' })
@@ -732,6 +758,7 @@ export class TournamentsController {
   }
 
   @Delete(':id/gallery/:index')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa ảnh khỏi gallery theo index' })
@@ -754,6 +781,7 @@ export class TournamentsController {
   }
 
   @Get(':id/manage/participants')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách participant đầy đủ cho BTC' })
   async findParticipantsForOrganizer(
@@ -765,6 +793,7 @@ export class TournamentsController {
   }
 
   @Get(':id/referees')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách trọng tài của giải đấu' })
   async findReferees(
@@ -775,6 +804,7 @@ export class TournamentsController {
   }
 
   @Post(':id/referees')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Mời trọng tài tham gia giải đấu bằng Email/Gmail' })
@@ -801,6 +831,7 @@ export class TournamentsController {
   }
 
   @Delete(':id/referees/:refereeId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'BTC thu hồi lời mời trọng tài đang chờ phản hồi' })
@@ -829,6 +860,7 @@ export class TournamentsController {
   }
 
   @Patch('stages/:id')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật cấu hình vòng đấu (Stage)' })
@@ -841,6 +873,7 @@ export class TournamentsController {
   }
 
   @Patch('groups/:id')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật cấu hình luật cho một bảng đấu' })
@@ -853,6 +886,7 @@ export class TournamentsController {
   }
 
   @Post(':id/mock-participants')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Sinh danh sách VĐV giả lập để test' })
@@ -897,6 +931,7 @@ export class TournamentsController {
   }
 
   @Post(':id/import-participants')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Nhập danh sách VĐV từ Google Form / Excel' })
@@ -914,6 +949,7 @@ export class TournamentsController {
   }
 
   @Delete(':id/mock-participants')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa toàn bộ VĐV giả lập' })
@@ -926,6 +962,7 @@ export class TournamentsController {
   }
 
   @Delete(':id/participants/:participantId/mock')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa một participant giả lập' })
@@ -938,6 +975,7 @@ export class TournamentsController {
   }
 
   @Patch(':id/participants/:participantId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Duyệt hoặc từ chối vận động viên đăng ký' })
@@ -951,6 +989,7 @@ export class TournamentsController {
   }
 
   @Post(':id/participants/:participantId/lock-roster')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Khóa roster đội trước khi lập sơ đồ thi đấu' })
@@ -968,6 +1007,7 @@ export class TournamentsController {
   }
 
   @Post(':id/participants/:participantId/unlock-roster')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Mở khóa roster đội trước khi giải bắt đầu' })
@@ -1034,6 +1074,7 @@ export class TournamentsController {
   }
 
   @Post(':id/reserve-slots')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Gán trực tiếp người chơi vào slot giữ chỗ (Wildcard)' })
@@ -1057,6 +1098,7 @@ export class TournamentsController {
   }
 
   @Post(':id/participants/:participantId/kick')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Kick vận động viên/đội thi đấu khỏi giải và hoàn tiền' })
@@ -1070,6 +1112,7 @@ export class TournamentsController {
   }
 
   @Get(':id/ops-audit-logs')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy nhật ký vận hành cho organizer ops panel' })
   async getOpsAuditLogs(
@@ -1081,6 +1124,7 @@ export class TournamentsController {
   }
 
   @Post(':id/cancel')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Hủy giải đấu / nội dung thi đấu và hoàn tiền cho mọi người' })
@@ -1092,6 +1136,7 @@ export class TournamentsController {
   }
 
   @Post(':id/playoff')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tao tran Play-off cho Round Robin' })
@@ -1108,6 +1153,7 @@ export class TournamentsController {
   }
 
   @Post(':id/stages/:stageId/finalize')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ket thuc som stage (cancel cac tran con lai)' })
@@ -1120,6 +1166,7 @@ export class TournamentsController {
   }
 
   @Post(':id/auto-seed')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tự động xếp hạt giống theo ELO' })
@@ -1132,6 +1179,7 @@ export class TournamentsController {
   }
 
   @Post(':id/advance-standings')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Chot vong bang va chuyen tiep sang vong loai truc tiep' })
@@ -1172,6 +1220,7 @@ export class TournamentsController {
   }
 
   @Post(':id/staff')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Them nhan su (CO_ORGANIZER, REFEREE, SPECTATOR)' })
@@ -1184,6 +1233,7 @@ export class TournamentsController {
   }
 
   @Delete(':id/staff/:userId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xoa nhan su khoi giai' })
