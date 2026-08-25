@@ -78,6 +78,15 @@ export class ChatController {
     return this.chatService.sendMessage(user.sub, createMessageDto);
   }
 
+  @Get('rooms/:id')
+  @ApiOperation({ summary: 'Lấy thông tin phòng chat và thành viên' })
+  async getRoomDetails(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.chatService.getRoomDetails(user.sub, id);
+  }
+
   @Get('rooms/:id/messages')
   @ApiOperation({ summary: 'Lấy lịch sử tin nhắn của một phòng' })
   async getMessages(
