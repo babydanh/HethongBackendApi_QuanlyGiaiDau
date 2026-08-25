@@ -197,6 +197,32 @@ export class TournamentsRepository {
     );
   }
 
+  private async findCompletedParticipantPaymentInTx(
+    tx: Transaction | AppDbOrTx,
+    tournamentId: string,
+    participantId: string,
+  ) {
+    const [payment] = await tx
+      .select({
+        id: schema.payments.id,
+        amount: schema.payments.amount,
+        refundStatus: schema.payments.refundStatus,
+                refundableAmount: sql<string>`GREATEST(${schema.payments.amount} - COALESCE(${schema.payments.refundedAmount}, 0), 0)`,
+
+      })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.tournamentId, tournamentId),
+          eq(schema.payments.participantId, participantId),
+          eq(schema.payments.status, PaymentStatus.COMPLETED),
+        ),
+      )
+      .orderBy(desc(schema.payments.paidAt), desc(schema.payments.createdAt))
+      .limit(1);
+    return payment ?? null;
+  }
+
   async findAll(
     query: QueryTournamentDto,
     options?: {
@@ -806,7 +832,10 @@ export class TournamentsRepository {
       const feeRuleConfig = new Map(
         feeRuleConfigRows.map((config) => [config.key, config.value]),
       );
-      const parseNonNegativeInteger = (value: string | undefined, fallback: number) => {
+      const parseNonNegativeInteger = (
+        value: string | undefined,
+        fallback: number,
+      ) => {
         const parsed = Number(value ?? fallback);
         return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
       };
@@ -994,11 +1023,16 @@ export class TournamentsRepository {
               ),
             );
           const totalCollected = parseFloat(resultPayments.totalCollected);
-          const platformFeeRetained = parseFloat(resultPayments.platformFeeRetained);
+          const platformFeeRetained = parseFloat(
+            resultPayments.platformFeeRetained,
+          );
           const amountRequested = totalCollected - platformFeeRetained;
 
-          if (totalCollected > 0 && platformFeeRetained >= 0 && amountRequested >= 0) {
-
+          if (
+            totalCollected > 0 &&
+            platformFeeRetained >= 0 &&
+            amountRequested >= 0
+          ) {
             if (amountRequested > 0) {
               const [resultCount] = await tx
                 .select({ count: count() })
@@ -1216,7 +1250,9 @@ export class TournamentsRepository {
     return result?.count || 0;
   }
 
-  async sumCompletedRegistrationPlatformFees(tournamentId: string): Promise<number> {
+  async sumCompletedRegistrationPlatformFees(
+    tournamentId: string,
+  ): Promise<number> {
     const [result] = await this.db
       .select({
         total: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`,
@@ -2219,6 +2255,7 @@ export class TournamentsRepository {
           rankingConsent: data.rankingConsent === true,
           customResponses: data.customResponses ?? null,
           isPaid,
+          entryFeeAtRegistration: payableEntryFeeAmount.toFixed(2),
           // Keep the invite token even when a known partner was selected so the
           // invited account can confirm through the same join URL/QR flow.
           teamInviteToken,
@@ -2419,7 +2456,10 @@ export class TournamentsRepository {
         );
       }
 
-      if (participant.partnerUserId && participant.partnerUserId !== partnerUserId) {
+      if (
+        participant.partnerUserId &&
+        participant.partnerUserId !== partnerUserId
+      ) {
         throw new BadRequestException(
           'Chỉ đúng tài khoản đồng đội được mời mới có thể xác nhận lời mời này.',
         );
@@ -2574,7 +2614,10 @@ export class TournamentsRepository {
           'Lời mời ghép đôi không tồn tại hoặc đã bị hủy.',
         );
       }
-      if (participant.partnerUserId && participant.partnerUserId !== partnerUserId) {
+      if (
+        participant.partnerUserId &&
+        participant.partnerUserId !== partnerUserId
+      ) {
         throw new BadRequestException(
           'Chỉ đúng tài khoản đồng đội được mời mới có thể từ chối lời mời này.',
         );
@@ -2905,9 +2948,13 @@ export class TournamentsRepository {
       // 6. Cập nhật trạng thái đội hoàn tất:
       // - OPEN => COMPLETE
       // - APPROVAL => PENDING_APPROVAL
-      const entryFeeAmount = division?.entryFee
-        ? parseFloat(division.entryFee)
-        : parseFloat(tournament.entryFee || '0');
+      const entryFeeAmount =
+        participant.entryFeeAtRegistration !== null &&
+        participant.entryFeeAtRegistration !== undefined
+          ? Number(participant.entryFeeAtRegistration)
+          : division?.entryFee
+            ? parseFloat(division.entryFee)
+            : parseFloat(tournament.entryFee || '0');
       const isPaid = entryFeeAmount === 0;
 
       const tCfg = (tournament.tournamentConfig || {}) as Record<
@@ -3038,23 +3085,26 @@ export class TournamentsRepository {
         bankData?.bankAccountNumber || profile?.bankAccountNumber;
       const finalBankAccountName =
         bankData?.bankAccountName || profile?.bankAccountName;
-      const entryFeeAmount = await this.resolveDivisionEntryFee(
+      const completedPayment = await this.findCompletedParticipantPaymentInTx(
         tx,
-        tournament,
-        oldParticipant.tournamentDivisionId,
+        tournamentId,
+        participantId,
+      );
+      const hasRefundableCapturedPayment = Boolean(
+        completedPayment &&
+        Number(completedPayment.refundableAmount) > 0 &&
+        completedPayment.refundStatus !== 'REFUNDED',
       );
 
-      if (oldParticipant.isPaid) {
-        if (entryFeeAmount > 0) {
-          if (
-            !finalBankName?.trim() ||
-            !finalBankAccountNumber?.trim() ||
-            !finalBankAccountName?.trim()
-          ) {
-            throw new BadRequestException(
-              'Vui lòng nhập đầy đủ thông tin tài khoản ngân hàng để nhận lại tiền hoàn lệ phí.',
-            );
-          }
+      if (hasRefundableCapturedPayment) {
+        if (
+          !finalBankName?.trim() ||
+          !finalBankAccountNumber?.trim() ||
+          !finalBankAccountName?.trim()
+        ) {
+          throw new BadRequestException(
+            'Vui lòng nhập đầy đủ thông tin tài khoản ngân hàng để nhận lại tiền hoàn lệ phí.',
+          );
         }
       }
 
@@ -3074,27 +3124,20 @@ export class TournamentsRepository {
 
       // 4. Nếu đã thanh toán, thực hiện hoàn tiền (chuyển sang trạng thái PENDING_REFUND và lưu thông tin bank)
       let refundAmount: string | null = null;
-      if (oldParticipant.isPaid) {
-        if (entryFeeAmount > 0) {
-          // Cập nhật trạng thái hoàn tiền trên bản ghi payment gốc
-          await tx
-            .update(schema.payments)
-            .set({
-              refundStatus: 'PENDING_REFUND',
-              refundedAmount: '0.00',
-              refundBankName: finalBankName,
-              refundAccountNumber: finalBankAccountNumber,
-              refundAccountName: finalBankAccountName,
-            })
-            .where(
-              and(
-                eq(schema.payments.tournamentId, tournamentId),
-                eq(schema.payments.participantId, participantId),
-                eq(schema.payments.status, 'COMPLETED'),
-              ),
-            );
-          refundAmount = entryFeeAmount.toString();
-        }
+      if (hasRefundableCapturedPayment && completedPayment) {
+        // Refund is anchored to the immutable captured payment amount. A later
+        // division fee change must never rewrite this fact.
+        await tx
+          .update(schema.payments)
+          .set({
+            refundStatus: 'PENDING_REFUND',
+            refundBankName: finalBankName,
+            refundAccountNumber: finalBankAccountNumber,
+            refundAccountName: finalBankAccountName,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.payments.id, completedPayment.id));
+        refundAmount = completedPayment.amount;
       }
 
       await this.auditService.logUpdate(
@@ -3170,30 +3213,23 @@ export class TournamentsRepository {
         'PARTICIPANT_KICKED',
       );
 
-      // 4. Hoàn tiền nếu đã nộp lệ phí
+      // 4. Hoàn tiền theo payment COMPLETED đã capture, không theo fee hiện tại
       let refundAmount: string | null = null;
-      if (participant.isPaid) {
-        const entryFeeAmount = await this.resolveDivisionEntryFee(
-          tx,
-          tournament,
-          participant.tournamentDivisionId,
-        );
-        if (entryFeeAmount > 0) {
-          await tx
-            .update(schema.payments)
-            .set({
-              refundStatus: 'PENDING_REFUND',
-              refundedAmount: '0.00',
-            })
-            .where(
-              and(
-                eq(schema.payments.tournamentId, tournamentId),
-                eq(schema.payments.participantId, participantId),
-                eq(schema.payments.status, 'COMPLETED'),
-              ),
-            );
-          refundAmount = entryFeeAmount.toString();
-        }
+      const completedPayment = await this.findCompletedParticipantPaymentInTx(
+        tx,
+        tournamentId,
+        participantId,
+      );
+      if (
+        completedPayment &&
+        Number(completedPayment.refundableAmount) > 0 &&
+        completedPayment.refundStatus !== 'REFUNDED'
+      ) {
+        await tx
+          .update(schema.payments)
+          .set({ refundStatus: 'PENDING_REFUND', updatedAt: new Date() })
+          .where(eq(schema.payments.id, completedPayment.id));
+        refundAmount = completedPayment.refundableAmount;
       }
 
       // 5. Xử lý Walkover/BYE trong sơ đồ thi đấu
@@ -5301,6 +5337,7 @@ export class TournamentsRepository {
               registeredBy: user1.id,
               teamName,
               isPaid: true,
+              entryFeeAtRegistration: '0.00',
               teamInviteToken: null,
               teamStatus: 'COMPLETE',
               isMock: true,
@@ -5653,7 +5690,11 @@ export class TournamentsRepository {
       }
 
       const [highestSeed] = await tx
-        .select({ maxSeed: sql<number | null>`max(${schema.tournamentParticipants.seed})` })
+        .select({
+          maxSeed: sql<
+            number | null
+          >`max(${schema.tournamentParticipants.seed})`,
+        })
         .from(schema.tournamentParticipants)
         .where(
           and(
@@ -6479,6 +6520,9 @@ export class TournamentsRepository {
           registeredBy: userId,
           teamName: teamName || 'Đội khách mời',
           isPaid: true,
+          entryFeeAtRegistration: (
+            await this.resolveDivisionEntryFee(tx, tournament, divisionId)
+          ).toFixed(2),
           isWildcard: true,
           teamStatus,
         })
@@ -6587,28 +6631,22 @@ export class TournamentsRepository {
           'TOURNAMENT_CANCELLED',
         );
 
-        if (participant.isPaid) {
-          const entryFeeAmount = await this.resolveDivisionEntryFee(
-            tx,
-            updatedTournament,
-            participant.tournamentDivisionId,
-          );
-          if (entryFeeAmount > 0) {
-            await tx
-              .update(schema.payments)
-              .set({
-                refundStatus: 'PENDING_REFUND',
-                refundedAmount: '0.00',
-              })
-              .where(
-                and(
-                  eq(schema.payments.tournamentId, tournamentId),
-                  eq(schema.payments.participantId, participant.id),
-                  eq(schema.payments.status, 'COMPLETED'),
-                ),
-              );
-          }
+                const completedPayment = await this.findCompletedParticipantPaymentInTx(
+          tx,
+          tournamentId,
+          participant.id,
+        );
+        if (
+          completedPayment &&
+          Number(completedPayment.refundableAmount) > 0 &&
+          completedPayment.refundStatus !== 'REFUNDED'
+        ) {
+          await tx
+            .update(schema.payments)
+            .set({ refundStatus: 'PENDING_REFUND', updatedAt: new Date() })
+            .where(eq(schema.payments.id, completedPayment.id));
         }
+
       }
 
       // 4. Cancel all active matches
@@ -6772,25 +6810,20 @@ export class TournamentsRepository {
             'REGISTRATION_CANCELLED_TOURNAMENT_FULL',
           );
 
-          const entryFeeAmount = await this.resolveDivisionEntryFee(
+          const completedPayment = await this.findCompletedParticipantPaymentInTx(
             tx,
-            tournament,
-            p.tournamentDivisionId,
+            tournamentId,
+            p.id,
           );
-          if (entryFeeAmount > 0 && p.isPaid) {
+          if (
+            completedPayment &&
+            Number(completedPayment.refundableAmount) > 0 &&
+            completedPayment.refundStatus !== 'REFUNDED'
+          ) {
             await tx
               .update(schema.payments)
-              .set({
-                refundStatus: 'PENDING_REFUND',
-                refundedAmount: '0.00',
-              })
-              .where(
-                and(
-                  eq(schema.payments.tournamentId, tournamentId),
-                  eq(schema.payments.participantId, p.id),
-                  eq(schema.payments.status, 'COMPLETED'),
-                ),
-              );
+              .set({ refundStatus: 'PENDING_REFUND', updatedAt: new Date() })
+              .where(eq(schema.payments.id, completedPayment.id));
           }
 
           canceledLeaders.push({
@@ -6854,25 +6887,23 @@ export class TournamentsRepository {
           'PARTNER_JOIN_TIMEOUT',
         );
 
-        const entryFeeAmount = await this.resolveDivisionEntryFee(
+        const completedPayment = await this.findCompletedParticipantPaymentInTx(
           tx,
-          tournament,
-          participant.tournamentDivisionId,
+          tournament.id,
+          participant.id,
         );
-        if (entryFeeAmount > 0 && participant.isPaid) {
+        if (
+          completedPayment &&
+          Number(completedPayment.refundableAmount) > 0 &&
+          completedPayment.refundStatus !== 'REFUNDED'
+        ) {
           await tx
             .update(schema.payments)
             .set({
               refundStatus: 'PENDING_REFUND',
-              refundedAmount: '0.00',
+              updatedAt: new Date(),
             })
-            .where(
-              and(
-                eq(schema.payments.tournamentId, tournament.id),
-                eq(schema.payments.participantId, participant.id),
-                eq(schema.payments.status, 'COMPLETED'),
-              ),
-            );
+            .where(eq(schema.payments.id, completedPayment.id));
         }
 
         results.push({
@@ -6944,11 +6975,16 @@ export class TournamentsRepository {
 
       const matchType = division?.matchType ?? tournament?.matchType ?? null;
       const isDoubles = this.isDoublesMatchType(matchType);
-      const entryFeeAmount = await this.resolveDivisionEntryFee(
-        tx,
-        { entryFee: tournament?.entryFee ?? null },
-        nextWaitlisted.tournamentDivisionId,
-      );
+            const entryFeeAmount =
+        nextWaitlisted.entryFeeAtRegistration !== null &&
+        nextWaitlisted.entryFeeAtRegistration !== undefined
+          ? Number(nextWaitlisted.entryFeeAtRegistration)
+          : await this.resolveDivisionEntryFee(
+              tx,
+              { entryFee: tournament?.entryFee ?? null },
+              nextWaitlisted.tournamentDivisionId,
+            );
+
       const promotionConfig = (tournament?.tournamentConfig || {}) as Record<
         string,
         unknown
@@ -6970,7 +7006,8 @@ export class TournamentsRepository {
         .update(schema.tournamentParticipants)
         .set({
           teamStatus: promotedStatus,
-          isPaid: nextWaitlisted.isPaid || entryFeeAmount === 0,
+                    isPaid: nextWaitlisted.isPaid || entryFeeAmount === 0,
+
         })
         .where(eq(schema.tournamentParticipants.id, nextWaitlisted.id))
         .returning();
@@ -7316,13 +7353,29 @@ export class TournamentsRepository {
 
         const [tournamentRecord] = await tx
           .select({
+            status: schema.tournaments.status,
+            isRegistrationLocked: schema.tournaments.isRegistrationLocked,
             matchType: schema.tournaments.matchType,
             genderRestriction: schema.tournaments.genderRestriction,
             tournamentConfig: schema.tournaments.tournamentConfig,
           })
           .from(schema.tournaments)
           .where(eq(schema.tournaments.id, oldRecord.tournamentId))
+          .for('update')
           .limit(1);
+
+        if (
+          dto.entryFee !== undefined &&
+          (!tournamentRecord ||
+            !['DRAFT', 'UPCOMING', 'REGISTRATION_OPEN'].includes(
+              tournamentRecord.status,
+            ) ||
+            tournamentRecord.isRegistrationLocked)
+        ) {
+          throw new BadRequestException(
+            'Chỉ được thay đổi lệ phí khi giải còn nháp hoặc đang trong thời gian đăng ký mở.',
+          );
+        }
 
         const [divisionCount] = await tx
           .select({ value: count() })
@@ -8937,6 +8990,9 @@ export class TournamentsRepository {
             registeredBy: user1Id || managerUserId,
             teamName: teamName || 'Đội đăng ký',
             isPaid: item.isPaid ?? true,
+            entryFeeAtRegistration: (
+              await this.resolveDivisionEntryFee(tx, tournament, divisionId)
+            ).toFixed(2),
             teamStatus,
             partnerUserId: user2Id || null,
             seed: item.elo ? Math.round(item.elo) : null,
@@ -8967,7 +9023,9 @@ export class TournamentsRepository {
           });
         }
 
-        for (const linkedUserId of new Set([user1Id, user2Id].filter((value): value is string => Boolean(value)))) {
+        for (const linkedUserId of new Set(
+          [user1Id, user2Id].filter((value): value is string => Boolean(value)),
+        )) {
           linkedAccountNotifications.push({
             userId: linkedUserId,
             status: teamStatus,

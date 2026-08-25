@@ -69,13 +69,33 @@ export class PaymentsRepository {
     return record ?? null;
   }
 
+  async findCompletedParticipantPayment(participantId: string) {
+    const [payment] = await this.db
+      .select()
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.participantId, participantId),
+          eq(schema.payments.status, 'COMPLETED'),
+        ),
+      )
+      .orderBy(desc(schema.payments.paidAt), desc(schema.payments.createdAt))
+      .limit(1);
+    return payment ?? null;
+  }
+
   async countTournamentPlayers(tournamentId: string): Promise<number> {
     const [result] = await this.db
-      .select({ count: sql<number>`count(${schema.tournamentRosters.id})::int` })
+      .select({
+        count: sql<number>`count(${schema.tournamentRosters.id})::int`,
+      })
       .from(schema.tournamentParticipants)
       .innerJoin(
         schema.tournamentRosters,
-        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
       )
       .where(
         and(
@@ -95,7 +115,9 @@ export class PaymentsRepository {
     return result?.count ?? 0;
   }
 
-  async sumCompletedRegistrationPlatformFees(tournamentId: string): Promise<number> {
+  async sumCompletedRegistrationPlatformFees(
+    tournamentId: string,
+  ): Promise<number> {
     const [result] = await this.db
       .select({
         total: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), 0)`,
@@ -183,7 +205,11 @@ export class PaymentsRepository {
       subtotal: input.amount.toString(),
       platformFeeAmount: input.platformFeeAmount.toString(),
       totalAmount: input.amount.toString(),
-      snapshot: { status: 'PENDING', amount: input.amount, purpose: input.purpose },
+      snapshot: {
+        status: 'PENDING',
+        amount: input.amount,
+        purpose: input.purpose,
+      },
     });
     return record;
   }
@@ -214,13 +240,21 @@ export class PaymentsRepository {
     return event ?? null;
   }
 
-  async finalizeReceipt(paymentId: string, payment: typeof schema.payments.$inferSelect, webhook: Record<string, unknown>) {
+  async finalizeReceipt(
+    paymentId: string,
+    payment: typeof schema.payments.$inferSelect,
+    webhook: Record<string, unknown>,
+  ) {
     const receiptNumber = `VNS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${payment.id.slice(0, 8).toUpperCase()}`;
     const [receipt] = await this.db
       .update(schema.paymentReceipts)
       .set({
         receiptNumber,
-        snapshot: { ...webhook, paymentId: payment.id, orderCode: payment.providerOrderCode },
+        snapshot: {
+          ...webhook,
+          paymentId: payment.id,
+          orderCode: payment.providerOrderCode,
+        },
       })
       .where(eq(schema.paymentReceipts.paymentId, paymentId))
       .returning();
@@ -235,7 +269,12 @@ export class PaymentsRepository {
         transactionReference: orderCode,
         updatedAt: new Date(),
       })
-      .where(and(eq(schema.payments.id, paymentId), eq(schema.payments.status, 'PENDING')))
+      .where(
+        and(
+          eq(schema.payments.id, paymentId),
+          eq(schema.payments.status, 'PENDING'),
+        ),
+      )
       .returning();
     return record ?? null;
   }
@@ -330,10 +369,16 @@ export class PaymentsRepository {
     return this.db
       .select({
         payment: schema.payments,
-        tournament: { id: schema.tournaments.id, name: schema.tournaments.name },
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
       })
       .from(schema.payments)
-      .innerJoin(schema.tournaments, eq(schema.payments.tournamentId, schema.tournaments.id))
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.payments.tournamentId, schema.tournaments.id),
+      )
       .where(eq(schema.payments.userId, userId))
       .orderBy(desc(schema.payments.createdAt));
   }
@@ -356,10 +401,7 @@ export class PaymentsRepository {
     return record ?? null;
   }
 
-  async createPayoutRequest(
-    organizerId: string,
-    data: PayoutRequestDto,
-  ) {
+  async createPayoutRequest(organizerId: string, data: PayoutRequestDto) {
     return this.db.transaction(async (tx) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext(${`payout:${data.tournamentId}`}))`,
@@ -375,12 +417,18 @@ export class PaymentsRepository {
           ),
         )
         .limit(1);
-      if (activePayout) throw new Error('Giải đấu đang có một yêu cầu giải ngân chưa kết thúc.');
+      if (activePayout)
+        throw new Error(
+          'Giải đấu đang có một yêu cầu giải ngân chưa kết thúc.',
+        );
 
       const [openRefund] = await tx
         .select({ id: schema.paymentRefunds.id })
         .from(schema.paymentRefunds)
-        .innerJoin(schema.payments, eq(schema.paymentRefunds.paymentId, schema.payments.id))
+        .innerJoin(
+          schema.payments,
+          eq(schema.paymentRefunds.paymentId, schema.payments.id),
+        )
         .where(
           and(
             eq(schema.payments.tournamentId, data.tournamentId),
@@ -392,7 +440,8 @@ export class PaymentsRepository {
           ),
         )
         .limit(1);
-      if (openRefund) throw new Error('Giải đấu còn yêu cầu hoàn tiền đang xử lý.');
+      if (openRefund)
+        throw new Error('Giải đấu còn yêu cầu hoàn tiền đang xử lý.');
 
       const [balance] = await tx
         .select({
@@ -401,7 +450,9 @@ export class PaymentsRepository {
           retained: sql<string>`coalesce(sum(case when ${schema.financialLedgerEntries.entryType} = 'PLATFORM_FEE_RETAINED' then ${schema.financialLedgerEntries.amount} else 0 end), 0)`,
         })
         .from(schema.financialLedgerEntries)
-        .where(eq(schema.financialLedgerEntries.tournamentId, data.tournamentId));
+        .where(
+          eq(schema.financialLedgerEntries.tournamentId, data.tournamentId),
+        );
 
       const available = Number(balance?.available ?? 0);
       if (data.amountRequested > available) {
@@ -504,10 +555,16 @@ export class PaymentsRepository {
     return this.db
       .select({
         payout: schema.organizerPayouts,
-        tournament: { id: schema.tournaments.id, name: schema.tournaments.name },
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
       })
       .from(schema.organizerPayouts)
-      .innerJoin(schema.tournaments, eq(schema.organizerPayouts.tournamentId, schema.tournaments.id))
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.organizerPayouts.tournamentId, schema.tournaments.id),
+      )
       .where(eq(schema.organizerPayouts.organizerId, organizerId))
       .orderBy(desc(schema.organizerPayouts.createdAt));
   }
@@ -516,7 +573,10 @@ export class PaymentsRepository {
     return this.db
       .select({
         payout: schema.organizerPayouts,
-        tournament: { id: schema.tournaments.id, name: schema.tournaments.name },
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
         organizer: {
           id: schema.users.id,
           email: schema.users.email,
@@ -524,8 +584,14 @@ export class PaymentsRepository {
         },
       })
       .from(schema.organizerPayouts)
-      .innerJoin(schema.tournaments, eq(schema.organizerPayouts.tournamentId, schema.tournaments.id))
-      .innerJoin(schema.users, eq(schema.organizerPayouts.organizerId, schema.users.id))
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.organizerPayouts.tournamentId, schema.tournaments.id),
+      )
+      .innerJoin(
+        schema.users,
+        eq(schema.organizerPayouts.organizerId, schema.users.id),
+      )
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .orderBy(desc(schema.organizerPayouts.createdAt));
   }
@@ -534,7 +600,10 @@ export class PaymentsRepository {
     return this.db
       .select({
         payment: schema.payments,
-        tournament: { id: schema.tournaments.id, name: schema.tournaments.name },
+        tournament: {
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+        },
         user: {
           id: schema.users.id,
           email: schema.users.email,
@@ -542,16 +611,25 @@ export class PaymentsRepository {
         },
       })
       .from(schema.payments)
-      .innerJoin(schema.tournaments, eq(schema.payments.tournamentId, schema.tournaments.id))
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.payments.tournamentId, schema.tournaments.id),
+      )
       .innerJoin(schema.users, eq(schema.payments.userId, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .orderBy(desc(schema.payments.createdAt));
   }
 
   async getAdminStats() {
-    const [users] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.users);
-    const [communities] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.communities);
-    const [tournaments] = await this.db.select({ count: sql<number>`count(*)::int` }).from(schema.tournaments);
+    const [users] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.users);
+    const [communities] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.communities);
+    const [tournaments] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tournaments);
     const [paymentTotals] = await this.db
       .select({
         amount: sql<string>`coalesce(sum(${schema.payments.amount}), 0)`,
@@ -560,7 +638,9 @@ export class PaymentsRepository {
       .from(schema.payments)
       .where(eq(schema.payments.status, 'COMPLETED'));
     const [payoutTotals] = await this.db
-      .select({ amount: sql<string>`coalesce(sum(${schema.organizerPayouts.amountRequested}), 0)` })
+      .select({
+        amount: sql<string>`coalesce(sum(${schema.organizerPayouts.amountRequested}), 0)`,
+      })
       .from(schema.organizerPayouts)
       .where(eq(schema.organizerPayouts.status, 'PAID'));
     return {
@@ -573,20 +653,32 @@ export class PaymentsRepository {
     };
   }
 
-  async confirmLegacyRefund(paymentId: string, adminId: string, proofUrl: string) {
+  async confirmLegacyRefund(
+    paymentId: string,
+    adminId: string,
+    proofUrl: string,
+  ) {
     return this.db.transaction(async (tx) => {
       const [payment] = await tx
         .select()
         .from(schema.payments)
         .where(eq(schema.payments.id, paymentId))
         .limit(1);
-      if (!payment || payment.status !== 'COMPLETED' || payment.refundStatus !== 'PENDING_REFUND') {
+      if (
+        !payment ||
+        payment.status !== 'COMPLETED' ||
+        payment.refundStatus !== 'PENDING_REFUND'
+      ) {
         return null;
       }
 
       const [updated] = await tx
         .update(schema.payments)
-        .set({ refundStatus: 'REFUNDED', refundedAmount: payment.amount, updatedAt: new Date() })
+        .set({
+          refundStatus: 'REFUNDED',
+          refundedAmount: payment.amount,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(schema.payments.id, paymentId),

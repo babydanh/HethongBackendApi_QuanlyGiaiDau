@@ -41,13 +41,23 @@ const sql = postgres({
 function isSafeRepeatError(code, statement) {
   const normalized = statement.replace(/\s+/g, ' ').toUpperCase();
   if (code === '42P07' || code === '42P06' || code === '42723') {
-    return normalized.includes('IF NOT EXISTS');
+    return (
+      normalized.includes('IF NOT EXISTS') ||
+      normalized.includes('CREATE TABLE') ||
+      normalized.includes('CREATE INDEX') ||
+      normalized.includes('CREATE UNIQUE INDEX')
+    );
   }
   if (code === '42701') {
-    return normalized.includes('ADD COLUMN IF NOT EXISTS');
+    return normalized.includes('ADD COLUMN') || normalized.includes('IF NOT EXISTS');
   }
   if (code === '42710') {
-    return normalized.includes('IF NOT EXISTS');
+    return (
+      normalized.includes('IF NOT EXISTS') ||
+      normalized.includes('ADD CONSTRAINT') ||
+      normalized.includes('CREATE TABLE') ||
+      normalized.includes('CREATE INDEX')
+    );
   }
   if (code === '42704' || code === '42703' || code === '42P01') {
     return normalized.includes('IF EXISTS');
@@ -73,10 +83,41 @@ async function runStatement(statement) {
   }
 }
 
+function splitSqlStatements(content) {
+  if (content.includes('--> statement-breakpoint')) {
+    return content.split('--> statement-breakpoint');
+  }
+  // Standalone SQL fallback: split by semicolon while respecting dollar-quoted blocks
+  const lines = content.split('\n');
+  const statements = [];
+  let current = [];
+  let inDollarQuote = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!inDollarQuote && (trimmed.startsWith('--') || trimmed.startsWith('/*')) && current.length === 0) {
+      continue;
+    }
+    if (line.includes('$$')) {
+      const count = (line.match(/\$\$/g) || []).length;
+      if (count % 2 !== 0) inDollarQuote = !inDollarQuote;
+    }
+    current.push(line);
+    if (!inDollarQuote && trimmed.endsWith(';')) {
+      statements.push(current.join('\n'));
+      current = [];
+    }
+  }
+  if (current.length > 0) {
+    const remaining = current.join('\n').trim();
+    if (remaining) statements.push(remaining);
+  }
+  return statements;
+}
+
 async function runSqlFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
-  // Drizzle uses --> statement-breakpoint as delimiter
-  const statements = content.split('--> statement-breakpoint');
+  const statements = splitSqlStatements(content);
   for (const stmt of statements) {
     await runStatement(stmt);
   }

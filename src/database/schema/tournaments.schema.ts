@@ -205,6 +205,13 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   rankingConsent: boolean('ranking_consent').default(false).notNull(),
   customResponses: jsonb('custom_responses'),
   isPaid: boolean('is_paid').default(false).notNull(),
+  // Effective registration fee captured when this participant is created.
+  // This is distinct from isPaid: zero means free at registration, while
+  // isPaid=true after a paid flow means the payment was captured.
+  entryFeeAtRegistration: numeric('entry_fee_at_registration', {
+    precision: 12,
+    scale: 2,
+  }).default('0.00').notNull(),
   teamInviteToken: varchar('team_invite_token', { length: 50 }).unique(),
   teamStatus: varchar('team_status', { length: 50 }).default('PENDING').notNull(),
   partnerUserId: uuid('partner_user_id').references(() => users.id, { onDelete: 'restrict' }),
