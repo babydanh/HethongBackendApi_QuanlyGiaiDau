@@ -1191,8 +1191,13 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.tournamentParticipants.tournamentId, tournamentId),
-          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-          ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          notInArray(schema.tournamentParticipants.teamStatus, [
+            'REJECTED',
+            'WITHDRAWN',
+            'KICKED',
+            'EXPIRED',
+            'CANCELLED',
+          ]),
         ),
       );
     return result?.count || 0;
@@ -7215,9 +7220,13 @@ export class TournamentsRepository {
         .where(
           and(
             eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            notInArray(schema.tournamentParticipants.teamStatus, [
+              'REJECTED',
+              'WITHDRAWN',
+              'KICKED',
+              'EXPIRED',
+              'CANCELLED',
+            ]),
           ),
         );
       return Number(result?.value ?? 0);
