@@ -3413,9 +3413,21 @@ export class TournamentsRepository {
         );
       }
     }
+    const [completedRegistrationPayment] = await this.db
+      .select({ id: schema.payments.id })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.participantId, participant.id),
+          eq(schema.payments.purpose, 'REGISTRATION_FEE'),
+          eq(schema.payments.status, 'COMPLETED'),
+        ),
+      )
+      .limit(1);
     const paymentEligible =
       participant.teamStatus === 'COMPLETE' &&
       !participant.isPaid &&
+      !completedRegistrationPayment &&
       Number.isSafeInteger(payableEntryFeeAmount) &&
       payableEntryFeeAmount > 0;
 
