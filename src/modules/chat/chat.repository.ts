@@ -291,7 +291,7 @@ export class ChatRepository {
     return this.db.transaction(async (tx) => {
       // Serialize creation for this pair. The existing schema has no unique
       // constraint that can represent an unordered two-user relationship.
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${pairKey}, 0))`);
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${pairKey}))`);
 
       const memberRows = await tx
         .select({ roomId: schema.chatRoomMembers.roomId, userId: schema.chatRoomMembers.userId })
@@ -396,18 +396,26 @@ export class ChatRepository {
   async isAcquainted(firstUserId: string, secondUserId: string): Promise<boolean> {
     try {
       const [sharedCommunity] = await this.db
-        .select({ one: sql<number>`1` })
+        .select({ id: schema.communityMembers.id })
         .from(schema.communityMembers)
-        .where(and(
-          eq(schema.communityMembers.userId, firstUserId),
-          eq(schema.communityMembers.status, 'JOINED'),
-          sql`EXISTS (
-            SELECT 1 FROM ${schema.communityMembers} cm2
-            WHERE cm2.community_id = ${schema.communityMembers.communityId}
-              AND cm2.user_id = ${secondUserId}
-              AND cm2.status = 'JOINED'
-          )`,
-        ))
+        .where(
+          and(
+            eq(schema.communityMembers.userId, firstUserId),
+            eq(schema.communityMembers.status, 'JOINED'),
+            inArray(
+              schema.communityMembers.communityId,
+              this.db
+                .select({ communityId: schema.communityMembers.communityId })
+                .from(schema.communityMembers)
+                .where(
+                  and(
+                    eq(schema.communityMembers.userId, secondUserId),
+                    eq(schema.communityMembers.status, 'JOINED'),
+                  ),
+                ),
+            ),
+          ),
+        )
         .limit(1);
       if (sharedCommunity) return true;
 
