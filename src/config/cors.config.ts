@@ -51,8 +51,11 @@ export const corsOptions = {
     'Accept',
     'Origin',
     'X-App-Key',
+    'x-app-key',
     'X-Client-Id',
+    'x-client-id',
     'X-CSRF-Token',
+    'x-csrf-token',
   ],
   credentials: true,
 };
