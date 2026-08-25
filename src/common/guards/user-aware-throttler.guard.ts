@@ -1,6 +1,6 @@
 import { ExecutionContext, Injectable, Logger } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import type { ThrottlerLimitDetail } from '@nestjs/throttler';
+import type { ThrottlerLimitDetail, ThrottlerRequest } from '@nestjs/throttler';
 import * as jwt from 'jsonwebtoken';
 
 /** Keeps authenticated users isolated from each other behind a shared proxy IP. */
@@ -25,6 +25,24 @@ export class UserAwareThrottlerGuard extends ThrottlerGuard {
     if (typeof skipClass === 'object' && skipClass['default']) return true;
 
     return super.shouldSkip(context);
+  }
+
+  protected async handleRequest(requestProps: ThrottlerRequest): Promise<boolean> {
+    const { context, throttler } = requestProps;
+    // Named throttlers ('sensitive', 'strict') are only evaluated if the route or controller explicitly decorated @Throttle({ sensitive: ... }) or @Throttle({ strict: ... })
+    if (throttler.name && throttler.name !== 'default') {
+      const handler = context.getHandler();
+      const classRef = context.getClass();
+      const throttles =
+        this.reflector.get<Record<string, { limit: number; ttl: number }>>('THROTTLER:THROTTLES', handler) ||
+        this.reflector.get<Record<string, { limit: number; ttl: number }>>('THROTTLER:THROTTLES', classRef);
+
+      if (!throttles || !throttles[throttler.name]) {
+        return true;
+      }
+    }
+
+    return super.handleRequest(requestProps);
   }
 
   protected getTracker(req: Record<string, any>): Promise<string> {
