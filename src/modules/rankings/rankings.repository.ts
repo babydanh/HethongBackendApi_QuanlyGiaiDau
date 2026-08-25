@@ -660,6 +660,35 @@ export class RankingsRepository {
     } = query;
 
     const conditions: SQL[] = [eq(schema.eloHistoryLogs.userId, userId)];
+
+    // Do not expose stale/legacy ELO history created from a mock-involved match.
+    // The write-side ranking guard blocks new rows; this read-side guard keeps
+    // old data from appearing in dashboard/profile history.
+    conditions.push(sql`NOT EXISTS (
+      SELECT 1
+      FROM matches mock_match
+      LEFT JOIN tournament_participants mock_participant_1
+        ON mock_participant_1.id = mock_match.participant1_id
+      LEFT JOIN tournament_participants mock_participant_2
+        ON mock_participant_2.id = mock_match.participant2_id
+      WHERE mock_match.id = ${schema.eloHistoryLogs.matchId}
+        AND (
+          mock_participant_1.is_mock = TRUE
+          OR mock_participant_2.is_mock = TRUE
+          OR EXISTS (
+            SELECT 1
+            FROM tournament_rosters mock_roster
+            INNER JOIN users mock_user
+              ON mock_user.id = mock_roster.user_id
+            WHERE mock_roster.participant_id IN (
+              mock_match.participant1_id,
+              mock_match.participant2_id
+            )
+              AND mock_user.is_mock = TRUE
+          )
+        )
+    )`);
+
     if (categoryId) {
       conditions.push(eq(schema.eloHistoryLogs.categoryId, categoryId));
     }

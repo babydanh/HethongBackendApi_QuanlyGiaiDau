@@ -368,6 +368,30 @@ export class MatchesRepository {
           inArray(schema.matches.participant2Id, pIds),
         ) as SQL,
       );
+
+      // Personal history must not present demo/mock fixtures as real player
+      // form. Keep mock matches available to tournament/organizer queries, but
+      // exclude a user-scoped match when either participant or roster contains
+      // a mock identity.
+      conditions.push(sql`NOT EXISTS (
+        SELECT 1
+        FROM ${schema.tournamentParticipants} mock_participant
+        WHERE mock_participant.id IN (
+          ${schema.matches.participant1Id},
+          ${schema.matches.participant2Id}
+        )
+        AND (
+          mock_participant.is_mock = TRUE
+          OR EXISTS (
+            SELECT 1
+            FROM ${schema.tournamentRosters} mock_roster
+            INNER JOIN ${schema.users} mock_user
+              ON mock_user.id = mock_roster.user_id
+            WHERE mock_roster.participant_id = mock_participant.id
+              AND mock_user.is_mock = TRUE
+          )
+        )
+      )`);
     }
 
     let decodedCursor: { id: string; updatedAt: string } | null = null;
@@ -625,7 +649,8 @@ export class MatchesRepository {
         id: string;
         teamName: string;
         seed: number | null;
-        members: { userId: string; fullName: string | null }[];
+        isMock: boolean;
+        members: { userId: string; fullName: string | null; isMock: boolean }[];
       }
     >();
     if (participantIds.size > 0) {
@@ -634,6 +659,7 @@ export class MatchesRepository {
           id: schema.tournamentParticipants.id,
           teamName: schema.tournamentParticipants.teamName,
           seed: schema.tournamentParticipants.seed,
+          isMock: schema.tournamentParticipants.isMock,
         })
         .from(schema.tournamentParticipants)
         .where(
@@ -647,8 +673,13 @@ export class MatchesRepository {
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
           eloPoints: schema.userRanks.eloPoints,
+          isMock: schema.users.isMock,
         })
         .from(schema.tournamentRosters)
+        .innerJoin(
+          schema.users,
+          eq(schema.tournamentRosters.userId, schema.users.id),
+        )
         .leftJoin(
           schema.profiles,
           eq(schema.tournamentRosters.userId, schema.profiles.userId),
@@ -670,6 +701,7 @@ export class MatchesRepository {
           userId: string;
           fullName: string | null;
           avatarUrl: string | null;
+          isMock: boolean;
           elo?: { eloPoints: number };
         }[]
       >();
@@ -679,6 +711,7 @@ export class MatchesRepository {
           userId: r.userId,
           fullName: r.fullName,
           avatarUrl: r.avatarUrl,
+          isMock: r.isMock,
           elo:
             r.eloPoints !== null && r.eloPoints !== undefined
               ? { eloPoints: r.eloPoints }
@@ -855,6 +888,7 @@ export class MatchesRepository {
               id: p1.id,
               teamName: p1.teamName,
               seed: p1.seed,
+              isMock: p1.isMock,
               members: p1.members,
             }
           : null,
@@ -863,6 +897,7 @@ export class MatchesRepository {
               id: p2.id,
               teamName: p2.teamName,
               seed: p2.seed,
+              isMock: p2.isMock,
               members: p2.members,
             }
           : null,
@@ -1024,11 +1059,13 @@ export class MatchesRepository {
       id: string;
       teamName: string;
       tournamentDivisionId: string | null;
+      isMock: boolean;
       eloPoints: number | null;
       members: {
         userId: string;
         fullName: string | null;
         avatarUrl: string | null;
+        isMock: boolean;
         elo?: { eloPoints: number };
       }[];
     };
@@ -1045,6 +1082,7 @@ export class MatchesRepository {
         .select({
           id: schema.tournamentParticipants.id,
           teamName: schema.tournamentParticipants.teamName,
+          isMock: schema.tournamentParticipants.isMock,
           tournamentDivisionId:
             schema.tournamentParticipants.tournamentDivisionId,
         })
@@ -1058,8 +1096,13 @@ export class MatchesRepository {
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
           eloPoints: schema.userRanks.eloPoints,
+          isMock: schema.users.isMock,
         })
         .from(schema.tournamentRosters)
+        .innerJoin(
+          schema.users,
+          eq(schema.tournamentRosters.userId, schema.users.id),
+        )
         .leftJoin(
           schema.profiles,
           eq(schema.tournamentRosters.userId, schema.profiles.userId),
@@ -1083,6 +1126,7 @@ export class MatchesRepository {
           userId: roster.userId,
           fullName: roster.fullName,
           avatarUrl: roster.avatarUrl,
+          isMock: roster.isMock,
           elo:
             roster.eloPoints == null
               ? undefined
