@@ -214,6 +214,7 @@ export class MatchesRepository {
       city,
       isRanked,
       matchType,
+      search,
     } = query;
     const publicOnly = query.publicOnly ?? query.isPublicOnly;
     const catId = query.categoryId || query.category_id;
@@ -300,6 +301,31 @@ export class MatchesRepository {
     if (groupId) {
       conditions.push(eq(schema.matches.groupId, groupId));
     }
+
+    const searchTerm = search?.trim();
+    if (searchTerm) {
+      const searchPattern = `%${searchTerm}%`;
+      conditions.push(
+        sql`(
+          exists (
+            select 1
+            from ${schema.tournamentParticipants}
+            where (
+              ${schema.tournamentParticipants.id} = ${schema.matches.participant1Id}
+              or ${schema.tournamentParticipants.id} = ${schema.matches.participant2Id}
+            )
+            and ${schema.tournamentParticipants.teamName} ilike ${searchPattern}
+          )
+          or exists (
+            select 1
+            from ${schema.tournaments}
+            where ${schema.tournaments.id} = ${schema.matches.tournamentId}
+            and ${schema.tournaments.name} ilike ${searchPattern}
+          )
+        )`,
+      );
+    }
+
     if (status) {
       const rawStatuses = status
         .split(',')
