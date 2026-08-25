@@ -1444,20 +1444,32 @@ export class TournamentsService {
       status: initialStatus,
     });
 
-    // Auto-post to Community Feed for Lite tournaments
+    // Auto-post to Community Feed
     if (fullDto.communityId && (!requestedPublic || isAdmin)) {
       try {
+        const hasDivisions = Boolean(dto.divisions && dto.divisions.length > 0);
+        const hasEntryFee = Boolean(fullDto.entryFee && Number(fullDto.entryFee) > 0);
+        const hasEloConstraint = Boolean(
+          dto.divisions && dto.divisions.some((d) => d.minElo != null || d.maxElo != null),
+        );
+        const hasSpecificRestrictions = Boolean(
+          dto.genderRestriction && dto.genderRestriction !== 'MIXED',
+        );
+
+        // Chỉ tạo Poll khi là giải Siêu Lite thuần túy (không có nội dung/ràng buộc lệ phí/elo phức tạp)
+        const isSuperLite = !hasDivisions && !hasEntryFee && !hasEloConstraint && !hasSpecificRestrictions;
+
         await this.communitySocialRepository.createTournamentPost(
           fullDto.communityId,
           userId,
           record.id,
           record.name,
           record.bannerUrl,
-          true, // isLite
+          isSuperLite,
         );
       } catch (err) {
         console.error(
-          'Failed to auto-post lite tournament to community feed:',
+          'Failed to auto-post tournament to community feed:',
           err,
         );
       }

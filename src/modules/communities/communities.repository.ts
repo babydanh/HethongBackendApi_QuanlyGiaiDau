@@ -955,14 +955,56 @@ export class CommunitiesRepository {
     if (status && status !== 'ALL') {
       condition = and(condition, eq(schema.tournaments.status, status)) as SQL;
     }
-    return await this.db
-      .select()
+    const rows = await this.db
+      .select({
+        tournament: schema.tournaments,
+        category: {
+          id: schema.categories.id,
+          name: schema.categories.name,
+          slug: schema.categories.slug,
+        },
+        venue: {
+          id: schema.tournamentVenues.id,
+          name: schema.tournamentVenues.name,
+          locationAddress: schema.tournamentVenues.locationAddress,
+        },
+        parent: {
+          id: schema.parentTournaments.id,
+          name: schema.parentTournaments.name,
+          description: schema.parentTournaments.description,
+          bannerUrl: schema.parentTournaments.bannerUrl,
+          logoUrl: schema.parentTournaments.logoUrl,
+          createdBy: schema.parentTournaments.createdBy,
+          createdAt: schema.parentTournaments.createdAt,
+          updatedAt: schema.parentTournaments.updatedAt,
+        },
+      })
       .from(schema.tournaments)
+      .leftJoin(
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
+      )
+      .leftJoin(
+        schema.tournamentVenues,
+        eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+      )
+      .leftJoin(
+        schema.parentTournaments,
+        eq(schema.tournaments.parentId, schema.parentTournaments.id),
+      )
       .where(condition)
       .orderBy(sql`${schema.tournaments.createdAt} DESC`);
+
+    return rows.map(({ tournament, category, venue, parent }) => ({
+      ...tournament,
+      category: category?.id ? category : null,
+      venue: venue?.id ? venue : null,
+      parent: parent?.id ? parent : null,
+    }));
   }
 
   // --- RANKINGS ---
+
   async getRankings(communityId: string, limit: number = 100) {
     return await this.db
       .select({
