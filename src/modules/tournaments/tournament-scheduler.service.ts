@@ -357,36 +357,17 @@ export class TournamentSchedulerService {
             await this.db.insert(schema.notifications).values(notiData);
           }
 
-          // Auto-post to Community Feed with Poll
+          // Auto-post to Community Feed
           try {
-            const [recurringPost] = await this.db.insert(schema.communityPosts).values({
+            await this.db.insert(schema.communityPosts).values({
               communityId: t.communityId,
               authorId: t.createdBy,
               tournamentId: newTournament[0].id,
               type: 'TOURNAMENT_ANNOUNCEMENT',
-              body: `⚡ CLB vừa mở giải đấu định kỳ: **${newName}**! Bình chọn tham gia ngay bên dưới hoặc quét mã QR để vào phòng đấu.`,
+              body: `⚡ CLB vừa mở giải đấu định kỳ: **${newName}**! Nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`,
               mediaUrls: newTournament[0].bannerUrl ? [newTournament[0].bannerUrl] : [],
               status: 'PUBLISHED',
-            }).returning();
-
-            if (recurringPost) {
-              const [newPoll] = await this.db.insert(schema.communityPolls).values({
-                communityId: t.communityId,
-                creatorId: t.createdBy,
-                postId: recurringPost.id,
-                question: `Bạn có tham gia giải "${newName}" không?`,
-                allowMultipleAnswers: false,
-                allowAddOptions: false,
-              }).returning();
-
-              if (newPoll) {
-                await this.db.insert(schema.communityPollOptions).values([
-                  { pollId: newPoll.id, creatorId: t.createdBy, optionText: '✅ Có tham gia (Đăng ký ngay)' },
-                  { pollId: newPoll.id, creatorId: t.createdBy, optionText: '⏳ Chưa chắc chắn' },
-                  { pollId: newPoll.id, creatorId: t.createdBy, optionText: '❌ Bận / Không tham gia' },
-                ]);
-              }
-            }
+            });
           } catch (feedErr) {
             this.logger.error('Failed to post recurring tournament to community feed:', feedErr.message);
           }
