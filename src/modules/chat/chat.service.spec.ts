@@ -24,16 +24,18 @@ function createService(repository: Record<string, jest.Mock>) {
 }
 
 describe('ChatService authorization regressions', () => {
-  it('reuses the same DIRECT room and hydrates it for the caller', async () => {
+  it('reuses the same DIRECT room and hydrates it without rebuilding the inbox', async () => {
     const room = { id: 'room-1', type: RoomType.DIRECT };
-    const hydrated = { ...room, members: [] };
+    const hydrated = { ...room, participants: [] };
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
       getAllowStrangerMessages: jest.fn().mockResolvedValue(true),
       isAcquainted: jest.fn().mockResolvedValue(true),
       getOrCreateDirectRoom: jest.fn().mockResolvedValue(room),
-      getUserRoomById: jest.fn().mockResolvedValue(hydrated),
+      getRoomDetails: jest.fn().mockResolvedValue(hydrated),
+      getUserRooms: jest.fn(),
+      getUserRoomById: jest.fn(),
     };
     const { service } = createService(repository);
 
@@ -49,8 +51,9 @@ describe('ChatService authorization regressions', () => {
     expect(first).toEqual(hydrated);
     expect(second).toEqual(hydrated);
     expect(repository.getOrCreateDirectRoom).toHaveBeenCalledTimes(2);
-    expect(repository.getOrCreateDirectRoom).toHaveBeenNthCalledWith(1, 'user-a', 'user-b');
-    expect(repository.getOrCreateDirectRoom).toHaveBeenNthCalledWith(2, 'user-b', 'user-a');
+    expect(repository.getRoomDetails).toHaveBeenCalledTimes(2);
+    expect(repository.getUserRooms).not.toHaveBeenCalled();
+    expect(repository.getUserRoomById).not.toHaveBeenCalled();
   });
 
   it('denies a stranger when the recipient disabled stranger messages', async () => {
