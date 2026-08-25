@@ -10,14 +10,14 @@ export enum PaymentPurpose {
 export class CreatePaymentDto {
   @ApiProperty({ enum: PaymentPurpose, description: 'Mục đích thanh toán' })
   @IsEnum(PaymentPurpose)
-  purpose: PaymentPurpose;
+  purpose!: PaymentPurpose;
 
   @ApiProperty({
     example: 'uuid-tournament',
     description: 'ID của giải đấu cần thanh toán phí tham gia',
   })
   @IsUUID()
-  tournamentId: string;
+  tournamentId!: string;
 
   @ApiPropertyOptional({
     example: 'uuid-participant',

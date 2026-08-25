@@ -2046,9 +2046,7 @@ export class TournamentsRepository {
           ? 'PENDING_PARTNER'
           : hasUndersizedFootballRoster
             ? 'PENDING'
-            : regMode === 'APPROVAL'
-              ? 'PENDING_APPROVAL'
-              : 'COMPLETE';
+            : 'COMPLETE';
       const isPaid = payableEntryFeeAmount === 0;
 
       if (isTeamSport && data.footballTeamId && selectedDivision) {
@@ -4450,15 +4448,55 @@ export class TournamentsRepository {
     );
     if (ids.length === 0) return [];
 
-    return await this.db
-      .select()
+    const rows = await this.db
+      .select({
+        tournament: schema.tournaments,
+        category: {
+          id: schema.categories.id,
+          name: schema.categories.name,
+        },
+      })
       .from(schema.tournaments)
+      .leftJoin(
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
+      )
       .where(
         and(
           inArray(schema.tournaments.id, ids),
           sql`${schema.tournaments.deletedAt} IS NULL`,
         ),
-      );
+      )
+      .orderBy(desc(schema.tournaments.createdAt));
+
+    return await Promise.all(
+      rows.map(async (r) => {
+        const [participantCount] = await this.db
+          .select({ count: count() })
+          .from(schema.tournamentParticipants)
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, r.tournament.id),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            ),
+          );
+
+        const pCount = participantCount?.count || 0;
+        return {
+          ...r.tournament,
+          category: r.category?.id ? r.category : null,
+          participantCount: pCount,
+          _count: {
+            participants: pCount,
+          },
+          _summary: {
+            participantCount: pCount,
+          },
+        };
+      }),
+    );
   }
 
   async findMyWorkspace(userId: string) {
@@ -4986,8 +5024,16 @@ export class TournamentsRepository {
         matchType: schema.tournaments.matchType,
         genderRestriction: schema.tournaments.genderRestriction,
         categoryId: schema.tournaments.categoryId,
+        tournamentType: schema.tournaments.tournamentType,
+        isRanked: schema.tournaments.isRanked,
+        tournamentConfig: schema.tournaments.tournamentConfig,
+        sportRules: schema.tournaments.sportRules,
+        entryFee: schema.tournaments.entryFee,
+        maxParticipants: schema.tournaments.maxParticipants,
         bannerUrl: schema.tournaments.bannerUrl,
         logoUrl: schema.tournaments.logoUrl,
+        createdAt: schema.tournaments.createdAt,
+        updatedAt: schema.tournaments.updatedAt,
         category: {
           id: schema.categories.id,
           name: schema.categories.name,
@@ -5002,9 +5048,10 @@ export class TournamentsRepository {
         and(
           eq(schema.tournaments.parentId, id),
           sql`${schema.tournaments.deletedAt} IS NULL`,
-          sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`,
+          sql`${schema.tournaments.status} NOT IN ('PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')`,
         ),
-      );
+      )
+      .orderBy(asc(schema.tournaments.createdAt));
 
     const divisions = await Promise.all(
       rawDivisions.map(async (div) => {
@@ -5021,10 +5068,15 @@ export class TournamentsRepository {
             ),
           );
 
+        const countVal = pCount?.count || 0;
         return {
           ...div,
+          participantCount: countVal,
+          _count: {
+            participants: countVal,
+          },
           _summary: {
-            participantCount: pCount?.count || 0,
+            participantCount: countVal,
           },
         };
       }),
@@ -5068,7 +5120,8 @@ export class TournamentsRepository {
           eq(schema.parentTournaments.createdBy, userId),
           sql`${schema.parentTournaments.deletedAt} IS NULL`,
         ),
-      );
+      )
+      .orderBy(desc(schema.parentTournaments.createdAt));
   }
 
   async softDeleteParent(id: string, userId: string) {
