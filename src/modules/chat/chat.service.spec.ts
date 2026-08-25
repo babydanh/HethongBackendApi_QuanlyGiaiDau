@@ -13,6 +13,7 @@ function createService(repository: Record<string, jest.Mock>) {
     broadcastMessagePinned: jest.fn(),
     broadcastMessageReaction: jest.fn(),
     notifyDirectRoomCreated: jest.fn(),
+    notifyDirectRoomUpdated: jest.fn(),
   };
   const firebase = { sendPushToUsers: jest.fn() };
   return {
