@@ -2457,9 +2457,12 @@ export class TournamentsService {
       (stageId): stageId is string =>
         typeof stageId === 'string' && stageId.length > 0,
     );
-    const bracketKey =
-      stageIds.join(':') ||
-      `matches-${String(result.totalMatches ?? 'unknown')}`;
+    const totalMatches =
+      typeof result.totalMatches === 'number' ||
+      typeof result.totalMatches === 'string'
+        ? String(result.totalMatches)
+        : 'unknown';
+    const bracketKey = stageIds.join(':') || `matches-${totalMatches}`;
     const divisionKey = division?.id ?? 'all';
 
     try {
