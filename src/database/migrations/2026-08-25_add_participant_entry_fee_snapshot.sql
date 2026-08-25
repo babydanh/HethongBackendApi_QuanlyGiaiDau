@@ -1,13 +1,13 @@
 ALTER TABLE tournament_participants
   ADD COLUMN IF NOT EXISTS entry_fee_at_registration numeric(12,2);
 --> statement-breakpoint
-UPDATE tournament_participants AS participant
+UPDATE tournament_participants
 SET entry_fee_at_registration = COALESCE(division.entry_fee, tournament.entry_fee, 0.00)
 FROM tournaments AS tournament
 LEFT JOIN tournament_divisions AS division
-  ON division.id = participant.tournament_division_id
-WHERE participant.tournament_id = tournament.id
-  AND participant.entry_fee_at_registration IS NULL;
+  ON division.id = tournament_participants.tournament_division_id
+WHERE tournament_participants.tournament_id = tournament.id
+  AND tournament_participants.entry_fee_at_registration IS NULL;
 --> statement-breakpoint
 ALTER TABLE tournament_participants
   ALTER COLUMN entry_fee_at_registration SET DEFAULT 0.00;
