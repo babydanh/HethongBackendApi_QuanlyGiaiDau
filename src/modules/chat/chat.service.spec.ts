@@ -68,6 +68,39 @@ describe('ChatService authorization regressions', () => {
     })).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('returns room details only after DIRECT membership and block checks pass', async () => {
+    const repository = {
+      findRoomById: jest.fn().mockResolvedValue({ id: 'room-1', type: RoomType.DIRECT }),
+      isMemberOfRoom: jest.fn().mockResolvedValue(true),
+      getRoomMemberIds: jest.fn().mockResolvedValue(['user-a', 'user-b']),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+      getRoomDetails: jest.fn().mockResolvedValue({
+        id: 'room-1',
+        type: RoomType.DIRECT,
+        participants: [],
+      }),
+    };
+    const { service } = createService(repository);
+
+    await expect(service.getRoomDetails('user-a', 'room-1')).resolves.toEqual(
+      expect.objectContaining({ id: 'room-1', participants: [] }),
+    );
+    expect(repository.getRoomDetails).toHaveBeenCalledWith('room-1');
+  });
+
+  it('rejects room details for a DIRECT non-member', async () => {
+    const repository = {
+      findRoomById: jest.fn().mockResolvedValue({ id: 'room-1', type: RoomType.DIRECT }),
+      isMemberOfRoom: jest.fn().mockResolvedValue(false),
+      getRoomMemberIds: jest.fn().mockResolvedValue(['user-a', 'user-b']),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+    };
+    const { service } = createService(repository);
+
+    await expect(service.getRoomDetails('intruder', 'room-1'))
+      .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('rejects pinning a DIRECT message by a non-member', async () => {
     const repository = {
       findRoomById: jest.fn().mockResolvedValue({ id: 'room-1', type: RoomType.DIRECT }),

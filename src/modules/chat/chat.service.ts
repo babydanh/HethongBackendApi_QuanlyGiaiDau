@@ -175,6 +175,24 @@ export class ChatService {
     return member;
   }
 
+  async getRoomDetails(userId: string, roomId: string) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room) {
+      throw new NotFoundException('Không tìm thấy phòng chat.');
+    }
+
+    const roomType = room.type as RoomType;
+    if (roomType === RoomType.CLUB && room.communityId) {
+      await this.assertClubMember(room.communityId, userId);
+    } else if (roomType === RoomType.DIRECT) {
+      await this.assertDirectRoomAccess(userId, roomId);
+    } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
+      throw new ForbiddenException('Bạn không phải là thành viên của phòng chat này.');
+    }
+
+    return this.chatRepository.getRoomDetails(roomId);
+  }
+
   async sendMessage(userId: string, data: CreateMessageDto) {
     const messageText = data.messageText?.trim();
     const attachmentsUrls = (data.attachmentsUrls ?? []).filter((url) => url.trim().length > 0);
