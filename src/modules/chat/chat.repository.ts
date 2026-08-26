@@ -217,9 +217,12 @@ export class ChatRepository {
         continue;
       }
       const isFresh = new Date(room.updatedAt).getTime() >= new Date(existing.updatedAt).getTime();
+      const unreadCount = existing.id === room.id
+        ? Math.max(existing.unreadCount, room.unreadCount)
+        : existing.unreadCount + room.unreadCount;
       canonicalRooms.set(key, {
         ...(isFresh ? room : existing),
-        unreadCount: Math.max(existing.unreadCount, room.unreadCount),
+        unreadCount,
       });
     }
 
@@ -1095,6 +1098,36 @@ export class ChatRepository {
       .where(eq(schema.chatRooms.id, roomId))
       .limit(1);
     return room;
+  }
+
+  async getRoomDetails(roomId: string) {
+    const [room] = await this.db
+      .select()
+      .from(schema.chatRooms)
+      .where(eq(schema.chatRooms.id, roomId))
+      .limit(1);
+    if (!room) return null;
+
+    const participants = await this.db
+      .select({
+        id: schema.users.id,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+        lastReadAt: schema.chatReadStates.lastReadAt,
+      })
+      .from(schema.chatRoomMembers)
+      .innerJoin(schema.users, eq(schema.chatRoomMembers.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .leftJoin(
+        schema.chatReadStates,
+        and(
+          eq(schema.chatReadStates.roomId, roomId),
+          eq(schema.chatReadStates.userId, schema.users.id),
+        ),
+      )
+      .where(eq(schema.chatRoomMembers.roomId, roomId));
+
+    return { ...room, participants };
   }
 
   async getSupportRooms() {
