@@ -709,6 +709,21 @@ export const buildMatchCompletedNotification = (params: {
   redirectUrl: `/live/${params.matchId}`,
 });
 
+export const buildMatchAdvancedNotification = (params: {
+  nextMatchId: string;
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  roundLabel: string;
+  divisionId?: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.MATCH_ADVANCED,
+  title: `Bạn đã vào vòng ${params.roundLabel}`,
+  content: `Chúc mừng! Bạn đã vượt qua và vào vòng ${params.roundLabel} tại giải ${params.tournamentName}.`,
+  redirectUrl: `/live/${params.nextMatchId}`,
+});
+
 export const buildMatchScheduledNotification = (params: {
   matchId: string;
   tournamentId: string;

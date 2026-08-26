@@ -114,6 +114,7 @@ export class BracketGeneratorService {
           type: 'SINGLE_ELIMINATION',
           order: 1,
           tournamentDivisionId: divisionId ?? null,
+          venueId: tournament.venueId ?? null,
         })
         .returning();
 
@@ -349,6 +350,7 @@ export class BracketGeneratorService {
           type: 'DOUBLE_ELIMINATION',
           order: 1,
           tournamentDivisionId: divisionId ?? null,
+          venueId: tournament.venueId ?? null,
         })
         .returning();
 
@@ -829,6 +831,7 @@ export class BracketGeneratorService {
           type: 'ROUND_ROBIN',
           order: 1,
           tournamentDivisionId: divisionId ?? null,
+          venueId: tournament.venueId ?? null,
           roundConfig: {
             ...stageSportRuleOverrides,
             scoring: {
@@ -1299,6 +1302,7 @@ export class BracketGeneratorService {
           type: 'ROUND_ROBIN',
           order: 1,
           tournamentDivisionId: divisionId ?? null,
+          venueId: tournament.venueId ?? null,
           roundConfig: {
             ...stageSportRuleOverrides,
             scoring: {
@@ -1422,6 +1426,7 @@ export class BracketGeneratorService {
           type: playoffTypeUpper,
           order: 2,
           tournamentDivisionId: divisionId ?? null,
+          venueId: tournament.venueId ?? null,
           roundConfig: {
             ...playoffSportRuleOverrides,
             advanceMapping: {
