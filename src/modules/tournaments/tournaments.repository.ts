@@ -3385,27 +3385,47 @@ export class TournamentsRepository {
       .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(eq(schema.tournamentRosters.participantId, participantId));
 
-    const [tournamentFeeRow] = await this.db
-      .select({ entryFee: schema.tournaments.entryFee })
-      .from(schema.tournaments)
-      .where(eq(schema.tournaments.id, tournamentId))
-      .limit(1);
-    let payableEntryFeeAmount = Number(tournamentFeeRow?.entryFee ?? 0);
-    if (participant.tournamentDivisionId) {
-      const [divisionFeeRow] = await this.db
-        .select({ entryFee: schema.tournamentDivisions.entryFee })
-        .from(schema.tournamentDivisions)
-        .where(
-          eq(schema.tournamentDivisions.id, participant.tournamentDivisionId),
-        )
+    const hasRegistrationFeeSnapshot =
+      participant.entryFeeAtRegistration !== null &&
+      participant.entryFeeAtRegistration !== undefined;
+    let payableEntryFeeAmount = hasRegistrationFeeSnapshot
+      ? Number(participant.entryFeeAtRegistration)
+      : 0;
+    if (!hasRegistrationFeeSnapshot) {
+      const [tournamentFeeRow] = await this.db
+        .select({ entryFee: schema.tournaments.entryFee })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
-      payableEntryFeeAmount = Number(
-        divisionFeeRow?.entryFee ?? payableEntryFeeAmount,
-      );
+      payableEntryFeeAmount = Number(tournamentFeeRow?.entryFee ?? 0);
+      if (participant.tournamentDivisionId) {
+        const [divisionFeeRow] = await this.db
+          .select({ entryFee: schema.tournamentDivisions.entryFee })
+          .from(schema.tournamentDivisions)
+          .where(
+            eq(schema.tournamentDivisions.id, participant.tournamentDivisionId),
+          )
+          .limit(1);
+        payableEntryFeeAmount = Number(
+          divisionFeeRow?.entryFee ?? payableEntryFeeAmount,
+        );
+      }
     }
+    const [completedRegistrationPayment] = await this.db
+      .select({ id: schema.payments.id })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.participantId, participant.id),
+          eq(schema.payments.purpose, 'REGISTRATION_FEE'),
+          eq(schema.payments.status, 'COMPLETED'),
+        ),
+      )
+      .limit(1);
     const paymentEligible =
       participant.teamStatus === 'COMPLETE' &&
       !participant.isPaid &&
+      !completedRegistrationPayment &&
       Number.isSafeInteger(payableEntryFeeAmount) &&
       payableEntryFeeAmount > 0;
 
@@ -3418,8 +3438,10 @@ export class TournamentsRepository {
         teamStatus: participant.teamStatus,
         partnerUserId: participant.partnerUserId,
         isPaid: participant.isPaid,
-        tournamentDivisionId: participant.tournamentDivisionId,
+                tournamentDivisionId: participant.tournamentDivisionId,
+        entryFeeAtRegistration: participant.entryFeeAtRegistration,
         registeredAt: participant.registeredAt,
+
         teamInviteToken: participant.teamInviteToken,
         partnerInviteExpiresAt: participant.partnerInviteExpiresAt,
         members,
@@ -7457,7 +7479,7 @@ export class TournamentsRepository {
               maxParticipants: dto.maxParticipants,
             }),
             ...(dto.entryFee !== undefined && {
-              entryFee: dto.entryFee.toString(),
+              entryFee: dto.entryFee != null ? dto.entryFee.toString() : '0',
             }),
             ...(dto.status && { status: dto.status }),
             ...(dto.isConfigOverride !== undefined && {

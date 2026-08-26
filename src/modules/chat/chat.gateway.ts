@@ -222,7 +222,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const persisted = await this.chatRepository.saveMessage(user.sub, { roomId: payload.roomId, messageText: payload.content.trim() });
     const messagePayload = { ...persisted, content: persisted.messageText, timestamp: persisted.createdAt.toISOString() };
     if (room.type === 'CLUB') this.broadcastClubMessage(payload.roomId, messagePayload);
-    else this.broadcastMessage(payload.roomId, messagePayload);
+    else {
+      this.broadcastMessage(payload.roomId, messagePayload);
+      const memberIds = await this.chatRepository.getRoomMemberIds(payload.roomId);
+      for (const memberId of memberIds) {
+        if (memberId !== user.sub) this.notifyDirectRoomUpdated(memberId, payload.roomId);
+      }
+    }
     return { event: 'messageSent', data: messagePayload };
   }
 
@@ -232,10 +238,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   /** Notify an online recipient that a direct room is now available. */
   notifyDirectRoomCreated(userId: string, roomId: string) {
+    this.notifyDirectRoomEvent(userId, 'chat:room:created', roomId);
+  }
+
+  /** Notify an online recipient that an existing direct room has new activity. */
+  notifyDirectRoomUpdated(userId: string, roomId: string) {
+    this.notifyDirectRoomEvent(userId, 'chat:room:updated', roomId);
+  }
+
+  private notifyDirectRoomEvent(userId: string, event: 'chat:room:created' | 'chat:room:updated', roomId: string) {
     const socketIds = ChatGateway.onlineUsers.get(userId);
     if (!socketIds) return;
     for (const socketId of socketIds) {
-      this.server.to(socketId).emit('chat:room:created', { roomId });
+      this.server.to(socketId).emit(event, { roomId });
     }
   }
 

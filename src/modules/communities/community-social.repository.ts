@@ -419,8 +419,8 @@ export class CommunitySocialRepository {
   ) {
     const mediaUrls = bannerUrl ? [bannerUrl] : [];
     const body = isLite
-      ? `⚡ CLB vừa mở giải đấu nhanh: **${tournamentName}**! Bình chọn tham gia ngay bên dưới hoặc quét mã QR để vào phòng đấu.`
-      : `🏆 CLB vừa công bố giải đấu mới: **${tournamentName}**! Các thành viên hãy nhanh tay đăng ký tham gia ngay.`;
+      ? `⚡ CLB vừa mở giải đấu nhanh: **${tournamentName}**! Nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`
+      : `🏆 CLB vừa công bố giải đấu mới: **${tournamentName}**! Các thành viên hãy nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`;
 
     const [post] = await this.db.insert(schema.communityPosts)
       .values({
@@ -435,7 +435,7 @@ export class CommunitySocialRepository {
       .returning();
 
     if (post && isLite) {
-      // Tự động tạo Poll tương tác đăng ký cho giải Lite
+      // Tự động tạo Poll tương tác thăm dò cho giải Siêu Lite
       try {
         await this.createPoll(
           communityId,
@@ -449,7 +449,7 @@ export class CommunitySocialRepository {
           post.id,
         );
       } catch (pollErr) {
-        console.error('Failed to create interactive poll for lite tournament post:', pollErr);
+        console.error('Failed to create interactive poll for super lite tournament post:', pollErr);
       }
     }
 
