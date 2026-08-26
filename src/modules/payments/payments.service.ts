@@ -26,6 +26,8 @@ import type { PayoutReviewStatus } from './dto/review-payout.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { PaymentsRepository } from './payments.repository';
 import { RegistrationLockService } from '../tournaments/registration-lock.service';
+import { resolveFootballTeamConfig } from '../tournaments/utils/football-team-config';
+import { isRegistrationRosterCompleteForPayment } from '../tournaments/utils/registration-payment-eligibility';
 
 interface CalculatedPayment {
   amount: number;
@@ -587,7 +589,35 @@ export class PaymentsService {
       ) {
         throw new BadRequestException('divisionId không khớp lượt đăng ký.');
       }
-      if (participant.teamStatus !== 'COMPLETE') {
+
+      const division = participant.tournamentDivisionId
+        ? await this.paymentsRepository.findDivisionById(
+            participant.tournamentDivisionId,
+          )
+        : null;
+      if (participant.tournamentDivisionId && (!division || division.tournamentId !== tournament.id)) {
+        throw new BadRequestException('Hạng mục thi đấu không hợp lệ.');
+      }
+
+      const rosterCount = await this.paymentsRepository.countParticipantPlayers(
+        participant.id,
+      );
+      const footballConfig = resolveFootballTeamConfig(
+        tournament.tournamentConfig,
+      );
+      const isFootball = Boolean(participant.footballTeamId) || footballConfig.isTeamSport;
+      const mainRosterCount = isFootball
+        ? await this.paymentsRepository.countParticipantMainPlayers(participant.id)
+        : rosterCount;
+      const rosterComplete = isRegistrationRosterCompleteForPayment({
+        teamStatus: participant.teamStatus,
+        matchType: division?.matchType ?? tournament.matchType,
+        isFootball,
+        rosterCount,
+        mainRosterCount,
+        requiredFootballMainRosterCount: footballConfig.mainSize,
+      });
+      if (!rosterComplete) {
         throw new BadRequestException(
           'Lượt đăng ký phải hoàn tất đủ thành viên trước khi thanh toán.',
         );
@@ -599,13 +629,7 @@ export class PaymentsService {
       let amount = hasRegistrationFeeSnapshot
         ? Number(participant.entryFeeAtRegistration)
         : Number(tournament.entryFee);
-      if (!hasRegistrationFeeSnapshot && participant.tournamentDivisionId) {
-        const division = await this.paymentsRepository.findDivisionById(
-          participant.tournamentDivisionId,
-        );
-        if (!division || division.tournamentId !== tournament.id) {
-          throw new BadRequestException('Hạng mục thi đấu không hợp lệ.');
-        }
+      if (!hasRegistrationFeeSnapshot && division) {
         amount = Number(division.entryFee);
       }
       // isPaid=true from a paid registration is only trusted together with the

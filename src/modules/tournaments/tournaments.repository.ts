@@ -64,6 +64,7 @@ import {
 import { validateFootballRosterSelection } from './utils/football-roster-validation';
 import { assertFootballRosterLockable } from './utils/football-roster-lock';
 import { resolveFootballTeamConfig } from './utils/football-team-config';
+import { isRegistrationRosterCompleteForPayment } from './utils/registration-payment-eligibility';
 
 @Injectable()
 export class TournamentsRepository {
@@ -2404,12 +2405,34 @@ export class TournamentsRepository {
         participant,
       );
 
+      const registrationRosterCount = isTeamSport
+        ? 1 +
+          new Set([
+            ...footballTeamMemberIds.filter((memberId) => memberId !== userId),
+            ...footballTeamReserveMemberIds,
+          ]).size
+        : partnerId
+          ? 2
+          : 1;
+      const registrationMainRosterCount = isTeamSport
+        ? footballTeamMemberIds.length
+        : registrationRosterCount;
+      const registrationRosterComplete =
+        isRegistrationRosterCompleteForPayment({
+          teamStatus: participant.teamStatus,
+          matchType: effectiveMatchType,
+          isFootball: isTeamSport,
+          rosterCount: registrationRosterCount,
+          mainRosterCount: registrationMainRosterCount,
+          requiredFootballMainRosterCount,
+        });
+
       return {
         participant,
         entryFee: payableEntryFeeAmount,
         paymentUrl,
         paymentEligible:
-          participant.teamStatus === 'COMPLETE' &&
+          registrationRosterComplete &&
           !participant.isPaid &&
           Number.isSafeInteger(payableEntryFeeAmount) &&
           payableEntryFeeAmount > 0,
@@ -3393,6 +3416,7 @@ export class TournamentsRepository {
     let payableEntryFeeAmount = hasRegistrationFeeSnapshot
       ? Number(participant.entryFeeAtRegistration)
       : 0;
+    let divisionMatchType: string | null = null;
     if (!hasRegistrationFeeSnapshot) {
       const [tournamentFeeRow] = await this.db
         .select({ entryFee: schema.tournaments.entryFee })
@@ -3402,17 +3426,47 @@ export class TournamentsRepository {
       payableEntryFeeAmount = Number(tournamentFeeRow?.entryFee ?? 0);
       if (participant.tournamentDivisionId) {
         const [divisionFeeRow] = await this.db
-          .select({ entryFee: schema.tournamentDivisions.entryFee })
+          .select({
+            entryFee: schema.tournamentDivisions.entryFee,
+            matchType: schema.tournamentDivisions.matchType,
+          })
           .from(schema.tournamentDivisions)
           .where(
             eq(schema.tournamentDivisions.id, participant.tournamentDivisionId),
           )
           .limit(1);
+        divisionMatchType = divisionFeeRow?.matchType ?? null;
         payableEntryFeeAmount = Number(
           divisionFeeRow?.entryFee ?? payableEntryFeeAmount,
         );
       }
+    } else if (participant.tournamentDivisionId) {
+      const [divisionRow] = await this.db
+        .select({ matchType: schema.tournamentDivisions.matchType })
+        .from(schema.tournamentDivisions)
+        .where(
+          eq(schema.tournamentDivisions.id, participant.tournamentDivisionId),
+        )
+        .limit(1);
+      divisionMatchType = divisionRow?.matchType ?? null;
     }
+    const rosterCount = members.length;
+    const footballConfig = resolveFootballTeamConfig(
+      (await this.db
+        .select({ tournamentConfig: schema.tournaments.tournamentConfig })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1))[0]?.tournamentConfig,
+    );
+    const isFootball = Boolean(participant.footballTeamId) || footballConfig.isTeamSport;
+    const rosterComplete = isRegistrationRosterCompleteForPayment({
+      teamStatus: participant.teamStatus,
+      matchType: divisionMatchType,
+      isFootball,
+      rosterCount,
+      mainRosterCount: members.filter((member) => member.role === 'MAIN').length,
+      requiredFootballMainRosterCount: footballConfig.mainSize,
+    });
     const [completedRegistrationPayment] = await this.db
       .select({ id: schema.payments.id })
       .from(schema.payments)
@@ -3425,7 +3479,7 @@ export class TournamentsRepository {
       )
       .limit(1);
     const paymentEligible =
-      participant.teamStatus === 'COMPLETE' &&
+      rosterComplete &&
       !participant.isPaid &&
       !completedRegistrationPayment &&
       Number.isSafeInteger(payableEntryFeeAmount) &&
