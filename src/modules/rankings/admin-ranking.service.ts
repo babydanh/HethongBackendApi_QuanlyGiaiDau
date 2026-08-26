@@ -6,10 +6,12 @@ import {
 } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import {
+  aliasedTable,
   and,
   desc,
   eq,
   exists,
+  gt,
   ilike,
   inArray,
   isNull,
@@ -72,6 +74,7 @@ type StatusSnapshot = {
 
 type AdminContextCursor = { updatedAt: Date; id: string };
 type AdminHistoryCursor = { createdAt: Date; id: string };
+type AdminPairCursor = { eloPoints: number; id: string };
 
 type AdminContextRow = {
   contextId: string;
@@ -217,6 +220,83 @@ export class AdminRankingService {
                 id: last.contextId,
               })
             : null,
+      },
+    };
+  }
+
+  async listPairs(query: AdminEloQueryDto) {
+    this.assertPublicAdminQuery(query.scope, query.communityId);
+    if (!query.categoryId) throw new BadRequestException('ELO_CATEGORY_REQUIRED');
+    const limit = Math.min(query.limit ?? 50, 100);
+    const cursor = this.decodePairCursor(query.cursor);
+    const user1 = aliasedTable(schema.users, 'admin_pair_user1');
+    const user2 = aliasedTable(schema.users, 'admin_pair_user2');
+    const profile1 = aliasedTable(schema.profiles, 'admin_pair_profile1');
+    const profile2 = aliasedTable(schema.profiles, 'admin_pair_profile2');
+    const conditions = [
+      eq(schema.pairRanks.categoryId, query.categoryId),
+      eq(schema.pairRanks.scope, 'PUBLIC'),
+      gt(schema.pairRanks.matchesPlayed, 0),
+      eq(user1.isMock, false),
+      eq(user2.isMock, false),
+      isNull(user1.deletedAt),
+      isNull(user2.deletedAt),
+    ];
+    if (query.matchType) conditions.push(eq(schema.pairRanks.matchType, query.matchType));
+    if (query.genderRestriction) conditions.push(eq(schema.pairRanks.genderRestriction, query.genderRestriction));
+    if (query.search?.trim()) {
+      const search = `%${query.search.trim()}%`;
+      conditions.push(sql`(
+        ${user1.email} ILIKE ${search}
+        OR ${user2.email} ILIKE ${search}
+        OR ${profile1.fullName} ILIKE ${search}
+        OR ${profile2.fullName} ILIKE ${search}
+      )`);
+    }
+    if (query.minElo !== undefined) conditions.push(sql`${schema.pairRanks.eloPoints} >= ${query.minElo}`);
+    if (query.maxElo !== undefined) conditions.push(sql`${schema.pairRanks.eloPoints} <= ${query.maxElo}`);
+    if (cursor) {
+      conditions.push(sql`(
+        ${schema.pairRanks.eloPoints} < ${cursor.eloPoints}
+        OR (${schema.pairRanks.eloPoints} = ${cursor.eloPoints} AND ${schema.pairRanks.id} < ${cursor.id})
+      )`);
+    }
+    const rows = await this.db
+      .select({
+        pairId: schema.pairRanks.id,
+        user1: { id: user1.id, fullName: profile1.fullName, email: user1.email, avatarUrl: profile1.avatarUrl },
+        user2: { id: user2.id, fullName: profile2.fullName, email: user2.email, avatarUrl: profile2.avatarUrl },
+        categoryId: schema.pairRanks.categoryId,
+        categoryName: schema.categories.name,
+        matchType: schema.pairRanks.matchType,
+        genderRestriction: schema.pairRanks.genderRestriction,
+        eloPoints: schema.pairRanks.eloPoints,
+        peakElo: schema.pairRanks.peakElo,
+        matchesPlayed: schema.pairRanks.matchesPlayed,
+        matchesWon: schema.pairRanks.matchesWon,
+        winStreak: schema.pairRanks.winStreak,
+        updatedAt: schema.pairRanks.updatedAt,
+      })
+      .from(schema.pairRanks)
+      .innerJoin(user1, eq(schema.pairRanks.user1Id, user1.id))
+      .innerJoin(user2, eq(schema.pairRanks.user2Id, user2.id))
+      .leftJoin(profile1, eq(user1.id, profile1.userId))
+      .leftJoin(profile2, eq(user2.id, profile2.userId))
+      .innerJoin(schema.categories, eq(schema.pairRanks.categoryId, schema.categories.id))
+      .where(and(...conditions))
+      .orderBy(desc(schema.pairRanks.eloPoints), desc(schema.pairRanks.id))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const data = rows.slice(0, limit);
+    const last = data.at(-1);
+    return {
+      data,
+      meta: {
+        limit,
+        hasMore,
+        nextCursor: hasMore && last
+          ? CursorPaginationHelper.encodeCursor({ eloPoints: last.eloPoints, id: last.pairId })
+          : null,
       },
     };
   }
@@ -1206,6 +1286,15 @@ export class AdminRankingService {
       throw new BadRequestException('ELO_CURSOR_INVALID');
     }
     return { updatedAt: new Date(decoded.updatedAt), id: decoded.id };
+  }
+
+  private decodePairCursor(cursor?: string): AdminPairCursor | undefined {
+    if (!cursor) return undefined;
+    const decoded = CursorPaginationHelper.decodeCursor<{ eloPoints: number; id: string }>(cursor);
+    if (!decoded || typeof decoded.id !== 'string' || typeof decoded.eloPoints !== 'number' || !Number.isFinite(decoded.eloPoints)) {
+      throw new BadRequestException('ELO_CURSOR_INVALID');
+    }
+    return { eloPoints: decoded.eloPoints, id: decoded.id };
   }
 
   private decodeHistoryCursor(cursor?: string): AdminHistoryCursor | undefined {
