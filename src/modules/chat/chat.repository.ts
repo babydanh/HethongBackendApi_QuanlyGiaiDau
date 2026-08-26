@@ -373,7 +373,7 @@ export class ChatRepository {
     return !!record;
   }
 
-  /// Cài đặt riêng tư của người nhận: cho phép người lạ nhắn tin (mặc định true).
+  /// Cài đặt riêng tư của người nhận: cho phép người lạ nhắn tin (mặc định false).
   async getAllowStrangerMessages(userId: string): Promise<boolean> {
     try {
       const [row] = await this.db
@@ -381,7 +381,7 @@ export class ChatRepository {
         .from(schema.profiles)
         .where(eq(schema.profiles.userId, userId))
         .limit(1);
-      return row?.allow ?? true;
+      return row?.allow ?? false;
     } catch (error) {
       // Privacy checks must fail closed. A schema/read failure must never turn
       // a recipient who disabled stranger messages into an implicitly open inbox.
@@ -393,10 +393,30 @@ export class ChatRepository {
     }
   }
 
-  /// Hai người "quen nhau" nếu cùng là thành viên JOINED của ít nhất 1 CLB
-  /// hoặc đã là bạn bè (friendship ACCEPTED). Ngược lại là người lạ.
+  /// Hai người "quen nhau" nếu đã từng có tin nhắn direct hoặc cùng là
+  /// thành viên JOINED của ít nhất 1 CLB. Ngược lại là người lạ.
   async isAcquainted(firstUserId: string, secondUserId: string): Promise<boolean> {
     try {
+      const [directMessageHistory] = await this.db
+        .select({ id: schema.chatMessages.id })
+        .from(schema.chatMessages)
+        .innerJoin(schema.chatRooms, eq(schema.chatMessages.roomId, schema.chatRooms.id))
+        .where(and(
+          eq(schema.chatRooms.type, 'DIRECT'),
+          sql`EXISTS (
+            SELECT 1 FROM chat_room_members first_member
+            WHERE first_member.room_id = ${schema.chatMessages.roomId}
+              AND first_member.user_id = ${firstUserId}
+          )`,
+          sql`EXISTS (
+            SELECT 1 FROM chat_room_members second_member
+            WHERE second_member.room_id = ${schema.chatMessages.roomId}
+              AND second_member.user_id = ${secondUserId}
+          )`,
+        ))
+        .limit(1);
+      if (directMessageHistory) return true;
+
       const [sharedCommunity] = await this.db
         .select({ id: schema.communityMembers.id })
         .from(schema.communityMembers)
@@ -421,18 +441,7 @@ export class ChatRepository {
         .limit(1);
       if (sharedCommunity) return true;
 
-      const [friend] = await this.db
-        .select({ id: schema.friendships.id })
-        .from(schema.friendships)
-        .where(and(
-          eq(schema.friendships.status, 'ACCEPTED'),
-          or(
-            and(eq(schema.friendships.senderId, firstUserId), eq(schema.friendships.receiverId, secondUserId)),
-            and(eq(schema.friendships.senderId, secondUserId), eq(schema.friendships.receiverId, firstUserId)),
-          ),
-        ))
-        .limit(1);
-      return !!friend;
+      return false;
     } catch (error) {
       // If acquaintance data cannot be read, fail closed: the service will
       // return its normal 403 for a restricted recipient rather than a 500.

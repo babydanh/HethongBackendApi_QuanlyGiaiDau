@@ -103,8 +103,8 @@ export const profiles = pgTable('profiles', {
   provinceCode: varchar('province_code', { length: 20 })
     .references(() => provinces.code, { onDelete: 'set null' }),
   isVerified: boolean('is_verified').default(false).notNull(),
-  // Quyền riêng tư nhắn tin: false = chặn người lạ (không cùng CLB, không bạn bè) nhắn tin.
-  allowStrangerMessages: boolean('allow_stranger_messages').default(true).notNull(),
+  // Quyền riêng tư nhắn tin: false = chặn người lạ nhắn tin; opt-in mới là true.
+  allowStrangerMessages: boolean('allow_stranger_messages').default(false).notNull(),
   bankName: varchar('bank_name', { length: 100 }),
   bankAccountNumber: varchar('bank_account_number', { length: 50 }),
   bankAccountName: varchar('bank_account_name', { length: 255 }),
