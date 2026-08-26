@@ -192,23 +192,14 @@ export class CommunitiesService {
 
     const isPrivate = community.visibility === 'PRIVATE';
     return {
-      id: community.id,
-      name: community.name,
-      logoUrl: community.logoUrl,
-      bannerUrl: community.bannerUrl,
-      visibility: community.visibility,
-      joinMode: community.joinMode,
-      status: community.status,
+      ...community,
       provinceCode: isPrivate ? null : community.provinceCode,
-      categories: community.categories,
+      districtCode: isPrivate ? null : community.districtCode,
+      wardCode: isPrivate ? null : community.wardCode,
       description: isPrivate ? null : community.description,
-      rules: null,
-      locationAddress: null,
-      socialLinks: null,
-      _count: {
-        members: community._count?.members ?? 0,
-        tournaments: 0,
-      },
+      rules: isPrivate ? null : community.rules,
+      locationAddress: isPrivate ? null : community.locationAddress,
+      socialLinks: isPrivate ? null : community.socialLinks,
       access,
     };
   }
@@ -1001,7 +992,7 @@ export class CommunitiesService {
   async getGallery(id: string, viewer?: CommunityViewer) {
     const community = await this.findById(id);
     const access = await this.resolveAccess(community, viewer);
-    if (!access.isMember && !access.isAdmin) {
+    if (!access.isMember && !access.isAdmin && community.visibility !== 'PUBLIC') {
       throw new ForbiddenException('Thư viện ảnh chỉ dành cho thành viên CLB.');
     }
     return await this.communitiesRepository.getGallery(id);
@@ -1054,7 +1045,7 @@ export class CommunitiesService {
   async getTournaments(id: string, status?: string, viewer?: CommunityViewer) {
     const community = await this.findById(id);
     const access = await this.resolveAccess(community, viewer);
-    if (!access.isMember && !access.isAdmin) {
+    if (!access.isMember && !access.isAdmin && community.visibility !== 'PUBLIC') {
       throw new ForbiddenException('Danh sách giải đấu chỉ dành cho thành viên CLB.');
     }
     return await this.communitiesRepository.getTournaments(
@@ -1068,7 +1059,7 @@ export class CommunitiesService {
   async getRankings(id: string, limit?: number, viewer?: CommunityViewer) {
     const community = await this.findById(id);
     const access = await this.resolveAccess(community, viewer);
-    if (!access.isMember && !access.isAdmin) {
+    if (!access.isMember && !access.isAdmin && community.visibility !== 'PUBLIC') {
       throw new ForbiddenException('Bảng xếp hạng chỉ dành cho thành viên CLB.');
     }
     return await this.communitiesRepository.getRankings(id, limit);
@@ -1151,6 +1142,7 @@ export class CommunitiesService {
       ? await this.communitiesRepository.findMember(community.id, viewer.id)
       : null;
     const isMember = membership?.status === 'JOINED';
+    const isPublic = community.visibility === 'PUBLIC';
     return {
       visibility: community.visibility,
       isAuthenticated: Boolean(viewer),
@@ -1158,9 +1150,9 @@ export class CommunitiesService {
       membershipStatus: membership?.status ?? null,
       membershipRole: membership?.role ?? null,
       isAdmin,
-      canViewContent: isAdmin || isMember,
-      canViewFeed: isAdmin || isMember || community.visibility === 'PUBLIC',
-      canViewMembers: isAdmin || isMember,
+      canViewContent: isAdmin || isMember || isPublic,
+      canViewFeed: isAdmin || isMember || isPublic,
+      canViewMembers: isAdmin || isMember || isPublic,
       canPost: isAdmin || isMember,
     };
   }
