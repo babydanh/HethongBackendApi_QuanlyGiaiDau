@@ -74,7 +74,7 @@ export class UpdateUserDto {
 
   @ApiPropertyOptional({
     example: true,
-    description: 'Cho phép người lạ (không cùng CLB, không là bạn bè) nhắn tin riêng. Mặc định true.',
+    description: 'Cho phép người lạ (chưa từng nhắn direct và không cùng CLB) nhắn tin riêng. Mặc định false; chỉ bật khi chủ động opt-in.',
   })
   @IsBoolean()
   @IsOptional()

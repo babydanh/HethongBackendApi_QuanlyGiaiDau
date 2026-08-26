@@ -56,7 +56,7 @@ describe('ChatService authorization regressions', () => {
     expect(repository.getUserRoomById).not.toHaveBeenCalled();
   });
 
-  it('denies a stranger when the recipient disabled stranger messages', async () => {
+  it('denies a stranger when the recipient has not opted in', async () => {
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
@@ -69,6 +69,58 @@ describe('ChatService authorization regressions', () => {
       type: RoomType.DIRECT,
       memberIds: ['user-b'],
     })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a stranger only when the recipient explicitly opts in', async () => {
+    const room = { id: 'room-1', type: RoomType.DIRECT };
+    const repository = {
+      isActiveUser: jest.fn().mockResolvedValue(true),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+      getAllowStrangerMessages: jest.fn().mockResolvedValue(true),
+      isAcquainted: jest.fn().mockResolvedValue(false),
+      getOrCreateDirectRoom: jest.fn().mockResolvedValue(room),
+      getRoomDetails: jest.fn().mockResolvedValue(room),
+    };
+    const { service } = createService(repository);
+
+    await expect(service.createRoom('user-a', {
+      type: RoomType.DIRECT,
+      memberIds: ['user-b'],
+    })).resolves.toEqual(room);
+  });
+
+  it('returns the stable privacy denial code from the policy endpoint', async () => {
+    const repository = {
+      isActiveUser: jest.fn().mockResolvedValue(true),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+      getAllowStrangerMessages: jest.fn().mockResolvedValue(false),
+      isAcquainted: jest.fn().mockResolvedValue(false),
+    };
+    const { service } = createService(repository);
+
+    await expect(service.getDirectMessagePolicy('user-a', 'user-b')).resolves.toEqual({
+      canMessage: false,
+      reasonCode: 'STRANGER_MESSAGES_DISABLED',
+    });
+  });
+
+  it('rechecks privacy when sending in an existing direct room', async () => {
+    const repository = {
+      findRoomById: jest.fn().mockResolvedValue({ id: 'room-1', type: RoomType.DIRECT }),
+      isMemberOfRoom: jest.fn().mockResolvedValue(true),
+      getRoomMemberIds: jest.fn().mockResolvedValue(['user-a', 'user-b']),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+      getAllowStrangerMessages: jest.fn().mockResolvedValue(false),
+      isAcquainted: jest.fn().mockResolvedValue(false),
+      saveMessage: jest.fn(),
+    };
+    const { service } = createService(repository);
+
+    await expect(service.sendMessage('user-a', {
+      roomId: 'room-1',
+      messageText: 'hello',
+    })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.saveMessage).not.toHaveBeenCalled();
   });
 
   it('returns room details only after DIRECT membership and block checks pass', async () => {
