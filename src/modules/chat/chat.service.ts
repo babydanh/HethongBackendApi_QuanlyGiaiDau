@@ -26,11 +26,14 @@ export class ChatService {
   ) {}
 
   async getUserRooms(userId: string) {
+    // Do not translate a repository/database failure into an empty inbox.
+    // Clients can retain their last successful snapshot and retry; returning
+    // [] makes every existing conversation look deleted.
     try {
       return await this.chatRepository.getUserRooms(userId);
     } catch (error) {
       this.logger.error(`Failed to get user rooms for ${userId}:`, error);
-      return [];
+      throw error;
     }
   }
 
