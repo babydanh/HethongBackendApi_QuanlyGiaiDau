@@ -60,6 +60,29 @@ describe('registration payment eligibility', () => {
     ).rejects.toThrow('phải hoàn tất đủ thành viên');
   });
 
+  it.each([
+    ['PENDING_PARTNER', 'doubles waiting for teammate'],
+    ['WAITLISTED', 'waitlisted registration'],
+    ['PENDING', 'incomplete football roster'],
+  ])('rejects %s before creating a payment link (%s)', async (teamStatus) => {
+    const service = makeService({
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      registeredBy: 'user-1',
+      isPaid: false,
+      teamStatus,
+      tournamentDivisionId: null,
+    });
+
+    await expect(
+      service.calculatePayment(
+        'user-1',
+        paymentData as never,
+        tournament as never,
+      ),
+    ).rejects.toThrow('phải hoàn tất đủ thành viên');
+  });
+
   it('uses the participant fee snapshot even when the current tournament fee is higher', async () => {
     const service = makeService({
       id: 'participant-1',

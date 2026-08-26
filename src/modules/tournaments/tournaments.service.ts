@@ -979,12 +979,21 @@ export class TournamentsService {
       },
     };
     const sportRuleDefaults = litePreset.sportRules as Record<string, unknown>;
+    const isSuperLite =
+      !Boolean(dto.divisions?.length) &&
+      !Boolean(
+        dto.divisions?.some(
+          (division) => division.minElo != null || division.maxElo != null,
+        ),
+      ) &&
+      !(dto.genderRestriction && dto.genderRestriction !== 'MIXED');
+
     const sportRules = {
       ...litePreset.sportRules,
-      // A Lite tournament always opens with the sport's basic rules while
-      // keeping free-score entry enabled. Category presets must not silently
-      // switch the scoring mode back to Strict.
-      mode: 'LITE',
+      // Advanced quick-create keeps the same sport preset but must not be
+      // exposed as the Super Lite product to clients or management routes.
+      mode: isSuperLite ? 'LITE' : 'STRICT',
+
       ...(sport === 'football'
         ? {
             halvesCount:
@@ -1123,9 +1132,10 @@ export class TournamentsService {
     }
 
     const tournamentConfig = {
-      mode: 'LITE',
-      isLite: true,
+      mode: isSuperLite ? 'LITE' : 'STRICT',
+      isLite: isSuperLite,
       sportPreset: litePreset.sportPreset,
+
       // Visibility controls discoverability; registrationMode independently
       // controls whether the organizer must approve each application.
       registrationMode,
@@ -1137,9 +1147,10 @@ export class TournamentsService {
       liteVisibility,
       bracketSetupMode: 'RANDOM',
       allowPlayerReferee: true,
-      // Quick creation only relaxes the initial form. The organizer still
-      // receives the complete advanced management workspace afterwards.
-      hideAdvancedSettings: false,
+      // Only pure Super Lite hides advanced settings. Configured divisions or
+      // restrictions belong to the standard management workspace.
+      hideAdvancedSettings: isSuperLite,
+
       scoringMode: 'FREE',
       bracketType: finalBracketType,
       maxTeams,
@@ -1447,20 +1458,9 @@ export class TournamentsService {
     // Auto-post to Community Feed
     if (fullDto.communityId && (!requestedPublic || isAdmin)) {
       try {
-        const hasDivisions = Boolean(dto.divisions && dto.divisions.length > 0);
-        const hasEntryFee = Boolean(fullDto.entryFee && Number(fullDto.entryFee) > 0);
-        const hasEloConstraint = Boolean(
-          dto.divisions && dto.divisions.some((d) => d.minElo != null || d.maxElo != null),
-        );
-        const hasSpecificRestrictions = Boolean(
-          dto.genderRestriction && dto.genderRestriction !== 'MIXED',
-        );
-
-        // Chỉ tạo Poll khi là giải Siêu Lite thuần túy (không có nội dung/ràng buộc lệ phí/elo phức tạp)
-        const isSuperLite = !hasDivisions && !hasEntryFee && !hasEloConstraint && !hasSpecificRestrictions;
-
         await this.communitySocialRepository.createTournamentPost(
           fullDto.communityId,
+
           userId,
           record.id,
           record.name,
@@ -1468,10 +1468,7 @@ export class TournamentsService {
           isSuperLite,
         );
       } catch (err) {
-        console.error(
-          'Failed to auto-post tournament to community feed:',
-          err,
-        );
+        console.error('Failed to auto-post tournament to community feed:', err);
       }
     }
 
@@ -1493,7 +1490,7 @@ export class TournamentsService {
     // tournament after creation, so new QR/link shares must open the standard
     // registration page (including doubles partner registration).
     const joinPath =
-      tournamentType === 'CLUB'
+      tournamentType === 'CLUB' && isSuperLite
         ? `/lite/tournaments/join/${inviteCode}`
         : `/tournaments/${record.id}/register${inviteCode ? `?invite=${encodeURIComponent(inviteCode)}` : ''}`;
 

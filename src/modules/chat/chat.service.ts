@@ -132,9 +132,11 @@ export class ChatService {
       }
       await this.assertCanDirectMessage(userId, otherUserId);
       const room = await this.chatRepository.getOrCreateDirectRoom(userId, otherUserId);
-      const requesterRoom = (await this.chatRepository.getUserRoomById(userId, room.id)) ?? room;
+      // Do not rebuild the entire inbox here. A single malformed/legacy room in
+      // getUserRooms must not turn a valid direct-room creation into HTTP 500.
+      const roomDetails = await this.chatRepository.getRoomDetails(room.id);
       this.chatGateway.notifyDirectRoomCreated(otherUserId, room.id);
-      return requesterRoom;
+      return roomDetails ?? room;
     }
 
     return this.chatRepository.createRoomWithMembers({ ...data, memberIds });
@@ -173,6 +175,24 @@ export class ChatService {
       );
     }
     return member;
+  }
+
+  async getRoomDetails(userId: string, roomId: string) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    if (!room) {
+      throw new NotFoundException('Không tìm thấy phòng chat.');
+    }
+
+    const roomType = room.type as RoomType;
+    if (roomType === RoomType.CLUB && room.communityId) {
+      await this.assertClubMember(room.communityId, userId);
+    } else if (roomType === RoomType.DIRECT) {
+      await this.assertDirectRoomAccess(userId, roomId);
+    } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
+      throw new ForbiddenException('Bạn không phải là thành viên của phòng chat này.');
+    }
+
+    return this.chatRepository.getRoomDetails(roomId);
   }
 
   async sendMessage(userId: string, data: CreateMessageDto) {

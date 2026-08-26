@@ -369,11 +369,37 @@ export class UsersRepository {
     userId: string,
     data: Partial<typeof schema.profiles.$inferInsert>,
   ) {
-    return await this.db
+    const updated = await this.db
       .update(schema.profiles)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(schema.profiles.userId, userId))
       .returning();
+
+    if (updated.length > 0) return updated;
+
+    // Legacy/imported accounts may have a user row without its profile row.
+    // Do not report a successful privacy update while silently updating zero rows.
+    const [user] = await this.db
+      .select({ email: schema.users.email })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    if (!user) return [];
+
+    const fallbackFullName = user.email.split('@')[0].trim().slice(0, 255) || 'Người dùng';
+    const [created] = await this.db
+      .insert(schema.profiles)
+      .values({
+        userId,
+        fullName: data.fullName ?? fallbackFullName,
+        ...data,
+      })
+      .onConflictDoUpdate({
+        target: schema.profiles.userId,
+        set: { ...data, updatedAt: new Date() },
+      })
+      .returning();
+    return created ? [created] : [];
   }
 
   async updateEmail(userId: string, email: string) {
