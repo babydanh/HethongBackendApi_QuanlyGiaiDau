@@ -97,23 +97,19 @@ export class ChatRepository {
 
     for (const room of roomsWithMembership) {
       // Get participants
+      // Read-state is optional metadata and is counted separately below. Do
+      // not join chat_read_states in the inbox projection: older production
+      // databases may not have that table yet, and one missing optional table
+      // must never turn the complete room list into HTTP 500.
       const participants = await this.db
         .select({
           id: schema.users.id,
           fullName: schema.profiles.fullName,
           avatarUrl: schema.profiles.avatarUrl,
-          lastReadAt: schema.chatReadStates.lastReadAt,
         })
         .from(schema.chatRoomMembers)
         .innerJoin(schema.users, eq(schema.chatRoomMembers.userId, schema.users.id))
         .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-        .leftJoin(
-          schema.chatReadStates,
-          and(
-            eq(schema.chatReadStates.userId, schema.users.id),
-            eq(schema.chatReadStates.roomId, room.id),
-          ),
-        )
         .where(eq(schema.chatRoomMembers.roomId, room.id));
 
       // Get last message (filtered by clearedAt if user has cleared history)
