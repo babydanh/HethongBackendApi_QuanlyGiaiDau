@@ -2552,6 +2552,27 @@ export class TournamentsService {
     }
 
     const config = (existing.tournamentConfig || {}) as Record<string, unknown>;
+    const isLite =
+      (config.isLite as boolean | undefined) === true ||
+      config.mode === 'LITE';
+    const isDoublesFormat =
+      existing.matchType === 'DOUBLES' ||
+      existing.matchType === 'MIXED_DOUBLES' ||
+      division?.matchType === 'DOUBLES' ||
+      division?.matchType === 'MIXED_DOUBLES';
+
+    if (isLite && isDoublesFormat) {
+      try {
+        await this.tournamentsRepository.generateLitePairsTx(
+          id,
+          userId,
+          'RANDOM',
+        );
+      } catch (_err) {
+        // Silently proceed if already paired or < 2 pending participants
+      }
+    }
+
     const bracketType = (
       division?.bracketType ||
       (config.bracketType as string) ||
