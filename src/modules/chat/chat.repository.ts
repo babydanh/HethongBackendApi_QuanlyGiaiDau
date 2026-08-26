@@ -160,15 +160,20 @@ export class ChatRepository {
       if (room.type === 'DIRECT') {
         const otherParticipant = participants.find((participant) => participant.id !== userId);
         if (otherParticipant) {
-          if (await this.isBlockedBetween(userId, otherParticipant.id)) {
-            canSendMessages = false;
-            messageRestriction = 'BLOCKED';
-          } else if (
-            !(await this.getAllowStrangerMessages(otherParticipant.id)) &&
-            !(await this.isAcquainted(userId, otherParticipant.id))
-          ) {
-            canSendMessages = false;
-            messageRestriction = 'STRANGER';
+          try {
+            if (await this.isBlockedBetween(userId, otherParticipant.id)) {
+              canSendMessages = false;
+              messageRestriction = 'BLOCKED';
+            } else if (
+              !(await this.getAllowStrangerMessages(otherParticipant.id)) &&
+              !(await this.isAcquainted(userId, otherParticipant.id))
+            ) {
+              canSendMessages = false;
+              messageRestriction = 'STRANGER';
+            }
+          } catch (err) {
+            this.logger.warn(`Failed to check restriction for direct room ${room.id}:`, err);
+            canSendMessages = true;
           }
         }
       }
@@ -417,29 +422,31 @@ export class ChatRepository {
         .limit(1);
       if (directMessageHistory) return true;
 
-      const [sharedCommunity] = await this.db
-        .select({ id: schema.communityMembers.id })
+      const secondUserMemberships = await this.db
+        .select({ communityId: schema.communityMembers.communityId })
         .from(schema.communityMembers)
         .where(
           and(
-            eq(schema.communityMembers.userId, firstUserId),
+            eq(schema.communityMembers.userId, secondUserId),
             eq(schema.communityMembers.status, 'JOINED'),
-            inArray(
-              schema.communityMembers.communityId,
-              this.db
-                .select({ communityId: schema.communityMembers.communityId })
-                .from(schema.communityMembers)
-                .where(
-                  and(
-                    eq(schema.communityMembers.userId, secondUserId),
-                    eq(schema.communityMembers.status, 'JOINED'),
-                  ),
-                ),
-            ),
           ),
-        )
-        .limit(1);
-      if (sharedCommunity) return true;
+        );
+
+      const secondUserCommunityIds = secondUserMemberships.map((m) => m.communityId);
+      if (secondUserCommunityIds.length > 0) {
+        const [sharedCommunity] = await this.db
+          .select({ id: schema.communityMembers.id })
+          .from(schema.communityMembers)
+          .where(
+            and(
+              eq(schema.communityMembers.userId, firstUserId),
+              eq(schema.communityMembers.status, 'JOINED'),
+              inArray(schema.communityMembers.communityId, secondUserCommunityIds),
+            ),
+          )
+          .limit(1);
+        if (sharedCommunity) return true;
+      }
 
       return false;
     } catch (error) {
