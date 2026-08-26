@@ -8,6 +8,7 @@ const makeService = (participant: Record<string, unknown>) => {
     findDivisionById: jest.fn().mockResolvedValue(null),
     getConfigValue: jest.fn().mockResolvedValue('0'),
     countParticipantPlayers: jest.fn().mockResolvedValue(1),
+    countParticipantMainPlayers: jest.fn().mockResolvedValue(1),
   };
   const service = new PaymentsService(
     repository as never,
@@ -41,7 +42,7 @@ const paymentData = {
 };
 
 describe('registration payment eligibility', () => {
-  it('rejects PENDING_APPROVAL registrations before PayOS link creation', async () => {
+  it('allows a complete single registration awaiting organizer approval to calculate payment', async () => {
     const service = makeService({
       id: 'participant-1',
       tournamentId: 'tournament-1',
@@ -57,7 +58,7 @@ describe('registration payment eligibility', () => {
         paymentData as never,
         tournament as never,
       ),
-    ).rejects.toThrow('phải hoàn tất đủ thành viên');
+    ).resolves.toMatchObject({ amount: 100000, participantId: 'participant-1' });
   });
 
   it.each([
@@ -165,6 +166,7 @@ describe('registration payment eligibility', () => {
       findDivisionById: jest.fn().mockResolvedValue(null),
       getConfigValue: jest.fn().mockResolvedValue('0'),
       countParticipantPlayers: jest.fn().mockResolvedValue(1),
+    countParticipantMainPlayers: jest.fn().mockResolvedValue(1),
     };
     const service = new PaymentsService(
       repository as never,
@@ -301,6 +303,7 @@ describe('registration platform-fee authority', () => {
       }),
       getConfigValue: jest.fn().mockResolvedValue('25'),
       countParticipantPlayers: jest.fn().mockResolvedValue(1),
+    countParticipantMainPlayers: jest.fn().mockResolvedValue(1),
     };
     const service = new PaymentsService(
       repository as never,

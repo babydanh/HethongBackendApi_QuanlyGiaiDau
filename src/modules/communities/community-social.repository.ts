@@ -165,8 +165,33 @@ export class CommunitySocialRepository {
       viewerReaction: row.viewerReaction,
     }));
 
+    // Deduplicate duplicate tournament posts (e.g. older legacy announcement + bracket posts for same tournament)
+    const seenTournaments = new Set<string>();
+    const duplicatePostIdsToCleanup: string[] = [];
+    const deduplicatedInitialData: typeof initialData = [];
+
+    for (const p of initialData) {
+      if (p.tournamentId) {
+        if (seenTournaments.has(p.tournamentId)) {
+          duplicatePostIdsToCleanup.push(p.id);
+          continue;
+        }
+        seenTournaments.add(p.tournamentId);
+      }
+      deduplicatedInitialData.push(p);
+    }
+
+    // Clean up duplicate legacy tournament posts in the background
+    if (duplicatePostIdsToCleanup.length > 0) {
+      this.db
+        .update(schema.communityPosts)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(inArray(schema.communityPosts.id, duplicatePostIdsToCleanup))
+        .catch((err) => console.error('Failed to cleanup duplicate tournament posts:', err));
+    }
+
     // Attach poll data if post has a poll
-    const postIds = initialData.map((p) => p.id);
+    const postIds = deduplicatedInitialData.map((p) => p.id);
     const polls = postIds.length > 0
       ? await this.db
           .select({ id: schema.communityPolls.id, postId: schema.communityPolls.postId })
@@ -182,7 +207,7 @@ export class CommunitySocialRepository {
       }
     }
 
-    const data = initialData.map((p) => ({
+    const data = deduplicatedInitialData.map((p) => ({
       ...p,
       poll: pollDetailsMap.get(p.id) || null,
     }));
@@ -422,6 +447,42 @@ export class CommunitySocialRepository {
       ? `⚡ CLB vừa mở giải đấu nhanh: **${tournamentName}**! Nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`
       : `🏆 CLB vừa công bố giải đấu mới: **${tournamentName}**! Các thành viên hãy nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`;
 
+    // 1. Check if post already exists for this tournament in the community
+    const existingPosts = await this.db
+      .select()
+      .from(schema.communityPosts)
+      .where(
+        and(
+          eq(schema.communityPosts.communityId, communityId),
+          eq(schema.communityPosts.tournamentId, tournamentId),
+          isNull(schema.communityPosts.deletedAt),
+        ),
+      )
+      .orderBy(desc(schema.communityPosts.createdAt));
+
+    if (existingPosts.length > 0) {
+      const primaryPost = existingPosts[0];
+      const [updatedPost] = await this.db
+        .update(schema.communityPosts)
+        .set({
+          body,
+          mediaUrls,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.communityPosts.id, primaryPost.id))
+        .returning();
+
+      if (existingPosts.length > 1) {
+        const duplicateIds = existingPosts.slice(1).map((p) => p.id);
+        await this.db
+          .update(schema.communityPosts)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(inArray(schema.communityPosts.id, duplicateIds));
+      }
+
+      return updatedPost ?? primaryPost;
+    }
+
     const [post] = await this.db.insert(schema.communityPosts)
       .values({
         communityId,
@@ -465,7 +526,49 @@ export class CommunitySocialRepository {
     bracketKey: string,
   ) {
     const scopeLabel = divisionName ? ` (${divisionName})` : '';
-    const body = `🏁 Sơ đồ thi đấu${scopeLabel} của giải **${tournamentName}** đã được chốt. Xem toàn bộ bracket và lịch đấu tại đây.`;
+    const body = `🏆 Sơ đồ thi đấu${scopeLabel} của giải **${tournamentName}** đã được tạo. Xem toàn bộ bracket và lịch đấu bên dưới.`;
+
+    // 1. Check if there is an existing announcement or post for this tournament in the community
+    const existingPosts = await this.db
+      .select()
+      .from(schema.communityPosts)
+      .where(
+        and(
+          eq(schema.communityPosts.communityId, communityId),
+          eq(schema.communityPosts.tournamentId, tournamentId),
+          isNull(schema.communityPosts.deletedAt),
+        ),
+      )
+      .orderBy(desc(schema.communityPosts.createdAt));
+
+    if (existingPosts.length > 0) {
+      const primaryPost = existingPosts[0];
+
+      // Update the existing post: bump to top by updating createdAt, update body, set type to TOURNAMENT_BRACKET
+      const [updatedPost] = await this.db
+        .update(schema.communityPosts)
+        .set({
+          type: 'TOURNAMENT_BRACKET',
+          body,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.communityPosts.id, primaryPost.id))
+        .returning();
+
+      // If duplicate posts existed for this tournament, clean them up
+      if (existingPosts.length > 1) {
+        const duplicateIds = existingPosts.slice(1).map((p) => p.id);
+        await this.db
+          .update(schema.communityPosts)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(inArray(schema.communityPosts.id, duplicateIds));
+      }
+
+      return updatedPost ?? primaryPost;
+    }
+
+    // 2. Fallback: If no existing post was found, insert a new bracket post
     const idempotencyKey = `tournament-bracket:${tournamentId}:${bracketKey}`.slice(0, 128);
     const [post] = await this.db
       .insert(schema.communityPosts)

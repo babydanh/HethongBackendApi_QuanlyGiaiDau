@@ -115,6 +115,19 @@ export class PaymentsRepository {
     return result?.count ?? 0;
   }
 
+  async countParticipantMainPlayers(participantId: string): Promise<number> {
+    const [result] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tournamentRosters)
+      .where(
+        and(
+          eq(schema.tournamentRosters.participantId, participantId),
+          eq(schema.tournamentRosters.role, 'MAIN'),
+        ),
+      );
+    return result?.count ?? 0;
+  }
+
   async sumCompletedRegistrationPlatformFees(
     tournamentId: string,
   ): Promise<number> {

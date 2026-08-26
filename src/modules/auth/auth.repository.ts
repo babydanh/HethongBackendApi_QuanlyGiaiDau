@@ -96,6 +96,7 @@ export class AuthRepository {
         .returning();
 
       profileData.userId = newUser.id;
+      profileData.allowStrangerMessages = profileData.allowStrangerMessages ?? false;
       await tx.insert(schema.profiles).values(profileData);
 
       await tx.insert(schema.userToRoles).values({
@@ -195,6 +196,7 @@ export class AuthRepository {
         .returning();
 
       profileData.userId = newUser.id;
+      profileData.allowStrangerMessages = profileData.allowStrangerMessages ?? false;
       await tx.insert(schema.profiles).values(profileData);
 
       await tx.insert(schema.userToRoles).values({

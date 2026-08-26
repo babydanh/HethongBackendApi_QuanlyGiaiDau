@@ -46,8 +46,8 @@ export class ChatService {
     }
   }
 
-  /// Người nhận bật "không nhận tin nhắn người lạ" và người gửi không quen
-  /// (không cùng CLB, không là bạn bè) → chặn nhắn tin riêng.
+  /// Người gửi là stranger khi chưa từng nhắn direct và không cùng CLB JOINED.
+  /// Stranger chỉ được nhắn khi người nhận chủ động bật opt-in.
   async assertCanDirectMessage(fromUserId: string, toUserId: string) {
     if (fromUserId === toUserId) return;
 

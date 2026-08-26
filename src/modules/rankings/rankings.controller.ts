@@ -57,6 +57,14 @@ export class RankingsController {
     return this.rankingsService.getLeaderboard(query);
   }
 
+  @Get('admin/pairs')
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Danh sách ELO theo cặp đôi đã thi đấu (Admin, chỉ xem)' })
+  async listAdminEloPairs(@Query() query: AdminEloQueryDto) {
+    return this.adminRankingService.listPairs(query);
+  }
+
   @Get('admin/players')
   @ApiBearerAuth()
   @Roles(UserRole.ADMIN)

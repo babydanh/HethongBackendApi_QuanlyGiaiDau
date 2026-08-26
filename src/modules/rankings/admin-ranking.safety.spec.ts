@@ -37,7 +37,10 @@ describe('admin Elo safety guardrails', () => {
     const adminRouteBlocks = controllerSource.match(
       /@(Get|Post)\('admin\/[^']+'\)[\s\S]*?@Roles\(UserRole\.ADMIN\)/g,
     );
-    expect(adminRouteBlocks).toHaveLength(5);
+    expect(adminRouteBlocks).toHaveLength(6);
+    expect(controllerSource).toContain(
+      "@Get('admin/pairs')\n  @ApiBearerAuth()",
+    );
     expect(controllerSource).toContain(
       "@Get('admin/players')\n  @ApiBearerAuth()",
     );
