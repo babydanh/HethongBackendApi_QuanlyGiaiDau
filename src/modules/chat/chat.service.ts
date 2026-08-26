@@ -29,8 +29,14 @@ export class ChatService {
     try {
       return await this.chatRepository.getUserRooms(userId);
     } catch (error) {
-      this.logger.error(`Failed to get user rooms for ${userId}:`, error);
-      return [];
+      this.logger.error(
+        `Failed to get user rooms for ${userId}.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      // An inbox query failure is not an empty inbox. Preserve the failure so
+      // the controller/client can expose a retryable unavailable state instead
+      // of silently replacing durable rooms with [].
+      throw error;
     }
   }
 
