@@ -83,7 +83,47 @@ describe('registration payment eligibility', () => {
     ).resolves.toMatchObject({ amount: 100000 });
   });
 
+  it('keeps a free registration free after the current fee increases', async () => {
+    const service = makeService({
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      registeredBy: 'user-1',
+      isPaid: true,
+      entryFeeAtRegistration: '0.00',
+      teamStatus: 'COMPLETE',
+      tournamentDivisionId: null,
+    });
+
+    await expect(
+      service.calculatePayment(
+        'user-1',
+        paymentData as never,
+        { ...tournament, entryFee: '200000' } as never,
+      ),
+    ).rejects.toThrow('Lệ phí đăng ký phải là số nguyên dương.');
+  });
+
+  it('prices a new unsnapshotted registration from the changed current fee', async () => {
+    const service = makeService({
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      registeredBy: 'user-1',
+      isPaid: false,
+      teamStatus: 'COMPLETE',
+      tournamentDivisionId: null,
+    });
+
+    await expect(
+      service.calculatePayment(
+        'user-1',
+        paymentData as never,
+        { ...tournament, entryFee: '200000' } as never,
+      ),
+    ).resolves.toMatchObject({ amount: 200000 });
+  });
+
   it('rejects a participant with a completed payment even when isPaid is stale false', async () => {
+
     const repository = {
       findParticipantById: jest.fn().mockResolvedValue({
         id: 'participant-1',

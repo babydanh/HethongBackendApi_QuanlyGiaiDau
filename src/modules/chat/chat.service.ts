@@ -249,6 +249,10 @@ export class ChatService {
       this.chatGateway.broadcastMessage(data.roomId, clubPayload);
     } else {
       this.chatGateway.broadcastMessage(data.roomId, message);
+      const memberIds = await this.chatRepository.getRoomMemberIds(data.roomId);
+      for (const memberId of memberIds) {
+        if (memberId !== userId) this.chatGateway.notifyDirectRoomUpdated(memberId, data.roomId);
+      }
     }
 
     // Dispatch FCM Push Notification in background

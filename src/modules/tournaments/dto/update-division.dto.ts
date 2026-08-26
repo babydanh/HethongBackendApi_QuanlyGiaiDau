@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -31,16 +32,18 @@ export class UpdateDivisionDto {
   genderRestriction?: GenderRestriction | null;
 
   @ApiPropertyOptional({ example: 32, nullable: true, minimum: 1 })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   @Min(1)
   maxParticipants?: number | null;
 
-  @ApiPropertyOptional({ example: 150000, minimum: 0 })
+  @ApiPropertyOptional({ example: 150000, minimum: 0, nullable: true })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   @Min(0)
-  entryFee?: number;
+  entryFee?: number | null;
 
   @ApiPropertyOptional({ example: 'ACTIVE' })
   @IsString()

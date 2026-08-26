@@ -955,14 +955,62 @@ export class CommunitiesRepository {
     if (status && status !== 'ALL') {
       condition = and(condition, eq(schema.tournaments.status, status)) as SQL;
     }
-    return await this.db
-      .select()
+    const rows = await this.db
+      .select({
+        tournament: schema.tournaments,
+        category: {
+          id: schema.categories.id,
+          name: schema.categories.name,
+          slug: schema.categories.slug,
+        },
+        venue: {
+          id: schema.tournamentVenues.id,
+          name: schema.tournamentVenues.name,
+          locationAddress: schema.tournamentVenues.locationAddress,
+        },
+        parent: {
+          id: schema.parentTournaments.id,
+          name: schema.parentTournaments.name,
+          description: schema.parentTournaments.description,
+          bannerUrl: schema.parentTournaments.bannerUrl,
+          logoUrl: schema.parentTournaments.logoUrl,
+          createdBy: schema.parentTournaments.createdBy,
+          createdAt: schema.parentTournaments.createdAt,
+          updatedAt: schema.parentTournaments.updatedAt,
+        },
+      })
       .from(schema.tournaments)
+      .leftJoin(
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
+      )
+      .leftJoin(
+        schema.tournamentVenues,
+        and(
+          eq(schema.tournaments.venueId, schema.tournamentVenues.id),
+          isNull(schema.tournamentVenues.deletedAt),
+        ),
+      )
+      .leftJoin(
+        schema.parentTournaments,
+        and(
+          eq(schema.tournaments.parentId, schema.parentTournaments.id),
+          isNull(schema.parentTournaments.deletedAt),
+        ),
+      )
       .where(condition)
       .orderBy(sql`${schema.tournaments.createdAt} DESC`);
+
+    return rows.map(({ tournament, category, venue, parent }) => ({
+      ...tournament,
+      category: category?.id ? category : null,
+      venue: venue?.id ? venue : null,
+      parent: parent?.id ? parent : null,
+    }));
   }
 
   // --- RANKINGS ---
+
   async getRankings(communityId: string, limit: number = 100) {
     return await this.db
       .select({
@@ -1461,32 +1509,49 @@ export class CommunitiesRepository {
   }
 
   async listTagPresets(communityId: string) {
-    return this.db.select().from(schema.communityTagPresets)
+    return this.db
+      .select()
+      .from(schema.communityTagPresets)
       .where(eq(schema.communityTagPresets.communityId, communityId))
       .orderBy(schema.communityTagPresets.createdAt);
   }
 
-  async createTagPreset(communityId: string, createdBy: string, name: string, color: string) {
-    const [created] = await this.db.insert(schema.communityTagPresets)
+  async createTagPreset(
+    communityId: string,
+    createdBy: string,
+    name: string,
+    color: string,
+  ) {
+    const [created] = await this.db
+      .insert(schema.communityTagPresets)
       .values({ communityId, createdBy, name, color })
       .returning();
     return created;
   }
 
   async findTagPresetByName(communityId: string, name: string) {
-    const [existing] = await this.db.select({ id: schema.communityTagPresets.id })
+    const [existing] = await this.db
+      .select({ id: schema.communityTagPresets.id })
       .from(schema.communityTagPresets)
-      .where(and(
-        eq(schema.communityTagPresets.communityId, communityId),
-        sql`lower(${schema.communityTagPresets.name}) = lower(${name})`,
-      ))
+      .where(
+        and(
+          eq(schema.communityTagPresets.communityId, communityId),
+          sql`lower(${schema.communityTagPresets.name}) = lower(${name})`,
+        ),
+      )
       .limit(1);
     return existing;
   }
 
   async deleteTagPreset(communityId: string, presetId: string) {
-    const [deleted] = await this.db.delete(schema.communityTagPresets)
-      .where(and(eq(schema.communityTagPresets.id, presetId), eq(schema.communityTagPresets.communityId, communityId)))
+    const [deleted] = await this.db
+      .delete(schema.communityTagPresets)
+      .where(
+        and(
+          eq(schema.communityTagPresets.id, presetId),
+          eq(schema.communityTagPresets.communityId, communityId),
+        ),
+      )
       .returning();
     return deleted;
   }
