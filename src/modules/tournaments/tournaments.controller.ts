@@ -421,7 +421,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ghép cặp 2 participant thủ công (Lite doubles)' })
   async pairLiteParticipants(
@@ -433,7 +432,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs/generate')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tự động ghép cặp (RANDOM hoặc ELO_BALANCED) cho Lite doubles' })
   async generateLitePairs(
@@ -445,7 +443,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/pairs/:participantId/unpair')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tách cặp participant đã ghép (Lite doubles)' })
   async unpairLiteParticipant(
@@ -456,8 +453,25 @@ export class TournamentsController {
     return this.tournamentsService.unpairLiteParticipant(id, participantId, user.sub, this.getSystemRoles(user));
   }
 
+  @Patch('lite/:id/divisions/:divisionId/bracket/slots')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật slot bracket cho giải Lite' })
+  async updateLiteBracketSlots(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('divisionId', ParseUUIDPipe) divisionId: string,
+    @Body() data: UpdateBracketSlotsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateLiteBracketSlots(
+      id,
+      divisionId,
+      user.sub,
+      data,
+      this.getSystemRoles(user),
+    );
+  }
+
   @Post('lite/:id/bracket')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Tạo hoặc lưu bracket cho giải Lite' })
   async generateLiteBracket(
@@ -474,7 +488,6 @@ export class TournamentsController {
   }
 
   @Post('lite/:id/bracket/reset')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reset bracket Lite trước khi có trận bắt đầu' })
   async resetLiteBracket(

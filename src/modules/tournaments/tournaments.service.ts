@@ -1364,9 +1364,12 @@ export class TournamentsService {
                     : dto.genderRestriction === 'FEMALE'
                       ? 'Đôi Nữ'
                       : 'Đôi Nam',
+            // Football is a team-vs-team sport. The category contract uses
+            // SINGLES as the generic match type; it must never be persisted as
+            // a doubles or mixed-doubles division.
             matchType:
               sport === 'football'
-                ? MatchType.DOUBLES
+                ? MatchType.SINGLES
                 : dto.format === 'singles'
                   ? MatchType.SINGLES
                   : dto.format === 'mixed_doubles' ||
@@ -1396,7 +1399,11 @@ export class TournamentsService {
           {
             tournamentId: record.id,
             name: divInfo.name.trim(),
-            matchType: divInfo.matchType as MatchType,
+            // Keep legacy/explicit football payloads compatible while enforcing
+            // the canonical football team contract at the persistence boundary.
+            matchType: sport === 'football'
+              ? MatchType.SINGLES
+              : (divInfo.matchType as MatchType),
             genderRestriction: divInfo.genderRestriction as
               | GenderRestriction
               | undefined,
@@ -2658,6 +2665,33 @@ export class TournamentsService {
       );
       return result;
     }
+  }
+
+  async updateLiteBracketSlots(
+    id: string,
+    divisionId: string,
+    userId: string,
+    data: UpdateBracketSlotsDto,
+    systemRoles: string[] = [],
+  ) {
+    if (!divisionId) {
+      throw new BadRequestException(
+        'divisionId là bắt buộc khi cập nhật bracket Lite',
+      );
+    }
+
+    await this.checkLiteAuthorization(id, userId, systemRoles);
+    const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
+    if (!divisions.some((division) => division.id === divisionId)) {
+      throw new NotFoundException('Không tìm thấy bảng đấu cho giải Lite này');
+    }
+
+    return this.tournamentsRepository.updateBracketSlots(
+      id,
+      divisionId,
+      userId,
+      data,
+    );
   }
 
   async updateBracketSlots(
