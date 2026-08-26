@@ -16,223 +16,299 @@ export class ChatRepository {
   ) {}
 
   async getUserRooms(userId: string) {
-    // 1. Direct and Group rooms where user is an explicit member
-    const directAndGroupRooms = await this.db
-      .select({
-        id: schema.chatRooms.id,
-        name: schema.chatRooms.name,
-        type: schema.chatRooms.type,
-        communityId: schema.chatRooms.communityId,
-        clubName: schema.chatRooms.clubName,
-        clubAvatar: schema.chatRooms.clubAvatar,
-        isAnnouncementOnly: schema.chatRooms.isAnnouncementOnly,
-        slowModeSeconds: schema.chatRooms.slowModeSeconds,
-        pinnedMessageId: schema.chatRooms.pinnedMessageId,
-        communityName: schema.communities.name,
-        communityLogo: schema.communities.logoUrl,
-        createdAt: schema.chatRooms.createdAt,
-        clearedAt: schema.chatRoomMembers.clearedAt,
-      })
-      .from(schema.chatRoomMembers)
-      .innerJoin(schema.chatRooms, eq(schema.chatRoomMembers.roomId, schema.chatRooms.id))
-      .leftJoin(schema.communities, eq(schema.chatRooms.communityId, schema.communities.id))
-      .where(eq(schema.chatRoomMembers.userId, userId));
-
-    // 2. Club rooms where user is a JOINED community member
-    const clubRooms = await this.db
-      .select({
-        id: schema.chatRooms.id,
-        name: schema.chatRooms.name,
-        type: schema.chatRooms.type,
-        communityId: schema.chatRooms.communityId,
-        clubName: schema.chatRooms.clubName,
-        clubAvatar: schema.chatRooms.clubAvatar,
-        isAnnouncementOnly: schema.chatRooms.isAnnouncementOnly,
-        slowModeSeconds: schema.chatRooms.slowModeSeconds,
-        pinnedMessageId: schema.chatRooms.pinnedMessageId,
-        communityName: schema.communities.name,
-        communityLogo: schema.communities.logoUrl,
-        createdAt: schema.chatRooms.createdAt,
-        clearedAt: schema.chatRoomMembers.clearedAt,
-      })
-      .from(schema.communityMembers)
-      .innerJoin(schema.chatRooms, and(eq(schema.chatRooms.communityId, schema.communityMembers.communityId), eq(schema.chatRooms.type, 'CLUB')))
-      .leftJoin(schema.communities, eq(schema.chatRooms.communityId, schema.communities.id))
-      .leftJoin(
-        schema.chatRoomMembers,
-        and(
-          eq(schema.chatRoomMembers.roomId, schema.chatRooms.id),
-          eq(schema.chatRoomMembers.userId, userId),
-        ),
-      )
-      .where(and(eq(schema.communityMembers.userId, userId), eq(schema.communityMembers.status, 'JOINED')));
-
-    // Deduplicate rooms
-    const allRoomMap = new Map<string, typeof directAndGroupRooms[0]>();
-    for (const r of directAndGroupRooms) allRoomMap.set(r.id, r);
-    for (const r of clubRooms) allRoomMap.set(r.id, r);
-
-    const roomsWithMembership = Array.from(allRoomMap.values());
-    if (roomsWithMembership.length === 0) return [];
-
-    const roomsList: {
-      id: string;
-      name: string | null;
-      type: string;
-      createdAt: Date;
-      participants: { id: string; fullName: string | null; avatarUrl: string | null }[];
-      lastMessage?: {
+    try {
+      // 1. Direct and Group rooms where user is an explicit member
+      let directAndGroupRooms: Array<{
         id: string;
-        senderId: string | null;
-        sender: { id: string | null; fullName: string; avatarUrl?: string };
-        content: string;
-        createdAt: string;
-      };
-      updatedAt: string;
-      unreadCount: number;
-      communityId: string | null;
-      canSendMessages?: boolean;
-      messageRestriction?: 'STRANGER' | 'BLOCKED' | null;
-    }[] = [];
+        name: string | null;
+        type: string;
+        communityId: string | null;
+        clubName: string | null;
+        clubAvatar: string | null;
+        isAnnouncementOnly: boolean;
+        slowModeSeconds: number;
+        pinnedMessageId: string | null;
+        communityName: string | null;
+        communityLogo: string | null;
+        createdAt: Date;
+        clearedAt: Date | null;
+      }> = [];
 
-    for (const room of roomsWithMembership) {
-      // Get participants
-      // Read-state is optional metadata and is counted separately below. Do
-      // not join chat_read_states in the inbox projection: older production
-      // databases may not have that table yet, and one missing optional table
-      // must never turn the complete room list into HTTP 500.
-      const participants = await this.db
-        .select({
-          id: schema.users.id,
-          fullName: schema.profiles.fullName,
-          avatarUrl: schema.profiles.avatarUrl,
-        })
-        .from(schema.chatRoomMembers)
-        .innerJoin(schema.users, eq(schema.chatRoomMembers.userId, schema.users.id))
-        .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
-        .where(eq(schema.chatRoomMembers.roomId, room.id));
-
-      // Get last message (filtered by clearedAt if user has cleared history)
-      const lastMsgConditions: SQL[] = [eq(schema.chatMessages.roomId, room.id)];
-      if (room.clearedAt) {
-        lastMsgConditions.push(sql`${schema.chatMessages.createdAt} > ${room.clearedAt}`);
-      }
-
-      const [lastMessage] = await this.db
-        .select({
-          id: schema.chatMessages.id,
-          roomId: schema.chatMessages.roomId,
-          senderId: schema.chatMessages.senderId,
-          messageText: schema.chatMessages.messageText,
-          attachmentsUrls: schema.chatMessages.attachmentsUrls,
-          isRead: schema.chatMessages.isRead,
-          createdAt: schema.chatMessages.createdAt,
-          senderName: schema.profiles.fullName,
-          senderAvatar: schema.profiles.avatarUrl,
-        })
-        .from(schema.chatMessages)
-        .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
-        .where(and(...lastMsgConditions))
-        .orderBy(sql`${schema.chatMessages.createdAt} DESC`)
-        .limit(1);
-
-      const nowIso = new Date().toISOString();
-      const lastMsgDateIso = lastMessage?.createdAt
-        ? (lastMessage.createdAt instanceof Date ? lastMessage.createdAt.toISOString() : new Date(lastMessage.createdAt).toISOString())
-        : null;
-      const roomCreatedDateIso = room.createdAt
-        ? (room.createdAt instanceof Date ? room.createdAt.toISOString() : new Date(room.createdAt).toISOString())
-        : nowIso;
-
-      let unread = 0;
       try {
-        unread = await this.countUnreadUsingState(room.id, userId);
-      } catch {
-        unread = 0;
+        directAndGroupRooms = await this.db
+          .select({
+            id: schema.chatRooms.id,
+            name: schema.chatRooms.name,
+            type: schema.chatRooms.type,
+            communityId: schema.chatRooms.communityId,
+            clubName: schema.chatRooms.clubName,
+            clubAvatar: schema.chatRooms.clubAvatar,
+            isAnnouncementOnly: schema.chatRooms.isAnnouncementOnly,
+            slowModeSeconds: schema.chatRooms.slowModeSeconds,
+            pinnedMessageId: schema.chatRooms.pinnedMessageId,
+            communityName: schema.communities.name,
+            communityLogo: schema.communities.logoUrl,
+            createdAt: schema.chatRooms.createdAt,
+            clearedAt: schema.chatRoomMembers.clearedAt,
+          })
+          .from(schema.chatRoomMembers)
+          .innerJoin(schema.chatRooms, eq(schema.chatRoomMembers.roomId, schema.chatRooms.id))
+          .leftJoin(schema.communities, eq(schema.chatRooms.communityId, schema.communities.id))
+          .where(eq(schema.chatRoomMembers.userId, userId));
+      } catch (err) {
+        this.logger.warn(`Failed to fetch directAndGroupRooms for ${userId}:`, err);
       }
 
-      let canSendMessages = true;
-      let messageRestriction: 'STRANGER' | 'BLOCKED' | null = null;
-      if (room.type === 'DIRECT') {
-        const otherParticipant = participants.find((participant) => participant.id !== userId);
-        if (otherParticipant) {
+      // 2. Club rooms where user is a JOINED community member
+      let clubRooms: Array<{
+        id: string;
+        name: string | null;
+        type: string;
+        communityId: string | null;
+        clubName: string | null;
+        clubAvatar: string | null;
+        isAnnouncementOnly: boolean;
+        slowModeSeconds: number;
+        pinnedMessageId: string | null;
+        communityName: string | null;
+        communityLogo: string | null;
+        createdAt: Date;
+        clearedAt: Date | null;
+      }> = [];
+
+      try {
+        clubRooms = await this.db
+          .select({
+            id: schema.chatRooms.id,
+            name: schema.chatRooms.name,
+            type: schema.chatRooms.type,
+            communityId: schema.chatRooms.communityId,
+            clubName: schema.chatRooms.clubName,
+            clubAvatar: schema.chatRooms.clubAvatar,
+            isAnnouncementOnly: schema.chatRooms.isAnnouncementOnly,
+            slowModeSeconds: schema.chatRooms.slowModeSeconds,
+            pinnedMessageId: schema.chatRooms.pinnedMessageId,
+            communityName: schema.communities.name,
+            communityLogo: schema.communities.logoUrl,
+            createdAt: schema.chatRooms.createdAt,
+            clearedAt: schema.chatRoomMembers.clearedAt,
+          })
+          .from(schema.communityMembers)
+          .innerJoin(schema.chatRooms, and(eq(schema.chatRooms.communityId, schema.communityMembers.communityId), eq(schema.chatRooms.type, 'CLUB')))
+          .leftJoin(schema.communities, eq(schema.chatRooms.communityId, schema.communities.id))
+          .leftJoin(
+            schema.chatRoomMembers,
+            and(
+              eq(schema.chatRoomMembers.roomId, schema.chatRooms.id),
+              eq(schema.chatRoomMembers.userId, userId),
+            ),
+          )
+          .where(and(eq(schema.communityMembers.userId, userId), eq(schema.communityMembers.status, 'JOINED')));
+      } catch (err) {
+        this.logger.warn(`Failed to fetch clubRooms for ${userId}:`, err);
+      }
+
+      // Deduplicate rooms
+      const allRoomMap = new Map<string, typeof directAndGroupRooms[0]>();
+      for (const r of directAndGroupRooms) allRoomMap.set(r.id, r);
+      for (const r of clubRooms) allRoomMap.set(r.id, r);
+
+      const roomsWithMembership = Array.from(allRoomMap.values());
+      if (roomsWithMembership.length === 0) return [];
+
+      const roomsList: {
+        id: string;
+        name: string | null;
+        type: string;
+        createdAt: Date;
+        participants: { id: string; fullName: string | null; avatarUrl: string | null }[];
+        lastMessage?: {
+          id: string;
+          senderId: string | null;
+          sender: { id: string | null; fullName: string; avatarUrl?: string };
+          content: string;
+          createdAt: string;
+        };
+        updatedAt: string;
+        unreadCount: number;
+        communityId: string | null;
+        canSendMessages?: boolean;
+        messageRestriction?: 'STRANGER' | 'BLOCKED' | null;
+      }[] = [];
+
+      for (const room of roomsWithMembership) {
+        try {
+          // Get participants
+          let participants: { id: string; fullName: string | null; avatarUrl: string | null }[] = [];
           try {
-            if (await this.isBlockedBetween(userId, otherParticipant.id)) {
-              canSendMessages = false;
-              messageRestriction = 'BLOCKED';
-            } else if (
-              !(await this.getAllowStrangerMessages(otherParticipant.id)) &&
-              !(await this.isAcquainted(userId, otherParticipant.id))
-            ) {
-              canSendMessages = false;
-              messageRestriction = 'STRANGER';
+            if (room.type === 'CLUB' && room.communityId) {
+              const members = await this.getClubRoomMembers(room.communityId);
+              participants = members.map((m) => ({
+                id: m.id,
+                fullName: m.fullName,
+                avatarUrl: m.avatarUrl,
+              }));
+            } else {
+              participants = await this.db
+                .select({
+                  id: schema.users.id,
+                  fullName: schema.profiles.fullName,
+                  avatarUrl: schema.profiles.avatarUrl,
+                })
+                .from(schema.chatRoomMembers)
+                .innerJoin(schema.users, eq(schema.chatRoomMembers.userId, schema.users.id))
+                .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+                .where(eq(schema.chatRoomMembers.roomId, room.id));
             }
-          } catch (err) {
-            this.logger.warn(`Failed to check restriction for direct room ${room.id}:`, err);
-            canSendMessages = true;
+          } catch (pErr) {
+            this.logger.warn(`Failed to get participants for room ${room.id}:`, pErr);
           }
+
+          // Get last message (filtered by clearedAt if user has cleared history)
+          let lastMessage: {
+            id: string;
+            roomId: string;
+            senderId: string | null;
+            messageText: string | null;
+            attachmentsUrls: string[];
+            isRead: boolean;
+            createdAt: Date;
+            senderName: string | null;
+            senderAvatar: string | null;
+          } | undefined = undefined;
+
+          try {
+            const lastMsgConditions: SQL[] = [eq(schema.chatMessages.roomId, room.id)];
+            if (room.clearedAt) {
+              lastMsgConditions.push(sql`${schema.chatMessages.createdAt} > ${room.clearedAt}`);
+            }
+
+            const [found] = await this.db
+              .select({
+                id: schema.chatMessages.id,
+                roomId: schema.chatMessages.roomId,
+                senderId: schema.chatMessages.senderId,
+                messageText: schema.chatMessages.messageText,
+                attachmentsUrls: schema.chatMessages.attachmentsUrls,
+                isRead: schema.chatMessages.isRead,
+                createdAt: schema.chatMessages.createdAt,
+                senderName: schema.profiles.fullName,
+                senderAvatar: schema.profiles.avatarUrl,
+              })
+              .from(schema.chatMessages)
+              .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
+              .where(and(...lastMsgConditions))
+              .orderBy(sql`${schema.chatMessages.createdAt} DESC`)
+              .limit(1);
+            lastMessage = found;
+          } catch (mErr) {
+            this.logger.warn(`Failed to get last message for room ${room.id}:`, mErr);
+          }
+
+          const nowIso = new Date().toISOString();
+          const lastMsgDateIso = lastMessage?.createdAt
+            ? (lastMessage.createdAt instanceof Date ? lastMessage.createdAt.toISOString() : new Date(lastMessage.createdAt).toISOString())
+            : null;
+          const roomCreatedDateIso = room.createdAt
+            ? (room.createdAt instanceof Date ? room.createdAt.toISOString() : new Date(room.createdAt).toISOString())
+            : nowIso;
+
+          let unread = 0;
+          try {
+            unread = await this.countUnreadUsingState(room.id, userId);
+          } catch {
+            unread = 0;
+          }
+
+          let canSendMessages = true;
+          let messageRestriction: 'STRANGER' | 'BLOCKED' | null = null;
+          if (room.type === 'DIRECT') {
+            const otherParticipant = participants.find((participant) => participant.id !== userId);
+            if (otherParticipant) {
+              try {
+                if (await this.isBlockedBetween(userId, otherParticipant.id)) {
+                  canSendMessages = false;
+                  messageRestriction = 'BLOCKED';
+                } else if (
+                  !(await this.getAllowStrangerMessages(otherParticipant.id)) &&
+                  !(await this.isAcquainted(userId, otherParticipant.id))
+                ) {
+                  canSendMessages = false;
+                  messageRestriction = 'STRANGER';
+                }
+              } catch (err) {
+                this.logger.warn(`Failed to check restriction for direct room ${room.id}:`, err);
+                canSendMessages = true;
+              }
+            }
+          }
+
+          roomsList.push({
+            ...room,
+            unreadCount: unread,
+            participants,
+            lastMessage: lastMessage
+              ? {
+                  id: lastMessage.id,
+                  senderId: lastMessage.senderId,
+                  sender: {
+                    id: lastMessage.senderId,
+                    fullName: lastMessage.senderName || '',
+                    avatarUrl: lastMessage.senderAvatar || undefined,
+                  },
+                  content: lastMessage.messageText || '',
+                  createdAt: lastMsgDateIso || nowIso,
+                }
+              : undefined,
+            updatedAt: lastMsgDateIso || roomCreatedDateIso,
+            canSendMessages,
+            messageRestriction,
+          });
+        } catch (roomProcessingErr) {
+          this.logger.warn(`Error processing room ${room.id}:`, roomProcessingErr);
         }
       }
 
-      roomsList.push({
-        ...room,
-        unreadCount: unread,
-        participants,
-        lastMessage: lastMessage
-          ? {
-              id: lastMessage.id,
-              senderId: lastMessage.senderId,
-              sender: {
-                id: lastMessage.senderId,
-                fullName: lastMessage.senderName || '',
-                avatarUrl: lastMessage.senderAvatar || undefined,
-              },
-              content: lastMessage.messageText || '',
-              createdAt: lastMsgDateIso || nowIso,
-            }
-          : undefined,
-        updatedAt: lastMsgDateIso || roomCreatedDateIso,
-        canSendMessages,
-        messageRestriction,
-      });
-    }
-
-    // Legacy data may contain more than one DIRECT room for the same pair.
-    // Collapse those rows at the API boundary so every client renders one
-    // conversation, while preserving the freshest preview and unread state.
-    const canonicalRooms = new Map<string, (typeof roomsList)[number]>();
-    for (const room of roomsList) {
-      const participantKey = room.type === 'DIRECT'
-        ? room.participants
-          .filter((participant) => participant.id !== userId)
-          .map((participant) => participant.id)
-          .sort()
-          .join(',')
-        : '';
-      const key = room.type === 'DIRECT' && participantKey
-        ? `DIRECT:${participantKey}`
-        : `${room.type}:${room.id}`;
-      const existing = canonicalRooms.get(key);
-      if (!existing) {
-        canonicalRooms.set(key, room);
-        continue;
+      // Legacy data may contain more than one DIRECT room for the same pair.
+      // Collapse those rows at the API boundary so every client renders one
+      // conversation, while preserving the freshest preview and unread state.
+      const canonicalRooms = new Map<string, (typeof roomsList)[number]>();
+      for (const room of roomsList) {
+        const participantKey = room.type === 'DIRECT'
+          ? room.participants
+            .filter((participant) => participant.id !== userId)
+            .map((participant) => participant.id)
+            .sort()
+            .join(',')
+          : '';
+        const key = room.type === 'DIRECT' && participantKey
+          ? `DIRECT:${participantKey}`
+          : `${room.type}:${room.id}`;
+        const existing = canonicalRooms.get(key);
+        if (!existing) {
+          canonicalRooms.set(key, room);
+          continue;
+        }
+        const isFresh = new Date(room.updatedAt).getTime() >= new Date(existing.updatedAt).getTime();
+        const unreadCount = existing.id === room.id
+          ? Math.max(existing.unreadCount, room.unreadCount)
+          : existing.unreadCount + room.unreadCount;
+        canonicalRooms.set(key, {
+          ...(isFresh ? room : existing),
+          unreadCount,
+        });
       }
-      const isFresh = new Date(room.updatedAt).getTime() >= new Date(existing.updatedAt).getTime();
-      const unreadCount = existing.id === room.id
-        ? Math.max(existing.unreadCount, room.unreadCount)
-        : existing.unreadCount + room.unreadCount;
-      canonicalRooms.set(key, {
-        ...(isFresh ? room : existing),
-        unreadCount,
-      });
+
+      const visibleRooms = Array.from(canonicalRooms.values());
+      visibleRooms.sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      );
+
+      return visibleRooms;
+    } catch (error) {
+      this.logger.error(`Failed to get user rooms for ${userId}:`, error);
+      return [];
     }
-
-    const visibleRooms = Array.from(canonicalRooms.values());
-    visibleRooms.sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    );
-
-    return visibleRooms;
   }
 
   async getUserRoomById(userId: string, roomId: string) {
