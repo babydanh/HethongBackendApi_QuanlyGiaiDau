@@ -2396,6 +2396,19 @@ export class MatchesRepository {
     return deleted;
   }
 
+  async getMaxRoundNumber(stageId: string): Promise<number> {
+    const [result] = await this.db
+      .select({ maxRound: sql<number>`coalesce(max(${schema.matches.roundNumber}), 0)` })
+      .from(schema.matches)
+      .where(
+        and(
+          eq(schema.matches.stageId, stageId),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
+    return result?.maxRound ?? 0;
+  }
+
   async getFollowerUserIds(tournamentId: string): Promise<string[]> {
     const rows = await this.db
       .select({ userId: schema.tournamentFollows.userId })

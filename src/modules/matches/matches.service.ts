@@ -27,6 +27,7 @@ import {
   buildMatchScheduledNotification,
   buildMatchReminderNotification,
   buildRefereeAssignedNotification,
+  buildMatchAdvancedNotification,
 } from '../notifications/notification-builder';
 import { RedisService } from '../../providers/redis/redis.service';
 import { resolveEffectiveSportRules } from '../tournaments/utils/sport-rules/resolve-effective-sport-rules';
@@ -322,6 +323,37 @@ export class MatchesService {
       }
     }
 
+    // Gửi thông báo cho VĐV được advance vào vòng tiếp theo
+    if (winnerId && existing.nextMatchId && existing.tournamentId) {
+      try {
+        const nextMatch = await this.matchesRepository.findById(existing.nextMatchId);
+        if (nextMatch) {
+          const roundNumber = nextMatch.roundNumber ?? 0;
+          const maxRoundInStage = await this.matchesRepository.getMaxRoundNumber(nextMatch.stageId);
+          const roundLabel = this.resolveRoundLabel(roundNumber, maxRoundInStage, nextMatch.stage?.type);
+
+          const winnerRosters = await this.matchesRepository.getRostersForParticipants([winnerId]);
+          for (const roster of winnerRosters) {
+            await this.notificationsService.sendNotification(
+              buildMatchAdvancedNotification({
+                nextMatchId: existing.nextMatchId,
+                tournamentId: existing.tournamentId,
+                tournamentName: existing.tournament?.name || 'giải đấu',
+                receiverId: roster.userId,
+                roundLabel,
+                divisionId:
+                  existing.participant1?.tournamentDivisionId ||
+                  existing.participant2?.tournamentDivisionId ||
+                  undefined,
+              }),
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Failed to send MATCH_ADVANCED notifications:', err);
+      }
+    }
+
     return updatedMatch;
   }
 
@@ -361,6 +393,22 @@ export class MatchesService {
         | null
         | undefined,
     });
+  }
+
+  private resolveRoundLabel(
+    roundNumber: number,
+    totalRounds: number,
+    stageType?: string | null,
+  ): string {
+    if (stageType === 'ROUND_ROBIN') {
+      return `Vòng bảng (Lượt ${roundNumber})`;
+    }
+    if (totalRounds > 0) {
+      if (roundNumber === totalRounds) return 'Chung kết';
+      if (roundNumber === totalRounds - 1) return 'Bán kết';
+      if (roundNumber === totalRounds - 2) return 'Tứ kết';
+    }
+    return `Vòng ${roundNumber}`;
   }
 
   private resolveFootballForfeitGoals(
