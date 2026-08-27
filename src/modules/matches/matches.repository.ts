@@ -579,6 +579,9 @@ export class MatchesRepository {
       const groupIds = groups.map((g) => g.id);
 
       const matchScope: SQL[] = [];
+      if (stageIds.length > 0) {
+        matchScope.push(inArray(schema.matches.stageId, stageIds));
+      }
       if (groupIds.length > 0) {
         matchScope.push(inArray(schema.matches.groupId, groupIds));
       }
