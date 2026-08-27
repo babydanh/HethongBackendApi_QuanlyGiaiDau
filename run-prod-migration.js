@@ -45,7 +45,8 @@ function isSafeRepeatError(code, statement) {
       normalized.includes('IF NOT EXISTS') ||
       normalized.includes('CREATE TABLE') ||
       normalized.includes('CREATE INDEX') ||
-      normalized.includes('CREATE UNIQUE INDEX')
+      normalized.includes('CREATE UNIQUE INDEX') ||
+      normalized.includes('ADD CONSTRAINT')
     );
   }
   if (code === '42701') {
