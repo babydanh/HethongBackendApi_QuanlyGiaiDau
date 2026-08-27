@@ -6,6 +6,7 @@ import {
   IsDateString,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -49,8 +50,8 @@ export class CreateSchedulePlanDto {
 
   @IsOptional()
   @IsInt()
-  @Min(15)
-  @Max(240)
+  @Min(1)
+  @Max(3600)
   durationMinutes: number = 45;
 
   @IsOptional()
@@ -60,6 +61,40 @@ export class CreateSchedulePlanDto {
   bufferMinutes: number = 5;
 
   @IsOptional()
+  @IsIn(['MATCH_TOTAL', 'PER_SET', 'PER_HALF'])
+  timingModel: 'MATCH_TOTAL' | 'PER_SET' | 'PER_HALF' = 'MATCH_TOTAL';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(240)
+  unitDurationMinutes: number = 45;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(15)
+  unitCount: number = 1;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  betweenUnitBreakMinutes: number = 0;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(60)
+  changeoverMinutes: number = 5;
+
+  @IsOptional()
+  @IsInt()
+  @IsIn([5, 10, 15])
+  gridIncrementMinutes: number = 10;
+
+  @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => ScheduleOperatingWindowDto)
   operatingWindow?: ScheduleOperatingWindowDto;
