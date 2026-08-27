@@ -532,7 +532,7 @@ export class TournamentsController {
 
 
   @Post(':id/generate-bracket')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Sinh nhánh đấu tự động (Bracket Generation)' })
@@ -554,7 +554,7 @@ export class TournamentsController {
   }
 
   @Patch(':id/divisions/:divisionId/bracket/slots')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật participant trong các slot bracket' })
@@ -794,7 +794,7 @@ export class TournamentsController {
   }
 
   @Get(':id/manage/participants')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách participant đầy đủ cho BTC' })
   async findParticipantsForOrganizer(
@@ -806,7 +806,7 @@ export class TournamentsController {
   }
 
   @Get(':id/referees')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy danh sách trọng tài của giải đấu' })
   async findReferees(
@@ -1111,7 +1111,7 @@ export class TournamentsController {
   }
 
   @Post(':id/participants/:participantId/kick')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Kick vận động viên/đội thi đấu khỏi giải và hoàn tiền' })
@@ -1125,7 +1125,7 @@ export class TournamentsController {
   }
 
   @Get(':id/ops-audit-logs')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy nhật ký vận hành cho organizer ops panel' })
   async getOpsAuditLogs(
