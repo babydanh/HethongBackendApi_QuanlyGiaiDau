@@ -2455,6 +2455,71 @@ export class MatchesRepository {
     return Boolean(row);
   }
 
+  async findScheduleTournament(tournamentId: string) {
+    const [tournament] = await this.db
+      .select({
+        id: schema.tournaments.id,
+        createdBy: schema.tournaments.createdBy,
+        startDate: schema.tournaments.startDate,
+        endDate: schema.tournaments.endDate,
+        venueId: schema.tournaments.venueId,
+        updatedAt: schema.tournaments.updatedAt,
+      })
+      .from(schema.tournaments)
+      .where(
+        and(
+          eq(schema.tournaments.id, tournamentId),
+          isNull(schema.tournaments.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    return tournament ?? null;
+  }
+
+  async findScheduleCourts(
+    tournamentId: string,
+    courtIds: string[],
+    divisionId?: string,
+  ) {
+    const tournamentVenueScope = sql`exists (
+      select 1 from ${schema.tournaments} t
+      where t.id = ${tournamentId}
+        and t.venue_id = ${schema.venueCourts.venueId}
+        and t.deleted_at is null
+    )`;
+    const divisionVenueScope = divisionId
+      ? sql`exists (
+          select 1 from ${schema.tournamentDivisions} d
+          where d.id = ${divisionId}
+            and d.tournament_id = ${tournamentId}
+            and d.venue_id = ${schema.venueCourts.venueId}
+        )`
+      : sql`false`;
+
+    return this.db
+      .select({
+        id: schema.venueCourts.id,
+        venueId: schema.venueCourts.venueId,
+        courtName: schema.venueCourts.courtName,
+        courtAddress: schema.tournamentVenues.locationAddress,
+        status: schema.venueCourts.status,
+      })
+      .from(schema.venueCourts)
+      .innerJoin(
+        schema.tournamentVenues,
+        eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
+      )
+      .where(
+        and(
+          inArray(schema.venueCourts.id, courtIds),
+          eq(schema.venueCourts.status, 'AVAILABLE'),
+          isNull(schema.tournamentVenues.deletedAt),
+          or(tournamentVenueScope, divisionVenueScope),
+        ),
+      );
+  }
+
   // ──────── Mute / Ban comment users ────────
 
   async getMutedUserIds(matchId: string): Promise<string[]> {

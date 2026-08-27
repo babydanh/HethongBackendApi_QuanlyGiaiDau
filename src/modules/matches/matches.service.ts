@@ -5,8 +5,10 @@ import {
   BadRequestException,
   ForbiddenException,
   UnauthorizedException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { randomUUID } from 'node:crypto';
 import { MatchesRepository } from './matches.repository';
 import {
   MATCH_OPERATION_ACTIONS,
@@ -14,6 +16,10 @@ import {
   OperateMatchDto,
 } from './dto/operate-match.dto';
 import { QueryMatchDto } from './dto/query-match.dto';
+import {
+  CreateSchedulePlanDto,
+  SCHEDULE_PLAN_STRATEGY,
+} from './dto/create-schedule-plan.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
@@ -762,6 +768,198 @@ export class MatchesService {
     });
 
     return { ...scoreDetails, sets };
+  }
+
+  async previewSchedulePlan(
+    tournamentId: string,
+    user: JwtPayload,
+    dto: CreateSchedulePlanDto,
+  ) {
+    const tournament = await this.matchesRepository.findScheduleTournament(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isManager =
+      this.isAdmin(user) ||
+      tournament.createdBy === user.sub ||
+      (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
+    if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
+
+    const uniqueCourtIds = [...new Set(dto.courtIds)];
+    if (uniqueCourtIds.length !== dto.courtIds.length) {
+      throw new BadRequestException('Không được chọn trùng sân');
+    }
+    const courts = await this.matchesRepository.findScheduleCourts(
+      tournamentId,
+      uniqueCourtIds,
+      dto.divisionId,
+    );
+    if (courts.length !== uniqueCourtIds.length) {
+      throw new UnprocessableEntityException('Một hoặc nhiều sân không thuộc phạm vi giải hoặc đã bị vô hiệu hóa');
+    }
+
+    const durationMs = dto.durationMinutes * 60_000;
+    const bufferMs = dto.bufferMinutes * 60_000;
+    const requestedDay = dto.date.slice(0, 10);
+    const dateWithTournamentTime = (source: Date | null, fallback: string) => {
+      if (!source) return new Date(`${requestedDay}T${fallback}:00.000Z`);
+      const hours = String(source.getUTCHours()).padStart(2, '0');
+      const minutes = String(source.getUTCMinutes()).padStart(2, '0');
+      return new Date(`${requestedDay}T${hours}:${minutes}:00.000Z`);
+    };
+    const windowStart = dto.operatingWindow
+      ? new Date(dto.operatingWindow.start)
+      : dateWithTournamentTime(tournament.startDate, '08:00');
+    const windowEnd = dto.operatingWindow
+      ? new Date(dto.operatingWindow.end)
+      : dateWithTournamentTime(tournament.endDate, '22:00');
+    if (!Number.isFinite(windowStart.getTime()) || !Number.isFinite(windowEnd.getTime()) || windowEnd <= windowStart) {
+      throw new BadRequestException('Khung giờ xếp lịch không hợp lệ');
+    }
+
+    const allMatches = await this.matchesRepository.findAll({
+      page: 1,
+      limit: 500,
+      tournamentId,
+    });
+    if (allMatches.meta.hasMore) {
+      throw new UnprocessableEntityException('Phạm vi giải có quá nhiều trận cho một lần preview; hãy chọn một phân hạng');
+    }
+    const scopedMatches = dto.divisionId
+      ? (await this.matchesRepository.findAll({
+          page: 1,
+          limit: 500,
+          tournamentId,
+          divisionId: dto.divisionId,
+        })).data
+      : allMatches.data;
+    const scopeById = new Map(scopedMatches.map((match) => [match.id, match]));
+    const selectedMatches = dto.matchIds
+      ? dto.matchIds.map((matchId) => scopeById.get(matchId))
+      : scopedMatches;
+    if (dto.matchIds && selectedMatches.some((match) => !match)) {
+      throw new UnprocessableEntityException('Một hoặc nhiều trận không thuộc phân hạng hoặc giải đấu này');
+    }
+
+    type Interval = { start: number; end: number; participantIds: string[] };
+    const busyByCourt = new Map<string, Interval[]>();
+    const busyByParticipant = new Map<string, Interval[]>();
+    const addBusy = (courtId: string, interval: Interval) => {
+      const list = busyByCourt.get(courtId) || [];
+      list.push(interval);
+      busyByCourt.set(courtId, list);
+      for (const participantId of interval.participantIds) {
+        const participantList = busyByParticipant.get(participantId) || [];
+        participantList.push(interval);
+        busyByParticipant.set(participantId, participantList);
+      }
+    };
+    for (const match of allMatches.data) {
+      if (!match.courtId || !match.scheduledAt || !['SCHEDULED', 'ONGOING'].includes(match.status)) continue;
+      const start = new Date(match.scheduledAt).getTime();
+      if (!Number.isFinite(start)) continue;
+      const end = start + durationMs + bufferMs;
+      if (end <= windowStart.getTime() || start >= windowEnd.getTime()) continue;
+      addBusy(match.courtId, {
+        start,
+        end,
+        participantIds: [match.participant1Id, match.participant2Id].filter(
+          (value): value is string => Boolean(value),
+        ),
+      });
+    }
+
+    const overlaps = (start: number, end: number, interval: Interval) =>
+      start < interval.end && end > interval.start;
+    const assignments: Array<{ matchId: string; courtId: string; scheduledAt: string }> = [];
+    const skipped: Array<{ matchId: string; reason: string }> = [];
+    const eligible = selectedMatches.filter((match): match is NonNullable<typeof match> => Boolean(match));
+    eligible.sort((a, b) =>
+      a.roundNumber - b.roundNumber ||
+      (a.leg ?? 0) - (b.leg ?? 0) ||
+      a.matchOrder - b.matchOrder ||
+      a.id.localeCompare(b.id),
+    );
+
+    for (const match of eligible) {
+      if (match.isBye) {
+        skipped.push({ matchId: match.id, reason: 'BYE' });
+        continue;
+      }
+      if (!match.participant1Id || !match.participant2Id) {
+        skipped.push({ matchId: match.id, reason: 'TBD_OR_DEPENDENCY_BLOCKED' });
+        continue;
+      }
+      if (['COMPLETED', 'CANCELLED', 'DISPUTED', 'ONGOING'].includes(match.status)) {
+        skipped.push({ matchId: match.id, reason: 'TERMINAL_OR_ONGOING' });
+        continue;
+      }
+      if (match.scheduledAt || match.courtId) {
+        skipped.push({ matchId: match.id, reason: 'ALREADY_SCHEDULED' });
+        continue;
+      }
+
+      let best: { courtId: string; start: number } | null = null;
+      for (const court of courts) {
+        let candidateStart = windowStart.getTime();
+        const participantIds = [match.participant1Id, match.participant2Id];
+        while (candidateStart + durationMs + bufferMs <= windowEnd.getTime()) {
+          const candidateEnd = candidateStart + durationMs + bufferMs;
+          const courtConflict = (busyByCourt.get(court.id) || []).find((interval) => overlaps(candidateStart, candidateEnd, interval));
+          const participantConflict = participantIds
+            .flatMap((participantId) => busyByParticipant.get(participantId) || [])
+            .find((interval) => overlaps(candidateStart, candidateEnd, interval));
+          if (!courtConflict && !participantConflict) break;
+          candidateStart = Math.max(courtConflict?.end || 0, participantConflict?.end || 0, candidateStart + bufferMs);
+        }
+        if (candidateStart + durationMs + bufferMs <= windowEnd.getTime() && (!best || candidateStart < best.start)) {
+          best = { courtId: court.id, start: candidateStart };
+        }
+      }
+      if (!best) {
+        skipped.push({ matchId: match.id, reason: 'NO_AVAILABLE_SLOT' });
+        continue;
+      }
+      const interval = {
+        start: best.start,
+        end: best.start + durationMs + bufferMs,
+        participantIds: [match.participant1Id, match.participant2Id],
+      };
+      addBusy(best.courtId, interval);
+      assignments.push({
+        matchId: match.id,
+        courtId: best.courtId,
+        scheduledAt: new Date(best.start).toISOString(),
+      });
+    }
+
+    const scheduleVersion = [
+      tournament.updatedAt.toISOString(),
+      ...allMatches.data.map((match) => `${match.id}:${match.revision ?? 0}:${match.updatedAt}`).sort(),
+    ].join('|');
+    return {
+      statusCode: 200,
+      message: 'Schedule plan previewed',
+      data: {
+        planId: randomUUID(),
+        strategy: SCHEDULE_PLAN_STRATEGY,
+        scheduleVersion,
+        durationMinutes: dto.durationMinutes,
+        bufferMinutes: dto.bufferMinutes,
+        operatingWindow: {
+          start: windowStart.toISOString(),
+          end: windowEnd.toISOString(),
+        },
+        assignments,
+        skipped,
+        conflicts: [],
+        readiness: {
+          eligibleCount: eligible.length,
+          assignedCount: assignments.length,
+          skippedCount: skipped.length,
+          canApply: assignments.length > 0 && skipped.length === 0,
+        },
+      },
+    };
   }
 
   async findAll(query: QueryMatchDto) {
