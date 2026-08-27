@@ -6450,6 +6450,16 @@ export class TournamentsService {
               : thirdPlace.participant2Name,
           ),
         });
+      } else if (semifinalLosers.length > 0) {
+        for (const loser of semifinalLosers) {
+          if (loser?.participantId) {
+            awards.push({
+              rank: 3,
+              shared: true,
+              participant: loser,
+            });
+          }
+        }
       }
     } else if (standingRows.length) {
       const groups = new Map<string, typeof standingRows>();
