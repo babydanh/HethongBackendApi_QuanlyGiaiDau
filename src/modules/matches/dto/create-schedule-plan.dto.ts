@@ -90,8 +90,14 @@ export class CreateSchedulePlanDto {
 
   @IsOptional()
   @IsInt()
-  @IsIn([5, 10, 15])
-  gridIncrementMinutes: number = 10;
+  @IsIn([5, 10, 15, 30, 60])
+  gridIncrementMinutes: number = 30;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(240)
+  minimumStartIntervalMinutes: number = 30;
 
   @IsOptional()
   @IsObject()

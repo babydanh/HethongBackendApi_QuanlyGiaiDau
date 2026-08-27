@@ -770,6 +770,54 @@ export class MatchesService {
     return { ...scoreDetails, sets };
   }
 
+  async getAiSchedulePlannerContext(
+    tournamentId: string,
+    user: JwtPayload,
+    courtIds: string[],
+    divisionId?: string,
+  ) {
+    const tournament = await this.matchesRepository.findScheduleTournament(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isManager =
+      this.isAdmin(user) ||
+      tournament.createdBy === user.sub ||
+      (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
+    if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
+
+    const query = new QueryMatchDto();
+    query.tournamentId = tournamentId;
+    query.divisionId = divisionId;
+    query.limit = 500;
+    const result = await this.matchesRepository.findAll(query);
+    const rows = Array.isArray(result?.data) ? result.data : [];
+    const safeValue = (row: unknown, key: string): unknown =>
+      row && typeof row === 'object' ? (row as Record<string, unknown>)[key] : undefined;
+
+    return {
+      tournament: {
+        id: tournament.id,
+        startDate: tournament.startDate,
+        endDate: tournament.endDate,
+      },
+      selectedCourtIds: [...new Set(courtIds)],
+      matches: rows.map((row) => ({
+        id: String(safeValue(row, 'id') ?? ''),
+        divisionId: safeValue(row, 'divisionId') ?? null,
+        roundNumber: Number(safeValue(row, 'roundNumber') ?? 0),
+        matchOrder: Number(safeValue(row, 'matchOrder') ?? 0),
+        bracketBranch: safeValue(row, 'bracketBranch') ?? null,
+        status: String(safeValue(row, 'status') ?? ''),
+        scheduledAt: safeValue(row, 'scheduledAt') ?? null,
+        courtId: safeValue(row, 'courtId') ?? null,
+        hasParticipant1: Boolean(safeValue(row, 'participant1Id')),
+        hasParticipant2: Boolean(safeValue(row, 'participant2Id')),
+        nextMatchId: safeValue(row, 'nextMatchId') ?? null,
+        loserNextMatchId: safeValue(row, 'loserNextMatchId') ?? null,
+      })),
+    };
+  }
+
   async previewSchedulePlan(
     tournamentId: string,
     user: JwtPayload,
@@ -803,9 +851,12 @@ export class MatchesService {
       ? requestedDurationMinutes
       : unitDurationMinutes * unitCount + betweenUnitBreakMinutes * Math.max(0, unitCount - 1);
     const bufferMinutes = changeoverMinutes;
-    const gridIncrementMinutes = [5, 10, 15].includes(dto.gridIncrementMinutes ?? 10)
-      ? (dto.gridIncrementMinutes ?? 10) as 5 | 10 | 15
-      : 10;
+    const gridIncrementMinutes = [5, 10, 15, 30, 60].includes(dto.gridIncrementMinutes ?? 30)
+      ? (dto.gridIncrementMinutes ?? 30) as 5 | 10 | 15 | 30 | 60
+      : 30;
+    const minimumStartIntervalMinutes = Number.isInteger(dto.minimumStartIntervalMinutes)
+      ? Math.min(240, Math.max(5, dto.minimumStartIntervalMinutes))
+      : 30;
 
     const uniqueCourtIds = [...new Set(dto.courtIds)];
     if (uniqueCourtIds.length !== dto.courtIds.length) {
@@ -899,6 +950,11 @@ export class MatchesService {
 
     const overlaps = (start: number, end: number, interval: Interval) =>
       start < interval.end && end > interval.start;
+    const snapToGrid = (timestamp: number) => {
+      const elapsed = Math.max(0, timestamp - windowStart.getTime());
+      const step = minimumStartIntervalMinutes * 60_000;
+      return windowStart.getTime() + Math.ceil(elapsed / step) * step;
+    };
     const assignments: Array<{ matchId: string; courtId: string; scheduledAt: string }> = [];
     const skipped: Array<{ matchId: string; reason: string }> = [];
     const eligible = selectedMatches.filter((match): match is NonNullable<typeof match> => Boolean(match));
@@ -938,7 +994,8 @@ export class MatchesService {
             .flatMap((participantId) => busyByParticipant.get(participantId) || [])
             .find((interval) => overlaps(candidateStart, candidateEnd, interval));
           if (!courtConflict && !participantConflict) break;
-          candidateStart = Math.max(courtConflict?.end || 0, participantConflict?.end || 0, candidateStart + bufferMs);
+          const nextAvailable = Math.max(courtConflict?.end || 0, participantConflict?.end || 0, candidateStart + 60_000);
+          candidateStart = snapToGrid(nextAvailable);
         }
         if (candidateStart + durationMs + bufferMs <= windowEnd.getTime() && (!best || candidateStart < best.start)) {
           best = { courtId: court.id, start: candidateStart };
@@ -980,6 +1037,7 @@ export class MatchesService {
         betweenUnitBreakMinutes,
         changeoverMinutes,
         gridIncrementMinutes,
+        minimumStartIntervalMinutes,
         operatingWindow: {
           start: windowStart.toISOString(),
           end: windowEnd.toISOString(),
