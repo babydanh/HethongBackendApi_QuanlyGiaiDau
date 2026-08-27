@@ -13,9 +13,20 @@ import { AuthModule } from '../auth/auth.module';
 import { CommunitiesModule } from '../communities/communities.module';
 import { MatchesModule } from '../matches/matches.module';
 import { MailModule } from '../../providers/mail/mail.module';
+import { VenuesModule } from '../venues/venues.module';
 
 @Module({
-  imports: [DatabaseModule, SeriesModule, RedisModule, StorageModule, AuthModule, CommunitiesModule, MatchesModule, MailModule],
+  imports: [
+    DatabaseModule,
+    SeriesModule,
+    RedisModule,
+    StorageModule,
+    AuthModule,
+    CommunitiesModule,
+    MatchesModule,
+    MailModule,
+    VenuesModule,
+  ],
   controllers: [TournamentsController],
   providers: [
     TournamentsService,
@@ -24,6 +35,11 @@ import { MailModule } from '../../providers/mail/mail.module';
     TournamentSchedulerService,
     RegistrationLockService,
   ],
-  exports: [TournamentsService, BracketGeneratorService, RegistrationLockService, TournamentsRepository],
+  exports: [
+    TournamentsService,
+    BracketGeneratorService,
+    RegistrationLockService,
+    TournamentsRepository,
+  ],
 })
 export class TournamentsModule {}

@@ -1318,6 +1318,68 @@ export class MatchesRepository {
     };
   }
 
+  async findAllowedCourtForMatch(
+    match: { stageId: string; tournamentId: string },
+    courtId: string,
+  ) {
+    const [scope] = await this.db
+      .select({
+        tournamentVenueId: schema.tournaments.venueId,
+        divisionVenueId: schema.tournamentDivisions.venueId,
+      })
+      .from(schema.tournamentStages)
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+      )
+      .leftJoin(
+        schema.tournamentDivisions,
+        eq(
+          schema.tournamentStages.tournamentDivisionId,
+          schema.tournamentDivisions.id,
+        ),
+      )
+      .where(
+        and(
+          eq(schema.tournamentStages.id, match.stageId),
+          eq(schema.tournamentStages.tournamentId, match.tournamentId),
+          isNull(schema.tournaments.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!scope) return null;
+
+    const venueIds = [scope.tournamentVenueId, scope.divisionVenueId].filter(
+      (venueId): venueId is string => Boolean(venueId),
+    );
+    if (venueIds.length === 0) return null;
+
+    const [court] = await this.db
+      .select({
+        id: schema.venueCourts.id,
+        venueId: schema.venueCourts.venueId,
+        courtName: schema.venueCourts.courtName,
+        courtAddress: schema.tournamentVenues.locationAddress,
+      })
+      .from(schema.venueCourts)
+      .innerJoin(
+        schema.tournamentVenues,
+        eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
+      )
+      .where(
+        and(
+          eq(schema.venueCourts.id, courtId),
+          inArray(schema.venueCourts.venueId, venueIds),
+          eq(schema.venueCourts.status, 'AVAILABLE'),
+          isNull(schema.tournamentVenues.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    return court ?? null;
+  }
+
   async findCommentsByMatchId(matchId: string, mutedUserIds: string[] = []) {
     const conditions: SQL[] = [eq(schema.matchComments.matchId, matchId)];
     if (mutedUserIds.length > 0) {
@@ -2011,6 +2073,7 @@ export class MatchesRepository {
     id: string,
     userId: string | null,
     data: {
+      courtId?: string | null;
       courtName?: string | null;
       courtAddress?: string | null;
       refereeId?: string | null;
@@ -2034,8 +2097,75 @@ export class MatchesRepository {
         sql`SELECT pg_advisory_xact_lock(hashtext(${`match-schedule:${existing.tournamentId}`}))`,
       );
 
-      const effectiveCourtName =
-        data.courtName !== undefined
+      let canonicalCourt: {
+        courtName: string;
+        courtAddress: string;
+      } | null = null;
+      if (data.courtId) {
+        const [scope] = await tx
+          .select({
+            tournamentVenueId: schema.tournaments.venueId,
+            divisionVenueId: schema.tournamentDivisions.venueId,
+          })
+          .from(schema.tournamentStages)
+          .innerJoin(
+            schema.tournaments,
+            eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
+          )
+          .leftJoin(
+            schema.tournamentDivisions,
+            eq(
+              schema.tournamentStages.tournamentDivisionId,
+              schema.tournamentDivisions.id,
+            ),
+          )
+          .where(
+            and(
+              eq(schema.tournamentStages.id, existing.stageId),
+              eq(schema.tournamentStages.tournamentId, existing.tournamentId),
+              isNull(schema.tournaments.deletedAt),
+            ),
+          )
+          .limit(1);
+        const venueIds = [
+          scope?.tournamentVenueId,
+          scope?.divisionVenueId,
+        ].filter((venueId): venueId is string => Boolean(venueId));
+        if (venueIds.length === 0) {
+          throw new BadRequestException(
+            'Giải đấu chưa cấu hình địa điểm thi đấu hợp lệ.',
+          );
+        }
+        const [court] = await tx
+          .select({
+            courtName: schema.venueCourts.courtName,
+            courtAddress: schema.tournamentVenues.locationAddress,
+          })
+          .from(schema.venueCourts)
+          .innerJoin(
+            schema.tournamentVenues,
+            eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
+          )
+          .where(
+            and(
+              eq(schema.venueCourts.id, data.courtId),
+              inArray(schema.venueCourts.venueId, venueIds),
+              eq(schema.venueCourts.status, 'AVAILABLE'),
+              isNull(schema.tournamentVenues.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!court) {
+          throw new BadRequestException(
+            'Sân được chọn không thuộc địa điểm thi đấu của giải này hoặc đang không hoạt động.',
+          );
+        }
+        canonicalCourt = court;
+      }
+
+      const effectiveCourtName = canonicalCourt
+        ? canonicalCourt.courtName
+        : data.courtName !== undefined
           ? data.courtName?.trim() || null
           : existing.courtName;
       const effectiveScheduledAt =
@@ -2137,8 +2267,13 @@ export class MatchesRepository {
         .update(schema.matches)
         .set({
           courtName: effectiveCourtName,
-          courtAddress:
-            data.courtAddress !== undefined
+          courtId:
+            data.courtId !== undefined
+              ? data.courtId || null
+              : existing.courtId,
+          courtAddress: canonicalCourt
+            ? canonicalCourt.courtAddress
+            : data.courtAddress !== undefined
               ? data.courtAddress?.trim() || null
               : existing.courtAddress,
           refereeId:
@@ -2401,7 +2536,9 @@ export class MatchesRepository {
 
   async getMaxRoundNumber(stageId: string): Promise<number> {
     const [result] = await this.db
-      .select({ maxRound: sql<number>`coalesce(max(${schema.matches.roundNumber}), 0)` })
+      .select({
+        maxRound: sql<number>`coalesce(max(${schema.matches.roundNumber}), 0)`,
+      })
       .from(schema.matches)
       .where(
         and(

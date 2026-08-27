@@ -85,6 +85,10 @@ import {
   resolveFootballTeamConfig,
 } from './utils/football-team-config';
 import { LiveScoreGateway } from '../matches/live-score.gateway';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { VenuesService } from '../venues/venues.service';
+import { CreateVenueCourtDto } from '../venues/dto/create-venue-court.dto';
+import { CreateVenueDto } from '../venues/dto/create-venue.dto';
 
 @Injectable()
 export class TournamentsService {
@@ -96,6 +100,7 @@ export class TournamentsService {
     private readonly redisService: RedisService,
     private readonly configService: ConfigService,
     private readonly communitySocialRepository: CommunitySocialRepository,
+    private readonly venuesService: VenuesService,
     @Optional() private readonly liveScoreGateway?: LiveScoreGateway,
     @Optional() private readonly mailService?: MailService,
   ) {}
@@ -191,6 +196,110 @@ export class TournamentsService {
       member?.status === 'JOINED' &&
       ['OWNER', 'MODERATOR'].includes(member.role)
     );
+  }
+
+  private async getManagedTournamentForCourtSetup(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const row = await this.tournamentsRepository.findById(tournamentId);
+    if (!row) throw new NotFoundException('Tournament not found');
+    const tournament = row;
+    const allowed = await this.isManager(
+      {
+        id: tournament.id,
+        createdBy: tournament.createdBy,
+        communityId: tournament.communityId,
+      },
+      userId,
+      systemRoles,
+    );
+    if (!allowed) {
+      throw new ForbiddenException(
+        'Bạn không có quyền cấu hình sân cho giải đấu này.',
+      );
+    }
+    return tournament;
+  }
+
+  async saveTournamentVenue(
+    tournamentId: string,
+    dto: CreateVenueDto,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    if (tournament.venueId) {
+      return this.venuesService.update(tournament.venueId, user.sub, dto);
+    }
+
+    const venue = await this.venuesService.create(user.sub, dto);
+    await this.tournamentsRepository.update(tournamentId, user.sub, {
+      venueId: venue.id,
+    });
+    return venue;
+  }
+
+  async getTournamentCourts(
+    tournamentId: string,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    if (!tournament.venueId) {
+      return { venue: null, courts: [] };
+    }
+    const venue = await this.venuesService.findOne(tournament.venueId);
+    return { venue, courts: venue.courts ?? [] };
+  }
+
+  async addTournamentCourt(
+    tournamentId: string,
+    dto: CreateVenueCourtDto,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    if (!tournament.venueId) {
+      throw new BadRequestException(
+        'Giải đấu cần lưu địa điểm trước khi thêm sân.',
+      );
+    }
+    return this.venuesService.addCourt(tournament.venueId, dto);
+  }
+
+  async removeTournamentCourt(
+    tournamentId: string,
+    courtId: string,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    if (!tournament.venueId) {
+      throw new NotFoundException('Giải đấu chưa có địa điểm thi đấu.');
+    }
+    const venue = await this.venuesService.findOne(tournament.venueId);
+    if (!venue.courts?.some((court) => court.id === courtId)) {
+      throw new NotFoundException('Court not found in this tournament venue');
+    }
+    return this.venuesService.removeCourt(tournament.venueId, courtId);
   }
 
   private isSystemTournamentCreator(systemRoles: string[] = []): boolean {
@@ -1401,9 +1510,10 @@ export class TournamentsService {
             name: divInfo.name.trim(),
             // Keep legacy/explicit football payloads compatible while enforcing
             // the canonical football team contract at the persistence boundary.
-            matchType: sport === 'football'
-              ? MatchType.SINGLES
-              : (divInfo.matchType as MatchType),
+            matchType:
+              sport === 'football'
+                ? MatchType.SINGLES
+                : (divInfo.matchType as MatchType),
             genderRestriction: divInfo.genderRestriction as
               | GenderRestriction
               | undefined,
@@ -2560,8 +2670,7 @@ export class TournamentsService {
 
     const config = (existing.tournamentConfig || {}) as Record<string, unknown>;
     const isLite =
-      (config.isLite as boolean | undefined) === true ||
-      config.mode === 'LITE';
+      (config.isLite as boolean | undefined) === true || config.mode === 'LITE';
     const isDoublesFormat =
       existing.matchType === 'DOUBLES' ||
       existing.matchType === 'MIXED_DOUBLES' ||
@@ -2681,7 +2790,8 @@ export class TournamentsService {
     }
 
     await this.checkLiteAuthorization(id, userId, systemRoles);
-    const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
+    const divisions =
+      await this.tournamentsRepository.getDivisionsByTournament(id);
     if (!divisions.some((division) => division.id === divisionId)) {
       throw new NotFoundException('Không tìm thấy bảng đấu cho giải Lite này');
     }

@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { MatchesService } from './matches.service';
 
 describe('MatchesService object-level football authority', () => {
@@ -6,6 +6,9 @@ describe('MatchesService object-level football authority', () => {
     findById: jest.fn(),
     isTournamentManager: jest.fn(),
     isRefereeAccepted: jest.fn(),
+    findAllowedCourtForMatch: jest.fn(),
+    getRostersForParticipants: jest.fn(),
+    updateSchedule: jest.fn(),
     updateScore: jest.fn(),
     updateRefereeId: jest.fn(),
     updateStatus: jest.fn(),
@@ -36,11 +39,12 @@ describe('MatchesService object-level football authority', () => {
     participant1Id: 'p1',
     participant2Id: 'p2',
     refereeId: null,
-    tournament: { createdBy: 'owner-1' },
     scoreDetails: null,
     p1SetsWon: 0,
     p2SetsWon: 0,
     revision: 1,
+    stageId: 'stage-1',
+    tournament: { createdBy: 'owner-1', sportRules: null },
   };
 
   beforeEach(() => {
@@ -48,9 +52,27 @@ describe('MatchesService object-level football authority', () => {
     repository.findById.mockResolvedValue({ ...baseMatch });
     repository.isTournamentManager.mockResolvedValue(false);
     repository.isRefereeAccepted.mockResolvedValue(false);
+    repository.findAllowedCourtForMatch.mockResolvedValue({
+      id: 'court-1',
+      courtName: 'Sân 1',
+      courtAddress: 'Địa chỉ sân',
+    });
+    repository.getRostersForParticipants.mockResolvedValue([]);
+    repository.updateSchedule.mockResolvedValue({
+      ...baseMatch,
+      courtId: 'court-1',
+      courtName: 'Sân 1',
+      courtAddress: 'Địa chỉ sân',
+    });
     repository.updateScore.mockResolvedValue({ ...baseMatch, p1SetsWon: 1 });
-    repository.updateRefereeId.mockResolvedValue({ ...baseMatch, refereeId: 'ref-1' });
-    repository.updateStatus.mockResolvedValue({ ...baseMatch, status: 'ONGOING' });
+    repository.updateRefereeId.mockResolvedValue({
+      ...baseMatch,
+      refereeId: 'ref-1',
+    });
+    repository.updateStatus.mockResolvedValue({
+      ...baseMatch,
+      status: 'ONGOING',
+    });
   });
 
   it('allows an accepted player-referee assigned to the match to enter score', async () => {
@@ -89,6 +111,42 @@ describe('MatchesService object-level football authority', () => {
     expect(repository.updateScore).not.toHaveBeenCalled();
   });
 
+  it('allows a tournament-scoped PLAYER co-organizer to assign an available court', async () => {
+    repository.isTournamentManager.mockResolvedValue(true);
+
+    await expect(
+      service.updateSchedule(
+        'match-1',
+        { sub: 'co-organizer-1', roles: ['PLAYER'] } as never,
+        { courtId: 'court-1' },
+      ),
+    ).resolves.toBeDefined();
+
+    expect(repository.findAllowedCourtForMatch).toHaveBeenCalledWith(
+      expect.objectContaining({ tournamentId: 'tournament-1' }),
+      'court-1',
+    );
+    expect(repository.updateSchedule).toHaveBeenCalledWith(
+      'match-1',
+      'co-organizer-1',
+      expect.objectContaining({ courtId: 'court-1' }),
+    );
+  });
+
+  it('rejects a cross-tournament or disabled court before persistence', async () => {
+    repository.isTournamentManager.mockResolvedValue(true);
+    repository.findAllowedCourtForMatch.mockResolvedValue(null);
+
+    await expect(
+      service.updateSchedule(
+        'match-1',
+        { sub: 'co-organizer-1', roles: ['PLAYER'] } as never,
+        { courtId: 'court-foreign-or-disabled' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.updateSchedule).not.toHaveBeenCalled();
+  });
+
   it('saves an accepted unassigned referee who starts the scheduled match', async () => {
     repository.findById.mockResolvedValue({
       ...baseMatch,
@@ -103,6 +161,10 @@ describe('MatchesService object-level football authority', () => {
         { status: 'ONGOING' } as never,
       ),
     ).resolves.toBeDefined();
-    expect(repository.updateRefereeId).toHaveBeenCalledWith('match-1', 'ref-1', 'ref-1');
+    expect(repository.updateRefereeId).toHaveBeenCalledWith(
+      'match-1',
+      'ref-1',
+      'ref-1',
+    );
   });
 });
