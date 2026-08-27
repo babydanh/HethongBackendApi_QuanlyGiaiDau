@@ -784,6 +784,29 @@ export class MatchesService {
       (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
     if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
 
+    // Normalize optional DTO defaults explicitly; do not rely on class-transformer
+    // preserving property initializers under whitelist/transform settings.
+    const timingModel = dto.timingModel ?? 'MATCH_TOTAL';
+    const requestedDurationMinutes = Number.isInteger(dto.durationMinutes) ? dto.durationMinutes : 45;
+    const requestedBufferMinutes = Number.isInteger(dto.bufferMinutes) ? dto.bufferMinutes : 5;
+    const unitDurationMinutes = Number.isInteger(dto.unitDurationMinutes)
+      ? dto.unitDurationMinutes
+      : requestedDurationMinutes;
+    const unitCount = Number.isInteger(dto.unitCount) ? dto.unitCount : 1;
+    const betweenUnitBreakMinutes = Number.isInteger(dto.betweenUnitBreakMinutes)
+      ? dto.betweenUnitBreakMinutes
+      : 0;
+    const changeoverMinutes = Number.isInteger(dto.changeoverMinutes)
+      ? dto.changeoverMinutes
+      : requestedBufferMinutes;
+    const durationMinutes = timingModel === 'MATCH_TOTAL'
+      ? requestedDurationMinutes
+      : unitDurationMinutes * unitCount + betweenUnitBreakMinutes * Math.max(0, unitCount - 1);
+    const bufferMinutes = changeoverMinutes;
+    const gridIncrementMinutes = [5, 10, 15].includes(dto.gridIncrementMinutes ?? 10)
+      ? (dto.gridIncrementMinutes ?? 10) as 5 | 10 | 15
+      : 10;
+
     const uniqueCourtIds = [...new Set(dto.courtIds)];
     if (uniqueCourtIds.length !== dto.courtIds.length) {
       throw new BadRequestException('Không được chọn trùng sân');
@@ -800,8 +823,8 @@ export class MatchesService {
       throw new UnprocessableEntityException('Một hoặc nhiều sân không thuộc phạm vi giải hoặc đã bị vô hiệu hóa');
     }
 
-    const durationMs = dto.durationMinutes * 60_000;
-    const bufferMs = dto.bufferMinutes * 60_000;
+    const durationMs = durationMinutes * 60_000;
+    const bufferMs = bufferMinutes * 60_000;
     const requestedDay = dto.date.slice(0, 10);
     const dateWithTournamentTime = (source: Date | null, fallback: string) => {
       if (!source) return new Date(`${requestedDay}T${fallback}:00.000Z`);
@@ -949,8 +972,14 @@ export class MatchesService {
         planId: randomUUID(),
         strategy: SCHEDULE_PLAN_STRATEGY,
         scheduleVersion,
-        durationMinutes: dto.durationMinutes,
-        bufferMinutes: dto.bufferMinutes,
+        durationMinutes,
+        bufferMinutes,
+        timingModel,
+        unitDurationMinutes,
+        unitCount,
+        betweenUnitBreakMinutes,
+        changeoverMinutes,
+        gridIncrementMinutes,
         operatingWindow: {
           start: windowStart.toISOString(),
           end: windowEnd.toISOString(),
