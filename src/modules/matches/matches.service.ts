@@ -5,8 +5,10 @@ import {
   BadRequestException,
   ForbiddenException,
   UnauthorizedException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { randomUUID } from 'node:crypto';
 import { MatchesRepository } from './matches.repository';
 import {
   MATCH_OPERATION_ACTIONS,
@@ -14,6 +16,10 @@ import {
   OperateMatchDto,
 } from './dto/operate-match.dto';
 import { QueryMatchDto } from './dto/query-match.dto';
+import {
+  CreateSchedulePlanDto,
+  SCHEDULE_PLAN_STRATEGY,
+} from './dto/create-schedule-plan.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
@@ -59,22 +65,36 @@ export class MatchesService {
     ];
 
     try {
-      const result = await this.matchesRepository.findAll({ page: 1, limit: 500, status: 'SCHEDULED' });
+      const result = await this.matchesRepository.findAll({
+        page: 1,
+        limit: 500,
+        status: 'SCHEDULED',
+      });
       for (const match of result.data) {
         if (!match.scheduledAt || match.status !== 'SCHEDULED') continue;
         const scheduledMs = new Date(match.scheduledAt).getTime();
         if (!Number.isFinite(scheduledMs) || scheduledMs <= now) continue;
         const minutesUntil = (scheduledMs - now) / 60000;
-        const window = windows.find((candidate) => Math.abs(minutesUntil - candidate.minutes) <= candidate.tolerance);
+        const window = windows.find(
+          (candidate) =>
+            Math.abs(minutesUntil - candidate.minutes) <= candidate.tolerance,
+        );
         if (!window) continue;
 
         const reminderKey = `match-reminder:${match.id}:${window.key}`;
         if (await this.redisService.get(reminderKey)) continue;
         await this.redisService.set(reminderKey, '1', 36 * 60 * 60);
 
-        const participantIds = [match.participant1Id, match.participant2Id]
-          .filter((participantId): participantId is string => Boolean(participantId));
-        const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+        const participantIds = [
+          match.participant1Id,
+          match.participant2Id,
+        ].filter((participantId): participantId is string =>
+          Boolean(participantId),
+        );
+        const rosters =
+          await this.matchesRepository.getRostersForParticipants(
+            participantIds,
+          );
         const scheduledAt = match.scheduledAt;
         const scheduledTime = new Date(scheduledAt).toLocaleString('vi-VN', {
           day: '2-digit',
@@ -84,21 +104,25 @@ export class MatchesService {
           minute: '2-digit',
           hour12: false,
         });
-        await Promise.all(rosters.map((roster) => this.notificationsService.sendNotification(
-          buildMatchReminderNotification({
-            matchId: match.id,
-            receiverId: roster.userId,
-            tournamentName: match.tournament?.name || 'giải đấu',
-            sportName: match.tournament?.category?.name,
-            divisionName: match.tournament?.divisionName,
-            matchType: match.tournament?.matchType,
-            scheduledTime,
-            court: match.courtName || 'Chưa xếp sân',
-            untilLabel: window.label,
-            bracketBranch: match.bracketBranch,
-            roundNumber: match.roundNumber,
-          }),
-        )));
+        await Promise.all(
+          rosters.map((roster) =>
+            this.notificationsService.sendNotification(
+              buildMatchReminderNotification({
+                matchId: match.id,
+                receiverId: roster.userId,
+                tournamentName: match.tournament?.name || 'giải đấu',
+                sportName: match.tournament?.category?.name,
+                divisionName: match.tournament?.divisionName,
+                matchType: match.tournament?.matchType,
+                scheduledTime,
+                court: match.courtName || 'Chưa xếp sân',
+                untilLabel: window.label,
+                bracketBranch: match.bracketBranch,
+                roundNumber: match.roundNumber,
+              }),
+            ),
+          ),
+        );
       }
     } catch (error) {
       console.error('Failed to send upcoming match reminders:', error);
@@ -326,13 +350,21 @@ export class MatchesService {
     // Gửi thông báo cho VĐV được advance vào vòng tiếp theo
     if (winnerId && existing.nextMatchId && existing.tournamentId) {
       try {
-        const nextMatch = await this.matchesRepository.findById(existing.nextMatchId);
+        const nextMatch = await this.matchesRepository.findById(
+          existing.nextMatchId,
+        );
         if (nextMatch) {
           const roundNumber = nextMatch.roundNumber ?? 0;
-          const maxRoundInStage = await this.matchesRepository.getMaxRoundNumber(nextMatch.stageId);
-          const roundLabel = this.resolveRoundLabel(roundNumber, maxRoundInStage, nextMatch.stage?.type);
+          const maxRoundInStage =
+            await this.matchesRepository.getMaxRoundNumber(nextMatch.stageId);
+          const roundLabel = this.resolveRoundLabel(
+            roundNumber,
+            maxRoundInStage,
+            nextMatch.stage?.type,
+          );
 
-          const winnerRosters = await this.matchesRepository.getRostersForParticipants([winnerId]);
+          const winnerRosters =
+            await this.matchesRepository.getRostersForParticipants([winnerId]);
           for (const roster of winnerRosters) {
             await this.notificationsService.sendNotification(
               buildMatchAdvancedNotification({
@@ -736,6 +768,204 @@ export class MatchesService {
     });
 
     return { ...scoreDetails, sets };
+  }
+
+  async previewSchedulePlan(
+    tournamentId: string,
+    user: JwtPayload,
+    dto: CreateSchedulePlanDto,
+  ) {
+    const tournament = await this.matchesRepository.findScheduleTournament(tournamentId);
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    const isManager =
+      this.isAdmin(user) ||
+      tournament.createdBy === user.sub ||
+      (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
+    if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
+
+    const uniqueCourtIds = [...new Set(dto.courtIds)];
+    if (uniqueCourtIds.length !== dto.courtIds.length) {
+      throw new BadRequestException('Không được chọn trùng sân');
+    }
+    if (dto.matchIds && new Set(dto.matchIds).size !== dto.matchIds.length) {
+      throw new BadRequestException('Không được chọn trùng trận');
+    }
+    const courts = await this.matchesRepository.findScheduleCourts(
+      tournamentId,
+      uniqueCourtIds,
+      dto.divisionId,
+    );
+    if (courts.length !== uniqueCourtIds.length) {
+      throw new UnprocessableEntityException('Một hoặc nhiều sân không thuộc phạm vi giải hoặc đã bị vô hiệu hóa');
+    }
+
+    const durationMs = dto.durationMinutes * 60_000;
+    const bufferMs = dto.bufferMinutes * 60_000;
+    const requestedDay = dto.date.slice(0, 10);
+    const dateWithTournamentTime = (source: Date | null, fallback: string) => {
+      if (!source) return new Date(`${requestedDay}T${fallback}:00.000Z`);
+      const hours = String(source.getUTCHours()).padStart(2, '0');
+      const minutes = String(source.getUTCMinutes()).padStart(2, '0');
+      return new Date(`${requestedDay}T${hours}:${minutes}:00.000Z`);
+    };
+    const windowStart = dto.operatingWindow
+      ? new Date(dto.operatingWindow.start)
+      : dateWithTournamentTime(tournament.startDate, '08:00');
+    const windowEnd = dto.operatingWindow
+      ? new Date(dto.operatingWindow.end)
+      : dateWithTournamentTime(tournament.endDate, '22:00');
+    if (!Number.isFinite(windowStart.getTime()) || !Number.isFinite(windowEnd.getTime()) || windowEnd <= windowStart) {
+      throw new BadRequestException('Khung giờ xếp lịch không hợp lệ');
+    }
+    if (windowStart.toISOString().slice(0, 10) !== requestedDay || windowEnd.toISOString().slice(0, 10) !== requestedDay) {
+      throw new BadRequestException('Khung giờ phải nằm trong ngày đã chọn');
+    }
+
+    const allMatches = await this.matchesRepository.findAll({
+      page: 1,
+      limit: 500,
+      tournamentId,
+    });
+    if (allMatches.meta.hasMore) {
+      throw new UnprocessableEntityException('Phạm vi giải có quá nhiều trận cho một lần preview; hãy chọn một phân hạng');
+    }
+    const scopedMatches = dto.divisionId
+      ? (await this.matchesRepository.findAll({
+          page: 1,
+          limit: 500,
+          tournamentId,
+          divisionId: dto.divisionId,
+        })).data
+      : allMatches.data;
+    const scopeById = new Map(scopedMatches.map((match) => [match.id, match]));
+    const selectedMatches = dto.matchIds
+      ? dto.matchIds.map((matchId) => scopeById.get(matchId))
+      : scopedMatches;
+    if (dto.matchIds && selectedMatches.some((match) => !match)) {
+      throw new UnprocessableEntityException('Một hoặc nhiều trận không thuộc phân hạng hoặc giải đấu này');
+    }
+
+    type Interval = { start: number; end: number; participantIds: string[] };
+    const busyByCourt = new Map<string, Interval[]>();
+    const busyByParticipant = new Map<string, Interval[]>();
+    const addBusy = (courtId: string, interval: Interval) => {
+      const list = busyByCourt.get(courtId) || [];
+      list.push(interval);
+      busyByCourt.set(courtId, list);
+      for (const participantId of interval.participantIds) {
+        const participantList = busyByParticipant.get(participantId) || [];
+        participantList.push(interval);
+        busyByParticipant.set(participantId, participantList);
+      }
+    };
+    for (const match of allMatches.data) {
+      if (!match.courtId || !match.scheduledAt || !['SCHEDULED', 'ONGOING'].includes(match.status)) continue;
+      const start = new Date(match.scheduledAt).getTime();
+      if (!Number.isFinite(start)) continue;
+      const end = start + durationMs + bufferMs;
+      if (end <= windowStart.getTime() || start >= windowEnd.getTime()) continue;
+      addBusy(match.courtId, {
+        start,
+        end,
+        participantIds: [match.participant1Id, match.participant2Id].filter(
+          (value): value is string => Boolean(value),
+        ),
+      });
+    }
+
+    const overlaps = (start: number, end: number, interval: Interval) =>
+      start < interval.end && end > interval.start;
+    const assignments: Array<{ matchId: string; courtId: string; scheduledAt: string }> = [];
+    const skipped: Array<{ matchId: string; reason: string }> = [];
+    const eligible = selectedMatches.filter((match): match is NonNullable<typeof match> => Boolean(match));
+    eligible.sort((a, b) =>
+      a.roundNumber - b.roundNumber ||
+      (a.leg ?? 0) - (b.leg ?? 0) ||
+      a.matchOrder - b.matchOrder ||
+      a.id.localeCompare(b.id),
+    );
+
+    for (const match of eligible) {
+      if (match.isBye) {
+        skipped.push({ matchId: match.id, reason: 'BYE' });
+        continue;
+      }
+      if (!match.participant1Id || !match.participant2Id) {
+        skipped.push({ matchId: match.id, reason: 'TBD_OR_DEPENDENCY_BLOCKED' });
+        continue;
+      }
+      if (['COMPLETED', 'CANCELLED', 'DISPUTED', 'ONGOING'].includes(match.status)) {
+        skipped.push({ matchId: match.id, reason: 'TERMINAL_OR_ONGOING' });
+        continue;
+      }
+      if (match.scheduledAt || match.courtId) {
+        skipped.push({ matchId: match.id, reason: 'ALREADY_SCHEDULED' });
+        continue;
+      }
+
+      let best: { courtId: string; start: number } | null = null;
+      for (const court of courts) {
+        let candidateStart = windowStart.getTime();
+        const participantIds = [match.participant1Id, match.participant2Id];
+        while (candidateStart + durationMs + bufferMs <= windowEnd.getTime()) {
+          const candidateEnd = candidateStart + durationMs + bufferMs;
+          const courtConflict = (busyByCourt.get(court.id) || []).find((interval) => overlaps(candidateStart, candidateEnd, interval));
+          const participantConflict = participantIds
+            .flatMap((participantId) => busyByParticipant.get(participantId) || [])
+            .find((interval) => overlaps(candidateStart, candidateEnd, interval));
+          if (!courtConflict && !participantConflict) break;
+          candidateStart = Math.max(courtConflict?.end || 0, participantConflict?.end || 0, candidateStart + bufferMs);
+        }
+        if (candidateStart + durationMs + bufferMs <= windowEnd.getTime() && (!best || candidateStart < best.start)) {
+          best = { courtId: court.id, start: candidateStart };
+        }
+      }
+      if (!best) {
+        skipped.push({ matchId: match.id, reason: 'NO_AVAILABLE_SLOT' });
+        continue;
+      }
+      const interval = {
+        start: best.start,
+        end: best.start + durationMs + bufferMs,
+        participantIds: [match.participant1Id, match.participant2Id],
+      };
+      addBusy(best.courtId, interval);
+      assignments.push({
+        matchId: match.id,
+        courtId: best.courtId,
+        scheduledAt: new Date(best.start).toISOString(),
+      });
+    }
+
+    const scheduleVersion = [
+      tournament.updatedAt.toISOString(),
+      ...allMatches.data.map((match) => `${match.id}:${match.revision ?? 0}:${match.updatedAt}`).sort(),
+    ].join('|');
+    return {
+      statusCode: 200,
+      message: 'Schedule plan previewed',
+      data: {
+        planId: randomUUID(),
+        strategy: SCHEDULE_PLAN_STRATEGY,
+        scheduleVersion,
+        durationMinutes: dto.durationMinutes,
+        bufferMinutes: dto.bufferMinutes,
+        operatingWindow: {
+          start: windowStart.toISOString(),
+          end: windowEnd.toISOString(),
+        },
+        assignments,
+        skipped,
+        conflicts: [],
+        readiness: {
+          eligibleCount: eligible.length,
+          assignedCount: assignments.length,
+          skippedCount: skipped.length,
+          canApply: assignments.length > 0 && skipped.length === 0,
+        },
+      },
+    };
   }
 
   async findAll(query: QueryMatchDto) {
@@ -1431,10 +1661,7 @@ export class MatchesService {
     // it before the tournament can advance; it likewise never creates a rank
     // result by itself.
     if (data.action === 'POSTPONE' || data.action === 'ABANDON') {
-      if (
-        data.action === 'POSTPONE' &&
-        existing.status !== 'SCHEDULED'
-      ) {
+      if (data.action === 'POSTPONE' && existing.status !== 'SCHEDULED') {
         throw new BadRequestException(
           'Chỉ có thể hoãn trận chưa bắt đầu. Trận đang diễn ra cần xử lý bỏ trận hoặc chốt kết quả.',
         );
@@ -1471,16 +1698,16 @@ export class MatchesService {
             data.action === 'POSTPONE'
               ? { specialResult }
               : { ...currentScoreDetails, specialResult },
-          ...(data.action === 'POSTPONE'
-            ? { p1SetsWon: 0, p2SetsWon: 0 }
-            : {}),
+          ...(data.action === 'POSTPONE' ? { p1SetsWon: 0, p2SetsWon: 0 } : {}),
           scheduledAt: null,
           startedAt: null,
           winnerId: null,
         },
       );
       if (!updated) {
-        throw new NotFoundException('Không tìm thấy trận sau khi ghi quyết định.');
+        throw new NotFoundException(
+          'Không tìm thấy trận sau khi ghi quyết định.',
+        );
       }
 
       this.liveScoreGateway.broadcastMatchStatus(
@@ -1497,10 +1724,14 @@ export class MatchesService {
         const participantIds = [
           existing.participant1Id,
           existing.participant2Id,
-        ].filter((participantId): participantId is string => Boolean(participantId));
+        ].filter((participantId): participantId is string =>
+          Boolean(participantId),
+        );
         if (participantIds.length > 0) {
           const rosters =
-            await this.matchesRepository.getRostersForParticipants(participantIds);
+            await this.matchesRepository.getRostersForParticipants(
+              participantIds,
+            );
           for (const roster of rosters) {
             await this.notificationsService.sendNotification(
               data.action === 'POSTPONE'
@@ -1669,6 +1900,7 @@ export class MatchesService {
     id: string,
     user: JwtPayload,
     data: {
+      courtId?: string;
       courtName?: string;
       courtAddress?: string;
       refereeId?: string;
@@ -1684,6 +1916,19 @@ export class MatchesService {
       throw new ForbiddenException(
         'Bạn không có quyền chỉnh lịch thi đấu của giải này',
       );
+    }
+
+    if (data.courtId) {
+      const allowedCourt =
+        await this.matchesRepository.findAllowedCourtForMatch(
+          existing,
+          data.courtId,
+        );
+      if (!allowedCourt) {
+        throw new BadRequestException(
+          'Sân được chọn không thuộc địa điểm thi đấu của giải này hoặc đang không hoạt động.',
+        );
+      }
     }
 
     if (data.refereeId) {

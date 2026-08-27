@@ -60,7 +60,15 @@ function isSafeRepeatError(code, statement) {
     );
   }
   if (code === '42704' || code === '42703' || code === '42P01') {
-    return normalized.includes('IF EXISTS');
+    return (
+      normalized.includes('IF EXISTS') ||
+      normalized.includes('DISABLE ROW LEVEL SECURITY') ||
+      normalized.includes('ENABLE ROW LEVEL SECURITY') ||
+      normalized.includes('DROP TABLE') ||
+      normalized.includes('DROP CONSTRAINT') ||
+      normalized.includes('DROP INDEX') ||
+      normalized.includes('DROP COLUMN')
+    );
   }
   return false;
 }
