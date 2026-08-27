@@ -1,8 +1,14 @@
-import { Controller, Post, Body, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Req, Res, UseGuards, Param, ParseUUIDPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { AiService } from './ai.service';
 import { ParseTournamentSourceDto } from './dto/parse-tournament-source.dto';
+import { AiScheduleCommandDto } from './dto/ai-schedule-command.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { UserRole } from '../../common/constants/enums';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 import type { Request, Response } from 'express';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
@@ -100,7 +106,21 @@ export class AiController {
     return { success: true, reply: result.content, data: result.content, ui_blocks: result.uiBlocks, tool_events: result.toolEvents };
   }
 
-    @Post('parse-tournament-source')
+  @Post('tournaments/:tournamentId/schedule-preview')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo preview xếp lịch bằng câu lệnh AI, không ghi dữ liệu' })
+  async previewTournamentScheduleWithAi(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Body() dto: AiScheduleCommandDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.aiService.previewScheduleFromCommand(tournamentId, user, dto);
+  }
+
+  @Public()
+  @Post('parse-tournament-source')
   @UseGuards(new RateLimitGuard(15, 60000))
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Phân tích Link Google Form / Điều lệ giải đấu để trích xuất thông tin tự động' })

@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, BadRequestException, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -11,6 +11,9 @@ import { MatchesService } from '../matches/matches.service';
 import { PaymentsService } from '../payments/payments.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { QueryMatchDto } from '../matches/dto/query-match.dto';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { CreateSchedulePlanDto } from '../matches/dto/create-schedule-plan.dto';
+import { AiScheduleCommandDto } from './dto/ai-schedule-command.dto';
 import { AiToolRouter } from './ai-tool.router';
 import type { AiAssistantResponse, AiStreamEvent, AiToolContext, AiToolEvent, AiToolResultEnvelope } from './ai-tool.types';
 
@@ -504,6 +507,84 @@ ${divisionsStr}
       if (error instanceof BadRequestException) throw error;
       throw new BadRequestException('Không thể xác minh địa chỉ công khai của link nguồn.');
     }
+  }
+
+  async previewScheduleFromCommand(tournamentId: string, user: JwtPayload, dto: AiScheduleCommandDto) {
+    if (!this.openai) throw new ServiceUnavailableException('AI scheduling chưa được cấu hình trên máy chủ');
+    const context = await this.matchesService.getAiSchedulePlannerContext(tournamentId, user, dto.courtIds, dto.divisionId);
+    if (context.matches.length === 0) throw new BadRequestException('Không có trận phù hợp trong phạm vi đã chọn để AI xếp lịch');
+
+    const response = await this.openai.chat.completions.create({
+      model: this.modelName,
+      messages: [
+        { role: 'system', content: 'Bạn là bộ phân tích yêu cầu xếp lịch cho SportO. Chỉ trả JSON theo schema. Không tạo lịch trực tiếp, không đổi bracket, không tạo sân. Chỉ chuyển câu lệnh thành intent. Nếu mơ hồ, needsReview=true. minimumStartIntervalMinutes mặc định 30.' },
+        { role: 'user', content: `Yêu cầu: ${dto.command}\nNgày mặc định: ${dto.date}\nSelected courts: ${JSON.stringify(context.selectedCourtIds)}\nBracket: ${JSON.stringify(context.matches.map((m) => ({ id: m.id, divisionId: m.divisionId, roundNumber: m.roundNumber, matchOrder: m.matchOrder, bracketBranch: m.bracketBranch, status: m.status, scheduledAt: m.scheduledAt, courtId: m.courtId, hasParticipant1: m.hasParticipant1, hasParticipant2: m.hasParticipant2 })))}` },
+      ],
+      temperature: 0.1,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'sport_o_schedule_intent',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              date: { type: ['string', 'null'] },
+              roundNumbers: { type: 'array', items: { type: 'integer' }, maxItems: 32 },
+              startTime: { type: ['string', 'null'] },
+              endTime: { type: ['string', 'null'] },
+              minimumStartIntervalMinutes: { type: 'integer' },
+              timingModel: { type: ['string', 'null'] },
+              unitDurationMinutes: { type: ['integer', 'null'] },
+              unitCount: { type: ['integer', 'null'] },
+              betweenUnitBreakMinutes: { type: ['integer', 'null'] },
+              changeoverMinutes: { type: ['integer', 'null'] },
+              needsReview: { type: 'boolean' },
+              explanation: { type: 'string' },
+            },
+            required: ['date', 'roundNumbers', 'startTime', 'endTime', 'minimumStartIntervalMinutes', 'timingModel', 'unitDurationMinutes', 'unitCount', 'betweenUnitBreakMinutes', 'changeoverMinutes', 'needsReview', 'explanation'],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    try {
+      const intent = JSON.parse(response.choices[0]?.message?.content?.trim() || '{}') as Record<string, unknown>;
+      const roundNumbers = Array.isArray(intent.roundNumbers) ? intent.roundNumbers.filter((v): v is number => Number.isInteger(v) && v >= 1 && v <= 100) : [];
+      const date = typeof intent.date === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(intent.date) ? intent.date : dto.date;
+      const fallbackStartTime = dto.operatingWindow?.start?.slice(11, 16) || '08:00';
+      const fallbackEndTime = dto.operatingWindow?.end?.slice(11, 16) || '22:00';
+      const startTime = typeof intent.startTime === 'string' && /^([01]\\d|2[0-3]):[0-5]\\d$/.test(intent.startTime) ? intent.startTime : fallbackStartTime;
+      const endTime = typeof intent.endTime === 'string' && /^([01]\\d|2[0-3]):[0-5]\\d$/.test(intent.endTime) ? intent.endTime : fallbackEndTime;
+      const interval = this.clampInteger(intent.minimumStartIntervalMinutes, dto.gridIncrementMinutes ?? 30, 5, 240);
+      const timingModel = ['MATCH_TOTAL', 'PER_SET', 'PER_HALF'].includes(String(intent.timingModel)) ? String(intent.timingModel) as CreateSchedulePlanDto['timingModel'] : 'MATCH_TOTAL';
+      const matchIds = context.matches.filter((m) => roundNumbers.length === 0 || roundNumbers.includes(m.roundNumber)).map((m) => m.id);
+      const previewDto = new CreateSchedulePlanDto();
+      previewDto.divisionId = dto.divisionId;
+      previewDto.date = date;
+      previewDto.courtIds = dto.courtIds;
+      previewDto.matchIds = matchIds;
+      previewDto.durationMinutes = this.clampInteger(intent.unitDurationMinutes, 45, 1, 3600);
+      previewDto.bufferMinutes = this.clampInteger(intent.changeoverMinutes, 5, 0, 60);
+      previewDto.timingModel = timingModel;
+      previewDto.unitDurationMinutes = this.clampInteger(intent.unitDurationMinutes, previewDto.durationMinutes, 1, 240);
+      previewDto.unitCount = this.clampInteger(intent.unitCount, 1, 1, 15);
+      previewDto.betweenUnitBreakMinutes = this.clampInteger(intent.betweenUnitBreakMinutes, 0, 0, 30);
+      previewDto.changeoverMinutes = previewDto.bufferMinutes;
+      previewDto.gridIncrementMinutes = ([5, 10, 15, 30, 60].includes(interval) ? interval : 30) as 5 | 10 | 15 | 30 | 60;
+      previewDto.minimumStartIntervalMinutes = interval;
+      previewDto.operatingWindow = { start: `${date}T${startTime}:00.000Z`, end: `${date}T${endTime}:00.000Z` };
+      const preview = await this.matchesService.previewSchedulePlan(tournamentId, user, previewDto);
+      return { statusCode: 200, message: 'AI schedule previewed', data: { intent: { date, roundNumbers, startTime, endTime, minimumStartIntervalMinutes: interval, timingModel, needsReview: intent.needsReview === true, explanation: typeof intent.explanation === 'string' ? intent.explanation.slice(0, 500) : '' }, preview: preview.data } };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof ServiceUnavailableException) throw error;
+      this.logger.error(`AI schedule command failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new InternalServerErrorException('Không thể tạo preview xếp lịch bằng AI lúc này');
+    }
+  }
+
+  private clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+    return typeof value === 'number' && Number.isInteger(value) ? Math.min(max, Math.max(min, value)) : fallback;
   }
 
   async parseTournamentSource(dto: {
