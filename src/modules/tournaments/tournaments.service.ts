@@ -4411,8 +4411,11 @@ export class TournamentsService {
       );
     }
 
+    const now = new Date();
     const updated = await this.tournamentsRepository.update(id, userId, {
       status: targetStatus,
+      isRegistrationLocked: true,
+      registrationEndDate: now.toISOString(),
     });
 
     return {
