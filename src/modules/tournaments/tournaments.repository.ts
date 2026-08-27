@@ -5445,7 +5445,7 @@ export class TournamentsRepository {
             .returning();
           await tx
             .insert(schema.profiles)
-            .values({ userId: user1.id, fullName: name1 })
+            .values({ userId: user1.id, fullName: name1, allowStrangerMessages: false })
             .returning();
 
           const [user2] = await tx
@@ -5454,7 +5454,7 @@ export class TournamentsRepository {
             .returning();
           await tx
             .insert(schema.profiles)
-            .values({ userId: user2.id, fullName: name2 })
+            .values({ userId: user2.id, fullName: name2, allowStrangerMessages: false })
             .returning();
 
           const teamName = `${name1} - ${name2}`;
@@ -5496,7 +5496,7 @@ export class TournamentsRepository {
             .returning();
           await tx
             .insert(schema.profiles)
-            .values({ userId: user.id, fullName: name })
+            .values({ userId: user.id, fullName: name, allowStrangerMessages: false })
             .returning();
 
           const [participant] = await tx

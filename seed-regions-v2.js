@@ -99,7 +99,8 @@ async function main() {
     // 3. Bổ sung cột allow_stranger_messages cho profiles nếu thiếu
     await sql`
       ALTER TABLE "profiles" 
-      ADD COLUMN IF NOT EXISTS "allow_stranger_messages" boolean DEFAULT true;
+      ADD COLUMN IF NOT EXISTS "allow_stranger_messages" boolean DEFAULT false;
+      ALTER TABLE "profiles" ALTER COLUMN "allow_stranger_messages" SET DEFAULT false;
     `;
 
     console.log('✅ Đã kiểm tra và đồng bộ 100% tất cả các cột của bảng provinces, wards, profiles thành công.');
