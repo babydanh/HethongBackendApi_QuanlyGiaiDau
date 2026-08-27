@@ -6264,86 +6264,7 @@ export class TournamentsService {
   }
 
   async getTournamentResults(tournamentId: string, divisionId?: string) {
-    const tournament = await this.tournamentsRepository.findById(tournamentId);
-    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
-
-    const matches =
-      await this.tournamentsRepository.findTournamentResultMatches(
-        tournamentId,
-        divisionId,
-      );
-    const standings = await this.tournamentsRepository.findGroupStandings(
-      tournamentId,
-      divisionId,
-    );
-    const standingRows = Array.isArray(standings)
-      ? standings
-      : Array.isArray(standings?.standings)
-        ? standings.standings
-        : [];
-    const completed = tournament.status === 'COMPLETED';
-    const knockout = matches.filter(
-      (match) => match.stageType !== 'ROUND_ROBIN',
-    );
-    const final = [...knockout]
-      .filter(
-        (match) =>
-          match.status === 'COMPLETED' &&
-          ['GRAND_FINALS', 'FINAL', 'MAIN'].includes(match.bracketBranch),
-      )
-      .sort(
-        (a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder,
-      )[0];
-
-    const participant = (id: string | null, name: string | null) =>
-      id ? { participantId: id, teamName: name || 'Chưa xác định' } : null;
-    const awards = final
-      ? [
-          {
-            rank: 1,
-            shared: false,
-            participant: participant(
-              final.winnerId,
-              final.winnerId === final.participant1Id
-                ? final.participant1Name
-                : final.participant2Name,
-            ),
-          },
-          {
-            rank: 2,
-            shared: false,
-            participant: participant(
-              final.winnerId === final.participant1Id
-                ? final.participant2Id
-                : final.participant1Id,
-              final.winnerId === final.participant1Id
-                ? final.participant2Name
-                : final.participant1Name,
-            ),
-          },
-        ]
-      : [];
-
-    return {
-      tournamentId,
-      status: tournament.status,
-      finalized:
-        completed && awards.every((award) => award.participant !== null),
-      awards: completed ? awards : [],
-      standings: standingRows,
-      matches: matches.map((match) => ({
-        id: match.id,
-        status: match.status,
-        roundNumber: match.roundNumber,
-        matchOrder: match.matchOrder,
-        bracketBranch: match.bracketBranch,
-        stageId: match.stageId,
-        stageName: match.stageName,
-        participant1: participant(match.participant1Id, match.participant1Name),
-        participant2: participant(match.participant2Id, match.participant2Name),
-        winnerId: match.winnerId,
-      })),
-    };
+    return this.getTournamentResultsV2(tournamentId, divisionId);
   }
 
   async getTournamentResultsV2(tournamentId: string, divisionId?: string) {
@@ -6364,15 +6285,34 @@ export class TournamentsService {
       : Array.isArray(standings?.standings)
         ? standings.standings
         : [];
-    const participant = (id: string | null, name: string | null) =>
-      id ? { participantId: id, teamName: name || 'Chua xac dinh' } : null;
+
+    const participantNameMap = new Map<string, string>();
+    for (const m of matches) {
+      if (m.participant1Id && m.participant1Name)
+        participantNameMap.set(m.participant1Id, m.participant1Name);
+      if (m.participant2Id && m.participant2Name)
+        participantNameMap.set(m.participant2Id, m.participant2Name);
+    }
+
+    const participant = (id: string | null, name: string | null) => {
+      if (!id) return null;
+      return {
+        participantId: id,
+        teamName: name || participantNameMap.get(id) || 'Chưa xác định',
+      };
+    };
+
     const completed = tournament.status === 'COMPLETED';
     const knockout = matches.filter(
       (match) =>
         match.stageType !== 'ROUND_ROBIN' &&
-        match.status === 'COMPLETED' &&
-        match.winnerId,
+        match.winnerId &&
+        (match.status === 'COMPLETED' ||
+          match.status === 'FINISHED' ||
+          match.status === 'DONE' ||
+          (typeof match.winnerId === 'string' && match.winnerId.trim().length > 0)),
     );
+
     const finalCandidates = knockout.filter((match) => {
       const branch = (match.bracketBranch || '').toUpperCase();
       const stageName = (match.stageName || '').toLowerCase();
@@ -6384,6 +6324,7 @@ export class TournamentsService {
         stageName.includes('grand final')
       );
     });
+
     const final = [
       ...(finalCandidates.length > 0
         ? finalCandidates
@@ -6394,13 +6335,15 @@ export class TournamentsService {
     ].sort(
       (a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder,
     )[0];
-    const loserOf = (match: typeof final) =>
-      match?.winnerId === match.participant1Id
-        ? participant(match.participant2Id, match.participant2Name)
-        : participant(
-            match?.participant1Id ?? null,
-            match?.participant1Name ?? null,
-          );
+
+    const loserOf = (match: typeof final) => {
+      if (!match) return null;
+      const isWinnerP1 = match.winnerId === match.participant1Id;
+      const loserId = isWinnerP1 ? match.participant2Id : match.participant1Id;
+      const loserName = isWinnerP1 ? match.participant2Name : match.participant1Name;
+      return participant(loserId, loserName);
+    };
+
     const awards: Array<{
       rank: number;
       shared: boolean;
@@ -6419,27 +6362,80 @@ export class TournamentsService {
         ),
       });
       awards.push({ rank: 2, shared: false, participant: loserOf(final) });
+
       const config = (tournament.tournamentConfig ?? {}) as {
         thirdPlaceMatch?: boolean;
       };
-      const semifinalLosers = knockout
-        .filter((match) => match.roundNumber === final.roundNumber - 1)
+
+      const otherKnockout = knockout.filter((match) => match.id !== final.id);
+
+      // 1. Matches where the two finalists won their semifinals
+      const semiMatchesForFinalists = [
+        otherKnockout
+          .filter((match) => match.winnerId === final.participant1Id)
+          .sort((a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder)[0],
+        otherKnockout
+          .filter((match) => match.winnerId === final.participant2Id)
+          .sort((a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder)[0],
+      ].filter((m): m is (typeof otherKnockout)[0] => Boolean(m));
+
+      const semifinalLosers = semiMatchesForFinalists
         .map(loserOf)
-        .filter(
-          (item): item is { participantId: string; teamName: string } =>
-            item !== null,
-        );
+        .filter((item): item is { participantId: string; teamName: string } => Boolean(item?.participantId));
+
+      // 2. Fallback by rounds if finalists weren't matched
+      if (semifinalLosers.length < 2) {
+        const distinctRounds = Array.from(
+          new Set(otherKnockout.map((m) => m.roundNumber)),
+        ).sort((a, b) => b - a);
+        const semiRound = distinctRounds.find((r) => r < final.roundNumber) ?? distinctRounds[0];
+        if (semiRound !== undefined) {
+          const roundLosers = otherKnockout
+            .filter((m) => m.roundNumber === semiRound)
+            .map(loserOf)
+            .filter((item): item is { participantId: string; teamName: string } => Boolean(item?.participantId));
+
+          for (const loser of roundLosers) {
+            if (!semifinalLosers.some((l) => l.participantId === loser.participantId)) {
+              semifinalLosers.push(loser);
+            }
+          }
+        }
+      }
+
+      // 3. Fallback by stageName/branch containing "bán kết" / "semi"
+      if (semifinalLosers.length < 2) {
+        const namedSemiLosers = otherKnockout
+          .filter((m) => {
+            const name = (m.stageName || '').toLowerCase();
+            const branch = (m.bracketBranch || '').toLowerCase();
+            return (
+              name.includes('bán kết') ||
+              name.includes('ban ket') ||
+              name.includes('semi') ||
+              branch.includes('semi')
+            );
+          })
+          .map(loserOf)
+          .filter((item): item is { participantId: string; teamName: string } => Boolean(item?.participantId));
+
+        for (const loser of namedSemiLosers) {
+          if (!semifinalLosers.some((l) => l.participantId === loser.participantId)) {
+            semifinalLosers.push(loser);
+          }
+        }
+      }
+
       const thirdPlace = config.thirdPlaceMatch
-        ? knockout.find(
+        ? otherKnockout.find(
             (match) =>
-              match.roundNumber === final.roundNumber &&
-              match.id !== final.id &&
               [match.participant1Id, match.participant2Id].some((id) =>
                 semifinalLosers.some((loser) => loser.participantId === id),
               ),
           )
         : undefined;
-      if (thirdPlace) {
+
+      if (thirdPlace && thirdPlace.winnerId) {
         awards.push({
           rank: 3,
           shared: false,
