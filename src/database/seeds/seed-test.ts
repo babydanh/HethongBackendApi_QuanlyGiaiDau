@@ -173,7 +173,7 @@ async function createTournament(params: {
       const user1Id = uuidv4();
       const user2Id = uuidv4();
       await db.insert(schema.users).values({ id: user1Id, email: `mock_${uuidv4().substring(0,8)}@vndc.com`, isMock: true });
-      await db.insert(schema.profiles).values({ userId: user1Id, fullName: name1 });
+      await db.insert(schema.profiles).values({ userId: user1Id, fullName: name1, allowStrangerMessages: false });
       await db.insert(schema.userRanks).values({
         userId: user1Id,
         categoryId: categoryId,
@@ -185,7 +185,7 @@ async function createTournament(params: {
       await db.insert(schema.tournamentRosters).values({ participantId: partId, userId: user1Id, role: 'MAIN' });
 
       await db.insert(schema.users).values({ id: user2Id, email: `mock_${uuidv4().substring(0,8)}@vndc.com`, isMock: true });
-      await db.insert(schema.profiles).values({ userId: user2Id, fullName: name2 });
+      await db.insert(schema.profiles).values({ userId: user2Id, fullName: name2, allowStrangerMessages: false });
       await db.insert(schema.userRanks).values({
         userId: user2Id,
         categoryId: categoryId,
@@ -215,7 +215,7 @@ async function createTournament(params: {
 
       const userId = uuidv4();
       await db.insert(schema.users).values({ id: userId, email: `mock_${uuidv4().substring(0,8)}@vndc.com`, isMock: true });
-      await db.insert(schema.profiles).values({ userId: userId, fullName: teamName });
+      await db.insert(schema.profiles).values({ userId: userId, fullName: teamName, allowStrangerMessages: false });
       await db.insert(schema.userRanks).values({
         userId: userId,
         categoryId: categoryId,

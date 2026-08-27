@@ -1146,6 +1146,38 @@ export class ChatRepository {
       .values({ roomId, userId, lastReadAt: now })
       .onConflictDoUpdate({ target: [schema.chatReadStates.roomId, schema.chatReadStates.userId], set: { lastReadAt: now } })
       .returning();
+
+    // If this is a direct room, also mark read for all direct rooms sharing the same pair of participants
+    try {
+      const [room] = await this.db.select({ type: schema.chatRooms.type }).from(schema.chatRooms).where(eq(schema.chatRooms.id, roomId)).limit(1);
+      if (room?.type === 'DIRECT') {
+        const members = await this.db.select({ userId: schema.chatRoomMembers.userId }).from(schema.chatRoomMembers).where(eq(schema.chatRoomMembers.roomId, roomId));
+        const otherMember = members.find((m) => m.userId !== userId);
+        if (otherMember) {
+          const directRooms = await this.db
+            .select({ roomId: schema.chatRoomMembers.roomId, userId: schema.chatRoomMembers.userId })
+            .from(schema.chatRoomMembers)
+            .where(inArray(schema.chatRoomMembers.userId, [userId, otherMember.userId]));
+          const roomUsers = new Map<string, Set<string>>();
+          for (const row of directRooms) {
+            const users = roomUsers.get(row.roomId) ?? new Set<string>();
+            users.add(row.userId);
+            roomUsers.set(row.roomId, users);
+          }
+          const pairRoomIds = Array.from(roomUsers.entries())
+            .filter(([rId, users]) => rId !== roomId && users.size === 2 && users.has(userId) && users.has(otherMember.userId))
+            .map(([rId]) => rId);
+          for (const pairRoomId of pairRoomIds) {
+            await this.db.insert(schema.chatReadStates)
+              .values({ roomId: pairRoomId, userId, lastReadAt: now })
+              .onConflictDoUpdate({ target: [schema.chatReadStates.roomId, schema.chatReadStates.userId], set: { lastReadAt: now } });
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to cascade markRead for direct room ${roomId}:`, err);
+    }
+
     return state;
   }
 
