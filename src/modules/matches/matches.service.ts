@@ -788,6 +788,9 @@ export class MatchesService {
     if (uniqueCourtIds.length !== dto.courtIds.length) {
       throw new BadRequestException('Không được chọn trùng sân');
     }
+    if (dto.matchIds && new Set(dto.matchIds).size !== dto.matchIds.length) {
+      throw new BadRequestException('Không được chọn trùng trận');
+    }
     const courts = await this.matchesRepository.findScheduleCourts(
       tournamentId,
       uniqueCourtIds,
@@ -814,6 +817,9 @@ export class MatchesService {
       : dateWithTournamentTime(tournament.endDate, '22:00');
     if (!Number.isFinite(windowStart.getTime()) || !Number.isFinite(windowEnd.getTime()) || windowEnd <= windowStart) {
       throw new BadRequestException('Khung giờ xếp lịch không hợp lệ');
+    }
+    if (windowStart.toISOString().slice(0, 10) !== requestedDay || windowEnd.toISOString().slice(0, 10) !== requestedDay) {
+      throw new BadRequestException('Khung giờ phải nằm trong ngày đã chọn');
     }
 
     const allMatches = await this.matchesRepository.findAll({
