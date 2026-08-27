@@ -59,22 +59,36 @@ export class MatchesService {
     ];
 
     try {
-      const result = await this.matchesRepository.findAll({ page: 1, limit: 500, status: 'SCHEDULED' });
+      const result = await this.matchesRepository.findAll({
+        page: 1,
+        limit: 500,
+        status: 'SCHEDULED',
+      });
       for (const match of result.data) {
         if (!match.scheduledAt || match.status !== 'SCHEDULED') continue;
         const scheduledMs = new Date(match.scheduledAt).getTime();
         if (!Number.isFinite(scheduledMs) || scheduledMs <= now) continue;
         const minutesUntil = (scheduledMs - now) / 60000;
-        const window = windows.find((candidate) => Math.abs(minutesUntil - candidate.minutes) <= candidate.tolerance);
+        const window = windows.find(
+          (candidate) =>
+            Math.abs(minutesUntil - candidate.minutes) <= candidate.tolerance,
+        );
         if (!window) continue;
 
         const reminderKey = `match-reminder:${match.id}:${window.key}`;
         if (await this.redisService.get(reminderKey)) continue;
         await this.redisService.set(reminderKey, '1', 36 * 60 * 60);
 
-        const participantIds = [match.participant1Id, match.participant2Id]
-          .filter((participantId): participantId is string => Boolean(participantId));
-        const rosters = await this.matchesRepository.getRostersForParticipants(participantIds);
+        const participantIds = [
+          match.participant1Id,
+          match.participant2Id,
+        ].filter((participantId): participantId is string =>
+          Boolean(participantId),
+        );
+        const rosters =
+          await this.matchesRepository.getRostersForParticipants(
+            participantIds,
+          );
         const scheduledAt = match.scheduledAt;
         const scheduledTime = new Date(scheduledAt).toLocaleString('vi-VN', {
           day: '2-digit',
@@ -84,21 +98,25 @@ export class MatchesService {
           minute: '2-digit',
           hour12: false,
         });
-        await Promise.all(rosters.map((roster) => this.notificationsService.sendNotification(
-          buildMatchReminderNotification({
-            matchId: match.id,
-            receiverId: roster.userId,
-            tournamentName: match.tournament?.name || 'giải đấu',
-            sportName: match.tournament?.category?.name,
-            divisionName: match.tournament?.divisionName,
-            matchType: match.tournament?.matchType,
-            scheduledTime,
-            court: match.courtName || 'Chưa xếp sân',
-            untilLabel: window.label,
-            bracketBranch: match.bracketBranch,
-            roundNumber: match.roundNumber,
-          }),
-        )));
+        await Promise.all(
+          rosters.map((roster) =>
+            this.notificationsService.sendNotification(
+              buildMatchReminderNotification({
+                matchId: match.id,
+                receiverId: roster.userId,
+                tournamentName: match.tournament?.name || 'giải đấu',
+                sportName: match.tournament?.category?.name,
+                divisionName: match.tournament?.divisionName,
+                matchType: match.tournament?.matchType,
+                scheduledTime,
+                court: match.courtName || 'Chưa xếp sân',
+                untilLabel: window.label,
+                bracketBranch: match.bracketBranch,
+                roundNumber: match.roundNumber,
+              }),
+            ),
+          ),
+        );
       }
     } catch (error) {
       console.error('Failed to send upcoming match reminders:', error);
@@ -326,13 +344,21 @@ export class MatchesService {
     // Gửi thông báo cho VĐV được advance vào vòng tiếp theo
     if (winnerId && existing.nextMatchId && existing.tournamentId) {
       try {
-        const nextMatch = await this.matchesRepository.findById(existing.nextMatchId);
+        const nextMatch = await this.matchesRepository.findById(
+          existing.nextMatchId,
+        );
         if (nextMatch) {
           const roundNumber = nextMatch.roundNumber ?? 0;
-          const maxRoundInStage = await this.matchesRepository.getMaxRoundNumber(nextMatch.stageId);
-          const roundLabel = this.resolveRoundLabel(roundNumber, maxRoundInStage, nextMatch.stage?.type);
+          const maxRoundInStage =
+            await this.matchesRepository.getMaxRoundNumber(nextMatch.stageId);
+          const roundLabel = this.resolveRoundLabel(
+            roundNumber,
+            maxRoundInStage,
+            nextMatch.stage?.type,
+          );
 
-          const winnerRosters = await this.matchesRepository.getRostersForParticipants([winnerId]);
+          const winnerRosters =
+            await this.matchesRepository.getRostersForParticipants([winnerId]);
           for (const roster of winnerRosters) {
             await this.notificationsService.sendNotification(
               buildMatchAdvancedNotification({
@@ -1431,10 +1457,7 @@ export class MatchesService {
     // it before the tournament can advance; it likewise never creates a rank
     // result by itself.
     if (data.action === 'POSTPONE' || data.action === 'ABANDON') {
-      if (
-        data.action === 'POSTPONE' &&
-        existing.status !== 'SCHEDULED'
-      ) {
+      if (data.action === 'POSTPONE' && existing.status !== 'SCHEDULED') {
         throw new BadRequestException(
           'Chỉ có thể hoãn trận chưa bắt đầu. Trận đang diễn ra cần xử lý bỏ trận hoặc chốt kết quả.',
         );
@@ -1471,16 +1494,16 @@ export class MatchesService {
             data.action === 'POSTPONE'
               ? { specialResult }
               : { ...currentScoreDetails, specialResult },
-          ...(data.action === 'POSTPONE'
-            ? { p1SetsWon: 0, p2SetsWon: 0 }
-            : {}),
+          ...(data.action === 'POSTPONE' ? { p1SetsWon: 0, p2SetsWon: 0 } : {}),
           scheduledAt: null,
           startedAt: null,
           winnerId: null,
         },
       );
       if (!updated) {
-        throw new NotFoundException('Không tìm thấy trận sau khi ghi quyết định.');
+        throw new NotFoundException(
+          'Không tìm thấy trận sau khi ghi quyết định.',
+        );
       }
 
       this.liveScoreGateway.broadcastMatchStatus(
@@ -1497,10 +1520,14 @@ export class MatchesService {
         const participantIds = [
           existing.participant1Id,
           existing.participant2Id,
-        ].filter((participantId): participantId is string => Boolean(participantId));
+        ].filter((participantId): participantId is string =>
+          Boolean(participantId),
+        );
         if (participantIds.length > 0) {
           const rosters =
-            await this.matchesRepository.getRostersForParticipants(participantIds);
+            await this.matchesRepository.getRostersForParticipants(
+              participantIds,
+            );
           for (const roster of rosters) {
             await this.notificationsService.sendNotification(
               data.action === 'POSTPONE'
@@ -1669,6 +1696,7 @@ export class MatchesService {
     id: string,
     user: JwtPayload,
     data: {
+      courtId?: string;
       courtName?: string;
       courtAddress?: string;
       refereeId?: string;
@@ -1684,6 +1712,19 @@ export class MatchesService {
       throw new ForbiddenException(
         'Bạn không có quyền chỉnh lịch thi đấu của giải này',
       );
+    }
+
+    if (data.courtId) {
+      const allowedCourt =
+        await this.matchesRepository.findAllowedCourtForMatch(
+          existing,
+          data.courtId,
+        );
+      if (!allowedCourt) {
+        throw new BadRequestException(
+          'Sân được chọn không thuộc địa điểm thi đấu của giải này hoặc đang không hoạt động.',
+        );
+      }
     }
 
     if (data.refereeId) {

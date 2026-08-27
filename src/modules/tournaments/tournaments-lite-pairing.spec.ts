@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TournamentsService } from './tournaments.service';
 import type { TournamentsRepository } from './tournaments.repository';
@@ -15,32 +15,62 @@ describe('deriveGroupStageConfig (pure)', () => {
   });
 
   it('4-5 teams → 2 groups, advance 1', () => {
-    expect(deriveGroupStageConfig(4)).toEqual({ numGroups: 2, teamsAdvancing: 1, teamsPerGroup: 2 });
-    expect(deriveGroupStageConfig(5)).toEqual({ numGroups: 2, teamsAdvancing: 1, teamsPerGroup: 3 });
+    expect(deriveGroupStageConfig(4)).toEqual({
+      numGroups: 2,
+      teamsAdvancing: 1,
+      teamsPerGroup: 2,
+    });
+    expect(deriveGroupStageConfig(5)).toEqual({
+      numGroups: 2,
+      teamsAdvancing: 1,
+      teamsPerGroup: 3,
+    });
   });
 
   it('6-11 teams → 2 groups, advance 2', () => {
     const r6 = deriveGroupStageConfig(6);
-    expect(r6.numGroups).toBe(2); expect(r6.teamsAdvancing).toBe(2); expect(r6.teamsPerGroup).toBe(3);
+    expect(r6.numGroups).toBe(2);
+    expect(r6.teamsAdvancing).toBe(2);
+    expect(r6.teamsPerGroup).toBe(3);
     const r11 = deriveGroupStageConfig(11);
-    expect(r11.numGroups).toBe(2); expect(r11.teamsAdvancing).toBe(2); expect(r11.teamsPerGroup).toBe(6);
+    expect(r11.numGroups).toBe(2);
+    expect(r11.teamsAdvancing).toBe(2);
+    expect(r11.teamsPerGroup).toBe(6);
   });
 
   it('12-15 teams → 4 groups, advance 1', () => {
-    expect(deriveGroupStageConfig(12)).toEqual({ numGroups: 4, teamsAdvancing: 1, teamsPerGroup: 3 });
-    expect(deriveGroupStageConfig(15)).toEqual({ numGroups: 4, teamsAdvancing: 1, teamsPerGroup: 4 });
+    expect(deriveGroupStageConfig(12)).toEqual({
+      numGroups: 4,
+      teamsAdvancing: 1,
+      teamsPerGroup: 3,
+    });
+    expect(deriveGroupStageConfig(15)).toEqual({
+      numGroups: 4,
+      teamsAdvancing: 1,
+      teamsPerGroup: 4,
+    });
   });
 
   it('16-23 teams → 4 groups, advance 2', () => {
-    expect(deriveGroupStageConfig(16)).toEqual({ numGroups: 4, teamsAdvancing: 2, teamsPerGroup: 4 });
-    expect(deriveGroupStageConfig(23)).toEqual({ numGroups: 4, teamsAdvancing: 2, teamsPerGroup: 6 });
+    expect(deriveGroupStageConfig(16)).toEqual({
+      numGroups: 4,
+      teamsAdvancing: 2,
+      teamsPerGroup: 4,
+    });
+    expect(deriveGroupStageConfig(23)).toEqual({
+      numGroups: 4,
+      teamsAdvancing: 2,
+      teamsPerGroup: 6,
+    });
   });
 
   it('24-32 teams → 8 groups', () => {
     const r24 = deriveGroupStageConfig(24);
-    expect(r24.numGroups).toBe(8); expect(r24.teamsAdvancing).toBe(2);
+    expect(r24.numGroups).toBe(8);
+    expect(r24.teamsAdvancing).toBe(2);
     const r32 = deriveGroupStageConfig(32);
-    expect(r32.numGroups).toBe(8); expect(r32.teamsAdvancing).toBe(2);
+    expect(r32.numGroups).toBe(8);
+    expect(r32.teamsAdvancing).toBe(2);
   });
 });
 
@@ -53,12 +83,17 @@ describe('TournamentsService — Lite pairing guards', () => {
   let mockRedis: any;
   let mockConfig: any;
   let mockCommunitySocial: any;
+  let mockVenues: any;
 
   const liteTournament = {
     id: 'tournament-1',
     createdBy: 'user-1',
     communityId: 'community-1',
-    tournamentConfig: { mode: 'LITE', bracketType: 'SINGLE_ELIMINATION', registrationMode: 'OPEN' },
+    tournamentConfig: {
+      mode: 'LITE',
+      bracketType: 'SINGLE_ELIMINATION',
+      registrationMode: 'OPEN',
+    },
     matchType: 'DOUBLES',
     status: 'REGISTRATION_OPEN',
     categoryId: 'cat-1',
@@ -90,7 +125,9 @@ describe('TournamentsService — Lite pairing guards', () => {
       getFootballEntryRoster: jest.fn(),
       findFootballTeamForRegistration: jest.fn(),
       updateFootballRoster: jest.fn(),
-      getDivisionsByTournament: jest.fn().mockResolvedValue([{ id: 'division-1', name: 'Division 1' }]),
+      getDivisionsByTournament: jest
+        .fn()
+        .mockResolvedValue([{ id: 'division-1', name: 'Division 1' }]),
     };
 
     mockBracketGenerator = {
@@ -113,10 +150,17 @@ describe('TournamentsService — Lite pairing guards', () => {
       }),
     };
     mockCommunitySocial = {
-      createTournamentBracketPost: jest.fn().mockResolvedValue({ id: 'post-1' }),
+      createTournamentBracketPost: jest
+        .fn()
+        .mockResolvedValue({ id: 'post-1' }),
     };
     const liveScoreGateway = {
       broadcastRegistrationUpdate: jest.fn(),
+    };
+    mockVenues = {
+      findOne: jest.fn(),
+      addCourt: jest.fn(),
+      removeCourt: jest.fn(),
     };
 
     service = new TournamentsService(
@@ -127,8 +171,78 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRedis as any,
       mockConfig as any,
       mockCommunitySocial as any,
+      mockVenues as any,
       liveScoreGateway as any,
     );
+  });
+
+  describe('tournament-scoped court setup', () => {
+    const managedTournament = {
+      ...liteTournament,
+      venueId: 'venue-1',
+    };
+    const venue = {
+      id: 'venue-1',
+      name: 'Nhà thi đấu',
+      locationAddress: 'Địa chỉ',
+      courts: [
+        {
+          id: 'court-1',
+          venueId: 'venue-1',
+          courtName: 'Sân 1',
+          status: 'AVAILABLE',
+        },
+      ],
+    };
+
+    it('allows a tournament co-organizer with PLAYER system role to manage its courts', async () => {
+      mockRepo.findById.mockResolvedValue(managedTournament);
+      mockRepo.isCoOrganizer.mockResolvedValue(true);
+      mockVenues.findOne.mockResolvedValue(venue);
+      mockVenues.addCourt.mockResolvedValue(venue.courts[0]);
+
+      await expect(
+        service.addTournamentCourt(
+          'tournament-1',
+          { courtName: 'Sân 2' } as never,
+          { sub: 'co-organizer-1', roles: ['PLAYER'] } as never,
+          ['PLAYER'],
+        ),
+      ).resolves.toEqual(venue.courts[0]);
+      expect(mockVenues.addCourt).toHaveBeenCalledWith('venue-1', { courtName: 'Sân 2' });
+    });
+
+    it('rejects an unrelated player before court mutation', async () => {
+      mockRepo.findById.mockResolvedValue(managedTournament);
+      mockRepo.isCoOrganizer.mockResolvedValue(false);
+      mockRepo.findCommunityMember.mockResolvedValue(null);
+
+      await expect(
+        service.addTournamentCourt(
+          'tournament-1',
+          { courtName: 'Sân lạ' } as never,
+          { sub: 'player-2', roles: ['PLAYER'] } as never,
+          ['PLAYER'],
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockVenues.addCourt).not.toHaveBeenCalled();
+    });
+
+    it('rejects removing a court not contained in the tournament venue', async () => {
+      mockRepo.findById.mockResolvedValue(managedTournament);
+      mockRepo.isCoOrganizer.mockResolvedValue(true);
+      mockVenues.findOne.mockResolvedValue(venue);
+
+      await expect(
+        service.removeTournamentCourt(
+          'tournament-1',
+          'court-from-another-venue',
+          { sub: 'co-organizer-1', roles: ['PLAYER'] } as never,
+          ['PLAYER'],
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockVenues.removeCourt).not.toHaveBeenCalled();
+    });
   });
 
   describe('checkLiteAuthorization', () => {
@@ -144,20 +258,35 @@ describe('TournamentsService — Lite pairing guards', () => {
 
     it('allows creator', async () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
-      const result = await (service as any).checkLiteAuthorization('tournament-1', 'user-1', []);
+      const result = await (service as any).checkLiteAuthorization(
+        'tournament-1',
+        'user-1',
+        [],
+      );
       expect(result.tournament.id).toBe('tournament-1');
     });
 
     it('allows ADMIN', async () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
-      const result = await (service as any).checkLiteAuthorization('tournament-1', 'other-user', ['ADMIN']);
+      const result = await (service as any).checkLiteAuthorization(
+        'tournament-1',
+        'other-user',
+        ['ADMIN'],
+      );
       expect(result.tournament.id).toBe('tournament-1');
     });
 
     it('allows community OWNER', async () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
-      mockRepo.findCommunityMember!.mockResolvedValue({ role: 'OWNER', status: 'JOINED' });
-      const result = await (service as any).checkLiteAuthorization('tournament-1', 'other-user', []);
+      mockRepo.findCommunityMember!.mockResolvedValue({
+        role: 'OWNER',
+        status: 'JOINED',
+      });
+      const result = await (service as any).checkLiteAuthorization(
+        'tournament-1',
+        'other-user',
+        [],
+      );
       expect(result.tournament.id).toBe('tournament-1');
     });
 
@@ -165,7 +294,11 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
       mockRepo.findCommunityMember!.mockResolvedValue(null);
       await expect(
-        (service as any).checkLiteAuthorization('tournament-1', 'other-user', []),
+        (service as any).checkLiteAuthorization(
+          'tournament-1',
+          'other-user',
+          [],
+        ),
       ).rejects.toThrow();
     });
   });
@@ -181,30 +314,60 @@ describe('TournamentsService — Lite pairing guards', () => {
       ['creator', 'creator-1', [], null, false],
       ['admin', 'other-user', ['ADMIN'], null, false],
       ['co-organizer', 'other-user', [], null, true],
-      ['community owner', 'other-user', [], { role: 'OWNER', status: 'JOINED' }, false],
-      ['community moderator', 'other-user', [], { role: 'MODERATOR', status: 'JOINED' }, false],
-    ])('allows %s to manage registration', async (_label, userId, roles, member, coOrganizer) => {
-      mockRepo.isCoOrganizer.mockResolvedValue(coOrganizer);
-      mockRepo.findCommunityMember.mockResolvedValue(member);
+      [
+        'community owner',
+        'other-user',
+        [],
+        { role: 'OWNER', status: 'JOINED' },
+        false,
+      ],
+      [
+        'community moderator',
+        'other-user',
+        [],
+        { role: 'MODERATOR', status: 'JOINED' },
+        false,
+      ],
+    ])(
+      'allows %s to manage registration',
+      async (_label, userId, roles, member, coOrganizer) => {
+        mockRepo.isCoOrganizer.mockResolvedValue(coOrganizer);
+        mockRepo.findCommunityMember.mockResolvedValue(member);
 
-      await expect(
-        (service as any).isManager(tournament, userId, roles),
-      ).resolves.toBe(true);
-    });
+        await expect(
+          (service as any).isManager(tournament, userId, roles),
+        ).resolves.toBe(true);
+      },
+    );
 
     it.each([
       ['global organizer', 'other-user', ['ORGANIZER'], null, false],
-      ['community player', 'other-user', [], { role: 'PLAYER', status: 'JOINED' }, false],
-      ['pending community member', 'other-user', [], { role: 'OWNER', status: 'PENDING' }, false],
+      [
+        'community player',
+        'other-user',
+        [],
+        { role: 'PLAYER', status: 'JOINED' },
+        false,
+      ],
+      [
+        'pending community member',
+        'other-user',
+        [],
+        { role: 'OWNER', status: 'PENDING' },
+        false,
+      ],
       ['unrelated user', 'other-user', [], null, false],
-    ])('rejects %s from managing registration', async (_label, userId, roles, member, coOrganizer) => {
-      mockRepo.isCoOrganizer.mockResolvedValue(coOrganizer);
-      mockRepo.findCommunityMember.mockResolvedValue(member);
+    ])(
+      'rejects %s from managing registration',
+      async (_label, userId, roles, member, coOrganizer) => {
+        mockRepo.isCoOrganizer.mockResolvedValue(coOrganizer);
+        mockRepo.findCommunityMember.mockResolvedValue(member);
 
-      await expect(
-        (service as any).isManager(tournament, userId, roles),
-      ).resolves.toBe(false);
-    });
+        await expect(
+          (service as any).isManager(tournament, userId, roles),
+        ).resolves.toBe(false);
+      },
+    );
   });
 
   describe('football roster lock contract', () => {
@@ -313,13 +476,16 @@ describe('TournamentsService — Lite pairing guards', () => {
           'creator-1',
           [],
         ),
-      ).resolves.toEqual(expect.objectContaining({ roster: expect.any(Array) }));
+      ).resolves.toEqual(
+        expect.objectContaining({ roster: expect.any(Array) }),
+      );
 
       expect(mockNotifications.sendNotification).toHaveBeenCalledTimes(1);
       expect(mockNotifications.sendNotification).toHaveBeenCalledWith(
         expect.objectContaining({
           receiverId: 'new-member',
-          redirectUrl: '/tournaments/tournament-1?tab=teams&divisionId=division-1&participantId=participant-1',
+          redirectUrl:
+            '/tournaments/tournament-1?tab=teams&divisionId=division-1&participantId=participant-1',
         }),
       );
     });
@@ -376,18 +542,19 @@ describe('TournamentsService — Lite pairing guards', () => {
         slug: 'pickleball',
         categoryConfig: null,
       } as any);
-      mockRepo.update!.mockImplementation(async (_id, _userId, dto) => ({
-        ...inProgressTournament,
-        ...dto,
-      }) as any);
+      mockRepo.update!.mockImplementation(
+        async (_id, _userId, dto) =>
+          ({
+            ...inProgressTournament,
+            ...dto,
+          }) as any,
+      );
     });
 
     it('allows hiding public banner text while preserving tournament configuration', async () => {
-      await service.update(
-        'tournament-1',
-        'user-1',
-        { tournamentConfig: { hideFeaturedCardText: true } } as any,
-      );
+      await service.update('tournament-1', 'user-1', {
+        tournamentConfig: { hideFeaturedCardText: true },
+      } as any);
 
       expect(mockRepo.update).toHaveBeenCalledWith(
         'tournament-1',
@@ -403,11 +570,9 @@ describe('TournamentsService — Lite pairing guards', () => {
 
     it('still rejects gameplay configuration changes while in progress', async () => {
       await expect(
-        service.update(
-          'tournament-1',
-          'user-1',
-          { tournamentConfig: { registrationMode: 'APPROVAL' } } as any,
-        ),
+        service.update('tournament-1', 'user-1', {
+          tournamentConfig: { registrationMode: 'APPROVAL' },
+        } as any),
       ).rejects.toThrow(BadRequestException);
 
       expect(mockRepo.update).not.toHaveBeenCalled();
@@ -416,10 +581,14 @@ describe('TournamentsService — Lite pairing guards', () => {
 
   describe('pairLiteParticipants', () => {
     it('rejects singles tournament', async () => {
-      mockRepo.findById!.mockResolvedValue({ ...liteTournament, matchType: 'SINGLES' });
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        matchType: 'SINGLES',
+      });
       await expect(
         service.pairLiteParticipants('tournament-1', 'user-1', [], {
-          participant1Id: 'p1', participant2Id: 'p2',
+          participant1Id: 'p1',
+          participant2Id: 'p2',
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -430,7 +599,8 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRepo.hasNonDeletedStagesOrMatches!.mockResolvedValue(true);
       await expect(
         service.pairLiteParticipants('tournament-1', 'user-1', ['ADMIN'], {
-          participant1Id: 'p1', participant2Id: 'p2',
+          participant1Id: 'p1',
+          participant2Id: 'p2',
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -438,12 +608,30 @@ describe('TournamentsService — Lite pairing guards', () => {
     it('calls lockTournamentAndPair for valid doubles', async () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
       mockRepo.hasNonDeletedStagesOrMatches!.mockResolvedValue(false);
-      mockRepo.findLeaderByParticipantId!.mockResolvedValue({ userId: 'leader-1', role: 'MAIN', id: 'leader-1', joinedAt: new Date() });
-      mockRepo.findUserBasicById!.mockResolvedValue({ id: 'leader-1', fullName: 'Player One', email: 'p1@test.com' });
-      mockRepo.lockTournamentAndPair!.mockResolvedValue({ id: 'p1', teamStatus: 'COMPLETE' });
-      const result = await service.pairLiteParticipants('tournament-1', 'user-1', ['ADMIN'], {
-        participant1Id: 'p1', participant2Id: 'p2',
+      mockRepo.findLeaderByParticipantId!.mockResolvedValue({
+        userId: 'leader-1',
+        role: 'MAIN',
+        id: 'leader-1',
+        joinedAt: new Date(),
       });
+      mockRepo.findUserBasicById!.mockResolvedValue({
+        id: 'leader-1',
+        fullName: 'Player One',
+        email: 'p1@test.com',
+      });
+      mockRepo.lockTournamentAndPair!.mockResolvedValue({
+        id: 'p1',
+        teamStatus: 'COMPLETE',
+      });
+      const result = await service.pairLiteParticipants(
+        'tournament-1',
+        'user-1',
+        ['ADMIN'],
+        {
+          participant1Id: 'p1',
+          participant2Id: 'p2',
+        },
+      );
       expect(mockRepo.lockTournamentAndPair).toHaveBeenCalled();
       expect(result).toEqual({ id: 'p1', teamStatus: 'COMPLETE' });
     });
@@ -461,15 +649,19 @@ describe('TournamentsService — Lite pairing guards', () => {
         totalMatches: 8,
       });
 
-      await service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN'], 'division-1');
-
-      expect(mockBracketGenerator.generateSingleElimination).toHaveBeenCalledWith(
+      await service.generateLiteBracket(
         'tournament-1',
         'user-1',
+        ['ADMIN'],
         'division-1',
-        'RANDOM',
       );
-      expect(mockCommunitySocial.createTournamentBracketPost).toHaveBeenCalledWith(
+
+      expect(
+        mockBracketGenerator.generateSingleElimination,
+      ).toHaveBeenCalledWith('tournament-1', 'user-1', 'division-1', 'RANDOM');
+      expect(
+        mockCommunitySocial.createTournamentBracketPost,
+      ).toHaveBeenCalledWith(
         'community-1',
         'user-1',
         'tournament-1',
@@ -490,15 +682,21 @@ describe('TournamentsService — Lite pairing guards', () => {
         totalMatches: 8,
       });
 
-      await service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN'], 'division-1', true);
-
-      expect(mockRepo.findBracket).toHaveBeenCalledWith('tournament-1', 'division-1');
-      expect(mockBracketGenerator.generateSingleElimination).toHaveBeenCalledWith(
+      await service.generateLiteBracket(
         'tournament-1',
         'user-1',
+        ['ADMIN'],
         'division-1',
-        'RANDOM',
+        true,
       );
+
+      expect(mockRepo.findBracket).toHaveBeenCalledWith(
+        'tournament-1',
+        'division-1',
+      );
+      expect(
+        mockBracketGenerator.generateSingleElimination,
+      ).toHaveBeenCalledWith('tournament-1', 'user-1', 'division-1', 'RANDOM');
     });
 
     it('blocks reset after a bracket match has started', async () => {
@@ -519,17 +717,30 @@ describe('TournamentsService — Lite pairing guards', () => {
       });
 
       await expect(
-        service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN'], 'division-1', true),
+        service.generateLiteBracket(
+          'tournament-1',
+          'user-1',
+          ['ADMIN'],
+          'division-1',
+          true,
+        ),
       ).rejects.toThrow('Không thể reset bracket sau khi đã bắt đầu');
-      expect(mockBracketGenerator.generateSingleElimination).not.toHaveBeenCalled();
+      expect(
+        mockBracketGenerator.generateSingleElimination,
+      ).not.toHaveBeenCalled();
     });
   });
 
   describe('generateLitePairs', () => {
     it('rejects singles', async () => {
-      mockRepo.findById!.mockResolvedValue({ ...liteTournament, matchType: 'SINGLES' });
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        matchType: 'SINGLES',
+      });
       await expect(
-        service.generateLitePairs('tournament-1', 'user-1', [], { strategy: 'RANDOM' }),
+        service.generateLitePairs('tournament-1', 'user-1', [], {
+          strategy: 'RANDOM',
+        }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -538,11 +749,18 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRepo.hasNonDeletedStagesOrMatches!.mockResolvedValue(false);
       mockRepo.generateLitePairsTx!.mockResolvedValue({
         message: 'Đã ghép 1 cặp thành công.',
-        paired: [{ participant1Id: 'p1', participant2Id: 'p2', teamName: 'P1 / P2' }],
+        paired: [
+          { participant1Id: 'p1', participant2Id: 'p2', teamName: 'P1 / P2' },
+        ],
         unpairedParticipantIds: [],
         strategy: 'RANDOM',
       });
-      const result = await service.generateLitePairs('tournament-1', 'user-1', ['ADMIN'], { strategy: 'RANDOM' });
+      const result = await service.generateLitePairs(
+        'tournament-1',
+        'user-1',
+        ['ADMIN'],
+        { strategy: 'RANDOM' },
+      );
       expect(mockRepo.generateLitePairsTx).toHaveBeenCalled();
       expect(result.paired).toHaveLength(1);
     });
@@ -554,7 +772,12 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRepo.findCommunityMember!.mockResolvedValue(null);
       mockRepo.hasNonDeletedStagesOrMatches!.mockResolvedValue(true);
       await expect(
-        (service as any).unpairLiteParticipant('tournament-1', 'paired-p1', 'user-1', ['ADMIN']),
+        (service as any).unpairLiteParticipant(
+          'tournament-1',
+          'paired-p1',
+          'user-1',
+          ['ADMIN'],
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -565,8 +788,17 @@ describe('TournamentsService — Lite pairing guards', () => {
         leader: { id: 'original', teamStatus: 'PENDING_PARTNER' },
         partner: { id: 'new', teamStatus: 'PENDING_PARTNER' },
       });
-      const result = await (service as any).unpairLiteParticipant('tournament-1', 'paired-p1', 'user-1', ['ADMIN']);
-      expect(mockRepo.lockTournamentAndUnpair).toHaveBeenCalledWith('tournament-1', 'paired-p1', 'user-1');
+      const result = await (service as any).unpairLiteParticipant(
+        'tournament-1',
+        'paired-p1',
+        'user-1',
+        ['ADMIN'],
+      );
+      expect(mockRepo.lockTournamentAndUnpair).toHaveBeenCalledWith(
+        'tournament-1',
+        'paired-p1',
+        'user-1',
+      );
       expect(result.leader.teamStatus).toBe('PENDING_PARTNER');
     });
   });
@@ -582,18 +814,21 @@ describe('Structural guards — repository transaction contracts', () => {
       'utf-8',
     );
     // Verify registerParticipant has FOR UPDATE tournament lock
-    const hasForUpdate = src.includes('.for(\'update\')') &&
+    const hasForUpdate =
+      src.includes(".for('update')") &&
       src.includes('Khong tim thay giai dau') === false; // just verify the file compiles
     expect(hasForUpdate).toBe(true);
 
     // Verify Lite capacity query counts distinct roster users
-    const hasRosterCount = src.includes('count(distinct') &&
+    const hasRosterCount =
+      src.includes('count(distinct') &&
       src.includes('tournamentRosters.userId') &&
       src.includes('maxParticipants');
     expect(hasRosterCount).toBe(true);
 
     // Verify non-Lite path still has COMPLETE+paid count
-    const hasNormalCount = src.includes('COMPLETE') &&
+    const hasNormalCount =
+      src.includes('COMPLETE') &&
       src.includes('isPaid') &&
       src.includes('maxParticipants') &&
       !src.includes('registerLiteParticipant');
@@ -617,7 +852,8 @@ describe('Structural guards — repository transaction contracts', () => {
       require('path').join(__dirname, 'tournaments.repository.ts'),
       'utf-8',
     );
-    const hasRegisteredByCheck = src.includes('participant.registeredBy') &&
+    const hasRegisteredByCheck =
+      src.includes('participant.registeredBy') &&
       src.includes('leaderRoster') &&
       src.includes('throw');
     expect(hasRegisteredByCheck).toBe(true);
