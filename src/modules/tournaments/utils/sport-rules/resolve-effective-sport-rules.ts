@@ -330,10 +330,13 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     ),
   );
 
-  const tiebreakAt = Math.max(
-    0,
-    Math.trunc(
-      readNumber(scoringSources, ['tiebreakAt', 'tiebreak_at']) ?? defaults.tiebreakAt,
+  const tiebreakAt = Math.min(
+    pointsPerSet - 1,
+    Math.max(
+      0,
+      Math.trunc(
+        readNumber(scoringSources, ['tiebreakAt', 'tiebreak_at']) ?? defaults.tiebreakAt,
+      ),
     ),
   );
 
