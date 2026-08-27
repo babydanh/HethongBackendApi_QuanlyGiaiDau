@@ -36,13 +36,7 @@ import {
 } from '../../common/helpers/cloudinary.helper';
 
 type CommunityMemberRole = 'OWNER' | 'MODERATOR' | 'MEMBER';
-type CommunityMemberStatus =
-  | 'JOINED'
-  | 'PENDING'
-  | 'INVITED'
-  | 'REJECTED'
-  | 'BANNED';
-type CommunityViewer = { id: string; roles?: string[] };
+type CommunityViewer = { id: string; roles?: (UserRole | string)[] };
 type SanitizeHtmlFn = (
   html: string,
   options?: Record<string, unknown>,
@@ -168,16 +162,16 @@ export class CommunitiesService {
     };
   }
 
-  async findById(id: string, user?: { id: string; roles: string[] }) {
+  async findById(id: string, user?: { id: string; roles?: (UserRole | string)[] }) {
     const community = await this.communitiesRepository.findById(id);
     if (!community) {
       throw new NotFoundException('Community not found');
     }
     // Nếu community bị khoá (REJECTED), chỉ ADMIN/MODERATOR mới xem được
     if (community.status === 'REJECTED') {
-      const isAdmin = user?.roles?.some(
-        (r) => r === UserRole.ADMIN || r === UserRole.MODERATOR,
-      );
+      const isAdmin =
+        user?.roles?.includes(UserRole.ADMIN) ||
+        user?.roles?.includes(UserRole.MODERATOR);
       if (!isAdmin) {
         throw new ForbiddenException('Cộng đồng này đã bị vô hiệu hoá.');
       }
@@ -186,7 +180,7 @@ export class CommunitiesService {
   }
 
   async getPublicView(id: string, viewer?: CommunityViewer) {
-    const community = await this.findById(id, viewer as { id: string; roles: string[] } | undefined);
+    const community = await this.findById(id, viewer);
     const access = await this.resolveAccess(community, viewer);
     if (access.isAdmin || access.isMember) return { ...community, access };
 
