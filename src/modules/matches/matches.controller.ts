@@ -70,7 +70,7 @@ export class MatchesController {
   }
 
   @Patch(':id/score')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
@@ -83,7 +83,7 @@ export class MatchesController {
   }
 
   @Patch(':id/status')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({
@@ -98,7 +98,7 @@ export class MatchesController {
   }
 
   @Patch(':id/schedule')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật lịch thi đấu, sân đấu và trọng tài' })
@@ -111,7 +111,7 @@ export class MatchesController {
   }
 
   @Patch(':id/operation')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
