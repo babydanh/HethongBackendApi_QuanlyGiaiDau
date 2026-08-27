@@ -6340,9 +6340,6 @@ export class TournamentsService {
               : thirdPlace.participant2Name,
           ),
         });
-      } else {
-        for (const loser of semifinalLosers)
-          awards.push({ rank: 3, shared: true, participant: loser });
       }
     } else if (standingRows.length) {
       const groups = new Map<string, typeof standingRows>();
@@ -6365,7 +6362,7 @@ export class TournamentsService {
         completed &&
         awards.length > 0 &&
         awards.every((award) => award.participant !== null),
-      awards: completed ? awards : [],
+      awards,
       standings: standingRows,
       matches: matches.map((match) => ({
         id: match.id,
