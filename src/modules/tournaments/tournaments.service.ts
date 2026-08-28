@@ -6335,7 +6335,7 @@ export class TournamentsService {
       ? allFinalCandidates
       : allKnockoutMatches.filter((match) => {
           const branch = (match.bracketBranch || '').toUpperCase();
-          return branch === 'MAIN' || branch === '';
+          return branch !== 'LOSERS' && branch !== 'THIRD_PLACE';
         })
     ).sort(
       (a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder,
