@@ -6306,9 +6306,12 @@ export class TournamentsService {
     };
 
     const completed = tournament.status === 'COMPLETED';
-    const knockout = matches.filter(
+    const allKnockoutMatches = matches.filter(
+      (m) => m.stageType !== 'ROUND_ROBIN',
+    );
+
+    const knockout = allKnockoutMatches.filter(
       (match) =>
-        match.stageType !== 'ROUND_ROBIN' &&
         match.winnerId &&
         (match.status === 'COMPLETED' ||
           match.status === 'FINISHED' ||
@@ -6316,7 +6319,7 @@ export class TournamentsService {
           (typeof match.winnerId === 'string' && match.winnerId.trim().length > 0)),
     );
 
-    const finalCandidates = knockout.filter((match) => {
+    const allFinalCandidates = allKnockoutMatches.filter((match) => {
       const branch = (match.bracketBranch || '').toUpperCase();
       const stageName = (match.stageName || '').toLowerCase();
       return (
@@ -6328,18 +6331,28 @@ export class TournamentsService {
       );
     });
 
-    const final = [
-      ...(finalCandidates.length > 0
-        ? finalCandidates
-        : knockout.filter((match) => {
-            const branch = (match.bracketBranch || '').toUpperCase();
-            return branch === 'MAIN' || branch === '';
-          })),
-    ].sort(
+    const trueFinalMatch = (allFinalCandidates.length > 0
+      ? allFinalCandidates
+      : allKnockoutMatches.filter((match) => {
+          const branch = (match.bracketBranch || '').toUpperCase();
+          return branch === 'MAIN' || branch === '';
+        })
+    ).sort(
       (a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder,
     )[0];
 
-    const loserOf = (match: typeof final) => {
+    const isFinalCompleted = Boolean(
+      trueFinalMatch &&
+      trueFinalMatch.winnerId &&
+      (trueFinalMatch.status === 'COMPLETED' ||
+        trueFinalMatch.status === 'FINISHED' ||
+        trueFinalMatch.status === 'DONE' ||
+        (typeof trueFinalMatch.winnerId === 'string' && trueFinalMatch.winnerId.trim().length > 0))
+    );
+
+    const final = isFinalCompleted ? trueFinalMatch : null;
+
+    const loserOf = (match: typeof trueFinalMatch) => {
       if (!match) return null;
       const isWinnerP1 = match.winnerId === match.participant1Id;
       const loserId = isWinnerP1 ? match.participant2Id : match.participant1Id;
