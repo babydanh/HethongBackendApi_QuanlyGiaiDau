@@ -89,6 +89,7 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { VenuesService } from '../venues/venues.service';
 import { CreateVenueCourtDto } from '../venues/dto/create-venue-court.dto';
 import { CreateVenueDto } from '../venues/dto/create-venue.dto';
+import { CreateBatchCourtsDto } from '../venues/dto/create-batch-courts.dto';
 
 @Injectable()
 export class TournamentsService {
@@ -279,6 +280,29 @@ export class TournamentsService {
       );
     }
     return this.venuesService.addCourt(tournament.venueId, dto);
+  }
+
+  async addTournamentCourtsBatch(
+    tournamentId: string,
+    dto: CreateBatchCourtsDto,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    if (!tournament.venueId) {
+      throw new BadRequestException(
+        'Giải đấu cần lưu địa điểm trước khi thêm sân.',
+      );
+    }
+    return this.venuesService.addCourtsBatch(
+      tournament.venueId,
+      dto.courtCount,
+      dto.namePrefix,
+    );
   }
 
   async removeTournamentCourt(

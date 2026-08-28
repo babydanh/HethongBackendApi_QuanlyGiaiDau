@@ -43,6 +43,7 @@ import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
 import { CreateVenueCourtDto } from '../venues/dto/create-venue-court.dto';
 import { CreateVenueDto } from '../venues/dto/create-venue.dto';
+import { CreateBatchCourtsDto } from '../venues/dto/create-batch-courts.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -352,6 +353,26 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.addTournamentCourt(
+      id,
+      dto,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post(':id/courts/batch')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Tạo hàng loạt sân cho địa điểm của giải đấu',
+  })
+  async addTournamentCourtsBatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateBatchCourtsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addTournamentCourtsBatch(
       id,
       dto,
       user,
