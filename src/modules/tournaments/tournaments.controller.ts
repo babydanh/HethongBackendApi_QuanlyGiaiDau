@@ -43,6 +43,7 @@ import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
 import { CreateVenueCourtDto } from '../venues/dto/create-venue-court.dto';
 import { CreateVenueDto } from '../venues/dto/create-venue.dto';
+import { UpdateVenueDto } from '../venues/dto/update-venue.dto';
 import { CreateBatchCourtsDto } from '../venues/dto/create-batch-courts.dto';
 import {
   ApiTags,
@@ -300,6 +301,158 @@ export class TournamentsController {
     return this.tournamentsService.deleteDivision(
       divisionId,
       user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  // ── MULTI-VENUE & COURTS ENDPOINTS ──
+
+  @Get(':id/venues')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách tất cả các địa điểm thi đấu kèm sân của giải' })
+  async getTournamentVenues(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.getTournamentVenuesWithCourts(
+      id,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post(':id/venues')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo địa điểm thi đấu mới cho giải' })
+  async createTournamentVenue(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateVenueDto & { isDefault?: boolean; initialCourtCount?: number; courtPrefix?: string },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.createTournamentVenue(
+      id,
+      dto,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Patch(':id/venues/:venueId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật thông tin địa điểm thi đấu' })
+  async updateTournamentVenue(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('venueId', ParseUUIDPipe) venueId: string,
+    @Body() dto: UpdateVenueDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.updateTournamentVenue(
+      id,
+      venueId,
+      dto,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Patch(':id/venues/:venueId/default')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Đặt địa điểm làm địa điểm mặc định của giải' })
+  async setDefaultTournamentVenue(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('venueId', ParseUUIDPipe) venueId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.setDefaultTournamentVenue(
+      id,
+      venueId,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Delete(':id/venues/:venueId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xóa địa điểm thi đấu khỏi giải' })
+  async deleteTournamentVenue(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('venueId', ParseUUIDPipe) venueId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.deleteTournamentVenue(
+      id,
+      venueId,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post(':id/venues/:venueId/courts')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Thêm sân vào địa điểm cụ thể' })
+  async addVenueCourtDirect(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('venueId', ParseUUIDPipe) venueId: string,
+    @Body() dto: CreateVenueCourtDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addVenueCourtDirect(
+      id,
+      venueId,
+      dto,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post(':id/venues/:venueId/courts/batch')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo hàng loạt sân cho địa điểm cụ thể' })
+  async addVenueCourtsBatchDirect(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('venueId', ParseUUIDPipe) venueId: string,
+    @Body() dto: CreateBatchCourtsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addVenueCourtsBatchDirect(
+      id,
+      venueId,
+      dto,
+      user,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Delete(':id/venues/:venueId/courts/:courtId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xóa sân khỏi địa điểm cụ thể' })
+  async removeVenueCourtDirect(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('venueId', ParseUUIDPipe) venueId: string,
+    @Param('courtId', ParseUUIDPipe) courtId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.removeVenueCourtDirect(
+      id,
+      venueId,
+      courtId,
+      user,
       this.getSystemRoles(user),
     );
   }

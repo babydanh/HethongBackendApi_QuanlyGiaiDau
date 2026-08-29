@@ -89,6 +89,7 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { VenuesService } from '../venues/venues.service';
 import { CreateVenueCourtDto } from '../venues/dto/create-venue-court.dto';
 import { CreateVenueDto } from '../venues/dto/create-venue.dto';
+import { UpdateVenueDto } from '../venues/dto/update-venue.dto';
 import { CreateBatchCourtsDto } from '../venues/dto/create-batch-courts.dto';
 
 @Injectable()
@@ -224,6 +225,149 @@ export class TournamentsService {
     return tournament;
   }
 
+  // ── MULTI-VENUE & COURTS MANAGEMENT ──
+
+  async getTournamentVenuesWithCourts(
+    tournamentId: string,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    const configuredVenueIds = Array.isArray(config.venueIds) ? (config.venueIds as string[]) : [];
+    const allVenueIds = Array.from(
+      new Set([tournament.venueId, ...configuredVenueIds].filter((v): v is string => Boolean(v))),
+    );
+
+    const venuesWithCourts = await Promise.all(
+      allVenueIds.map(async (venueId) => {
+        try {
+          const venue = await this.venuesService.findOne(venueId);
+          return {
+            ...venue,
+            isDefault: venue.id === tournament.venueId,
+            courts: venue.courts ?? [],
+          };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return venuesWithCourts.filter(Boolean);
+  }
+
+  async createTournamentVenue(
+    tournamentId: string,
+    dto: CreateVenueDto & { isDefault?: boolean; initialCourtCount?: number; courtPrefix?: string },
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+
+    const venue = await this.venuesService.create(user.sub, dto);
+
+    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    const existingVenueIds = Array.isArray(config.venueIds) ? (config.venueIds as string[]) : [];
+    const updatedVenueIds = Array.from(new Set([...existingVenueIds, venue.id]));
+
+    const shouldSetDefault = Boolean(dto.isDefault || !tournament.venueId);
+    await this.tournamentsRepository.update(tournamentId, user.sub, {
+      ...(shouldSetDefault && { venueId: venue.id }),
+      tournamentConfig: {
+        ...config,
+        venueIds: updatedVenueIds,
+      },
+    });
+
+    if (dto.initialCourtCount && dto.initialCourtCount > 0) {
+      await this.venuesService.addCourtsBatch(
+        venue.id,
+        dto.initialCourtCount,
+        dto.courtPrefix || 'Sân',
+      );
+    }
+
+    const createdVenue = await this.venuesService.findOne(venue.id);
+    return {
+      ...createdVenue,
+      isDefault: shouldSetDefault,
+      courts: createdVenue.courts ?? [],
+    };
+  }
+
+  async updateTournamentVenue(
+    tournamentId: string,
+    venueId: string,
+    dto: UpdateVenueDto,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    return this.venuesService.update(venueId, user.sub, dto);
+  }
+
+  async setDefaultTournamentVenue(
+    tournamentId: string,
+    venueId: string,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    await this.venuesService.findOne(venueId); // Ensure venue exists
+    await this.tournamentsRepository.update(tournamentId, user.sub, {
+      venueId,
+    });
+    return { success: true, defaultVenueId: venueId };
+  }
+
+  async deleteTournamentVenue(
+    tournamentId: string,
+    venueId: string,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    const existingVenueIds = Array.isArray(config.venueIds) ? (config.venueIds as string[]) : [];
+    const updatedVenueIds = existingVenueIds.filter((id) => id !== venueId);
+
+    let nextDefaultVenueId = tournament.venueId;
+    if (tournament.venueId === venueId) {
+      nextDefaultVenueId = updatedVenueIds[0] || null;
+    }
+
+    await this.tournamentsRepository.update(tournamentId, user.sub, {
+      venueId: nextDefaultVenueId || undefined,
+      tournamentConfig: {
+        ...config,
+        venueIds: updatedVenueIds,
+      },
+    });
+
+    return { success: true, remainingVenueIds: updatedVenueIds, defaultVenueId: nextDefaultVenueId };
+  }
+
   async saveTournamentVenue(
     tournamentId: string,
     dto: CreateVenueDto,
@@ -324,6 +468,55 @@ export class TournamentsService {
       throw new NotFoundException('Court not found in this tournament venue');
     }
     return this.venuesService.removeCourt(tournament.venueId, courtId);
+  }
+
+  async addVenueCourtDirect(
+    tournamentId: string,
+    venueId: string,
+    dto: CreateVenueCourtDto,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    return this.venuesService.addCourt(venueId, dto);
+  }
+
+  async addVenueCourtsBatchDirect(
+    tournamentId: string,
+    venueId: string,
+    dto: CreateBatchCourtsDto,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    return this.venuesService.addCourtsBatch(
+      venueId,
+      dto.courtCount,
+      dto.namePrefix,
+    );
+  }
+
+  async removeVenueCourtDirect(
+    tournamentId: string,
+    venueId: string,
+    courtId: string,
+    user: JwtPayload,
+    systemRoles: string[] = [],
+  ) {
+    await this.getManagedTournamentForCourtSetup(
+      tournamentId,
+      user.sub,
+      systemRoles,
+    );
+    return this.venuesService.removeCourt(venueId, courtId);
   }
 
   private isSystemTournamentCreator(systemRoles: string[] = []): boolean {
