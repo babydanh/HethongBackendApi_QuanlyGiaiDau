@@ -4181,15 +4181,23 @@ export class TournamentsRepository {
         ]),
       );
 
-      matchesList = dbMatches.map((m) => ({
-        ...m,
-        participant1: m.participant1Id
-          ? participantMap.get(m.participant1Id)
-          : null,
-        participant2: m.participant2Id
-          ? participantMap.get(m.participant2Id)
-          : null,
-      }));
+      const stageDivisionMap = new Map(stages.map((s) => [s.id, s.tournamentDivisionId]));
+      const groupStageMap = new Map(groups.map((g) => [g.id, g.stageId]));
+
+      matchesList = dbMatches.map((m) => {
+        const stageId = m.stageId || groupStageMap.get(m.groupId || '') || null;
+        const divisionIdVal = stageId ? stageDivisionMap.get(stageId) || null : null;
+        return {
+          ...m,
+          divisionId: divisionIdVal ?? null,
+          participant1: m.participant1Id
+            ? participantMap.get(m.participant1Id)
+            : null,
+          participant2: m.participant2Id
+            ? participantMap.get(m.participant2Id)
+            : null,
+        };
+      });
     }
 
     const groupsMap = new Map<string, BracketGroup[]>();
@@ -4208,6 +4216,7 @@ export class TournamentsRepository {
     return {
       stages: stages.map((s) => ({
         id: s.id,
+        tournamentDivisionId: s.tournamentDivisionId ?? null,
         name: s.name,
         type: s.type,
         order: s.order,
