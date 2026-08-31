@@ -3094,9 +3094,7 @@ export class TournamentsService {
       );
     }
 
-    const bracket = reset
-      ? await this.tournamentsRepository.findBracket(id, divisionId)
-      : null;
+    const bracket = await this.tournamentsRepository.findBracket(id, divisionId);
     const started =
       bracket?.stages.some((stage) =>
         stage.groups?.some((group) =>
@@ -3117,7 +3115,7 @@ export class TournamentsService {
       systemRoles,
       divisionId,
       'RANDOM',
-      reset,
+      true,
     );
   }
 
@@ -6981,15 +6979,6 @@ export class TournamentsService {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
-    // Reject if active bracket/stage/match exists
-    const hasActiveBracket =
-      await this.tournamentsRepository.hasNonDeletedStagesOrMatches(id);
-    if (hasActiveBracket) {
-      throw new BadRequestException(
-        'Không thể ghép cặp sau khi đã sinh nhánh đấu.',
-      );
-    }
-
     const registrationMode =
       config.registrationMode === 'INVITE_ONLY' ? 'INVITE_ONLY' : 'OPEN';
 
@@ -7042,15 +7031,6 @@ export class TournamentsService {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
-    // Reject if active bracket/stage/match exists
-    const hasActiveBracket =
-      await this.tournamentsRepository.hasNonDeletedStagesOrMatches(id);
-    if (hasActiveBracket) {
-      throw new BadRequestException(
-        'Không thể ghép cặp sau khi đã sinh nhánh đấu.',
-      );
-    }
-
     // Execute pairing in a transaction (authoritative; tx queries pending inside)
     return await this.tournamentsRepository.generateLitePairsTx(
       id,
@@ -7066,15 +7046,6 @@ export class TournamentsService {
     systemRoles: string[] = [],
   ) {
     await this.checkLiteAuthorization(id, userId, systemRoles);
-
-    // Reject if active bracket/stage/match exists
-    const hasActiveBracket =
-      await this.tournamentsRepository.hasNonDeletedStagesOrMatches(id);
-    if (hasActiveBracket) {
-      throw new BadRequestException(
-        'Không thể tách cặp sau khi đã sinh nhánh đấu.',
-      );
-    }
 
     return await this.tournamentsRepository.lockTournamentAndUnpair(
       id,

@@ -8462,33 +8462,69 @@ export class TournamentsRepository {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
-    // Check active stages/matches via tx (fixes TOCTOU)
-    const [stageCount] = await tx
-      .select({ count: count() })
-      .from(schema.tournamentStages)
-      .where(
-        and(
-          eq(schema.tournamentStages.tournamentId, tournamentId),
-          isNull(schema.tournamentStages.deletedAt),
-        ),
-      );
-    if (stageCount.count > 0) {
-      throw new BadRequestException(
-        'Không thể ghép cặp sau khi đã sinh nhánh đấu.',
-      );
-    }
-    const [matchCount] = await tx
+    // Only block pairing if a match has already started or finished
+    const [startedMatchCount] = await tx
       .select({ count: count() })
       .from(schema.matches)
       .where(
         and(
           eq(schema.matches.tournamentId, tournamentId),
+          ne(schema.matches.status, 'SCHEDULED'),
           isNull(schema.matches.deletedAt),
         ),
       );
-    if (matchCount.count > 0) {
+    if (startedMatchCount.count > 0) {
       throw new BadRequestException(
-        'Không thể ghép cặp sau khi đã sinh trận đấu.',
+        'Không thể thay đổi ghép cặp sau khi giải đấu đã bắt đầu thi đấu.',
+      );
+    }
+
+    return tournament;
+  }
+
+  /**
+   * Check inside the transaction that the tournament is LITE DOUBLES before unpairing.
+   * Does NOT reject if bracket/matches already exist; the existing bracket retains
+   * the participant slot until regenerated.
+   */
+  private async assertLiteUnpairableInTx(
+    tx: Transaction,
+    tournamentId: string,
+  ): Promise<typeof schema.tournaments.$inferSelect> {
+    const [tournament] = await tx
+      .select()
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1)
+      .for('update');
+
+    if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
+
+    const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    if (tCfg.isLite !== true) {
+      throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
+    }
+    if (
+      tournament.matchType !== 'DOUBLES' &&
+      tournament.matchType !== 'MIXED_DOUBLES'
+    ) {
+      throw new BadRequestException('Tách cặp chỉ hỗ trợ giải đấu đánh đôi.');
+    }
+
+    // Only block unpairing if a match has already started or finished
+    const [startedMatchCount] = await tx
+      .select({ count: count() })
+      .from(schema.matches)
+      .where(
+        and(
+          eq(schema.matches.tournamentId, tournamentId),
+          ne(schema.matches.status, 'SCHEDULED'),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
+    if (startedMatchCount.count > 0) {
+      throw new BadRequestException(
+        'Không thể tách cặp sau khi giải đấu đã bắt đầu thi đấu.',
       );
     }
 
@@ -8524,7 +8560,7 @@ export class TournamentsRepository {
     userId: string,
   ) {
     return await this.db.transaction(async (tx) => {
-      await this.assertLitePairableInTx(tx, tournamentId);
+      await this.assertLiteUnpairableInTx(tx, tournamentId);
       return this.unpairParticipantInTx(
         tx,
         tournamentId,
