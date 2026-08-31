@@ -495,25 +495,6 @@ export class CommunitySocialRepository {
       })
       .returning();
 
-    if (post && isLite) {
-      // Tự động tạo Poll tương tác thăm dò cho giải Siêu Lite
-      try {
-        await this.createPoll(
-          communityId,
-          authorId,
-          {
-            question: `Bạn có tham gia giải "${tournamentName}" không?`,
-            options: ['✅ Có tham gia (Đăng ký ngay)', '⏳ Chưa chắc chắn', '❌ Bận / Không tham gia'],
-            allowMultipleAnswers: false,
-            allowAddOptions: false,
-          },
-          post.id,
-        );
-      } catch (pollErr) {
-        console.error('Failed to create interactive poll for super lite tournament post:', pollErr);
-      }
-    }
-
     return post;
   }
 
