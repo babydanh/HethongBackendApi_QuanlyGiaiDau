@@ -2182,28 +2182,33 @@ export class MatchesRepository {
         throw new BadRequestException('Thời gian thi đấu không hợp lệ.');
       }
 
-      // Kiểm tra scheduling conflict: cùng sân, cùng giải, trong khung ±2h.
-      // Use effective values so partial edits (only time or only court) are
-      // checked against the existing schedule as well.
+      // Kiểm tra scheduling conflict: cùng sân hoặc cùng đội có khoảng thời gian thi đấu chồng lấn (exact time overlap)
       if (effectiveScheduledAt) {
         const scheduledDate = effectiveScheduledAt;
-        const conflictStart = new Date(
-          scheduledDate.getTime() - 2 * 60 * 60 * 1000,
-        );
-        const conflictEnd = new Date(
-          scheduledDate.getTime() + 2 * 60 * 60 * 1000,
-        );
-        // Only live reservations occupy a court/time slot. Historical
-        // completed matches and cancelled fixtures must not block a later
-        // reschedule (especially when a tournament reuses the same courts).
+        const currentDurationMin =
+          (data.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
+          ?? (existing.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
+          ?? 30;
+        const currentDurationMs = Math.max(15, currentDurationMin) * 60 * 1000;
+        const currentStartMs = scheduledDate.getTime();
+        const currentEndMs = currentStartMs + currentDurationMs;
+
+        // Query candidate matches within ±2 hours to check exact continuous interval overlap
+        const windowStart = new Date(currentStartMs - 2 * 60 * 60 * 1000);
+        const windowEnd = new Date(currentStartMs + 2 * 60 * 60 * 1000);
+
         const activeScheduledStatuses = inArray(schema.matches.status, [
           'SCHEDULED',
           'ONGOING',
         ]);
 
         if (effectiveCourtName) {
-          const conflict = await tx
-            .select({ id: schema.matches.id })
+          const candidateMatches = await tx
+            .select({
+              id: schema.matches.id,
+              scheduledAt: schema.matches.scheduledAt,
+              matchConfig: schema.matches.matchConfig,
+            })
             .from(schema.matches)
             .where(
               and(
@@ -2212,15 +2217,24 @@ export class MatchesRepository {
                 ne(schema.matches.id, id),
                 isNull(schema.matches.deletedAt),
                 activeScheduledStatuses,
-                gte(schema.matches.scheduledAt, conflictStart),
-                lte(schema.matches.scheduledAt, conflictEnd),
+                gte(schema.matches.scheduledAt, windowStart),
+                lte(schema.matches.scheduledAt, windowEnd),
               ),
-            )
-            .limit(1);
+            );
 
-          if (conflict.length > 0) {
+          const courtConflict = candidateMatches.find((m) => {
+            if (!m.scheduledAt) return false;
+            const otherStartMs = new Date(m.scheduledAt).getTime();
+            const otherDurationMin =
+              (m.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
+              ?? 30;
+            const otherEndMs = otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
+            return currentStartMs < otherEndMs && currentEndMs > otherStartMs;
+          });
+
+          if (courtConflict) {
             throw new BadRequestException(
-              `Sân ${effectiveCourtName} đã có trận đấu khác trong khung giờ này (${conflictStart.toLocaleTimeString('vi-VN')} - ${conflictEnd.toLocaleTimeString('vi-VN')}).`,
+              `Sân ${effectiveCourtName} đã có trận đấu khác trong cùng khung giờ.`,
             );
           }
         }
@@ -2232,9 +2246,11 @@ export class MatchesRepository {
           Boolean(participantId),
         );
         if (participantIds.length > 0) {
-          const participantConflict = await tx
+          const candidateParticipantMatches = await tx
             .select({
               id: schema.matches.id,
+              scheduledAt: schema.matches.scheduledAt,
+              matchConfig: schema.matches.matchConfig,
               participant1Id: schema.matches.participant1Id,
               participant2Id: schema.matches.participant2Id,
             })
@@ -2245,19 +2261,28 @@ export class MatchesRepository {
                 ne(schema.matches.id, id),
                 isNull(schema.matches.deletedAt),
                 activeScheduledStatuses,
-                gte(schema.matches.scheduledAt, conflictStart),
-                lte(schema.matches.scheduledAt, conflictEnd),
+                gte(schema.matches.scheduledAt, windowStart),
+                lte(schema.matches.scheduledAt, windowEnd),
                 or(
                   inArray(schema.matches.participant1Id, participantIds),
                   inArray(schema.matches.participant2Id, participantIds),
                 ),
               ),
-            )
-            .limit(1);
+            );
 
-          if (participantConflict.length > 0) {
+          const participantConflict = candidateParticipantMatches.find((m) => {
+            if (!m.scheduledAt) return false;
+            const otherStartMs = new Date(m.scheduledAt).getTime();
+            const otherDurationMin =
+              (m.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
+              ?? 30;
+            const otherEndMs = otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
+            return currentStartMs < otherEndMs && currentEndMs > otherStartMs;
+          });
+
+          if (participantConflict) {
             throw new BadRequestException(
-              'Một đội đã có trận đấu khác trong khung giờ này.',
+              'Một đội đã có trận đấu khác trong cùng khung giờ.',
             );
           }
         }
