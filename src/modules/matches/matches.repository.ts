@@ -1319,41 +1319,41 @@ export class MatchesRepository {
   }
 
   async findAllowedCourtForMatch(
-    match: { stageId: string; tournamentId: string },
+    match: { stageId?: string | null; tournamentId: string },
     courtId: string,
   ) {
-    const [scope] = await this.db
-      .select({
-        tournamentVenueId: schema.tournaments.venueId,
-        divisionVenueId: schema.tournamentDivisions.venueId,
-      })
-      .from(schema.tournamentStages)
-      .innerJoin(
-        schema.tournaments,
-        eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
-      )
-      .leftJoin(
-        schema.tournamentDivisions,
-        eq(
-          schema.tournamentStages.tournamentDivisionId,
-          schema.tournamentDivisions.id,
-        ),
-      )
+    const [tournament] = await this.db
+      .select({ venueId: schema.tournaments.venueId })
+      .from(schema.tournaments)
       .where(
         and(
-          eq(schema.tournamentStages.id, match.stageId),
-          eq(schema.tournamentStages.tournamentId, match.tournamentId),
+          eq(schema.tournaments.id, match.tournamentId),
           isNull(schema.tournaments.deletedAt),
         ),
       )
       .limit(1);
 
-    if (!scope) return null;
+    const divisionVenues = await this.db
+      .select({ venueId: schema.tournamentDivisions.venueId })
+      .from(schema.tournamentDivisions)
+      .where(eq(schema.tournamentDivisions.tournamentId, match.tournamentId));
 
-    const venueIds = [scope.tournamentVenueId, scope.divisionVenueId].filter(
-      (venueId): venueId is string => Boolean(venueId),
-    );
-    if (venueIds.length === 0) return null;
+    const venueIds = [
+      tournament?.venueId,
+      ...divisionVenues.map((d) => d.venueId),
+    ].filter((venueId): venueId is string => Boolean(venueId));
+
+    const courtCondition =
+      venueIds.length > 0
+        ? and(
+            eq(schema.venueCourts.id, courtId),
+            inArray(schema.venueCourts.venueId, venueIds),
+            eq(schema.venueCourts.status, 'AVAILABLE'),
+          )
+        : and(
+            eq(schema.venueCourts.id, courtId),
+            eq(schema.venueCourts.status, 'AVAILABLE'),
+          );
 
     const [court] = await this.db
       .select({
@@ -1363,18 +1363,11 @@ export class MatchesRepository {
         courtAddress: schema.tournamentVenues.locationAddress,
       })
       .from(schema.venueCourts)
-      .innerJoin(
+      .leftJoin(
         schema.tournamentVenues,
         eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
       )
-      .where(
-        and(
-          eq(schema.venueCourts.id, courtId),
-          inArray(schema.venueCourts.venueId, venueIds),
-          eq(schema.venueCourts.status, 'AVAILABLE'),
-          isNull(schema.tournamentVenues.deletedAt),
-        ),
-      )
+      .where(courtCondition)
       .limit(1);
 
     return court ?? null;
@@ -2102,65 +2095,61 @@ export class MatchesRepository {
         courtAddress: string;
       } | null = null;
       if (data.courtId) {
-        const [scope] = await tx
-          .select({
-            tournamentVenueId: schema.tournaments.venueId,
-            divisionVenueId: schema.tournamentDivisions.venueId,
-          })
-          .from(schema.tournamentStages)
-          .innerJoin(
-            schema.tournaments,
-            eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
-          )
-          .leftJoin(
-            schema.tournamentDivisions,
-            eq(
-              schema.tournamentStages.tournamentDivisionId,
-              schema.tournamentDivisions.id,
-            ),
-          )
+        const [tournament] = await tx
+          .select({ venueId: schema.tournaments.venueId })
+          .from(schema.tournaments)
           .where(
             and(
-              eq(schema.tournamentStages.id, existing.stageId),
-              eq(schema.tournamentStages.tournamentId, existing.tournamentId),
+              eq(schema.tournaments.id, existing.tournamentId),
               isNull(schema.tournaments.deletedAt),
             ),
           )
           .limit(1);
+
+        const divisionVenues = await tx
+          .select({ venueId: schema.tournamentDivisions.venueId })
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.tournamentId, existing.tournamentId));
+
         const venueIds = [
-          scope?.tournamentVenueId,
-          scope?.divisionVenueId,
+          tournament?.venueId,
+          ...divisionVenues.map((d) => d.venueId),
         ].filter((venueId): venueId is string => Boolean(venueId));
-        if (venueIds.length === 0) {
-          throw new BadRequestException(
-            'Giải đấu chưa cấu hình địa điểm thi đấu hợp lệ.',
-          );
-        }
+
+        const courtCondition =
+          venueIds.length > 0
+            ? and(
+                eq(schema.venueCourts.id, data.courtId),
+                inArray(schema.venueCourts.venueId, venueIds),
+                eq(schema.venueCourts.status, 'AVAILABLE'),
+              )
+            : and(
+                eq(schema.venueCourts.id, data.courtId),
+                eq(schema.venueCourts.status, 'AVAILABLE'),
+              );
+
         const [court] = await tx
           .select({
             courtName: schema.venueCourts.courtName,
             courtAddress: schema.tournamentVenues.locationAddress,
           })
           .from(schema.venueCourts)
-          .innerJoin(
+          .leftJoin(
             schema.tournamentVenues,
             eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
           )
-          .where(
-            and(
-              eq(schema.venueCourts.id, data.courtId),
-              inArray(schema.venueCourts.venueId, venueIds),
-              eq(schema.venueCourts.status, 'AVAILABLE'),
-              isNull(schema.tournamentVenues.deletedAt),
-            ),
-          )
+          .where(courtCondition)
           .limit(1);
+
         if (!court) {
           throw new BadRequestException(
             'Sân được chọn không thuộc địa điểm thi đấu của giải này hoặc đang không hoạt động.',
           );
         }
-        canonicalCourt = court;
+        canonicalCourt = {
+          courtName: court.courtName,
+          courtAddress: court.courtAddress || '',
+        };
       }
 
       const effectiveCourtName = canonicalCourt
