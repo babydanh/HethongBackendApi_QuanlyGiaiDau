@@ -1634,13 +1634,34 @@ export class TournamentsService {
         : {}),
     };
 
+    let fallbackLogoUrl = dto.logoUrl;
+    let fallbackBannerUrl = dto.bannerUrl;
+    if (dto.communityId && (!fallbackLogoUrl || !fallbackBannerUrl)) {
+      try {
+        const community = await this.tournamentsRepository.findCommunityById(
+          dto.communityId,
+        );
+        if (!fallbackLogoUrl && community) {
+          fallbackLogoUrl = community.logoUrl || community.bannerUrl || undefined;
+        }
+        if (!fallbackBannerUrl && community) {
+          fallbackBannerUrl = community.bannerUrl || community.logoUrl || undefined;
+        }
+      } catch (err) {
+        console.error(
+          'Failed to resolve community logo fallback for lite tournament:',
+          err,
+        );
+      }
+    }
+
     const fullDto = new CreateTournamentDto();
     Object.assign(fullDto, {
       name: dto.name,
       tournamentType,
       visibility: requestedPublic ? 'PUBLIC' : 'PRIVATE',
-      ...(dto.bannerUrl ? { bannerUrl: dto.bannerUrl } : {}),
-      ...(dto.logoUrl ? { logoUrl: dto.logoUrl } : {}),
+      ...(fallbackBannerUrl ? { bannerUrl: fallbackBannerUrl } : {}),
+      ...(fallbackLogoUrl ? { logoUrl: fallbackLogoUrl } : {}),
       ...(dto.communityId ? { communityId: dto.communityId } : {}),
       categoryId: category.id,
       matchType,

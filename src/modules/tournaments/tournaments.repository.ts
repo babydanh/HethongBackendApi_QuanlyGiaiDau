@@ -3631,6 +3631,8 @@ export class TournamentsRepository {
         id: schema.communities.id,
         name: schema.communities.name,
         joinMode: schema.communities.joinMode,
+        logoUrl: schema.communities.logoUrl,
+        bannerUrl: schema.communities.bannerUrl,
       })
       .from(schema.communities)
       .where(eq(schema.communities.id, communityId))
