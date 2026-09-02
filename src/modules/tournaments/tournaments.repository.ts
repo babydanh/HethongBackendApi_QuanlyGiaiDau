@@ -3630,6 +3630,7 @@ export class TournamentsRepository {
       .select({
         id: schema.communities.id,
         name: schema.communities.name,
+        visibility: schema.communities.visibility,
         joinMode: schema.communities.joinMode,
         logoUrl: schema.communities.logoUrl,
         bannerUrl: schema.communities.bannerUrl,

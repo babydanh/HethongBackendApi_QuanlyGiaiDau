@@ -835,13 +835,22 @@ export class TournamentsService {
           );
         })());
       let isCommunityMember = false;
-      if (userId && tournament.communityId) {
-        const member = await this.tournamentsRepository.findCommunityMember(
+      let isPublicCommunity = false;
+      if (tournament.communityId) {
+        const community = await this.tournamentsRepository.findCommunityById(
           tournament.communityId,
-          userId,
         );
-        if (member && member.status === 'JOINED') {
-          isCommunityMember = true;
+        if (community && community.visibility !== 'PRIVATE') {
+          isPublicCommunity = true;
+        }
+        if (userId) {
+          const member = await this.tournamentsRepository.findCommunityMember(
+            tournament.communityId,
+            userId,
+          );
+          if (member && member.status === 'JOINED') {
+            isCommunityMember = true;
+          }
         }
       }
       if (
@@ -849,7 +858,8 @@ export class TournamentsService {
         !isInviteMatch &&
         !isValidTeamInvite &&
         !isAdmin &&
-        !isCommunityMember
+        !isCommunityMember &&
+        !isPublicCommunity
       ) {
         throw new ForbiddenException('Giải đấu này yêu cầu mã mời');
       }
