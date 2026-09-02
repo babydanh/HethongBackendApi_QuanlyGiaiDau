@@ -820,7 +820,13 @@ export class TournamentsService {
       throw new ForbiddenException('Giải đấu đã bị cấm hoặc hủy vĩnh viễn');
     }
 
-    if (tournament.visibility === 'PRIVATE') {
+    const tourneyConfig = tournament.tournamentConfig as Record<string, unknown> | null | undefined;
+    const isLite = Boolean(tourneyConfig?.isLite || tourneyConfig?.mode === 'LITE');
+
+    if (
+      tournament.visibility === 'PRIVATE' ||
+      (isLite && tournament.communityId)
+    ) {
       const isInviteMatch = inviteCode && tournament.inviteCode === inviteCode;
       const isValidTeamInvite =
         !!participantId &&
@@ -840,7 +846,12 @@ export class TournamentsService {
         const community = await this.tournamentsRepository.findCommunityById(
           tournament.communityId,
         );
-        if (community && community.visibility !== 'PRIVATE') {
+        if (
+          community &&
+          community.visibility !== 'PRIVATE' &&
+          !isLite &&
+          tournament.visibility !== 'PRIVATE'
+        ) {
           isPublicCommunity = true;
         }
         if (userId) {
@@ -861,7 +872,7 @@ export class TournamentsService {
         !isCommunityMember &&
         !isPublicCommunity
       ) {
-        throw new ForbiddenException('Giải đấu này yêu cầu mã mời');
+        throw new ForbiddenException('Giải đấu nội bộ yêu cầu mã mời hoặc tham gia CLB');
       }
     }
 
@@ -2029,14 +2040,26 @@ export class TournamentsService {
 
     // Check club membership
     if (tournament.communityId) {
-      const member = await this.tournamentsRepository.findCommunityMember(
+      let member = await this.tournamentsRepository.findCommunityMember(
         tournament.communityId,
         userId,
       );
-      if (!member)
-        throw new ForbiddenException('Bạn chưa là thành viên câu lạc bộ');
+      if (!member) {
+        const community = await this.tournamentsRepository.findCommunityById(
+          tournament.communityId,
+        );
+        // When joining via tournament invite link, auto-join user into club (or send pending request if club requires approval)
+        const autoStatus = community?.joinMode === 'APPROVAL' ? 'PENDING' : 'JOINED';
+        await this.tournamentsRepository.addCommunityMember(
+          tournament.communityId,
+          userId,
+          'MEMBER',
+          autoStatus,
+        );
+        member = { status: autoStatus } as any;
+      }
       if (member.status === 'PENDING')
-        throw new ForbiddenException('Yêu cầu vào CLB đang chờ duyệt');
+        throw new ForbiddenException('Yêu cầu tham gia CLB đang chờ ban quản trị duyệt');
       if (member.status !== 'JOINED')
         throw new ForbiddenException('Bạn chưa là thành viên câu lạc bộ');
     }

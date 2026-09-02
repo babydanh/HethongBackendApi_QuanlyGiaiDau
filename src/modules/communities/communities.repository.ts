@@ -943,7 +943,12 @@ export class CommunitiesRepository {
           eq(schema.tournaments.visibility, 'COMMUNITY'),
           eq(schema.tournaments.visibility, 'RESTRICTED'),
         )
-      : eq(schema.tournaments.visibility, 'PUBLIC');
+      : and(
+          eq(schema.tournaments.visibility, 'PUBLIC'),
+          // Super Lite tournaments are hidden from non-members
+          sql`COALESCE((${schema.tournaments.tournamentConfig}->>'isLite')::boolean, false) = false`,
+          sql`COALESCE(${schema.tournaments.tournamentConfig}->>'mode', '') != 'LITE'`,
+        );
     let condition = and(
       eq(schema.tournaments.communityId, communityId),
       visibilityCondition,

@@ -437,22 +437,17 @@ export class MatchesRepository {
       )`);
     }
 
-    let decodedCursor: { id: string; updatedAt: string } | null = null;
+    let cursorCondition: SQL | null = null;
     if (cursor) {
-      decodedCursor = CursorPaginationHelper.decodeCursor<{
+      const decodedCursor = CursorPaginationHelper.decodeCursor<{
         id: string;
         updatedAt: string;
       }>(cursor);
-      if (decodedCursor) {
-        conditions.push(
-          or(
-            lt(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
-            and(
-              eq(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
-              lt(schema.matches.id, decodedCursor.id),
-            ),
-          ) as SQL,
-        );
+      if (decodedCursor && decodedCursor.updatedAt && decodedCursor.id) {
+        const cursorDate = new Date(decodedCursor.updatedAt);
+        // Postgres updated_at has microsecond precision while JS Date has millisecond precision.
+        // We compare: updated_at < cursorDate OR (date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', cursorDate) AND id < cursorId)
+        cursorCondition = sql`(${schema.matches.updatedAt} < ${cursorDate} OR (date_trunc('milliseconds', ${schema.matches.updatedAt}) = date_trunc('milliseconds', ${cursorDate}) AND ${schema.matches.id} < ${decodedCursor.id}))`;
       }
     }
 
@@ -609,6 +604,11 @@ export class MatchesRepository {
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const queryConditions = cursorCondition
+      ? [...conditions, cursorCondition]
+      : conditions;
+    const queryWhereClause =
+      queryConditions.length > 0 ? and(...queryConditions) : undefined;
 
     const [totalRecord] = await this.db
       .select({ count: count() })
@@ -618,7 +618,7 @@ export class MatchesRepository {
     const matchesQuery = this.db
       .select()
       .from(schema.matches)
-      .where(whereClause)
+      .where(queryWhereClause)
       .orderBy(desc(schema.matches.updatedAt), desc(schema.matches.id))
       .limit(take)
       .$dynamic();

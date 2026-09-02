@@ -1042,10 +1042,11 @@ export class CommunitiesService {
     if (!access.isMember && !access.isAdmin && community.visibility !== 'PUBLIC') {
       throw new ForbiddenException('Danh sách giải đấu chỉ dành cho thành viên CLB.');
     }
+    const isMemberOrAdmin = Boolean(access.isMember || access.isAdmin);
     return await this.communitiesRepository.getTournaments(
       id,
       status,
-      true,
+      isMemberOrAdmin,
     );
   }
 

@@ -3655,6 +3655,37 @@ export class TournamentsRepository {
     return records[0];
   }
 
+  async addCommunityMember(
+    communityId: string,
+    userId: string,
+    role: string = 'MEMBER',
+    status: string = 'JOINED',
+  ) {
+    const existing = await this.findCommunityMember(communityId, userId);
+    if (existing) {
+      if (existing.status !== status && status === 'JOINED') {
+        const [updated] = await this.db
+          .update(schema.communityMembers)
+          .set({ status: 'JOINED', joinedAt: new Date() })
+          .where(eq(schema.communityMembers.id, existing.id))
+          .returning();
+        return updated;
+      }
+      return existing;
+    }
+    const [created] = await this.db
+      .insert(schema.communityMembers)
+      .values({
+        communityId,
+        userId,
+        role,
+        status,
+        joinedAt: status === 'JOINED' ? new Date() : undefined,
+      })
+      .returning();
+    return created;
+  }
+
   async findUserProfile(userId: string) {
     const [profile] = await this.db
       .select({
