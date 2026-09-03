@@ -1256,7 +1256,6 @@ export class TournamentsController {
   }
 
   @Patch(':id/referees/:refereeId/respond')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Trọng tài chấp nhận/từ chối lời mời làm trọng tài',
