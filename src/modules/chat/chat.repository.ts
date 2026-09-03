@@ -795,7 +795,7 @@ export class ChatRepository {
       senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Sporto Player')`,
       senderAvatar: schema.profiles.avatarUrl,
       senderAvatarUrl: schema.profiles.avatarUrl,
-    }).from(schema.chatMessages).innerJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
+    }).from(schema.chatMessages).leftJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId)).where(and(...conditions))
       .orderBy(desc(schema.chatMessages.createdAt), desc(schema.chatMessages.id)).limit(limit + 1);
 
