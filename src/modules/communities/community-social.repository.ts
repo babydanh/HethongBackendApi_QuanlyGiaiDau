@@ -126,6 +126,10 @@ export class CommunitySocialRepository {
           bannerUrl: schema.tournaments.bannerUrl,
           maxParticipants: schema.tournaments.maxParticipants,
           inviteCode: schema.tournaments.inviteCode,
+          // Keep the Lite/advanced boundary explicit for mobile clients. The
+          // community feed intentionally selects a compact tournament shape,
+          // so clients cannot infer Lite from the omitted tournamentConfig.
+          isTournamentLite: sql<boolean>`COALESCE((${schema.tournaments.tournamentConfig}->>'isLite')::boolean, false) = true OR ${schema.tournaments.tournamentConfig}->>'mode' = 'LITE'`,
           hasBracket: sql<boolean>`EXISTS (
             SELECT 1
             FROM ${schema.tournamentStages}
