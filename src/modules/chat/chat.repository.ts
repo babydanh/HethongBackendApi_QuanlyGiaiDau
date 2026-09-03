@@ -121,7 +121,7 @@ export class ChatRepository {
         name: string | null;
         type: string;
         createdAt: Date;
-        participants: { id: string; fullName: string | null; avatarUrl: string | null }[];
+        participants: { id: string; fullName: string | null; avatarUrl: string | null; lastReadAt: Date | null }[];
         lastMessage?: {
           id: string;
           senderId: string | null;
@@ -139,14 +139,25 @@ export class ChatRepository {
       for (const room of roomsWithMembership) {
         try {
           // Get participants
-          let participants: { id: string; fullName: string | null; avatarUrl: string | null }[] = [];
+          let participants: { id: string; fullName: string | null; avatarUrl: string | null; lastReadAt: Date | null }[] = [];
           try {
             if (room.type === 'CLUB' && room.communityId) {
               const members = await this.getClubRoomMembers(room.communityId);
+              const readStates = await this.db
+                .select({
+                  userId: schema.chatReadStates.userId,
+                  lastReadAt: schema.chatReadStates.lastReadAt,
+                })
+                .from(schema.chatReadStates)
+                .where(eq(schema.chatReadStates.roomId, room.id));
+              const lastReadAtByUserId = new Map(
+                readStates.map((state) => [state.userId, state.lastReadAt]),
+              );
               participants = members.map((m) => ({
                 id: m.id,
                 fullName: m.fullName,
                 avatarUrl: m.avatarUrl,
+                lastReadAt: lastReadAtByUserId.get(m.id) ?? null,
               }));
             } else {
               participants = await this.db
@@ -154,10 +165,18 @@ export class ChatRepository {
                   id: schema.users.id,
                   fullName: schema.profiles.fullName,
                   avatarUrl: schema.profiles.avatarUrl,
+                  lastReadAt: schema.chatReadStates.lastReadAt,
                 })
                 .from(schema.chatRoomMembers)
                 .innerJoin(schema.users, eq(schema.chatRoomMembers.userId, schema.users.id))
                 .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+                .leftJoin(
+                  schema.chatReadStates,
+                  and(
+                    eq(schema.chatReadStates.roomId, room.id),
+                    eq(schema.chatReadStates.userId, schema.users.id),
+                  ),
+                )
                 .where(eq(schema.chatRoomMembers.roomId, room.id));
             }
           } catch (pErr) {
