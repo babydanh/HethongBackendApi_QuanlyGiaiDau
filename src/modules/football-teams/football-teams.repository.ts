@@ -168,8 +168,23 @@ export class FootballTeamsRepository {
   async findById(teamId: string) {
     const [team] = await this.db.select().from(schema.footballTeams).where(eq(schema.footballTeams.id, teamId)).limit(1);
     if (!team) throw new NotFoundException('Không tìm thấy đội bóng.');
-    const members = await this.db.select().from(schema.footballTeamMembers)
-      .where(eq(schema.footballTeamMembers.teamId, teamId)).orderBy(desc(schema.footballTeamMembers.createdAt));
+    const memberRows = await this.db
+      .select({
+        member: schema.footballTeamMembers,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.footballTeamMembers)
+      .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.footballTeamMembers.userId))
+      .where(eq(schema.footballTeamMembers.teamId, teamId))
+      .orderBy(desc(schema.footballTeamMembers.createdAt));
+    const members = memberRows.map(({ member, fullName, avatarUrl }) => ({
+      ...member,
+      profile: {
+        fullName: fullName || null,
+        avatarUrl: avatarUrl || null,
+      },
+    }));
     return { ...team, members };
   }
 
