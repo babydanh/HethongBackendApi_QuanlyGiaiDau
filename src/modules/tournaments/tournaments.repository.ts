@@ -1494,8 +1494,6 @@ export class TournamentsRepository {
             ),
           );
 
-        if (divisions.length === 0) return null;
-
         const requestedDivisionId =
           data.tournamentDivisionId ?? data.divisionId;
         const requestedDivision = requestedDivisionId
@@ -1504,10 +1502,13 @@ export class TournamentsRepository {
         const requestedGenderRestriction = (
           requestedDivision?.genderRestriction || ''
         ).toUpperCase();
+
+        const isLiteTournament = Boolean(tConfig.isLite || tConfig.mode === 'LITE');
         const isExplicitOpenDivision = Boolean(
-          requestedDivisionId &&
-          requestedDivision &&
-          !['MALE', 'FEMALE', 'MIXED'].includes(requestedGenderRestriction),
+          isLiteTournament ||
+          (requestedDivisionId &&
+            requestedDivision &&
+            !['MALE', 'FEMALE', 'MIXED'].includes(requestedGenderRestriction)),
         );
         const requiresLeaderGender =
           !isExplicitOpenDivision &&
@@ -1534,7 +1535,8 @@ export class TournamentsRepository {
         } else if (
           !partnerUserId &&
           targetMatchType === 'MIXED_DOUBLES' &&
-          !requestedDivisionId
+          !requestedDivisionId &&
+          !isLiteTournament
         ) {
           throw new BadRequestException(
             'Hình thức Đôi Nam Nữ yêu cầu nhập đồng đội để xác định giới tính cặp.',
@@ -1575,13 +1577,20 @@ export class TournamentsRepository {
 
         const selectedDivision = requestedDivisionId
           ? divisions.find((division) => division.id === requestedDivisionId)
-          : divisions.find(
-              (division) =>
-                division.matchType === targetMatchType &&
-                (division.genderRestriction === targetGenderRestriction ||
+          : isLiteTournament
+            ? (divisions.find(
+                (division) =>
+                  division.matchType === targetMatchType ||
                   !division.genderRestriction ||
-                  division.genderRestriction.toUpperCase() === 'OPEN'),
-            );
+                  division.genderRestriction.toUpperCase() === 'OPEN',
+              ) || divisions[0])
+            : divisions.find(
+                (division) =>
+                  division.matchType === targetMatchType &&
+                  (division.genderRestriction === targetGenderRestriction ||
+                    !division.genderRestriction ||
+                    division.genderRestriction.toUpperCase() === 'OPEN'),
+              );
 
         if (!selectedDivision) {
           const fallbackLabel =

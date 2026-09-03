@@ -710,16 +710,28 @@ export class TournamentsService {
       },
     );
     result.data = result.data
-      .filter(
-        (t) =>
-          ![
+      .filter((t) => {
+        if (
+          [
             'DRAFT',
             'PENDING_APPROVAL',
             'SUSPENDED',
             'CANCELLED',
             'PENDING_DELETE',
-          ].includes(t.status),
-      )
+          ].includes(t.status)
+        ) {
+          return false;
+        }
+        // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
+        const cfg = (typeof t.tournamentConfig === 'string'
+          ? (() => { try { return JSON.parse(t.tournamentConfig); } catch { return {}; } })()
+          : t.tournamentConfig) as Record<string, unknown> | null | undefined;
+        const isClubLite = Boolean(t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'));
+        if (isClubLite) {
+          return false;
+        }
+        return true;
+      })
       .map((t) => this.mapTournamentFormat(t));
 
     try {
@@ -747,16 +759,28 @@ export class TournamentsService {
       },
     );
     result.data = result.data
-      .filter(
-        (t) =>
-          ![
+      .filter((t) => {
+        if (
+          [
             'DRAFT',
             'PENDING_APPROVAL',
             'SUSPENDED',
             'CANCELLED',
             'PENDING_DELETE',
-          ].includes(t.status),
-      )
+          ].includes(t.status)
+        ) {
+          return false;
+        }
+        // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
+        const cfg = (typeof t.tournamentConfig === 'string'
+          ? (() => { try { return JSON.parse(t.tournamentConfig); } catch { return {}; } })()
+          : t.tournamentConfig) as Record<string, unknown> | null | undefined;
+        const isClubLite = Boolean(t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'));
+        if (isClubLite) {
+          return false;
+        }
+        return true;
+      })
       .map((t) => this.mapPublicTournament(this.mapTournamentFormat(t)));
     return result;
   }
@@ -820,7 +844,9 @@ export class TournamentsService {
       throw new ForbiddenException('Giải đấu đã bị cấm hoặc hủy vĩnh viễn');
     }
 
-    const tourneyConfig = tournament.tournamentConfig as Record<string, unknown> | null | undefined;
+    const tourneyConfig = (typeof tournament.tournamentConfig === 'string'
+      ? (() => { try { return JSON.parse(tournament.tournamentConfig); } catch { return {}; } })()
+      : tournament.tournamentConfig) as Record<string, unknown> | null | undefined;
     const isLite = Boolean(tourneyConfig?.isLite || tourneyConfig?.mode === 'LITE');
 
     if (
@@ -872,8 +898,13 @@ export class TournamentsService {
         !isCommunityMember &&
         !isPublicCommunity
       ) {
-        throw new ForbiddenException('Giải đấu nội bộ yêu cầu mã mời hoặc tham gia CLB');
+        throw new ForbiddenException('Giải đấu nội bộ chỉ dành cho thành viên của câu lạc bộ');
       }
+    }
+
+    // Do NOT leak internal inviteCode to non-owner, non-admin viewers
+    if (!isOwner && !isAdmin) {
+      tournament.inviteCode = null;
     }
 
     return this.mapTournamentFormat(tournament);
@@ -3339,9 +3370,21 @@ export class TournamentsService {
     }
   }
 
-  private async validateProfileComplete(userId: string): Promise<void> {
+  private async validateProfileComplete(
+    userId: string,
+    options?: { isLite?: boolean },
+  ): Promise<void> {
     const profile = await this.tournamentsRepository.findUserProfile(userId);
-    if (!profile?.fullName || !profile.phoneNumber || !profile.gender) {
+    if (!profile?.fullName) {
+      throw new BadRequestException(
+        'Vui lòng cập nhật họ tên trước khi tham gia giải đấu.',
+      );
+    }
+    // Đối với giải Siêu Lite nội bộ CLB: phong trào nhanh gọn, KHÔNG bắt buộc số điện thoại hay giới tính!
+    if (options?.isLite) {
+      return;
+    }
+    if (!profile.phoneNumber || !profile.gender) {
       throw new BadRequestException(
         'Vui lòng cập nhật đầy đủ họ tên, số điện thoại và giới tính trước khi đăng ký giải đấu.',
       );
@@ -3571,27 +3614,34 @@ export class TournamentsService {
     registerTournamentDto: RegisterTournamentDto,
     inviteCode?: string,
   ) {
-    await this.validateProfileComplete(userId);
-
     const tournament = await this.tournamentsRepository.findById(id);
     if (!tournament) {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
 
-    this.assertRegistrationAccessible(tournament, { inviteCode });
+    const tConfig = (typeof tournament.tournamentConfig === 'string'
+      ? (() => { try { return JSON.parse(tournament.tournamentConfig); } catch { return {}; } })()
+      : tournament.tournamentConfig) as Record<string, unknown> | null | undefined;
+    const isLite = Boolean(tConfig?.isLite || tConfig?.mode === 'LITE');
 
-    // Nếu là giải nội bộ CLB, chỉ member mới đăng ký được
-    if (tournament.communityId && tournament.tournamentType === 'CLUB') {
+    // 1. Kiểm tra tư cách thành viên CLB TRƯỚC HẾT đối với giải nội bộ CLB
+    if (tournament.communityId && (tournament.tournamentType === 'CLUB' || isLite)) {
+      const isInviteMatch = Boolean(inviteCode && tournament.inviteCode === inviteCode);
       const member = await this.tournamentsRepository.findCommunityMember(
         tournament.communityId,
         userId,
       );
-      if (!member || member.status !== 'JOINED') {
+      if ((!member || member.status !== 'JOINED') && !isInviteMatch) {
         throw new ForbiddenException(
           'Giải đấu này chỉ dành cho thành viên của câu lạc bộ.',
         );
       }
     }
+
+    this.assertRegistrationAccessible(tournament, { inviteCode });
+
+    // 2. Chỉ kiểm tra hồ sơ cá nhân khi đã là thành viên CLB hợp lệ (giải Siêu Lite không bắt gender)
+    await this.validateProfileComplete(userId, { isLite });
 
     let userIds = [userId];
     let partnerUser: { id: string } | null = null;
