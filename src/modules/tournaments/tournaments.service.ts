@@ -4559,12 +4559,8 @@ export class TournamentsService {
       );
     }
 
-    // Tự động gán banner và logo mặc định nếu chưa có
-    const defaultBanner = 'https://qlgiaidau.vndcsport.vn/default-banner.png';
-    const defaultLogo = 'https://qlgiaidau.vndcsport.vn/default-logo.png';
+    // Khởi tạo updateData cho publish
     const updateData: Record<string, unknown> = {};
-    if (!existing.bannerUrl) updateData.bannerUrl = defaultBanner;
-    if (!existing.logoUrl) updateData.logoUrl = defaultLogo;
 
     if (!existing.startDate) {
       throw new BadRequestException(

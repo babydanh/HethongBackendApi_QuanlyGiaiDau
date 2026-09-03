@@ -447,7 +447,7 @@ export class MatchesRepository {
         const cursorDate = new Date(decodedCursor.updatedAt);
         // Postgres updated_at has microsecond precision while JS Date has millisecond precision.
         // We compare: updated_at < cursorDate OR (date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', cursorDate) AND id < cursorId)
-        cursorCondition = sql`(${schema.matches.updatedAt} < ${cursorDate} OR (date_trunc('milliseconds', ${schema.matches.updatedAt}) = date_trunc('milliseconds', ${cursorDate}) AND ${schema.matches.id} < ${decodedCursor.id}))`;
+        cursorCondition = sql`(${schema.matches.updatedAt} < ${cursorDate} OR (date_trunc('milliseconds', ${schema.matches.updatedAt}) = date_trunc('milliseconds', ${cursorDate}) AND ${schema.matches.id}::text < ${decodedCursor.id}::text))`;
       }
     }
 
