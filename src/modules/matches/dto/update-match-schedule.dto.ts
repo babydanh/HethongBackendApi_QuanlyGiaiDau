@@ -67,5 +67,7 @@ export class UpdateMatchScheduleDto {
     deuceEnabled?: boolean;
     tiebreakAt?: number;
     maxPoints?: number;
+    durationMinutes?: number;
+    estimatedMinutes?: number;
   };
 }

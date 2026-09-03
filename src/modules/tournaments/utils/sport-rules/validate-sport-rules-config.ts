@@ -71,6 +71,12 @@ const COMMON_ROOT_KEYS = new Set([
   'draw_points',
   'lossPoints',
   'loss_points',
+  'durationMinutes',
+  'duration_minutes',
+  'estimatedMinutes',
+  'estimated_minutes',
+  'matchDuration',
+  'match_duration',
 ]);
 
 const ROUND_STRUCTURE_KEYS = new Set([

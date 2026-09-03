@@ -3630,7 +3630,14 @@ export class TournamentsRepository {
       .select({
         id: schema.communities.id,
         name: schema.communities.name,
+<<<<<<< HEAD
         joinMode: schema.communities.joinMode,
+=======
+        visibility: schema.communities.visibility,
+        joinMode: schema.communities.joinMode,
+        logoUrl: schema.communities.logoUrl,
+        bannerUrl: schema.communities.bannerUrl,
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       })
       .from(schema.communities)
       .where(eq(schema.communities.id, communityId))
@@ -3650,6 +3657,37 @@ export class TournamentsRepository {
       )
       .limit(1);
     return records[0];
+  }
+
+  async addCommunityMember(
+    communityId: string,
+    userId: string,
+    role: string = 'MEMBER',
+    status: string = 'JOINED',
+  ) {
+    const existing = await this.findCommunityMember(communityId, userId);
+    if (existing) {
+      if (existing.status !== status && status === 'JOINED') {
+        const [updated] = await this.db
+          .update(schema.communityMembers)
+          .set({ status: 'JOINED', joinedAt: new Date() })
+          .where(eq(schema.communityMembers.id, existing.id))
+          .returning();
+        return updated;
+      }
+      return existing;
+    }
+    const [created] = await this.db
+      .insert(schema.communityMembers)
+      .values({
+        communityId,
+        userId,
+        role,
+        status,
+        joinedAt: status === 'JOINED' ? new Date() : undefined,
+      })
+      .returning();
+    return created;
   }
 
   async findUserProfile(userId: string) {
@@ -4181,6 +4219,7 @@ export class TournamentsRepository {
         ]),
       );
 
+<<<<<<< HEAD
       matchesList = dbMatches.map((m) => ({
         ...m,
         participant1: m.participant1Id
@@ -4190,6 +4229,25 @@ export class TournamentsRepository {
           ? participantMap.get(m.participant2Id)
           : null,
       }));
+=======
+      const stageDivisionMap = new Map(stages.map((s) => [s.id, s.tournamentDivisionId]));
+      const groupStageMap = new Map(groups.map((g) => [g.id, g.stageId]));
+
+      matchesList = dbMatches.map((m) => {
+        const stageId = m.stageId || groupStageMap.get(m.groupId || '') || null;
+        const divisionIdVal = stageId ? stageDivisionMap.get(stageId) || null : null;
+        return {
+          ...m,
+          divisionId: divisionIdVal ?? null,
+          participant1: m.participant1Id
+            ? participantMap.get(m.participant1Id)
+            : null,
+          participant2: m.participant2Id
+            ? participantMap.get(m.participant2Id)
+            : null,
+        };
+      });
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
     }
 
     const groupsMap = new Map<string, BracketGroup[]>();
@@ -4208,6 +4266,7 @@ export class TournamentsRepository {
     return {
       stages: stages.map((s) => ({
         id: s.id,
+        tournamentDivisionId: s.tournamentDivisionId ?? null,
         name: s.name,
         type: s.type,
         order: s.order,
@@ -8462,6 +8521,7 @@ export class TournamentsRepository {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
+<<<<<<< HEAD
     // Check active stages/matches via tx (fixes TOCTOU)
     const [stageCount] = await tx
       .select({ count: count() })
@@ -8478,17 +8538,80 @@ export class TournamentsRepository {
       );
     }
     const [matchCount] = await tx
+=======
+    // Only block pairing if a match has already started or finished
+    const [startedMatchCount] = await tx
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       .select({ count: count() })
       .from(schema.matches)
       .where(
         and(
           eq(schema.matches.tournamentId, tournamentId),
+<<<<<<< HEAD
           isNull(schema.matches.deletedAt),
         ),
       );
     if (matchCount.count > 0) {
       throw new BadRequestException(
         'Không thể ghép cặp sau khi đã sinh trận đấu.',
+=======
+          ne(schema.matches.status, 'SCHEDULED'),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
+    if (startedMatchCount.count > 0) {
+      throw new BadRequestException(
+        'Không thể thay đổi ghép cặp sau khi giải đấu đã bắt đầu thi đấu.',
+      );
+    }
+
+    return tournament;
+  }
+
+  /**
+   * Check inside the transaction that the tournament is LITE DOUBLES before unpairing.
+   * Does NOT reject if bracket/matches already exist; the existing bracket retains
+   * the participant slot until regenerated.
+   */
+  private async assertLiteUnpairableInTx(
+    tx: Transaction,
+    tournamentId: string,
+  ): Promise<typeof schema.tournaments.$inferSelect> {
+    const [tournament] = await tx
+      .select()
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1)
+      .for('update');
+
+    if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
+
+    const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
+    if (tCfg.isLite !== true) {
+      throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
+    }
+    if (
+      tournament.matchType !== 'DOUBLES' &&
+      tournament.matchType !== 'MIXED_DOUBLES'
+    ) {
+      throw new BadRequestException('Tách cặp chỉ hỗ trợ giải đấu đánh đôi.');
+    }
+
+    // Only block unpairing if a match has already started or finished
+    const [startedMatchCount] = await tx
+      .select({ count: count() })
+      .from(schema.matches)
+      .where(
+        and(
+          eq(schema.matches.tournamentId, tournamentId),
+          ne(schema.matches.status, 'SCHEDULED'),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
+    if (startedMatchCount.count > 0) {
+      throw new BadRequestException(
+        'Không thể tách cặp sau khi giải đấu đã bắt đầu thi đấu.',
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       );
     }
 
@@ -8524,7 +8647,11 @@ export class TournamentsRepository {
     userId: string,
   ) {
     return await this.db.transaction(async (tx) => {
+<<<<<<< HEAD
       await this.assertLitePairableInTx(tx, tournamentId);
+=======
+      await this.assertLiteUnpairableInTx(tx, tournamentId);
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       return this.unpairParticipantInTx(
         tx,
         tournamentId,

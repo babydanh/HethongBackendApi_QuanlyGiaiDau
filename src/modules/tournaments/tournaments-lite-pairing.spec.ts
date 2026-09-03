@@ -593,6 +593,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+<<<<<<< HEAD
     it('rejects when bracket exists (UX precheck)', async () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
       mockRepo.findCommunityMember!.mockResolvedValue(null);
@@ -603,6 +604,36 @@ describe('TournamentsService — Lite pairing guards', () => {
           participant2Id: 'p2',
         }),
       ).rejects.toThrow(BadRequestException);
+=======
+    it('allows pairing even when bracket exists', async () => {
+      mockRepo.findById!.mockResolvedValue(liteTournament);
+      mockRepo.findCommunityMember!.mockResolvedValue(null);
+      mockRepo.findLeaderByParticipantId!.mockResolvedValue({
+        userId: 'leader-1',
+        role: 'MAIN',
+        id: 'leader-1',
+        joinedAt: new Date(),
+      });
+      mockRepo.findUserBasicById!.mockResolvedValue({
+        id: 'leader-1',
+        fullName: 'Player One',
+        email: 'p1@test.com',
+      });
+      mockRepo.lockTournamentAndPair!.mockResolvedValue({
+        id: 'p1',
+        teamStatus: 'COMPLETE',
+      });
+      const result = await service.pairLiteParticipants(
+        'tournament-1',
+        'user-1',
+        ['ADMIN'],
+        {
+          participant1Id: 'p1',
+          participant2Id: 'p2',
+        },
+      );
+      expect(result).toEqual({ id: 'p1', teamStatus: 'COMPLETE' });
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
     });
 
     it('calls lockTournamentAndPair for valid doubles', async () => {
@@ -767,6 +798,7 @@ describe('TournamentsService — Lite pairing guards', () => {
   });
 
   describe('unpairLiteParticipant', () => {
+<<<<<<< HEAD
     it('rejects when bracket exists (UX precheck)', async () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
       mockRepo.findCommunityMember!.mockResolvedValue(null);
@@ -779,6 +811,28 @@ describe('TournamentsService — Lite pairing guards', () => {
           ['ADMIN'],
         ),
       ).rejects.toThrow(BadRequestException);
+=======
+    it('allows unpairing even when bracket exists (bracket retains slot until regenerated)', async () => {
+      mockRepo.findById!.mockResolvedValue(liteTournament);
+      mockRepo.findCommunityMember!.mockResolvedValue(null);
+      mockRepo.hasNonDeletedStagesOrMatches!.mockResolvedValue(true);
+      mockRepo.lockTournamentAndUnpair!.mockResolvedValue({
+        leader: { id: 'original', teamStatus: 'PENDING_PARTNER' },
+        partner: { id: 'new', teamStatus: 'PENDING_PARTNER' },
+      });
+      const result = await (service as any).unpairLiteParticipant(
+        'tournament-1',
+        'paired-p1',
+        'user-1',
+        ['ADMIN'],
+      );
+      expect(mockRepo.lockTournamentAndUnpair).toHaveBeenCalledWith(
+        'tournament-1',
+        'paired-p1',
+        'user-1',
+      );
+      expect(result.leader.teamStatus).toBe('PENDING_PARTNER');
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
     });
 
     it('calls lockTournamentAndUnpair for valid request', async () => {
@@ -835,15 +889,28 @@ describe('Structural guards — repository transaction contracts', () => {
     expect(hasNormalCount).toBe(true);
   });
 
+<<<<<<< HEAD
   it('assertLitePairableInTx called by lockTournamentAndPair/Unpair/generateLitePairsTx', () => {
+=======
+  it('assertLitePairableInTx and assertLiteUnpairableInTx contracts in repository', () => {
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
     const fs = require('fs');
     const src = fs.readFileSync(
       require('path').join(__dirname, 'tournaments.repository.ts'),
       'utf-8',
     );
+<<<<<<< HEAD
     const calls = (src.match(/assertLitePairableInTx/g) || []).length;
     // 1 def + 3 callers (lockTournamentAndPair, lockTournamentAndUnpair, generateLitePairsTx)
     expect(calls).toBe(4);
+=======
+    const pairCalls = (src.match(/assertLitePairableInTx/g) || []).length;
+    // 1 def + 2 callers (lockTournamentAndPair, generateLitePairsTx)
+    expect(pairCalls).toBe(3);
+    const unpairCalls = (src.match(/assertLiteUnpairableInTx/g) || []).length;
+    // 1 def + 1 caller (lockTournamentAndUnpair)
+    expect(unpairCalls).toBe(2);
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
   });
 
   it('unpair uses registeredBy for deterministic leader', () => {

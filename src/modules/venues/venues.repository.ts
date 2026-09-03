@@ -1,4 +1,4 @@
-﻿import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -165,6 +165,22 @@ export class VenuesRepository {
     return court;
   }
 
+  async addCourtsBatch(venueId: string, courtCount: number, namePrefix = 'Sân') {
+    const existingCourts = await this.findCourtsByVenue(venueId);
+    const existingCount = existingCourts.length;
+    const valuesToInsert = Array.from({ length: courtCount }, (_, i) => ({
+      venueId,
+      courtName: `${namePrefix} ${existingCount + i + 1}`,
+      status: 'AVAILABLE',
+    }));
+
+    if (valuesToInsert.length === 0) return [];
+    return this.db
+      .insert(schema.venueCourts)
+      .values(valuesToInsert)
+      .returning();
+  }
+
   async removeCourt(courtId: string) {
     const [deleted] = await this.db
       .delete(schema.venueCourts)
@@ -173,5 +189,3 @@ export class VenuesRepository {
     return deleted;
   }
 }
-
-

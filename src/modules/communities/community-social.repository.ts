@@ -495,6 +495,7 @@ export class CommunitySocialRepository {
       })
       .returning();
 
+<<<<<<< HEAD
     if (post && isLite) {
       // Tự động tạo Poll tương tác thăm dò cho giải Siêu Lite
       try {
@@ -514,6 +515,8 @@ export class CommunitySocialRepository {
       }
     }
 
+=======
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
     return post;
   }
 

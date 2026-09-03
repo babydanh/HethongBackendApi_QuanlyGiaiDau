@@ -196,11 +196,13 @@ export class UsersRepository {
       )!;
     }
 
+    const effectiveOrder = order === 'asc' ? 'asc' : 'desc';
     const sortConfig =
-      order === 'desc'
+      effectiveOrder === 'desc'
         ? desc(schema.users.createdAt)
         : asc(schema.users.createdAt);
 
+<<<<<<< HEAD
     let cursorValue: { createdAt: string; id: string } | null = null;
     if (cursor) {
       try {
@@ -215,6 +217,30 @@ export class UsersRepository {
       const cursorPredicate = order === 'asc'
         ? sql`(${schema.users.createdAt} > ${cursorDate} OR (${schema.users.createdAt} = ${cursorDate} AND ${schema.users.id} > ${cursorValue.id}))`
         : sql`(${schema.users.createdAt} < ${cursorDate} OR (${schema.users.createdAt} = ${cursorDate} AND ${schema.users.id} < ${cursorValue.id}))`;
+=======
+    const decodedCursor = cursor
+      ? CursorPaginationHelper.decodeCursor<{ createdAt: string; id: string }>(cursor)
+      : null;
+
+    let userWhere = whereClause;
+    if (decodedCursor) {
+      const cursorDate = new Date(decodedCursor.createdAt);
+      const cursorPredicate = effectiveOrder === 'asc'
+        ? or(
+            gt(schema.users.createdAt, cursorDate),
+            and(
+              eq(schema.users.createdAt, cursorDate),
+              gt(schema.users.id, decodedCursor.id),
+            ),
+          )
+        : or(
+            lt(schema.users.createdAt, cursorDate),
+            and(
+              eq(schema.users.createdAt, cursorDate),
+              lt(schema.users.id, decodedCursor.id),
+            ),
+          );
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       userWhere = and(whereClause, cursorPredicate)!;
     }
 
@@ -231,7 +257,11 @@ export class UsersRepository {
       .from(schema.users)
       .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
       .where(userWhere)
+<<<<<<< HEAD
       .orderBy(sortConfig, order === 'desc' ? desc(schema.users.id) : asc(schema.users.id))
+=======
+      .orderBy(sortConfig, effectiveOrder === 'desc' ? desc(schema.users.id) : asc(schema.users.id))
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       .limit(limit + 1)
       .$dynamic();
     const userRows = await userQuery;
@@ -322,7 +352,11 @@ export class UsersRepository {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+<<<<<<< HEAD
         nextCursor: hasMore && lastUser ? Buffer.from(JSON.stringify({ createdAt: lastUser.createdAt.toISOString(), id: lastUser.id })).toString('base64url') : null,
+=======
+        nextCursor: hasMore && lastUser ? CursorPaginationHelper.encodeCursor({ id: lastUser.id, createdAt: lastUser.createdAt.toISOString() }) : null,
+>>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
         hasMore,
       },
     };

@@ -45,6 +45,12 @@ export class VenuesService {
     return this.venuesRepository.addCourt(venueId, createVenueCourtDto);
   }
 
+  async addCourtsBatch(venueId: string, courtCount: number, namePrefix = 'Sân') {
+    const existing = await this.venuesRepository.findById(venueId);
+    if (!existing) throw new NotFoundException('Venue not found');
+    return this.venuesRepository.addCourtsBatch(venueId, courtCount, namePrefix);
+  }
+
   async removeCourt(venueId: string, courtId: string) {
     const existing = await this.venuesRepository.findById(venueId);
     if (!existing) throw new NotFoundException('Venue not found');
