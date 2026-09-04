@@ -21,6 +21,7 @@ import {
   lte,
   ne,
   lt,
+  gt,
   desc,
 } from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
@@ -445,7 +446,13 @@ export class MatchesRepository {
       }>(cursor);
       if (decodedCursor && decodedCursor.updatedAt && decodedCursor.id) {
         const cursorDate = new Date(decodedCursor.updatedAt);
-        cursorCondition = sql`(${schema.matches.updatedAt} < ${cursorDate} OR (${schema.matches.updatedAt} = ${cursorDate} AND ${schema.matches.id} < ${decodedCursor.id}::uuid))`;
+        cursorCondition = or(
+          lt(schema.matches.updatedAt, cursorDate),
+          and(
+            eq(schema.matches.updatedAt, cursorDate),
+            lt(schema.matches.id, decodedCursor.id),
+          ),
+        ) as SQL;
       }
     }
 
