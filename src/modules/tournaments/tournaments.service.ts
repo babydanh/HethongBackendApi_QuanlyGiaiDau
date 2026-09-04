@@ -1746,8 +1746,13 @@ export class TournamentsService {
       ? dto.divisions
       : [
           {
-            name:
-              sport === 'football'
+            name: isSuperLite
+              ? sport === 'football'
+                ? `Bóng đá ${footballTeamSize || 7} người`
+                : dto.format === 'singles'
+                  ? 'Đánh Đơn'
+                  : 'Đánh Đôi'
+              : sport === 'football'
                 ? dto.genderRestriction === 'FEMALE'
                   ? 'Đội nữ'
                   : dto.genderRestriction === 'MALE'
