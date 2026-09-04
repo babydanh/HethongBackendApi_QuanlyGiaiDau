@@ -673,7 +673,6 @@ export class TournamentsController {
   }
 
   @Post('lite')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({
     summary:
