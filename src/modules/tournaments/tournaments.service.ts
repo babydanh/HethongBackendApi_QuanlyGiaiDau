@@ -1629,11 +1629,6 @@ export class TournamentsService {
       }
     }
 
-    const calculatedDurationMinutes =
-      dto.durationMinutes ??
-      (dto.durationHours ? Math.round(dto.durationHours * 60) : undefined) ??
-      90; // Default to 90 minutes (1h30) if not specified
-
     let endDateTime: string | undefined = undefined;
     if (dto.endDate) {
       const hasTime = dto.endDate.includes('T');
@@ -1641,13 +1636,17 @@ export class TournamentsService {
       if (hasTime && hasTz) {
         const parsedEnd = new Date(dto.endDate);
         endDateTime = !Number.isNaN(parsedEnd.getTime()) ? parsedEnd.toISOString() : undefined;
-      } else if (startDateTime) {
-        // Fallback or compute from duration
-        endDateTime = new Date(
-          new Date(startDateTime).getTime() + calculatedDurationMinutes * 60 * 1000,
-        ).toISOString();
       }
-    } else if (startDateTime) {
+    }
+
+    const calculatedDurationMinutes =
+      dto.durationMinutes ??
+      (dto.durationHours ? Math.round(dto.durationHours * 60) : undefined) ??
+      (startDateTime && endDateTime && new Date(endDateTime).getTime() > new Date(startDateTime).getTime()
+        ? Math.round((new Date(endDateTime).getTime() - new Date(startDateTime).getTime()) / (60 * 1000))
+        : 90); // Default to 90 minutes (1h30) only if not specified or calculable
+
+    if (!endDateTime && startDateTime) {
       endDateTime = new Date(
         new Date(startDateTime).getTime() + calculatedDurationMinutes * 60 * 1000,
       ).toISOString();
