@@ -275,7 +275,30 @@ export class TournamentsRepository {
       conditions.push(eq(schema.tournaments.categoryId, categoryId));
     }
     if (status) {
-      conditions.push(eq(schema.tournaments.status, status));
+      const statuses = status
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (statuses.length === 1) {
+        if (statuses[0] === 'UPCOMING') {
+          conditions.push(
+            inArray(schema.tournaments.status, ['UPCOMING', 'REGISTRATION_CLOSED']),
+          );
+        } else {
+          conditions.push(eq(schema.tournaments.status, statuses[0]));
+        }
+      } else if (statuses.length > 1) {
+        const expandedStatuses = new Set<string>();
+        for (const s of statuses) {
+          if (s === 'UPCOMING') {
+            expandedStatuses.add('UPCOMING');
+            expandedStatuses.add('REGISTRATION_CLOSED');
+          } else {
+            expandedStatuses.add(s);
+          }
+        }
+        conditions.push(inArray(schema.tournaments.status, Array.from(expandedStatuses)));
+      }
     }
     if (communityId) {
       conditions.push(eq(schema.tournaments.communityId, communityId));
