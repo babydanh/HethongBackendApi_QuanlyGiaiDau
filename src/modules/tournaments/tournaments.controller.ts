@@ -1340,8 +1340,6 @@ export class TournamentsController {
   }
 
   @Post(':id/mock-participants')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Sinh danh sách VĐV giả lập để test' })
   async seedMockParticipants(
@@ -1401,8 +1399,6 @@ export class TournamentsController {
   }
 
   @Delete(':id/mock-participants')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa toàn bộ VĐV giả lập' })
   async clearMockParticipants(
@@ -1419,8 +1415,6 @@ export class TournamentsController {
   }
 
   @Delete(':id/participants/:participantId/mock')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa một participant giả lập' })
   async deleteMockParticipant(
