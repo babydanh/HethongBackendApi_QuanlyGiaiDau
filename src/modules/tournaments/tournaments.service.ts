@@ -1584,28 +1584,48 @@ export class TournamentsService {
     // 8. Tạo CreateTournamentDto từ dữ liệu Lite
     let startDateTime: string | undefined = undefined;
     if (dto.startDate) {
-      if (dto.startTime && dto.startTime.includes(':')) {
-        const hasTime = dto.startDate.includes('T');
-        if (hasTime) {
-          // If startDate is already a full ISO string (e.g. from app/web client),
-          // check if it has timezone or offset
-          const dateObj = new Date(dto.startDate);
-          if (!Number.isNaN(dateObj.getTime())) {
-            const [hh, mm] = dto.startTime.split(':');
-            dateObj.setHours(Number(hh), Number(mm), 0, 0);
-            startDateTime = dateObj.toISOString();
-          } else {
-            const datePart = dto.startDate.split('T')[0];
-            startDateTime = new Date(`${datePart}T${dto.startTime.padStart(5, '0')}:00`).toISOString();
-          }
-        } else {
-          startDateTime = new Date(
-            `${dto.startDate}T${dto.startTime.padStart(5, '0')}:00`,
-          ).toISOString();
-        }
-      } else {
+      const hasTime = dto.startDate.includes('T');
+      const hasTz = dto.startDate.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dto.startDate);
+
+      if (hasTime && hasTz && !dto.startTime) {
+        // Full ISO with timezone and no explicit time override
         const parsed = new Date(dto.startDate);
         startDateTime = !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
+      } else {
+        // Extract date part (YYYY-MM-DD)
+        const datePart = dto.startDate.includes('T')
+          ? dto.startDate.split('T')[0]
+          : dto.startDate;
+        
+        let hh = 8;
+        let mm = 0;
+        if (dto.startTime && dto.startTime.includes(':')) {
+          const parts = dto.startTime.split(':');
+          hh = Number(parts[0]) || 0;
+          mm = Number(parts[1]) || 0;
+        } else if (hasTime) {
+          // Parse time part from ISO string "YYYY-MM-DDTHH:mm..."
+          const timePart = dto.startDate.split('T')[1];
+          const timeMatch = timePart.match(/^(\d{2}):(\d{2})/);
+          if (timeMatch) {
+            hh = Number(timeMatch[1]);
+            mm = Number(timeMatch[2]);
+          }
+        }
+
+        const dateParts = datePart.split('-');
+        if (dateParts.length === 3) {
+          const yyyy = Number(dateParts[0]);
+          const month = Number(dateParts[1]);
+          const day = Number(dateParts[2]);
+          // Client is in Vietnam timezone (UTC+7).
+          // UTC hour = hh - 7
+          const utcTimestamp = Date.UTC(yyyy, month - 1, day, hh - 7, mm, 0, 0);
+          startDateTime = new Date(utcTimestamp).toISOString();
+        } else {
+          const parsed = new Date(dto.startDate);
+          startDateTime = !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
+        }
       }
     }
 
@@ -1616,8 +1636,17 @@ export class TournamentsService {
 
     let endDateTime: string | undefined = undefined;
     if (dto.endDate) {
-      const parsedEnd = new Date(dto.endDate);
-      endDateTime = !Number.isNaN(parsedEnd.getTime()) ? parsedEnd.toISOString() : undefined;
+      const hasTime = dto.endDate.includes('T');
+      const hasTz = dto.endDate.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dto.endDate);
+      if (hasTime && hasTz) {
+        const parsedEnd = new Date(dto.endDate);
+        endDateTime = !Number.isNaN(parsedEnd.getTime()) ? parsedEnd.toISOString() : undefined;
+      } else if (startDateTime) {
+        // Fallback or compute from duration
+        endDateTime = new Date(
+          new Date(startDateTime).getTime() + calculatedDurationMinutes * 60 * 1000,
+        ).toISOString();
+      }
     } else if (startDateTime) {
       endDateTime = new Date(
         new Date(startDateTime).getTime() + calculatedDurationMinutes * 60 * 1000,
