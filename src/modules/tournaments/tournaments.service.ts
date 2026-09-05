@@ -6024,6 +6024,79 @@ export class TournamentsService {
     return updatedTournament;
   }
 
+  async toggleRecurringTournament(
+    id: string,
+    enabled: boolean,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    let isAuthorized = await this.isManager(tournament, userId, systemRoles);
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(
+        tournament.communityId,
+        userId,
+      );
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+        isAuthorized = true;
+      }
+    }
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền quản lý lịch tự động của giải đấu này');
+    }
+
+    const config = (tournament.tournamentConfig || {}) as Record<string, any>;
+    const recurring = config.recurring || {};
+    if (!recurring || typeof recurring !== 'object') {
+      throw new BadRequestException('Giải đấu này không có thiết lập lịch tự động');
+    }
+
+    const updatedConfig = {
+      ...config,
+      recurring: {
+        ...recurring,
+        enabled: Boolean(enabled),
+      },
+    };
+
+    return await this.tournamentsRepository.update(id, userId, {
+      tournamentConfig: updatedConfig,
+    });
+  }
+
+  async deleteRecurringTournament(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    let isAuthorized = await this.isManager(tournament, userId, systemRoles);
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(
+        tournament.communityId,
+        userId,
+      );
+      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+        isAuthorized = true;
+      }
+    }
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền quản lý lịch tự động của giải đấu này');
+    }
+
+    const config = (tournament.tournamentConfig || {}) as Record<string, any>;
+    const updatedConfig = { ...config };
+    delete updatedConfig.recurring;
+
+    return await this.tournamentsRepository.update(id, userId, {
+      tournamentConfig: updatedConfig,
+    });
+  }
+
   async getFeesConfig() {
     return this.tournamentsRepository.getFeesConfig();
   }

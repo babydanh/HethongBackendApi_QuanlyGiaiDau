@@ -1631,6 +1631,40 @@ export class TournamentsController {
     );
   }
 
+  @Patch(':id/recurring/toggle')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Bật/Tắt (Tạm dừng hoặc Kích hoạt lại) lịch tự động tạo giải định kỳ',
+  })
+  async toggleRecurringTournament(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('enabled') enabled: boolean,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.toggleRecurringTournament(
+      id,
+      enabled,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Delete(':id/recurring')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Xóa hoàn toàn lịch tự động tạo giải định kỳ (tắt recurring khỏi giải)',
+  })
+  async deleteRecurringTournament(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.deleteRecurringTournament(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
   @Post(':id/playoff')
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
