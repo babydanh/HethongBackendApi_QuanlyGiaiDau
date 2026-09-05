@@ -338,6 +338,26 @@ export class CreateLiteTournamentDto {
   endDate?: string;
 
   @ApiPropertyOptional({
+    example: 90,
+    description: 'Thời lượng thi đấu dự kiến (phút)',
+  })
+  @IsNumber()
+  @IsOptional()
+  @Min(15)
+  @Max(14400)
+  durationMinutes?: number;
+
+  @ApiPropertyOptional({
+    example: 1.5,
+    description: 'Thời lượng thi đấu dự kiến (giờ)',
+  })
+  @IsNumber()
+  @IsOptional()
+  @Min(0.25)
+  @Max(240)
+  durationHours?: number;
+
+  @ApiPropertyOptional({
     example: false,
     description: 'Giải đấu xếp hạng ELO (true) hay phong trào (false)',
   })

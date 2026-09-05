@@ -1585,20 +1585,43 @@ export class TournamentsService {
     let startDateTime: string | undefined = undefined;
     if (dto.startDate) {
       if (dto.startTime && dto.startTime.includes(':')) {
-        const datePart = dto.startDate.includes('T')
-          ? dto.startDate.split('T')[0]
-          : dto.startDate;
-        startDateTime = new Date(
-          `${datePart}T${dto.startTime.padStart(5, '0')}:00`,
-        ).toISOString();
+        const hasTime = dto.startDate.includes('T');
+        if (hasTime) {
+          // If startDate is already a full ISO string (e.g. from app/web client),
+          // check if it has timezone or offset
+          const dateObj = new Date(dto.startDate);
+          if (!Number.isNaN(dateObj.getTime())) {
+            const [hh, mm] = dto.startTime.split(':');
+            dateObj.setHours(Number(hh), Number(mm), 0, 0);
+            startDateTime = dateObj.toISOString();
+          } else {
+            const datePart = dto.startDate.split('T')[0];
+            startDateTime = new Date(`${datePart}T${dto.startTime.padStart(5, '0')}:00`).toISOString();
+          }
+        } else {
+          startDateTime = new Date(
+            `${dto.startDate}T${dto.startTime.padStart(5, '0')}:00`,
+          ).toISOString();
+        }
       } else {
-        startDateTime = new Date(dto.startDate).toISOString();
+        const parsed = new Date(dto.startDate);
+        startDateTime = !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
       }
     }
 
+    const calculatedDurationMinutes =
+      dto.durationMinutes ??
+      (dto.durationHours ? Math.round(dto.durationHours * 60) : undefined) ??
+      90; // Default to 90 minutes (1h30) if not specified
+
     let endDateTime: string | undefined = undefined;
     if (dto.endDate) {
-      endDateTime = new Date(dto.endDate).toISOString();
+      const parsedEnd = new Date(dto.endDate);
+      endDateTime = !Number.isNaN(parsedEnd.getTime()) ? parsedEnd.toISOString() : undefined;
+    } else if (startDateTime) {
+      endDateTime = new Date(
+        new Date(startDateTime).getTime() + calculatedDurationMinutes * 60 * 1000,
+      ).toISOString();
     }
 
     const registrationStartDate = dto.registrationStartDate
@@ -1662,6 +1685,8 @@ export class TournamentsService {
       .filter((part): part is string => Boolean(part));
     const tournamentConfigWithLocation = {
       ...tournamentConfig,
+      durationHours: Number((calculatedDurationMinutes / 60).toFixed(1)),
+      durationMinutes: calculatedDurationMinutes,
       schedule: {
         registrationStartDate: registrationStartDate.toISOString(),
         ...(registrationEndDate
