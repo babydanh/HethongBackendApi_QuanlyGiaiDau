@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { MatchesService } from './matches.service';
 
 describe('MatchesService object-level football authority', () => {
@@ -12,6 +16,7 @@ describe('MatchesService object-level football authority', () => {
     updateScore: jest.fn(),
     updateRefereeId: jest.fn(),
     updateStatus: jest.fn(),
+    canAccessLiveMatch: jest.fn(),
   };
   const gateway = {
     broadcastScoreUpdate: jest.fn(),
@@ -20,6 +25,7 @@ describe('MatchesService object-level football authority', () => {
   const rankings = {};
   const notifications = {};
   const redis = {
+    hgetall: jest.fn(),
     hset: jest.fn(),
     getClient: jest.fn(() => ({ expire: jest.fn() })),
     delByPattern: jest.fn(),
@@ -73,6 +79,30 @@ describe('MatchesService object-level football authority', () => {
       ...baseMatch,
       status: 'ONGOING',
     });
+    repository.canAccessLiveMatch.mockResolvedValue(true);
+    redis.hgetall.mockResolvedValue({});
+  });
+
+  it('allows an authenticated club/Lite actor to read a match detail', async () => {
+    await expect(
+      service.findOne('match-1', {
+        sub: 'member-1',
+        roles: ['PLAYER'],
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: 'match-1' }));
+    expect(repository.canAccessLiveMatch).toHaveBeenCalledWith(
+      'match-1',
+      'member-1',
+      ['PLAYER'],
+    );
+  });
+
+  it('keeps inaccessible match detail hidden with a not-found response', async () => {
+    repository.canAccessLiveMatch.mockResolvedValue(false);
+
+    await expect(
+      service.findOne('match-1', { sub: 'outsider', roles: ['PLAYER'] }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('allows an accepted player-referee assigned to the match to enter score', async () => {

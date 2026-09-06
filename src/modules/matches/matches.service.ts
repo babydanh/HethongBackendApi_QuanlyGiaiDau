@@ -776,14 +776,19 @@ export class MatchesService {
     courtIds: string[],
     divisionId?: string,
   ) {
-    const tournament = await this.matchesRepository.findScheduleTournament(tournamentId);
+    const tournament =
+      await this.matchesRepository.findScheduleTournament(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
     const isManager =
       this.isAdmin(user) ||
       tournament.createdBy === user.sub ||
-      (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
-    if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
+      (await this.matchesRepository.isTournamentManager(
+        tournamentId,
+        user.sub,
+      ));
+    if (!isManager)
+      throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
 
     const query = new QueryMatchDto();
     query.tournamentId = tournamentId;
@@ -792,7 +797,9 @@ export class MatchesService {
     const result = await this.matchesRepository.findAll(query);
     const rows = Array.isArray(result?.data) ? result.data : [];
     const safeValue = (row: unknown, key: string): unknown =>
-      row && typeof row === 'object' ? (row as Record<string, unknown>)[key] : undefined;
+      row && typeof row === 'object'
+        ? (row as Record<string, unknown>)[key]
+        : undefined;
 
     return {
       tournament: {
@@ -823,38 +830,55 @@ export class MatchesService {
     user: JwtPayload,
     dto: CreateSchedulePlanDto,
   ) {
-    const tournament = await this.matchesRepository.findScheduleTournament(tournamentId);
+    const tournament =
+      await this.matchesRepository.findScheduleTournament(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
     const isManager =
       this.isAdmin(user) ||
       tournament.createdBy === user.sub ||
-      (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
-    if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
+      (await this.matchesRepository.isTournamentManager(
+        tournamentId,
+        user.sub,
+      ));
+    if (!isManager)
+      throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
 
     // Normalize optional DTO defaults explicitly; do not rely on class-transformer
     // preserving property initializers under whitelist/transform settings.
     const timingModel = dto.timingModel ?? 'MATCH_TOTAL';
-    const requestedDurationMinutes = Number.isInteger(dto.durationMinutes) ? dto.durationMinutes : 45;
-    const requestedBufferMinutes = Number.isInteger(dto.bufferMinutes) ? dto.bufferMinutes : 5;
+    const requestedDurationMinutes = Number.isInteger(dto.durationMinutes)
+      ? dto.durationMinutes
+      : 45;
+    const requestedBufferMinutes = Number.isInteger(dto.bufferMinutes)
+      ? dto.bufferMinutes
+      : 5;
     const unitDurationMinutes = Number.isInteger(dto.unitDurationMinutes)
       ? dto.unitDurationMinutes
       : requestedDurationMinutes;
     const unitCount = Number.isInteger(dto.unitCount) ? dto.unitCount : 1;
-    const betweenUnitBreakMinutes = Number.isInteger(dto.betweenUnitBreakMinutes)
+    const betweenUnitBreakMinutes = Number.isInteger(
+      dto.betweenUnitBreakMinutes,
+    )
       ? dto.betweenUnitBreakMinutes
       : 0;
     const changeoverMinutes = Number.isInteger(dto.changeoverMinutes)
       ? dto.changeoverMinutes
       : requestedBufferMinutes;
-    const durationMinutes = timingModel === 'MATCH_TOTAL'
-      ? requestedDurationMinutes
-      : unitDurationMinutes * unitCount + betweenUnitBreakMinutes * Math.max(0, unitCount - 1);
+    const durationMinutes =
+      timingModel === 'MATCH_TOTAL'
+        ? requestedDurationMinutes
+        : unitDurationMinutes * unitCount +
+          betweenUnitBreakMinutes * Math.max(0, unitCount - 1);
     const bufferMinutes = changeoverMinutes;
-    const gridIncrementMinutes = [5, 10, 15, 30, 60].includes(dto.gridIncrementMinutes ?? 30)
-      ? (dto.gridIncrementMinutes ?? 30) as 5 | 10 | 15 | 30 | 60
+    const gridIncrementMinutes = [5, 10, 15, 30, 60].includes(
+      dto.gridIncrementMinutes ?? 30,
+    )
+      ? ((dto.gridIncrementMinutes ?? 30) as 5 | 10 | 15 | 30 | 60)
       : 30;
-    const minimumStartIntervalMinutes = Number.isInteger(dto.minimumStartIntervalMinutes)
+    const minimumStartIntervalMinutes = Number.isInteger(
+      dto.minimumStartIntervalMinutes,
+    )
       ? Math.min(240, Math.max(5, dto.minimumStartIntervalMinutes))
       : 30;
 
@@ -871,7 +895,9 @@ export class MatchesService {
       dto.divisionId,
     );
     if (courts.length !== uniqueCourtIds.length) {
-      throw new UnprocessableEntityException('Một hoặc nhiều sân không thuộc phạm vi giải hoặc đã bị vô hiệu hóa');
+      throw new UnprocessableEntityException(
+        'Một hoặc nhiều sân không thuộc phạm vi giải hoặc đã bị vô hiệu hóa',
+      );
     }
 
     const durationMs = durationMinutes * 60_000;
@@ -889,10 +915,17 @@ export class MatchesService {
     const windowEnd = dto.operatingWindow
       ? new Date(dto.operatingWindow.end)
       : dateWithTournamentTime(tournament.endDate, '22:00');
-    if (!Number.isFinite(windowStart.getTime()) || !Number.isFinite(windowEnd.getTime()) || windowEnd <= windowStart) {
+    if (
+      !Number.isFinite(windowStart.getTime()) ||
+      !Number.isFinite(windowEnd.getTime()) ||
+      windowEnd <= windowStart
+    ) {
       throw new BadRequestException('Khung giờ xếp lịch không hợp lệ');
     }
-    if (windowStart.toISOString().slice(0, 10) !== requestedDay || windowEnd.toISOString().slice(0, 10) !== requestedDay) {
+    if (
+      windowStart.toISOString().slice(0, 10) !== requestedDay ||
+      windowEnd.toISOString().slice(0, 10) !== requestedDay
+    ) {
       throw new BadRequestException('Khung giờ phải nằm trong ngày đã chọn');
     }
 
@@ -902,22 +935,28 @@ export class MatchesService {
       tournamentId,
     });
     if (allMatches.meta.hasMore) {
-      throw new UnprocessableEntityException('Phạm vi giải có quá nhiều trận cho một lần preview; hãy chọn một phân hạng');
+      throw new UnprocessableEntityException(
+        'Phạm vi giải có quá nhiều trận cho một lần preview; hãy chọn một phân hạng',
+      );
     }
     const scopedMatches = dto.divisionId
-      ? (await this.matchesRepository.findAll({
-          page: 1,
-          limit: 500,
-          tournamentId,
-          divisionId: dto.divisionId,
-        })).data
+      ? (
+          await this.matchesRepository.findAll({
+            page: 1,
+            limit: 500,
+            tournamentId,
+            divisionId: dto.divisionId,
+          })
+        ).data
       : allMatches.data;
     const scopeById = new Map(scopedMatches.map((match) => [match.id, match]));
     const selectedMatches = dto.matchIds
       ? dto.matchIds.map((matchId) => scopeById.get(matchId))
       : scopedMatches;
     if (dto.matchIds && selectedMatches.some((match) => !match)) {
-      throw new UnprocessableEntityException('Một hoặc nhiều trận không thuộc phân hạng hoặc giải đấu này');
+      throw new UnprocessableEntityException(
+        'Một hoặc nhiều trận không thuộc phân hạng hoặc giải đấu này',
+      );
     }
 
     type Interval = { start: number; end: number; participantIds: string[] };
@@ -934,11 +973,17 @@ export class MatchesService {
       }
     };
     for (const match of allMatches.data) {
-      if (!match.courtId || !match.scheduledAt || !['SCHEDULED', 'ONGOING'].includes(match.status)) continue;
+      if (
+        !match.courtId ||
+        !match.scheduledAt ||
+        !['SCHEDULED', 'ONGOING'].includes(match.status)
+      )
+        continue;
       const start = new Date(match.scheduledAt).getTime();
       if (!Number.isFinite(start)) continue;
       const end = start + durationMs + bufferMs;
-      if (end <= windowStart.getTime() || start >= windowEnd.getTime()) continue;
+      if (end <= windowStart.getTime() || start >= windowEnd.getTime())
+        continue;
       addBusy(match.courtId, {
         start,
         end,
@@ -955,14 +1000,21 @@ export class MatchesService {
       const step = minimumStartIntervalMinutes * 60_000;
       return windowStart.getTime() + Math.ceil(elapsed / step) * step;
     };
-    const assignments: Array<{ matchId: string; courtId: string; scheduledAt: string }> = [];
+    const assignments: Array<{
+      matchId: string;
+      courtId: string;
+      scheduledAt: string;
+    }> = [];
     const skipped: Array<{ matchId: string; reason: string }> = [];
-    const eligible = selectedMatches.filter((match): match is NonNullable<typeof match> => Boolean(match));
-    eligible.sort((a, b) =>
-      a.roundNumber - b.roundNumber ||
-      (a.leg ?? 0) - (b.leg ?? 0) ||
-      a.matchOrder - b.matchOrder ||
-      a.id.localeCompare(b.id),
+    const eligible = selectedMatches.filter(
+      (match): match is NonNullable<typeof match> => Boolean(match),
+    );
+    eligible.sort(
+      (a, b) =>
+        a.roundNumber - b.roundNumber ||
+        (a.leg ?? 0) - (b.leg ?? 0) ||
+        a.matchOrder - b.matchOrder ||
+        a.id.localeCompare(b.id),
     );
 
     for (const match of eligible) {
@@ -971,10 +1023,15 @@ export class MatchesService {
         continue;
       }
       if (!match.participant1Id || !match.participant2Id) {
-        skipped.push({ matchId: match.id, reason: 'TBD_OR_DEPENDENCY_BLOCKED' });
+        skipped.push({
+          matchId: match.id,
+          reason: 'TBD_OR_DEPENDENCY_BLOCKED',
+        });
         continue;
       }
-      if (['COMPLETED', 'CANCELLED', 'DISPUTED', 'ONGOING'].includes(match.status)) {
+      if (
+        ['COMPLETED', 'CANCELLED', 'DISPUTED', 'ONGOING'].includes(match.status)
+      ) {
         skipped.push({ matchId: match.id, reason: 'TERMINAL_OR_ONGOING' });
         continue;
       }
@@ -989,15 +1046,28 @@ export class MatchesService {
         const participantIds = [match.participant1Id, match.participant2Id];
         while (candidateStart + durationMs + bufferMs <= windowEnd.getTime()) {
           const candidateEnd = candidateStart + durationMs + bufferMs;
-          const courtConflict = (busyByCourt.get(court.id) || []).find((interval) => overlaps(candidateStart, candidateEnd, interval));
+          const courtConflict = (busyByCourt.get(court.id) || []).find(
+            (interval) => overlaps(candidateStart, candidateEnd, interval),
+          );
           const participantConflict = participantIds
-            .flatMap((participantId) => busyByParticipant.get(participantId) || [])
-            .find((interval) => overlaps(candidateStart, candidateEnd, interval));
+            .flatMap(
+              (participantId) => busyByParticipant.get(participantId) || [],
+            )
+            .find((interval) =>
+              overlaps(candidateStart, candidateEnd, interval),
+            );
           if (!courtConflict && !participantConflict) break;
-          const nextAvailable = Math.max(courtConflict?.end || 0, participantConflict?.end || 0, candidateStart + 60_000);
+          const nextAvailable = Math.max(
+            courtConflict?.end || 0,
+            participantConflict?.end || 0,
+            candidateStart + 60_000,
+          );
           candidateStart = snapToGrid(nextAvailable);
         }
-        if (candidateStart + durationMs + bufferMs <= windowEnd.getTime() && (!best || candidateStart < best.start)) {
+        if (
+          candidateStart + durationMs + bufferMs <= windowEnd.getTime() &&
+          (!best || candidateStart < best.start)
+        ) {
           best = { courtId: court.id, start: candidateStart };
         }
       }
@@ -1020,7 +1090,9 @@ export class MatchesService {
 
     const scheduleVersion = [
       tournament.updatedAt.toISOString(),
-      ...allMatches.data.map((match) => `${match.id}:${match.revision ?? 0}:${match.updatedAt}`).sort(),
+      ...allMatches.data
+        .map((match) => `${match.id}:${match.revision ?? 0}:${match.updatedAt}`)
+        .sort(),
     ].join('|');
     return {
       statusCode: 200,
@@ -1075,24 +1147,22 @@ export class MatchesService {
     return result;
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: JwtPayload) {
     const match = await this.matchesRepository.findById(id);
     if (!match) {
       throw new NotFoundException('Match not found');
     }
-    const t = match.tournament;
-    if (
-      t &&
-      (t.visibility !== 'PUBLIC' ||
-        [
-          'DRAFT',
-          'PENDING_APPROVAL',
-          'SUSPENDED',
-          'CANCELLED',
-          'PENDING_DELETE',
-          'pending_delete',
-        ].includes(t.status))
-    ) {
+
+    const systemRoles = [
+      ...(user?.roles ?? []),
+      ...(user?.role ? [user.role] : []),
+    ];
+    const canAccess = await this.matchesRepository.canAccessLiveMatch(
+      id,
+      user?.sub,
+      systemRoles,
+    );
+    if (!canAccess) {
       throw new NotFoundException('Match not found');
     }
     if (match.status === 'ONGOING') {
@@ -1146,7 +1216,12 @@ export class MatchesService {
       existing.tournamentId,
       user.sub,
     );
-    if (!isLiteTournament && !isTournamentManager && !isReferee && !acceptedReferee) {
+    if (
+      !isLiteTournament &&
+      !isTournamentManager &&
+      !isReferee &&
+      !acceptedReferee
+    ) {
       throw new ForbiddenException(
         'Bạn không có quyền nhập điểm cho trận đấu này',
       );
@@ -1528,7 +1603,12 @@ export class MatchesService {
       existing.tournamentId,
       user.sub,
     );
-    if (!isLiteTournament && !isTournamentManager && !isReferee && !acceptedReferee) {
+    if (
+      !isLiteTournament &&
+      !isTournamentManager &&
+      !isReferee &&
+      !acceptedReferee
+    ) {
       throw new ForbiddenException(
         'Bạn không có quyền thay đổi trạng thái trận đấu này',
       );
