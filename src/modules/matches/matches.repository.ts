@@ -2071,6 +2071,45 @@ export class MatchesRepository {
       .where(inArray(schema.tournamentRosters.participantId, participantIds));
   }
 
+  /**
+   * Live-score access for Super Lite is limited to users who are actually
+   * registered in that tournament. This is intentionally separate from
+   * tournament management/staff access: a roster member may score a Lite
+   * match, but must not gain scheduling or bracket-management privileges.
+   */
+  async isTournamentParticipant(
+    tournamentId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const [roster] = await this.db
+      .select({ id: schema.tournamentRosters.id })
+      .from(schema.tournamentRosters)
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(
+          schema.tournamentRosters.participantId,
+          schema.tournamentParticipants.id,
+        ),
+      )
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          eq(schema.tournamentRosters.userId, userId),
+          eq(schema.tournamentRosters.status, 'ACTIVE'),
+          notInArray(schema.tournamentParticipants.teamStatus, [
+            'WITHDRAWN',
+            'REJECTED',
+            'KICKED',
+            'EXPIRED',
+            'CANCELLED',
+          ]),
+        ),
+      )
+      .limit(1);
+
+    return Boolean(roster);
+  }
+
   async updateSchedule(
     id: string,
     userId: string | null,

@@ -1209,18 +1209,25 @@ export class MatchesService {
       | undefined;
     const isLiteTournament =
       tournamentConfig?.isLite === true ||
-      String(tournamentConfig?.mode || '').toUpperCase() === 'LITE';
+      (String(tournamentConfig?.mode || '').toUpperCase() === 'LITE' &&
+        tournamentConfig?.hideAdvancedSettings === true);
     const isReferee = existing.refereeId === user.sub;
     const isTournamentManager = await this.isTournamentManager(existing, user);
     const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
       existing.tournamentId,
       user.sub,
     );
+    const isLiteTournamentParticipant =
+      isLiteTournament &&
+      (await this.matchesRepository.isTournamentParticipant(
+        existing.tournamentId,
+        user.sub,
+      ));
     if (
-      !isLiteTournament &&
       !isTournamentManager &&
       !isReferee &&
-      !acceptedReferee
+      !acceptedReferee &&
+      !isLiteTournamentParticipant
     ) {
       throw new ForbiddenException(
         'Bạn không có quyền nhập điểm cho trận đấu này',
@@ -1597,17 +1604,24 @@ export class MatchesService {
       | undefined;
     const isLiteTournament =
       tournamentConfig?.isLite === true ||
-      String(tournamentConfig?.mode || '').toUpperCase() === 'LITE';
+      (String(tournamentConfig?.mode || '').toUpperCase() === 'LITE' &&
+        tournamentConfig?.hideAdvancedSettings === true);
     const isTournamentManager = await this.isTournamentManager(existing, user);
     const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
       existing.tournamentId,
       user.sub,
     );
+    const isLiteTournamentParticipant =
+      isLiteTournament &&
+      (await this.matchesRepository.isTournamentParticipant(
+        existing.tournamentId,
+        user.sub,
+      ));
     if (
-      !isLiteTournament &&
       !isTournamentManager &&
       !isReferee &&
-      !acceptedReferee
+      !acceptedReferee &&
+      !isLiteTournamentParticipant
     ) {
       throw new ForbiddenException(
         'Bạn không có quyền thay đổi trạng thái trận đấu này',

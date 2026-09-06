@@ -9,6 +9,7 @@ describe('MatchesService object-level football authority', () => {
   const repository = {
     findById: jest.fn(),
     isTournamentManager: jest.fn(),
+    isTournamentParticipant: jest.fn(),
     isRefereeAccepted: jest.fn(),
     findAllowedCourtForMatch: jest.fn(),
     getRostersForParticipants: jest.fn(),
@@ -57,6 +58,7 @@ describe('MatchesService object-level football authority', () => {
     jest.clearAllMocks();
     repository.findById.mockResolvedValue({ ...baseMatch });
     repository.isTournamentManager.mockResolvedValue(false);
+    repository.isTournamentParticipant.mockResolvedValue(false);
     repository.isRefereeAccepted.mockResolvedValue(false);
     repository.findAllowedCourtForMatch.mockResolvedValue({
       id: 'court-1',
@@ -116,6 +118,98 @@ describe('MatchesService object-level football authority', () => {
       ),
     ).resolves.toBeDefined();
     expect(repository.updateScore).toHaveBeenCalled();
+  });
+
+  it('allows an active Super Lite roster member to start without management access', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      status: 'SCHEDULED',
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+    repository.isTournamentParticipant.mockResolvedValue(true);
+    repository.updateStatus.mockResolvedValue({
+      ...baseMatch,
+      status: 'ONGOING',
+    });
+
+    await expect(
+      service.updateStatus(
+        'match-1',
+        { sub: 'roster-member-1', roles: ['PLAYER'] } as never,
+        { status: 'ONGOING' } as never,
+      ),
+    ).resolves.toBeDefined();
+    expect(repository.isTournamentParticipant).toHaveBeenCalledWith(
+      'tournament-1',
+      'roster-member-1',
+    );
+    expect(repository.updateStatus).toHaveBeenCalled();
+  });
+
+  it('allows an active Super Lite roster member to score without management access', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+    repository.isTournamentParticipant.mockResolvedValue(true);
+
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'roster-member-1', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 1, p2SetsWon: 0 } as never,
+      ),
+    ).resolves.toBeDefined();
+    expect(repository.isTournamentParticipant).toHaveBeenCalledWith(
+      'tournament-1',
+      'roster-member-1',
+    );
+    expect(repository.updateScore).toHaveBeenCalled();
+  });
+
+  it('rejects a non-member from starting or scoring a Super Lite match', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'outsider', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 0, p2SetsWon: 0 } as never,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.updateScore).not.toHaveBeenCalled();
+  });
+
+  it('does not classify Quick scoring mode as Super Lite participant access', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: false, mode: 'LITE' },
+      },
+    });
+    repository.isTournamentParticipant.mockResolvedValue(true);
+
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'roster-member-1', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 1, p2SetsWon: 0 } as never,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.updateScore).not.toHaveBeenCalled();
   });
 
   it('allows a co-organizer scoped to this tournament to enter score', async () => {

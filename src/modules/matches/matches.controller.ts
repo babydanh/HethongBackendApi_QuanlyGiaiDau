@@ -91,6 +91,22 @@ export class MatchesController {
     return await this.matchesService.updateScore(id, user, updateMatchScoreDto);
   }
 
+  /**
+   * Super Lite Live entry point. Authentication is still required by the
+   * global JwtAuthGuard; the service verifies active tournament roster
+   * membership and never grants management permissions through this route.
+   */
+  @Patch(':id/lite-score')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Người tham gia Super Lite cập nhật tỷ số' })
+  async updateLiteScore(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateMatchScoreDto: UpdateMatchScoreDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.updateScore(id, user, updateMatchScoreDto);
+  }
+
   @Patch(':id/status')
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE, UserRole.PLAYER)
   @Verified()
@@ -99,6 +115,26 @@ export class MatchesController {
     summary: 'Cập nhật trạng thái trận đấu (ONGOING, COMPLETED)',
   })
   async updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateMatchStatusDto: UpdateMatchStatusDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.updateStatus(
+      id,
+      user,
+      updateMatchStatusDto,
+    );
+  }
+
+  /**
+   * Super Lite Live entry point. Only an authenticated active roster member
+   * may start/finish the match; scheduling and operations remain protected by
+   * their existing management endpoints.
+   */
+  @Patch(':id/lite-status')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Người tham gia Super Lite đổi trạng thái trận' })
+  async updateLiteStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateMatchStatusDto: UpdateMatchStatusDto,
     @CurrentUser() user: JwtPayload,
