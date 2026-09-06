@@ -1297,10 +1297,17 @@ export class MatchesService {
         const matchConfig = existing.matchConfig as
           | Record<string, unknown>
           | undefined;
-        resolvedConfig.mode =
+        const explicitMode =
           (tournamentConfig?.mode as string | undefined) ||
           (sportRules?.mode as string | undefined) ||
           (matchConfig?.mode as string | undefined);
+        resolvedConfig.mode = isLiteTournament
+          ? 'LITE'
+          : explicitMode?.toUpperCase() === 'LITE'
+            ? 'LITE'
+            : explicitMode
+              ? 'STRICT'
+              : resolvedConfig.mode;
         const validation =
           resolvedConfig.kind === 'FOOTBALL'
             ? validateScoreDetails(scoreDetails, resolvedConfig)
@@ -1335,10 +1342,17 @@ export class MatchesService {
           | Record<string, unknown>
           | undefined;
 
-        resolvedConfig.mode =
+        const explicitMode =
           (tournamentConfig?.mode as string | undefined) ||
           (sportRules?.mode as string | undefined) ||
           (matchConfig?.mode as string | undefined);
+        resolvedConfig.mode = isLiteTournament
+          ? 'LITE'
+          : explicitMode?.toUpperCase() === 'LITE'
+            ? 'LITE'
+            : explicitMode
+              ? 'STRICT'
+              : resolvedConfig.mode;
         const validation = validateScoreDetails(scoreDetails, resolvedConfig);
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
