@@ -3286,13 +3286,24 @@ export class TournamentsService {
       throw new NotFoundException('Không tìm thấy bảng đấu cho giải Lite này');
     }
 
-    return this.tournamentsRepository.updateBracketSlots(
+    const result = await this.tournamentsRepository.updateBracketSlots(
       id,
       divisionId,
       userId,
       data,
       { allowLiveUnassign: true },
     );
+
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
+      await this.redisService.del(`matches:tournament:${id}`);
+      await this.redisService.del(`tournament:${id}`);
+    } catch (cacheErr) {
+      this.logger.warn(`Failed to clear cache for tournament ${id}: ${cacheErr}`);
+    }
+
+    return result;
   }
 
   async updateBracketSlots(
@@ -3337,12 +3348,23 @@ export class TournamentsService {
       throw new NotFoundException('Không tìm thấy bảng đấu cho giải đấu này');
     }
 
-    return this.tournamentsRepository.updateBracketSlots(
+    const result = await this.tournamentsRepository.updateBracketSlots(
       id,
       divisionId,
       userId,
       data,
     );
+
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
+      await this.redisService.del(`matches:tournament:${id}`);
+      await this.redisService.del(`tournament:${id}`);
+    } catch (cacheErr) {
+      this.logger.warn(`Failed to clear cache for tournament ${id}: ${cacheErr}`);
+    }
+
+    return result;
   }
 
   async generateLiteBracket(
