@@ -190,11 +190,13 @@ export class TournamentsService {
       return true;
     }
     if (!tournament.communityId) return false;
-    const community = await this.tournamentsRepository.findCommunityById(
-      tournament.communityId,
-    );
-    if (community && community.creatorId === userId) {
-      return true;
+    if (typeof this.tournamentsRepository.findCommunityById === 'function') {
+      const community = await this.tournamentsRepository.findCommunityById(
+        tournament.communityId,
+      );
+      if (community && community.creatorId === userId) {
+        return true;
+      }
     }
     const member = await this.tournamentsRepository.findCommunityMember(
       tournament.communityId,
@@ -2748,11 +2750,13 @@ export class TournamentsService {
     }
 
     if (!hasPermission && existing.communityId) {
-      const community = await this.tournamentsRepository.findCommunityById(
-        existing.communityId,
-      );
-      if (community && community.creatorId === userId) {
-        hasPermission = true;
+      if (typeof this.tournamentsRepository.findCommunityById === 'function') {
+        const community = await this.tournamentsRepository.findCommunityById(
+          existing.communityId,
+        );
+        if (community && community.creatorId === userId) {
+          hasPermission = true;
+        }
       }
       if (!hasPermission) {
         const member = await this.tournamentsRepository.findCommunityMember(
