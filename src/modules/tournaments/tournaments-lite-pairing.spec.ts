@@ -656,6 +656,32 @@ describe('TournamentsService — Lite pairing guards', () => {
   });
 
   describe('generateLiteBracket', () => {
+    it('blocks recreating a completed Lite tournament bracket', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        status: 'COMPLETED',
+      });
+
+      await expect(
+        service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN']),
+      ).rejects.toThrow('Giải đấu đã kết thúc');
+      expect(mockRepo.findBracket).not.toHaveBeenCalled();
+      expect(mockBracketGenerator.generateSingleElimination).not.toHaveBeenCalled();
+    });
+
+    it('blocks recreating a live Lite tournament bracket', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        status: 'IN_PROGRESS',
+      });
+
+      await expect(
+        service.generateLiteBracket('tournament-1', 'user-1', ['ADMIN']),
+      ).rejects.toThrow('Giải đấu đang diễn ra');
+      expect(mockRepo.findBracket).not.toHaveBeenCalled();
+      expect(mockBracketGenerator.generateSingleElimination).not.toHaveBeenCalled();
+    });
+
     it('passes divisionId to the generator for a newly created bracket', async () => {
       mockRepo.findById!.mockResolvedValue({
         ...liteTournament,

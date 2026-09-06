@@ -3662,6 +3662,7 @@ export class TournamentsRepository {
       .select({
         id: schema.communities.id,
         name: schema.communities.name,
+        creatorId: schema.communities.creatorId,
         visibility: schema.communities.visibility,
         joinMode: schema.communities.joinMode,
         logoUrl: schema.communities.logoUrl,
@@ -4031,7 +4032,9 @@ export class TournamentsRepository {
       false,
       false,
     );
-    return participants.map((p) => ({
+    // Public roster must contain only approved/active registrations. Pending
+    // approval and pending partner records are workflow state, not members.
+    return participants.filter((p) => p.teamStatus === 'COMPLETE').map((p) => ({
       ...p,
       customResponses: null,
       payment: null,
@@ -4298,6 +4301,7 @@ export class TournamentsRepository {
     divisionId: string,
     userId: string,
     data: UpdateBracketSlotsDto,
+    options: { allowLiveUnassign?: boolean } = {},
   ) {
     if (data.operations.length === 0) {
       throw new BadRequestException(
@@ -4330,16 +4334,26 @@ export class TournamentsRepository {
       if (!tournament) {
         throw new NotFoundException('Giải đấu không tồn tại');
       }
-      const tournamentStatus = tournament.status.toUpperCase();
+      const tournamentStatus = tournament.status.trim().toUpperCase();
+      const isUnassignOnly = data.operations.every(
+        (operation) =>
+          String(operation.operation).trim().toUpperCase() ===
+          BracketSlotMutationOperation.UNASSIGN,
+      );
+      const canUnassignScheduledMatchWhileTournamentRuns =
+        isUnassignOnly &&
+        options.allowLiveUnassign === true &&
+        ['IN_PROGRESS', 'ONGOING', 'LIVE'].includes(tournamentStatus);
       if (
-        tournamentStatus === 'IN_PROGRESS' ||
-        tournamentStatus === 'ONGOING' ||
-        tournamentStatus === 'COMPLETED' ||
-        tournamentStatus === 'CANCELLED'
+        ['IN_PROGRESS', 'ONGOING', 'LIVE', 'COMPLETED', 'CANCELLED'].includes(
+          tournamentStatus,
+        )
       ) {
-        throw new BadRequestException(
-          'Không thể thay đổi participant sau khi giải đã bắt đầu hoặc kết thúc',
-        );
+        if (!canUnassignScheduledMatchWhileTournamentRuns) {
+          throw new BadRequestException(
+            'Không thể thay đổi participant sau khi giải đã bắt đầu hoặc kết thúc',
+          );
+        }
       }
 
       const matches = await tx
@@ -4391,15 +4405,10 @@ export class TournamentsRepository {
       };
 
       const assertEditable = (match: (typeof matches)[number]) => {
-        const status = match.status.toUpperCase();
-        if (
-          status === 'IN_PROGRESS' ||
-          status === 'ONGOING' ||
-          status === 'LIVE' ||
-          status === 'COMPLETED'
-        ) {
+        const status = match.status.trim().toUpperCase();
+        if (!['SCHEDULED', 'PENDING', 'NOT_STARTED', 'UPCOMING'].includes(status)) {
           throw new BadRequestException(
-            'Không thể thay đổi participant của trận đang thi đấu',
+            'Chỉ có thể huỷ ghép ở trận chưa thi đấu',
           );
         }
       };
@@ -8608,7 +8617,12 @@ export class TournamentsRepository {
       .where(
         and(
           eq(schema.matches.tournamentId, tournamentId),
-          ne(schema.matches.status, 'SCHEDULED'),
+          notInArray(schema.matches.status, [
+            'SCHEDULED',
+            'PENDING',
+            'NOT_STARTED',
+            'UPCOMING',
+          ]),
           isNull(schema.matches.deletedAt),
         ),
       );

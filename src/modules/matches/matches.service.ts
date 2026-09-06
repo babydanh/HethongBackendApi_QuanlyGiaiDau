@@ -189,6 +189,66 @@ export class MatchesService {
     };
   }
 
+  /**
+   * Super Lite has an open scorecard, but it still has a tournament winner
+   * when its final bracket match is completed.  Do not wait for generated TBD
+   * placeholders/bye fixtures to become COMPLETED; those are not playable
+   * matches and previously kept a finished Lite tournament in progress.
+   */
+  private isSuperLiteFinalMatch(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+  ) {
+    if (!match) return false;
+    const rawConfig = match.tournament?.tournamentConfig;
+    const config = (
+      typeof rawConfig === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(rawConfig);
+            } catch {
+              return {};
+            }
+          })()
+        : rawConfig ?? {}
+    ) as Record<string, unknown>;
+    const isSuperLite =
+      config?.isLite === true ||
+      (String(config?.mode || '').toUpperCase() === 'LITE' &&
+        config?.hideAdvancedSettings === true);
+    const stageType = String(match.stage?.type || '').toUpperCase();
+    if (!isSuperLite || stageType === 'ROUND_ROBIN') return false;
+
+    const branch = String(match.bracketBranch || '').toUpperCase();
+    const stageName = String(match.stage?.name || '').toLowerCase();
+    const isThirdPlace =
+      branch === 'THIRD_PLACE' ||
+      branch.includes('THIRD_PLACE') ||
+      stageName.includes('third place') ||
+      stageName.includes('hạng 3') ||
+      stageName.includes('hang 3');
+    if (isThirdPlace) return false;
+
+    // Playoff matches used to break round-robin ties and are also terminal
+    // nodes, but they do not decide the tournament champion. Only the main
+    // elimination branch or an explicitly named final may close Super Lite.
+    const isExplicitFinal =
+      branch === 'FINAL' ||
+      branch === 'GRAND_FINALS' ||
+      stageName.includes('chung kết') ||
+      stageName.includes('chung ket') ||
+      stageName.includes('grand final') ||
+      stageName.includes('final');
+    if (branch === 'PLAYOFF' || (!isExplicitFinal && branch !== 'MAIN')) {
+      return false;
+    }
+
+    // A playable final is the terminal match of an elimination branch.  The
+    // absence of both links is the persisted bracket contract for a final;
+    // requiring an elimination stage prevents round-robin fixtures from
+    // closing the whole tournament after their first result.
+    return !match.nextMatchId && !match.loserNextMatchId;
+  }
+
   private async finalizeCompletedMatch(
     existing: Awaited<ReturnType<MatchesRepository['findById']>>,
     matchId: string,
@@ -274,7 +334,9 @@ export class MatchesService {
           await this.matchesRepository.checkAllMatchesCompleted(
             existing.tournamentId,
           );
-        if (allCompleted) {
+        const isSuperLiteFinal =
+          Boolean(winnerId) && this.isSuperLiteFinalMatch(existing);
+        if (allCompleted || isSuperLiteFinal) {
           await this.matchesRepository.updateTournamentStatus(
             existing.tournamentId,
             'COMPLETED',
@@ -1217,17 +1279,27 @@ export class MatchesService {
       existing.tournamentId,
       user.sub,
     );
-    const isLiteTournamentParticipant =
+    const canAccessSuperLiteMatch = isLiteTournament
+      ? await this.matchesRepository.canAccessLiveMatch(
+          id,
+          user.sub,
+          [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+        )
+      : false;
+    // Super Lite deliberately exposes the shared score board to any
+    // authenticated user who can access the match. Management, bracket and
+    // scheduling permissions remain protected by the checks above/below.
+    const canScoreSuperLite =
       isLiteTournament &&
-      (await this.matchesRepository.isTournamentParticipant(
-        existing.tournamentId,
-        user.sub,
-      ));
+      (canAccessSuperLiteMatch ||
+        isTournamentManager ||
+        isReferee ||
+        acceptedReferee);
     if (
       !isTournamentManager &&
       !isReferee &&
       !acceptedReferee &&
-      !isLiteTournamentParticipant
+      !canScoreSuperLite
     ) {
       throw new ForbiddenException(
         'Bạn không có quyền nhập điểm cho trận đấu này',
@@ -1288,26 +1360,11 @@ export class MatchesService {
         // bypass the sport validator. Football draws and shootouts are valid
         // domain outcomes and are therefore validated with football rules.
         const resolvedConfig = resolvedMatchConfig;
-        const tournamentConfig = existing.tournament?.tournamentConfig as
-          | Record<string, unknown>
-          | undefined;
-        const sportRules = existing.tournament?.sportRules as
-          | Record<string, unknown>
-          | undefined;
-        const matchConfig = existing.matchConfig as
-          | Record<string, unknown>
-          | undefined;
-        const explicitMode =
-          (tournamentConfig?.mode as string | undefined) ||
-          (sportRules?.mode as string | undefined) ||
-          (matchConfig?.mode as string | undefined);
-        resolvedConfig.mode = isLiteTournament
-          ? 'LITE'
-          : explicitMode?.toUpperCase() === 'LITE'
-            ? 'LITE'
-            : explicitMode
-              ? 'STRICT'
-              : resolvedConfig.mode;
+        // `resolveMatchConfig` already applies the full hierarchy, including
+        // a Quick tournament's explicit sportRules.mode=LITE. Do not replace
+        // that scoring mode with tournamentConfig.mode=STRICT: the latter is
+        // the product/access discriminator for standard tournaments.
+        if (isLiteTournament) resolvedConfig.mode = 'LITE';
         const validation =
           resolvedConfig.kind === 'FOOTBALL'
             ? validateScoreDetails(scoreDetails, resolvedConfig)
@@ -1332,46 +1389,33 @@ export class MatchesService {
       } else {
         // Resolve config hierarchy (Stage -> Round -> Match)
         const resolvedConfig = resolvedMatchConfig;
-        const tournamentConfig = existing.tournament?.tournamentConfig as
-          | Record<string, unknown>
-          | undefined;
-        const sportRules = existing.tournament?.sportRules as
-          | Record<string, unknown>
-          | undefined;
-        const matchConfig = existing.matchConfig as
-          | Record<string, unknown>
-          | undefined;
-
-        const explicitMode =
-          (tournamentConfig?.mode as string | undefined) ||
-          (sportRules?.mode as string | undefined) ||
-          (matchConfig?.mode as string | undefined);
-        resolvedConfig.mode = isLiteTournament
-          ? 'LITE'
-          : explicitMode?.toUpperCase() === 'LITE'
-            ? 'LITE'
-            : explicitMode
-              ? 'STRICT'
-              : resolvedConfig.mode;
+        // Keep scoring mode independent from the product mode. In particular,
+        // Quick may persist tournamentConfig.mode=STRICT together with an
+        // explicit open sportRules.mode=LITE.
+        if (isLiteTournament) resolvedConfig.mode = 'LITE';
         const validation = validateScoreDetails(scoreDetails, resolvedConfig);
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
 
-        // Suggest winner automatically
-        if (p1SetsWon >= validation.setsToWin) {
-          if (winnerId && winnerId !== existing.participant1Id) {
-            throw new BadRequestException(
-              'WinnerId không khớp với kết quả set thắng.',
-            );
+        // Strict presets derive a winner from the configured set target.
+        // Super Lite is an open scorecard: each manually closed set is
+        // history, so winning the first set must not finalize the match.
+        if (resolvedConfig.mode !== 'LITE') {
+          if (p1SetsWon >= validation.setsToWin) {
+            if (winnerId && winnerId !== existing.participant1Id) {
+              throw new BadRequestException(
+                'WinnerId không khớp với kết quả set thắng.',
+              );
+            }
+            winnerId = existing.participant1Id || undefined;
+          } else if (p2SetsWon >= validation.setsToWin) {
+            if (winnerId && winnerId !== existing.participant2Id) {
+              throw new BadRequestException(
+                'WinnerId không khớp với kết quả set thắng.',
+              );
+            }
+            winnerId = existing.participant2Id || undefined;
           }
-          winnerId = existing.participant1Id || undefined;
-        } else if (p2SetsWon >= validation.setsToWin) {
-          if (winnerId && winnerId !== existing.participant2Id) {
-            throw new BadRequestException(
-              'WinnerId không khớp với kết quả set thắng.',
-            );
-          }
-          winnerId = existing.participant2Id || undefined;
         }
       }
     }
@@ -1625,17 +1669,27 @@ export class MatchesService {
       existing.tournamentId,
       user.sub,
     );
-    const isLiteTournamentParticipant =
+    const canAccessSuperLiteMatch = isLiteTournament
+      ? await this.matchesRepository.canAccessLiveMatch(
+          id,
+          user.sub,
+          [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+        )
+      : false;
+    // Super Lite deliberately exposes the shared score board to any
+    // authenticated user who can access the match. Management, bracket and
+    // scheduling permissions remain protected by the checks above/below.
+    const canStartSuperLite =
       isLiteTournament &&
-      (await this.matchesRepository.isTournamentParticipant(
-        existing.tournamentId,
-        user.sub,
-      ));
+      (canAccessSuperLiteMatch ||
+        isTournamentManager ||
+        isReferee ||
+        acceptedReferee);
     if (
       !isTournamentManager &&
       !isReferee &&
       !acceptedReferee &&
-      !isLiteTournamentParticipant
+      !canStartSuperLite
     ) {
       throw new ForbiddenException(
         'Bạn không có quyền thay đổi trạng thái trận đấu này',

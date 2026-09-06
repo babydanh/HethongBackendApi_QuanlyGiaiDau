@@ -873,8 +873,7 @@ export class TournamentsController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @Verified()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa giải đấu (Soft Delete)' })
   async remove(

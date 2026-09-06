@@ -98,6 +98,32 @@ describe('validateScoreDetails', () => {
     });
   });
 
+  it('accepts Lite/open scorecards beyond the old BO3 default', () => {
+    const result = validateScoreDetails(
+      {
+        sets: [
+          { team1Score: 21, team2Score: 18, isFinished: true },
+          { team1Score: 18, team2Score: 21, isFinished: true },
+          { team1Score: 21, team2Score: 16, isFinished: true },
+          { team1Score: 17, team2Score: 21, isFinished: true },
+          { team1Score: 21, team2Score: 19, isFinished: true },
+        ],
+      },
+      buildResolvedConfig({
+        mode: 'LITE',
+        bestOf: 3,
+        setsToWin: 2,
+      }),
+    );
+
+    expect(result).toEqual({
+      p1SetsWon: 3,
+      p2SetsWon: 2,
+      setsToWin: 2,
+      totalSets: 5,
+    });
+  });
+
   it('accepts tennis scoreDetails with the final set still in progress', () => {
     const result = validateScoreDetails(
       {

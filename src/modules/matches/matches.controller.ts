@@ -93,12 +93,12 @@ export class MatchesController {
 
   /**
    * Super Lite Live entry point. Authentication is still required by the
-   * global JwtAuthGuard; the service verifies active tournament roster
-   * membership and never grants management permissions through this route.
+   * global JwtAuthGuard; the service verifies the canonical Super Lite flag
+   * and never grants management permissions through this route.
    */
   @Patch(':id/lite-score')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Người tham gia Super Lite cập nhật tỷ số' })
+  @ApiOperation({ summary: 'Tài khoản đã đăng nhập cập nhật tỷ số Super Lite' })
   async updateLiteScore(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateMatchScoreDto: UpdateMatchScoreDto,
@@ -127,13 +127,13 @@ export class MatchesController {
   }
 
   /**
-   * Super Lite Live entry point. Only an authenticated active roster member
-   * may start/finish the match; scheduling and operations remain protected by
+   * Super Lite Live entry point. Any authenticated user with access to the
+   * match may start/finish it; scheduling and operations remain protected by
    * their existing management endpoints.
    */
   @Patch(':id/lite-status')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Người tham gia Super Lite đổi trạng thái trận' })
+  @ApiOperation({ summary: 'Tài khoản đã đăng nhập đổi trạng thái Super Lite' })
   async updateLiteStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateMatchStatusDto: UpdateMatchStatusDto,

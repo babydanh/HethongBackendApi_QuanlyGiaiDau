@@ -1810,6 +1810,32 @@ export class MatchesRepository {
     ].filter((participantId): participantId is string =>
       Boolean(participantId),
     );
+
+    // Mock fixtures are useful for previewing a bracket, but they must never
+    // create an ELO outbox item.  The processor also guards this path, yet
+    // skipping at enqueue keeps the ranked history clean and avoids needless
+    // background work when a mock bracket is finalized.
+    const mockParticipants = participantIds.length
+      ? await tx
+          .select({ isMock: schema.tournamentParticipants.isMock })
+          .from(schema.tournamentParticipants)
+          .where(inArray(schema.tournamentParticipants.id, participantIds))
+      : [];
+    const mockRosterUsers = participantIds.length
+      ? await tx
+          .select({ isMock: schema.users.isMock })
+          .from(schema.tournamentRosters)
+          .innerJoin(
+            schema.users,
+            eq(schema.tournamentRosters.userId, schema.users.id),
+          )
+          .where(
+            inArray(schema.tournamentRosters.participantId, participantIds),
+          )
+      : [];
+    const hasMockParticipant =
+      mockParticipants.some((participant) => participant.isMock) ||
+      mockRosterUsers.some((roster) => roster.isMock);
     const consentRows = participantIds.length
       ? await tx
           .select({
@@ -1840,7 +1866,8 @@ export class MatchesRepository {
     if (
       eloTournament?.isRanked &&
       (winnerId || isFootballTeamMatch) &&
-      allParticipantsConsented
+      allParticipantsConsented &&
+      !hasMockParticipant
     ) {
       await tx
         .insert(schema.matchEloOutbox)
@@ -2069,45 +2096,6 @@ export class MatchesRepository {
       })
       .from(schema.tournamentRosters)
       .where(inArray(schema.tournamentRosters.participantId, participantIds));
-  }
-
-  /**
-   * Live-score access for Super Lite is limited to users who are actually
-   * registered in that tournament. This is intentionally separate from
-   * tournament management/staff access: a roster member may score a Lite
-   * match, but must not gain scheduling or bracket-management privileges.
-   */
-  async isTournamentParticipant(
-    tournamentId: string,
-    userId: string,
-  ): Promise<boolean> {
-    const [roster] = await this.db
-      .select({ id: schema.tournamentRosters.id })
-      .from(schema.tournamentRosters)
-      .innerJoin(
-        schema.tournamentParticipants,
-        eq(
-          schema.tournamentRosters.participantId,
-          schema.tournamentParticipants.id,
-        ),
-      )
-      .where(
-        and(
-          eq(schema.tournamentParticipants.tournamentId, tournamentId),
-          eq(schema.tournamentRosters.userId, userId),
-          eq(schema.tournamentRosters.status, 'ACTIVE'),
-          notInArray(schema.tournamentParticipants.teamStatus, [
-            'WITHDRAWN',
-            'REJECTED',
-            'KICKED',
-            'EXPIRED',
-            'CANCELLED',
-          ]),
-        ),
-      )
-      .limit(1);
-
-    return Boolean(roster);
   }
 
   async updateSchedule(

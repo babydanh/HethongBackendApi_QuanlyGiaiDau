@@ -68,6 +68,25 @@ describe('resolveEffectiveSportRules', () => {
     expect(resolved.mode).toBe('LITE');
   });
 
+  it('treats the Quick open preset as LITE without granting Super Lite access', () => {
+    const resolved = resolveEffectiveSportRules({
+      categoryConfig,
+      tournamentConfig: { isLite: false, mode: 'STRICT' },
+      tournamentSportRules: { mode: 'LITE' },
+    });
+
+    expect(resolved.mode).toBe('LITE');
+  });
+
+  it('treats the legacy FREE scoring marker as an open scorecard', () => {
+    const resolved = resolveEffectiveSportRules({
+      categoryConfig,
+      tournamentConfig: { isLite: false, mode: 'STRICT', scoringMode: 'FREE' },
+    });
+
+    expect(resolved.mode).toBe('LITE');
+  });
+
   it('falls back to the category sport when legacy tournament rules have another sport', () => {
     const resolved = resolveEffectiveSportRules({
       categoryConfig: { ruleKind: 'PICKLEBALL_RALLY' },

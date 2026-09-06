@@ -428,14 +428,34 @@ export function resolveEffectiveSportRules(
   // not need a scoring preset. Keep that product mode in the same scoring
   // contract as an explicit LITE preset so the app and API validate the same
   // payload.
+  const tournamentScoringMode = String(
+    tournamentConfigObj?.scoringMode ?? tournamentConfigObj?.scoring_mode ?? '',
+  )
+    .trim()
+    .toUpperCase();
+  const hasOpenScoringPreset = ['LITE', 'OPEN', 'FREE'].includes(
+    tournamentScoringMode,
+  );
   const mode =
     tournamentConfigObj?.isLite === true || tournamentConfigObj?.mode === 'LITE'
       ? 'LITE'
-      : scoringSources.some(
-            (s) => s?.mode === 'LITE' || s?.rulesPreset === 'LITE',
-          )
+      : hasOpenScoringPreset
         ? 'LITE'
-        : 'STRICT';
+        : scoringSources.some((s) =>
+              ['LITE', 'OPEN', 'FREE'].includes(
+                String(
+                  s?.mode ??
+                    s?.rulesPreset ??
+                    s?.scoringMode ??
+                    s?.scoring_mode ??
+                    '',
+                )
+                  .trim()
+                  .toUpperCase(),
+              ),
+            )
+          ? 'LITE'
+          : 'STRICT';
 
   return {
     version,

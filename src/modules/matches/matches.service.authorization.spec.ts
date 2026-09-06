@@ -9,7 +9,6 @@ describe('MatchesService object-level football authority', () => {
   const repository = {
     findById: jest.fn(),
     isTournamentManager: jest.fn(),
-    isTournamentParticipant: jest.fn(),
     isRefereeAccepted: jest.fn(),
     findAllowedCourtForMatch: jest.fn(),
     getRostersForParticipants: jest.fn(),
@@ -58,7 +57,6 @@ describe('MatchesService object-level football authority', () => {
     jest.clearAllMocks();
     repository.findById.mockResolvedValue({ ...baseMatch });
     repository.isTournamentManager.mockResolvedValue(false);
-    repository.isTournamentParticipant.mockResolvedValue(false);
     repository.isRefereeAccepted.mockResolvedValue(false);
     repository.findAllowedCourtForMatch.mockResolvedValue({
       id: 'court-1',
@@ -120,7 +118,7 @@ describe('MatchesService object-level football authority', () => {
     expect(repository.updateScore).toHaveBeenCalled();
   });
 
-  it('allows an active Super Lite roster member to start without management access', async () => {
+  it('allows any authenticated Super Lite actor to start without management access', async () => {
     repository.findById.mockResolvedValue({
       ...baseMatch,
       status: 'SCHEDULED',
@@ -129,7 +127,6 @@ describe('MatchesService object-level football authority', () => {
         tournamentConfig: { isLite: true, mode: 'LITE' },
       },
     });
-    repository.isTournamentParticipant.mockResolvedValue(true);
     repository.updateStatus.mockResolvedValue({
       ...baseMatch,
       status: 'ONGOING',
@@ -138,18 +135,14 @@ describe('MatchesService object-level football authority', () => {
     await expect(
       service.updateStatus(
         'match-1',
-        { sub: 'roster-member-1', roles: ['PLAYER'] } as never,
+        { sub: 'outsider-1', roles: ['PLAYER'] } as never,
         { status: 'ONGOING' } as never,
       ),
     ).resolves.toBeDefined();
-    expect(repository.isTournamentParticipant).toHaveBeenCalledWith(
-      'tournament-1',
-      'roster-member-1',
-    );
     expect(repository.updateStatus).toHaveBeenCalled();
   });
 
-  it('allows an active Super Lite roster member to score without management access', async () => {
+  it('allows any authenticated Super Lite actor to score without management access', async () => {
     repository.findById.mockResolvedValue({
       ...baseMatch,
       tournament: {
@@ -157,23 +150,17 @@ describe('MatchesService object-level football authority', () => {
         tournamentConfig: { isLite: true, mode: 'LITE' },
       },
     });
-    repository.isTournamentParticipant.mockResolvedValue(true);
-
     await expect(
       service.updateScore(
         'match-1',
-        { sub: 'roster-member-1', roles: ['PLAYER'] } as never,
+        { sub: 'outsider-1', roles: ['PLAYER'] } as never,
         { p1SetsWon: 1, p2SetsWon: 0 } as never,
       ),
     ).resolves.toBeDefined();
-    expect(repository.isTournamentParticipant).toHaveBeenCalledWith(
-      'tournament-1',
-      'roster-member-1',
-    );
     expect(repository.updateScore).toHaveBeenCalled();
   });
 
-  it('rejects a non-member from starting or scoring a Super Lite match', async () => {
+  it('allows an authenticated non-member to score a Super Lite match', async () => {
     repository.findById.mockResolvedValue({
       ...baseMatch,
       tournament: {
@@ -188,11 +175,32 @@ describe('MatchesService object-level football authority', () => {
         { sub: 'outsider', roles: ['PLAYER'] } as never,
         { p1SetsWon: 0, p2SetsWon: 0 } as never,
       ),
+    ).resolves.toBeDefined();
+    expect(repository.updateScore).toHaveBeenCalled();
+  });
+
+  it('rejects an authenticated user who cannot access a private Super Lite match', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        visibility: 'PRIVATE',
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+    repository.canAccessLiveMatch.mockResolvedValue(false);
+
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'outsider', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 0, p2SetsWon: 0 } as never,
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(repository.updateScore).not.toHaveBeenCalled();
   });
 
-  it('does not classify Quick scoring mode as Super Lite participant access', async () => {
+  it('does not classify Quick scoring mode as Super Lite live access', async () => {
     repository.findById.mockResolvedValue({
       ...baseMatch,
       tournament: {
@@ -200,8 +208,6 @@ describe('MatchesService object-level football authority', () => {
         tournamentConfig: { isLite: false, mode: 'LITE' },
       },
     });
-    repository.isTournamentParticipant.mockResolvedValue(true);
-
     await expect(
       service.updateScore(
         'match-1',

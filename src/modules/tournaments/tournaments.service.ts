@@ -190,13 +190,19 @@ export class TournamentsService {
       return true;
     }
     if (!tournament.communityId) return false;
+    const community = await this.tournamentsRepository.findCommunityById(
+      tournament.communityId,
+    );
+    if (community && community.creatorId === userId) {
+      return true;
+    }
     const member = await this.tournamentsRepository.findCommunityMember(
       tournament.communityId,
       userId,
     );
     return (
-      member?.status === 'JOINED' &&
-      ['OWNER', 'MODERATOR'].includes(member.role)
+      (member?.status === 'JOINED' || member?.status === 'ACTIVE') &&
+      ['OWNER', 'MODERATOR'].includes(member.role?.toUpperCase?.() ?? member.role)
     );
   }
 
@@ -237,10 +243,19 @@ export class TournamentsService {
       user.sub,
       systemRoles,
     );
-    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    const configuredVenueIds = Array.isArray(config.venueIds) ? (config.venueIds as string[]) : [];
+    const config = (tournament.tournamentConfig || {}) as Record<
+      string,
+      unknown
+    >;
+    const configuredVenueIds = Array.isArray(config.venueIds)
+      ? (config.venueIds as string[])
+      : [];
     const allVenueIds = Array.from(
-      new Set([tournament.venueId, ...configuredVenueIds].filter((v): v is string => Boolean(v))),
+      new Set(
+        [tournament.venueId, ...configuredVenueIds].filter((v): v is string =>
+          Boolean(v),
+        ),
+      ),
     );
 
     const venuesWithCourts = await Promise.all(
@@ -263,7 +278,11 @@ export class TournamentsService {
 
   async createTournamentVenue(
     tournamentId: string,
-    dto: CreateVenueDto & { isDefault?: boolean; initialCourtCount?: number; courtPrefix?: string },
+    dto: CreateVenueDto & {
+      isDefault?: boolean;
+      initialCourtCount?: number;
+      courtPrefix?: string;
+    },
     user: JwtPayload,
     systemRoles: string[] = [],
   ) {
@@ -275,9 +294,16 @@ export class TournamentsService {
 
     const venue = await this.venuesService.create(user.sub, dto);
 
-    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    const existingVenueIds = Array.isArray(config.venueIds) ? (config.venueIds as string[]) : [];
-    const updatedVenueIds = Array.from(new Set([...existingVenueIds, venue.id]));
+    const config = (tournament.tournamentConfig || {}) as Record<
+      string,
+      unknown
+    >;
+    const existingVenueIds = Array.isArray(config.venueIds)
+      ? (config.venueIds as string[])
+      : [];
+    const updatedVenueIds = Array.from(
+      new Set([...existingVenueIds, venue.id]),
+    );
 
     const shouldSetDefault = Boolean(dto.isDefault || !tournament.venueId);
     await this.tournamentsRepository.update(tournamentId, user.sub, {
@@ -348,8 +374,13 @@ export class TournamentsService {
       user.sub,
       systemRoles,
     );
-    const config = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    const existingVenueIds = Array.isArray(config.venueIds) ? (config.venueIds as string[]) : [];
+    const config = (tournament.tournamentConfig || {}) as Record<
+      string,
+      unknown
+    >;
+    const existingVenueIds = Array.isArray(config.venueIds)
+      ? (config.venueIds as string[])
+      : [];
     const updatedVenueIds = existingVenueIds.filter((id) => id !== venueId);
 
     let nextDefaultVenueId = tournament.venueId;
@@ -365,7 +396,11 @@ export class TournamentsService {
       },
     });
 
-    return { success: true, remainingVenueIds: updatedVenueIds, defaultVenueId: nextDefaultVenueId };
+    return {
+      success: true,
+      remainingVenueIds: updatedVenueIds,
+      defaultVenueId: nextDefaultVenueId,
+    };
   }
 
   async saveTournamentVenue(
@@ -723,10 +758,20 @@ export class TournamentsService {
           return false;
         }
         // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
-        const cfg = (typeof t.tournamentConfig === 'string'
-          ? (() => { try { return JSON.parse(t.tournamentConfig); } catch { return {}; } })()
-          : t.tournamentConfig) as Record<string, unknown> | null | undefined;
-        const isClubLite = Boolean(t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'));
+        const cfg = (
+          typeof t.tournamentConfig === 'string'
+            ? (() => {
+                try {
+                  return JSON.parse(t.tournamentConfig);
+                } catch {
+                  return {};
+                }
+              })()
+            : t.tournamentConfig
+        ) as Record<string, unknown> | null | undefined;
+        const isClubLite = Boolean(
+          t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'),
+        );
         if (isClubLite) {
           return false;
         }
@@ -772,10 +817,20 @@ export class TournamentsService {
           return false;
         }
         // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
-        const cfg = (typeof t.tournamentConfig === 'string'
-          ? (() => { try { return JSON.parse(t.tournamentConfig); } catch { return {}; } })()
-          : t.tournamentConfig) as Record<string, unknown> | null | undefined;
-        const isClubLite = Boolean(t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'));
+        const cfg = (
+          typeof t.tournamentConfig === 'string'
+            ? (() => {
+                try {
+                  return JSON.parse(t.tournamentConfig);
+                } catch {
+                  return {};
+                }
+              })()
+            : t.tournamentConfig
+        ) as Record<string, unknown> | null | undefined;
+        const isClubLite = Boolean(
+          t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'),
+        );
         if (isClubLite) {
           return false;
         }
@@ -844,20 +899,25 @@ export class TournamentsService {
       throw new ForbiddenException('Giải đấu đã bị cấm hoặc hủy vĩnh viễn');
     }
 
-    const tourneyConfig = (typeof tournament.tournamentConfig === 'string'
-      ? (() => { try { return JSON.parse(tournament.tournamentConfig); } catch { return {}; } })()
-      : tournament.tournamentConfig) as Record<string, unknown> | null | undefined;
-    const isLite = Boolean(tourneyConfig?.isLite || tourneyConfig?.mode === 'LITE');
+    const tourneyConfig = (
+      typeof tournament.tournamentConfig === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(tournament.tournamentConfig);
+            } catch {
+              return {};
+            }
+          })()
+        : tournament.tournamentConfig
+    ) as Record<string, unknown> | null | undefined;
+    const isLite = Boolean(
+      tourneyConfig?.isLite || tourneyConfig?.mode === 'LITE',
+    );
     const isClubTournament = Boolean(
-      tournament.communityId ||
-      tournament.tournamentType === 'CLUB' ||
-      isLite,
+      tournament.communityId || tournament.tournamentType === 'CLUB' || isLite,
     );
 
-    if (
-      tournament.visibility === 'PRIVATE' ||
-      isClubTournament
-    ) {
+    if (tournament.visibility === 'PRIVATE' || isClubTournament) {
       const isInviteMatch = inviteCode && tournament.inviteCode === inviteCode;
       const isValidTeamInvite =
         !!participantId &&
@@ -903,7 +963,6 @@ export class TournamentsService {
         );
       }
     }
-
 
     // Do NOT leak internal inviteCode to non-owner, non-admin viewers
     if (!isOwner && !isAdmin) {
@@ -1371,9 +1430,11 @@ export class TournamentsService {
 
     const sportRules = {
       ...litePreset.sportRules,
-      // Advanced quick-create keeps the same sport preset but must not be
-      // exposed as the Super Lite product to clients or management routes.
-      mode: isSuperLite ? 'LITE' : 'STRICT',
+      // Every Quick tournament uses the Lite/open scorecard contract: the
+      // organiser may close any number of sets and the next set starts at
+      // 0-0. This is a scoring preset only; `tournamentConfig.isLite` below
+      // remains the product/access discriminator for Super Lite.
+      mode: 'LITE',
 
       ...(sport === 'football'
         ? {
@@ -1590,18 +1651,21 @@ export class TournamentsService {
     let startDateTime: string | undefined = undefined;
     if (dto.startDate) {
       const hasTime = dto.startDate.includes('T');
-      const hasTz = dto.startDate.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dto.startDate);
+      const hasTz =
+        dto.startDate.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dto.startDate);
 
       if (hasTime && hasTz && !dto.startTime) {
         // Full ISO with timezone and no explicit time override
         const parsed = new Date(dto.startDate);
-        startDateTime = !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
+        startDateTime = !Number.isNaN(parsed.getTime())
+          ? parsed.toISOString()
+          : undefined;
       } else {
         // Extract date part (YYYY-MM-DD)
         const datePart = dto.startDate.includes('T')
           ? dto.startDate.split('T')[0]
           : dto.startDate;
-        
+
         let hh = 8;
         let mm = 0;
         if (dto.startTime && dto.startTime.includes(':')) {
@@ -1629,7 +1693,9 @@ export class TournamentsService {
           startDateTime = new Date(utcTimestamp).toISOString();
         } else {
           const parsed = new Date(dto.startDate);
-          startDateTime = !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : undefined;
+          startDateTime = !Number.isNaN(parsed.getTime())
+            ? parsed.toISOString()
+            : undefined;
         }
       }
     }
@@ -1637,23 +1703,33 @@ export class TournamentsService {
     let endDateTime: string | undefined = undefined;
     if (dto.endDate) {
       const hasTime = dto.endDate.includes('T');
-      const hasTz = dto.endDate.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dto.endDate);
+      const hasTz =
+        dto.endDate.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dto.endDate);
       if (hasTime && hasTz) {
         const parsedEnd = new Date(dto.endDate);
-        endDateTime = !Number.isNaN(parsedEnd.getTime()) ? parsedEnd.toISOString() : undefined;
+        endDateTime = !Number.isNaN(parsedEnd.getTime())
+          ? parsedEnd.toISOString()
+          : undefined;
       }
     }
 
     const calculatedDurationMinutes =
       dto.durationMinutes ??
       (dto.durationHours ? Math.round(dto.durationHours * 60) : undefined) ??
-      (startDateTime && endDateTime && new Date(endDateTime).getTime() > new Date(startDateTime).getTime()
-        ? Math.round((new Date(endDateTime).getTime() - new Date(startDateTime).getTime()) / (60 * 1000))
+      (startDateTime &&
+      endDateTime &&
+      new Date(endDateTime).getTime() > new Date(startDateTime).getTime()
+        ? Math.round(
+            (new Date(endDateTime).getTime() -
+              new Date(startDateTime).getTime()) /
+              (60 * 1000),
+          )
         : 90); // Default to 90 minutes (1h30) only if not specified or calculable
 
     if (!endDateTime && startDateTime) {
       endDateTime = new Date(
-        new Date(startDateTime).getTime() + calculatedDurationMinutes * 60 * 1000,
+        new Date(startDateTime).getTime() +
+          calculatedDurationMinutes * 60 * 1000,
       ).toISOString();
     }
 
@@ -1752,10 +1828,12 @@ export class TournamentsService {
           dto.communityId,
         );
         if (!fallbackLogoUrl && community) {
-          fallbackLogoUrl = community.logoUrl || community.bannerUrl || undefined;
+          fallbackLogoUrl =
+            community.logoUrl || community.bannerUrl || undefined;
         }
         if (!fallbackBannerUrl && community) {
-          fallbackBannerUrl = community.bannerUrl || community.logoUrl || undefined;
+          fallbackBannerUrl =
+            community.bannerUrl || community.logoUrl || undefined;
         }
       } catch (err) {
         console.error(
@@ -2145,7 +2223,8 @@ export class TournamentsService {
           tournament.communityId,
         );
         // When joining via tournament invite link, auto-join user into club (or send pending request if club requires approval)
-        const autoStatus = community?.joinMode === 'APPROVAL' ? 'PENDING' : 'JOINED';
+        const autoStatus =
+          community?.joinMode === 'APPROVAL' ? 'PENDING' : 'JOINED';
         await this.tournamentsRepository.addCommunityMember(
           tournament.communityId,
           userId,
@@ -2155,7 +2234,9 @@ export class TournamentsService {
         member = { status: autoStatus } as any;
       }
       if (member.status === 'PENDING')
-        throw new ForbiddenException('Yêu cầu tham gia CLB đang chờ ban quản trị duyệt');
+        throw new ForbiddenException(
+          'Yêu cầu tham gia CLB đang chờ ban quản trị duyệt',
+        );
       if (member.status !== 'JOINED')
         throw new ForbiddenException('Bạn chưa là thành viên câu lạc bộ');
     }
@@ -2659,16 +2740,34 @@ export class TournamentsService {
       }
     }
 
-    // Check permissions
+    // Check permissions: creator of tournament, club owner/moderator, or admin
     let hasPermission = await this.isManager(existing, userId, systemRoles);
 
+    if (!hasPermission && existing.createdBy === userId) {
+      hasPermission = true;
+    }
+
     if (!hasPermission && existing.communityId) {
-      const member = await this.tournamentsRepository.findCommunityMember(
+      const community = await this.tournamentsRepository.findCommunityById(
         existing.communityId,
-        userId,
       );
-      if (member && member.role === 'OWNER') {
+      if (community && community.creatorId === userId) {
         hasPermission = true;
+      }
+      if (!hasPermission) {
+        const member = await this.tournamentsRepository.findCommunityMember(
+          existing.communityId,
+          userId,
+        );
+        if (
+          member &&
+          (member.status === 'JOINED' || member.status === 'ACTIVE') &&
+          ['OWNER', 'MODERATOR'].includes(
+            member.role?.toUpperCase?.() ?? member.role,
+          )
+        ) {
+          hasPermission = true;
+        }
       }
     }
 
@@ -2733,8 +2832,16 @@ export class TournamentsService {
       return result;
     }
 
-    // Non-draft tournaments with participants or locked/live states must go through admin review
-    if (existing.status !== 'DRAFT') {
+    // Check if Lite or Club tournament: Club managers/creators can delete their own club/lite tournaments directly
+    const tCfg = (existing.tournamentConfig || {}) as Record<string, unknown>;
+    const isLiteOrClub =
+      existing.communityId != null ||
+      existing.tournamentType === 'CLUB' ||
+      tCfg?.isLite === true ||
+      tCfg?.mode === 'LITE';
+
+    // Non-draft tournaments with participants or locked/live states must go through admin review (unless Lite/Club tournament without payments)
+    if (existing.status !== 'DRAFT' && !isLiteOrClub) {
       const activeParticipants =
         await this.tournamentsRepository.countActiveParticipants(id);
       const requiresReview =
@@ -3025,13 +3132,25 @@ export class TournamentsService {
 
     if (!isAuthorized)
       throw new ForbiddenException('Bạn không có quyền tạo bảng thi đấu');
+    const divisions =
+      await this.tournamentsRepository.getDivisionsByTournament(id);
     let division: typeof schema.tournamentDivisions.$inferSelect | undefined;
     if (divisionId) {
-      const divisions =
-        await this.tournamentsRepository.getDivisionsByTournament(id);
       division = divisions.find((item) => item.id === divisionId);
       if (!division) {
         throw new NotFoundException('Không tìm thấy bảng đấu cho giải đấu này');
+      }
+    } else if (divisions.length === 1) {
+      division = divisions[0];
+      divisionId = divisions[0].id;
+    } else if (divisions.length > 1) {
+      // If no divisionId is specified but tournament has multiple divisions,
+      // check if this is a Lite tournament and default to first division
+      const configCheck = (existing.tournamentConfig || {}) as Record<string, unknown>;
+      const isLiteTournament = (configCheck.isLite as boolean | undefined) === true || configCheck.mode === 'LITE';
+      if (isLiteTournament) {
+        division = divisions[0];
+        divisionId = divisions[0].id;
       }
     }
 
@@ -3168,6 +3287,7 @@ export class TournamentsService {
       divisionId,
       userId,
       data,
+      { allowLiveUnassign: true },
     );
   }
 
@@ -3244,11 +3364,40 @@ export class TournamentsService {
       );
     }
 
-    const bracket = await this.tournamentsRepository.findBracket(id, divisionId);
+    const tournamentStatus = tournament.status.trim().toUpperCase();
+    if (['COMPLETED', 'FINISHED', 'DONE', 'ENDED'].includes(tournamentStatus)) {
+      throw new BadRequestException(
+        'Giải đấu đã kết thúc, không thể tạo lại sơ đồ thi đấu.',
+      );
+    }
+    if (['CANCELLED', 'CANCELED'].includes(tournamentStatus)) {
+      throw new BadRequestException(
+        'Giải đấu đã bị huỷ, không thể tạo lại sơ đồ thi đấu.',
+      );
+    }
+    if (['IN_PROGRESS', 'ONGOING', 'LIVE'].includes(tournamentStatus)) {
+      throw new BadRequestException(
+        'Giải đấu đang diễn ra, không thể tạo lại sơ đồ thi đấu.',
+      );
+    }
+
+    const bracket = await this.tournamentsRepository.findBracket(
+      id,
+      divisionId,
+    );
+    const scheduledStatuses = new Set([
+      'SCHEDULED',
+      'PENDING',
+      'NOT_STARTED',
+      'UPCOMING',
+    ]);
     const started =
       bracket?.stages.some((stage) =>
         stage.groups?.some((group) =>
-          group.matches?.some((match) => match.status !== 'SCHEDULED'),
+          group.matches?.some(
+            (match) =>
+              !scheduledStatuses.has(match.status.trim().toUpperCase()),
+          ),
         ),
       ) ?? false;
     if (started) {
@@ -3684,14 +3833,27 @@ export class TournamentsService {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
 
-    const tConfig = (typeof tournament.tournamentConfig === 'string'
-      ? (() => { try { return JSON.parse(tournament.tournamentConfig); } catch { return {}; } })()
-      : tournament.tournamentConfig) as Record<string, unknown> | null | undefined;
+    const tConfig = (
+      typeof tournament.tournamentConfig === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(tournament.tournamentConfig);
+            } catch {
+              return {};
+            }
+          })()
+        : tournament.tournamentConfig
+    ) as Record<string, unknown> | null | undefined;
     const isLite = Boolean(tConfig?.isLite || tConfig?.mode === 'LITE');
 
     // 1. Kiểm tra tư cách thành viên CLB TRƯỚC HẾT đối với giải nội bộ CLB
-    if (tournament.communityId && (tournament.tournamentType === 'CLUB' || isLite)) {
-      const isInviteMatch = Boolean(inviteCode && tournament.inviteCode === inviteCode);
+    if (
+      tournament.communityId &&
+      (tournament.tournamentType === 'CLUB' || isLite)
+    ) {
+      const isInviteMatch = Boolean(
+        inviteCode && tournament.inviteCode === inviteCode,
+      );
       const member = await this.tournamentsRepository.findCommunityMember(
         tournament.communityId,
         userId,
@@ -6051,13 +6213,17 @@ export class TournamentsService {
       }
     }
     if (!isAuthorized) {
-      throw new ForbiddenException('Bạn không có quyền quản lý lịch tự động của giải đấu này');
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý lịch tự động của giải đấu này',
+      );
     }
 
     const config = (tournament.tournamentConfig || {}) as Record<string, any>;
     const recurring = config.recurring || {};
     if (!recurring || typeof recurring !== 'object') {
-      throw new BadRequestException('Giải đấu này không có thiết lập lịch tự động');
+      throw new BadRequestException(
+        'Giải đấu này không có thiết lập lịch tự động',
+      );
     }
 
     const updatedConfig = {
@@ -6092,7 +6258,9 @@ export class TournamentsService {
       }
     }
     if (!isAuthorized) {
-      throw new ForbiddenException('Bạn không có quyền quản lý lịch tự động của giải đấu này');
+      throw new ForbiddenException(
+        'Bạn không có quyền quản lý lịch tự động của giải đấu này',
+      );
     }
 
     const config = (tournament.tournamentConfig || {}) as Record<string, any>;
@@ -6769,7 +6937,8 @@ export class TournamentsService {
         (match.status === 'COMPLETED' ||
           match.status === 'FINISHED' ||
           match.status === 'DONE' ||
-          (typeof match.winnerId === 'string' && match.winnerId.trim().length > 0)),
+          (typeof match.winnerId === 'string' &&
+            match.winnerId.trim().length > 0)),
     );
 
     const allFinalCandidates = allKnockoutMatches.filter((match) => {
@@ -6784,12 +6953,13 @@ export class TournamentsService {
       );
     });
 
-    const trueFinalMatch = (allFinalCandidates.length > 0
-      ? allFinalCandidates
-      : allKnockoutMatches.filter((match) => {
-          const branch = (match.bracketBranch || '').toUpperCase();
-          return branch !== 'LOSERS' && branch !== 'THIRD_PLACE';
-        })
+    const trueFinalMatch = (
+      allFinalCandidates.length > 0
+        ? allFinalCandidates
+        : allKnockoutMatches.filter((match) => {
+            const branch = (match.bracketBranch || '').toUpperCase();
+            return branch !== 'LOSERS' && branch !== 'THIRD_PLACE';
+          })
     ).sort(
       (a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder,
     )[0];
@@ -6800,7 +6970,8 @@ export class TournamentsService {
       (trueFinalMatch.status === 'COMPLETED' ||
         trueFinalMatch.status === 'FINISHED' ||
         trueFinalMatch.status === 'DONE' ||
-        (typeof trueFinalMatch.winnerId === 'string' && trueFinalMatch.winnerId.trim().length > 0))
+        (typeof trueFinalMatch.winnerId === 'string' &&
+          trueFinalMatch.winnerId.trim().length > 0)),
     );
 
     const final = isFinalCompleted ? trueFinalMatch : null;
@@ -6809,7 +6980,9 @@ export class TournamentsService {
       if (!match) return null;
       const isWinnerP1 = match.winnerId === match.participant1Id;
       const loserId = isWinnerP1 ? match.participant2Id : match.participant1Id;
-      const loserName = isWinnerP1 ? match.participant2Name : match.participant1Name;
+      const loserName = isWinnerP1
+        ? match.participant2Name
+        : match.participant1Name;
       return participant(loserId, loserName);
     };
 
@@ -6842,30 +7015,47 @@ export class TournamentsService {
       const semiMatchesForFinalists = [
         otherKnockout
           .filter((match) => match.winnerId === final.participant1Id)
-          .sort((a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder)[0],
+          .sort(
+            (a, b) =>
+              b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder,
+          )[0],
         otherKnockout
           .filter((match) => match.winnerId === final.participant2Id)
-          .sort((a, b) => b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder)[0],
+          .sort(
+            (a, b) =>
+              b.roundNumber - a.roundNumber || b.matchOrder - a.matchOrder,
+          )[0],
       ].filter((m): m is (typeof otherKnockout)[0] => Boolean(m));
 
       const semifinalLosers = semiMatchesForFinalists
         .map(loserOf)
-        .filter((item): item is { participantId: string; teamName: string } => Boolean(item?.participantId));
+        .filter((item): item is { participantId: string; teamName: string } =>
+          Boolean(item?.participantId),
+        );
 
       // 2. Fallback by rounds if finalists weren't matched
       if (semifinalLosers.length < 2) {
         const distinctRounds = Array.from(
           new Set(otherKnockout.map((m) => m.roundNumber)),
         ).sort((a, b) => b - a);
-        const semiRound = distinctRounds.find((r) => r < final.roundNumber) ?? distinctRounds[0];
+        const semiRound =
+          distinctRounds.find((r) => r < final.roundNumber) ??
+          distinctRounds[0];
         if (semiRound !== undefined) {
           const roundLosers = otherKnockout
             .filter((m) => m.roundNumber === semiRound)
             .map(loserOf)
-            .filter((item): item is { participantId: string; teamName: string } => Boolean(item?.participantId));
+            .filter(
+              (item): item is { participantId: string; teamName: string } =>
+                Boolean(item?.participantId),
+            );
 
           for (const loser of roundLosers) {
-            if (!semifinalLosers.some((l) => l.participantId === loser.participantId)) {
+            if (
+              !semifinalLosers.some(
+                (l) => l.participantId === loser.participantId,
+              )
+            ) {
               semifinalLosers.push(loser);
             }
           }
@@ -6886,21 +7076,26 @@ export class TournamentsService {
             );
           })
           .map(loserOf)
-          .filter((item): item is { participantId: string; teamName: string } => Boolean(item?.participantId));
+          .filter((item): item is { participantId: string; teamName: string } =>
+            Boolean(item?.participantId),
+          );
 
         for (const loser of namedSemiLosers) {
-          if (!semifinalLosers.some((l) => l.participantId === loser.participantId)) {
+          if (
+            !semifinalLosers.some(
+              (l) => l.participantId === loser.participantId,
+            )
+          ) {
             semifinalLosers.push(loser);
           }
         }
       }
 
       const thirdPlace = config.thirdPlaceMatch
-        ? otherKnockout.find(
-            (match) =>
-              [match.participant1Id, match.participant2Id].some((id) =>
-                semifinalLosers.some((loser) => loser.participantId === id),
-              ),
+        ? otherKnockout.find((match) =>
+            [match.participant1Id, match.participant2Id].some((id) =>
+              semifinalLosers.some((loser) => loser.participantId === id),
+            ),
           )
         : undefined;
 
