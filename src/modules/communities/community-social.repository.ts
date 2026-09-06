@@ -425,6 +425,32 @@ export class CommunitySocialRepository {
       ));
   }
 
+  async getAllNotificationPreferences(communityId: string, excludeUserId?: string) {
+    const conditions = [
+      eq(schema.communityMembers.communityId, communityId),
+      eq(schema.communityMembers.status, 'JOINED'),
+    ];
+    if (excludeUserId) {
+      conditions.push(sql`${schema.communityMembers.userId} != ${excludeUserId}`);
+    }
+    return this.db
+      .select({
+        userId: schema.communityMembers.userId,
+        notificationPreference: schema.communityMembers.notificationPreference,
+        socialMuted: schema.communityMemberSocialPreferences.muted,
+        socialNotificationsEnabled: schema.communityMemberSocialPreferences.notificationsEnabled,
+      })
+      .from(schema.communityMembers)
+      .leftJoin(
+        schema.communityMemberSocialPreferences,
+        and(
+          eq(schema.communityMemberSocialPreferences.communityId, schema.communityMembers.communityId),
+          eq(schema.communityMemberSocialPreferences.userId, schema.communityMembers.userId),
+        ),
+      )
+      .where(and(...conditions));
+  }
+
   async updatePostStatus(postId: string, status: 'PUBLISHED' | 'REJECTED' | 'HIDDEN') {
     const [post] = await this.db.update(schema.communityPosts).set({ status, updatedAt: new Date() }).where(eq(schema.communityPosts.id, postId)).returning();
     return post;

@@ -14,6 +14,8 @@ import { RoomType } from './dto/create-room.dto';
 import { extractLinkPreview } from './utils/link-preview.util';
 
 import { FirebaseService } from '../firebase/firebase.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { buildCommunityChatMessageNotification } from '../notifications/notification-builder';
 
 @Injectable()
 export class ChatService {
@@ -23,6 +25,7 @@ export class ChatService {
     private readonly chatRepository: ChatRepository,
     private readonly chatGateway: ChatGateway,
     private readonly firebaseService: FirebaseService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async getUserRooms(userId: string) {
@@ -308,11 +311,12 @@ export class ChatService {
             .map((m) => m.userId);
         }
 
-        if (recipientIds.length > 0) {
-          const senderUser = await this.chatRepository.findUserById(userId);
-          const senderName = senderUser?.fullName || 'Một thành viên';
-          const title = room.name ? `${senderName} (${room.name})` : senderName;
-          const body = messageText || (attachmentsUrls.length > 0 ? '📷 Đã gửi hình ảnh' : 'Tin nhắn mới');
+        const senderUser = await this.chatRepository.findUserById(userId);
+        const senderName = senderUser?.fullName || 'Một thành viên';
+        const title = room.name ? `${senderName} (${room.name})` : senderName;
+        const body = messageText || (attachmentsUrls.length > 0 ? '📷 Đã gửi hình ảnh' : 'Tin nhắn mới');
+
+        if (recipientIds.length > 0 && roomType !== RoomType.CLUB) {
 
           await this.firebaseService.sendPushToUsers(recipientIds, {
             title,
@@ -323,6 +327,25 @@ export class ChatService {
               messageId: message.id,
             },
           });
+        }
+
+        if (roomType === RoomType.CLUB && room.communityId) {
+          await Promise.all(
+            recipientIds.map((receiverId) =>
+              this.notificationsService.sendNotification(
+                buildCommunityChatMessageNotification({
+                  communityId: room.communityId!,
+                  communityName: room.name || 'CLB',
+                  senderName,
+                  receiverId,
+                  senderId: userId,
+                  roomId: data.roomId,
+                  messageId: message.id,
+                  content: body,
+                }),
+              ),
+            ),
+          );
         }
       } catch {
         // Fire-and-forget push error handling

@@ -11,6 +11,7 @@ import {
   buildCommunityPostApprovedNotification,
   buildCommunityPostCommentedNotification,
   buildCommunityPostMentionedNotification,
+  buildCommunityPostNewNotification,
 } from '../notifications/notification-builder';
 
 type SocialUser = { id: string; fullName?: string; roles?: string[] };
@@ -89,6 +90,14 @@ export class CommunitySocialService {
     }
 
     if (post.status !== 'PENDING') {
+      await this.sendNewPostNotifications({
+        communityId,
+        communityName: community.name,
+        senderId: user.id,
+        senderName: user.fullName?.trim() || 'Thành viên',
+        postId: post.id,
+        excludeUserIds: validMentionIds,
+      });
       await this.sendMentionNotifications({
         communityId,
         communityName: community.name,
@@ -348,6 +357,44 @@ export class CommunitySocialService {
         .map((preference) =>
           this.notificationsService.sendNotification(
             buildCommunityPostMentionedNotification({
+              communityId: params.communityId,
+              communityName: params.communityName,
+              senderName: params.senderName,
+              receiverId: preference.userId,
+              senderId: params.senderId,
+              postId: params.postId,
+            }),
+          ),
+        ),
+    );
+  }
+
+  private async sendNewPostNotifications(params: {
+    communityId: string;
+    communityName: string;
+    senderId: string;
+    senderName: string;
+    postId: string;
+    excludeUserIds?: string[];
+  }) {
+    // Giữ tương thích với các adapter/test double cũ; repository thật luôn có method này.
+    if (typeof this.socialRepository.getAllNotificationPreferences !== 'function') return;
+    const preferences = await this.socialRepository.getAllNotificationPreferences(
+      params.communityId,
+      params.senderId,
+    );
+    const excluded = new Set(params.excludeUserIds ?? []);
+    await Promise.all(
+      preferences
+        .filter((preference) =>
+          !excluded.has(preference.userId) &&
+          preference.notificationPreference === 'ALL' &&
+          preference.socialMuted !== true &&
+          preference.socialNotificationsEnabled !== false,
+        )
+        .map((preference) =>
+          this.notificationsService.sendNotification(
+            buildCommunityPostNewNotification({
               communityId: params.communityId,
               communityName: params.communityName,
               senderName: params.senderName,

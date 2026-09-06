@@ -231,6 +231,59 @@ export const buildCommunityPostMentionedNotification = (params: {
   redirectUrl: getCommunityRedirect(params.communityId, params.postId),
 });
 
+export const buildCommunityJoinReviewedNotification = (params: {
+  communityId: string;
+  communityName: string;
+  receiverId: string;
+  approved: boolean;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: params.approved
+    ? NOTIFICATION_TYPES.COMMUNITY_JOIN_APPROVED
+    : NOTIFICATION_TYPES.COMMUNITY_JOIN_REJECTED,
+  title: params.approved
+    ? 'Yêu cầu tham gia CLB đã được duyệt'
+    : 'Yêu cầu tham gia CLB bị từ chối',
+  content: params.approved
+    ? `Bạn đã được duyệt tham gia CLB ${params.communityName}.`
+    : `Yêu cầu tham gia CLB ${params.communityName} chưa được chấp nhận.`,
+  redirectUrl: getCommunityRedirect(params.communityId),
+});
+
+export const buildCommunityPostNewNotification = (params: {
+  communityId: string;
+  communityName: string;
+  senderName: string;
+  receiverId: string;
+  senderId?: string;
+  postId: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  senderId: params.senderId,
+  type: NOTIFICATION_TYPES.COMMUNITY_POST_NEW,
+  title: `Bài viết mới trong CLB ${params.communityName}`,
+  content: `${params.senderName} vừa đăng một bài viết mới trong CLB.`,
+  redirectUrl: getCommunityRedirect(params.communityId, params.postId),
+});
+
+export const buildCommunityChatMessageNotification = (params: {
+  communityId: string;
+  communityName: string;
+  senderName: string;
+  receiverId: string;
+  senderId: string;
+  roomId: string;
+  messageId: string;
+  content: string;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  senderId: params.senderId,
+  type: NOTIFICATION_TYPES.COMMUNITY_CHAT_MESSAGE,
+  title: `${params.senderName} · ${params.communityName}`,
+  content: params.content || 'Tin nhắn mới trong phòng chat CLB.',
+  redirectUrl: `/communities/${params.communityId}?chatRoomId=${encodeURIComponent(params.roomId)}`,
+});
+
 export const buildCommunityPostCommentedNotification = (params: {
   communityId: string;
   communityName: string;

@@ -6560,6 +6560,42 @@ export class TournamentsRepository {
     return participant;
   }
 
+  async isUserParticipant(tournamentId: string, userId: string): Promise<boolean> {
+    const [p] = await this.db
+      .select({ id: schema.tournamentParticipants.id })
+      .from(schema.tournamentParticipants)
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          or(
+            eq(schema.tournamentParticipants.registeredBy, userId),
+            eq(schema.tournamentParticipants.partnerUserId, userId),
+          ),
+          ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
+          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+        ),
+      )
+      .limit(1);
+    if (p) return true;
+
+    const [roster] = await this.db
+      .select({ id: schema.tournamentRosters.id })
+      .from(schema.tournamentRosters)
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(schema.tournamentRosters.participantId, schema.tournamentParticipants.id),
+      )
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          eq(schema.tournamentRosters.userId, userId),
+          ne(schema.tournamentRosters.status, 'REMOVED'),
+        ),
+      )
+      .limit(1);
+    return !!roster;
+  }
+
   async findCompletedParticipantPayment(participantId: string) {
     const [payment] = await this.db
       .select()

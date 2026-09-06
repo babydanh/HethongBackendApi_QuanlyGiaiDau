@@ -848,10 +848,15 @@ export class TournamentsService {
       ? (() => { try { return JSON.parse(tournament.tournamentConfig); } catch { return {}; } })()
       : tournament.tournamentConfig) as Record<string, unknown> | null | undefined;
     const isLite = Boolean(tourneyConfig?.isLite || tourneyConfig?.mode === 'LITE');
+    const isClubTournament = Boolean(
+      tournament.communityId ||
+      tournament.tournamentType === 'CLUB' ||
+      isLite,
+    );
 
     if (
       tournament.visibility === 'PRIVATE' ||
-      (isLite && tournament.communityId)
+      isClubTournament
     ) {
       const isInviteMatch = inviteCode && tournament.inviteCode === inviteCode;
       const isValidTeamInvite =
@@ -867,18 +872,7 @@ export class TournamentsService {
           );
         })());
       let isCommunityMember = false;
-      let isPublicCommunity = false;
       if (tournament.communityId) {
-        const community = await this.tournamentsRepository.findCommunityById(
-          tournament.communityId,
-        );
-        if (
-          community &&
-          community.visibility !== 'PRIVATE' &&
-          tournament.visibility !== 'PRIVATE'
-        ) {
-          isPublicCommunity = true;
-        }
         if (userId) {
           const member = await this.tournamentsRepository.findCommunityMember(
             tournament.communityId,
@@ -889,17 +883,27 @@ export class TournamentsService {
           }
         }
       }
+      let isParticipant = false;
+      if (userId) {
+        isParticipant = await this.tournamentsRepository.isUserParticipant(
+          id,
+          userId,
+        );
+      }
       if (
         !isOwner &&
         !isInviteMatch &&
         !isValidTeamInvite &&
         !isAdmin &&
         !isCommunityMember &&
-        !isPublicCommunity
+        !isParticipant
       ) {
-        throw new ForbiddenException('Giải đấu nội bộ chỉ dành cho thành viên của câu lạc bộ');
+        throw new ForbiddenException(
+          'Giải đấu nội bộ chỉ dành cho thành viên của câu lạc bộ hoặc người có mã mời',
+        );
       }
     }
+
 
     // Do NOT leak internal inviteCode to non-owner, non-admin viewers
     if (!isOwner && !isAdmin) {

@@ -23,6 +23,7 @@ import {
   buildCommunityBannedNotification,
   buildCommunityInviteNotification,
   buildCommunityInviteRevokedNotification,
+  buildCommunityJoinReviewedNotification,
   buildCommunityKickedNotification,
   buildCommunityOwnershipTransferredNotification,
   buildCommunityRoleDemotedNotification,
@@ -585,12 +586,26 @@ export class CommunitiesService {
     }
 
     const newStatus = action === 'APPROVE' ? 'JOINED' : 'REJECTED';
-    return await this.communitiesRepository.updateMemberStatus(
+    const updatedMember = await this.communitiesRepository.updateMemberStatus(
       id,
       memberId,
       newStatus,
       userId,
     );
+
+    if (updatedMember) {
+      const community = await this.findById(id);
+      await this.notificationsService.sendNotification(
+        buildCommunityJoinReviewedNotification({
+          communityId: id,
+          communityName: community.name,
+          receiverId: memberId,
+          approved: action === 'APPROVE',
+        }),
+      );
+    }
+
+    return updatedMember;
   }
 
   async followCommunity(userId: string, id: string) {
