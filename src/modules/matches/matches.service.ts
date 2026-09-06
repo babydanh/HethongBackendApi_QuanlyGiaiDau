@@ -1133,13 +1133,20 @@ export class MatchesService {
       );
     }
 
+    const tournamentConfig = existing.tournament?.tournamentConfig as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const isLiteTournament =
+      tournamentConfig?.isLite === true ||
+      String(tournamentConfig?.mode || '').toUpperCase() === 'LITE';
     const isReferee = existing.refereeId === user.sub;
     const isTournamentManager = await this.isTournamentManager(existing, user);
     const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
       existing.tournamentId,
       user.sub,
     );
-    if (!isTournamentManager && !isReferee && !acceptedReferee) {
+    if (!isLiteTournament && !isTournamentManager && !isReferee && !acceptedReferee) {
       throw new ForbiddenException(
         'Bạn không có quyền nhập điểm cho trận đấu này',
       );
@@ -1509,12 +1516,19 @@ export class MatchesService {
     }
 
     const isReferee = existing.refereeId === user.sub;
+    const tournamentConfig = existing.tournament?.tournamentConfig as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const isLiteTournament =
+      tournamentConfig?.isLite === true ||
+      String(tournamentConfig?.mode || '').toUpperCase() === 'LITE';
     const isTournamentManager = await this.isTournamentManager(existing, user);
     const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
       existing.tournamentId,
       user.sub,
     );
-    if (!isTournamentManager && !isReferee && !acceptedReferee) {
+    if (!isLiteTournament && !isTournamentManager && !isReferee && !acceptedReferee) {
       throw new ForbiddenException(
         'Bạn không có quyền thay đổi trạng thái trận đấu này',
       );

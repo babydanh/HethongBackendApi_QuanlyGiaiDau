@@ -273,7 +273,9 @@ export class MatchesRepository {
             select 1 from ${schema.tournaments} t
             where t.id = ${schema.matches.tournamentId}
             and t.deleted_at is null
-            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)` : sql``}
+            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
+              and not (t.tournament_config @> '{"isLite": true}'::jsonb
+                or t.tournament_config @> '{"mode": "LITE"}'::jsonb)` : sql``}
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
           or exists (
@@ -282,7 +284,9 @@ export class MatchesRepository {
             join ${schema.tournaments} t on s.tournament_id = t.id
             where g.id = ${schema.matches.groupId}
             and t.deleted_at is null
-            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)` : sql``}
+            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
+              and not (t.tournament_config @> '{"isLite": true}'::jsonb
+                or t.tournament_config @> '{"mode": "LITE"}'::jsonb)` : sql``}
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
         )`,

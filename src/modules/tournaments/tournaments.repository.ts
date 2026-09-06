@@ -4698,11 +4698,20 @@ export class TournamentsRepository {
           id: schema.categories.id,
           name: schema.categories.name,
         },
+        community: {
+          id: schema.communities.id,
+          name: schema.communities.name,
+          logoUrl: schema.communities.logoUrl,
+        },
       })
       .from(schema.tournaments)
       .leftJoin(
         schema.categories,
         eq(schema.tournaments.categoryId, schema.categories.id),
+      )
+      .leftJoin(
+        schema.communities,
+        eq(schema.tournaments.communityId, schema.communities.id),
       )
       .where(
         and(
@@ -4730,6 +4739,7 @@ export class TournamentsRepository {
         return {
           ...r.tournament,
           category: r.category?.id ? r.category : null,
+          community: r.community?.id ? r.community : null,
           participantCount: pCount,
           _count: {
             participants: pCount,
@@ -4756,11 +4766,17 @@ export class TournamentsRepository {
       tournamentType: schema.tournaments.tournamentType,
       logoUrl: schema.tournaments.logoUrl,
       categoryId: schema.tournaments.categoryId,
+      communityId: schema.tournaments.communityId,
       tournamentConfig: schema.tournaments.tournamentConfig,
       category: {
         id: schema.categories.id,
         name: schema.categories.name,
         slug: schema.categories.slug,
+      },
+      community: {
+        id: schema.communities.id,
+        name: schema.communities.name,
+        logoUrl: schema.communities.logoUrl,
       },
     } as const;
 
@@ -4778,6 +4794,10 @@ export class TournamentsRepository {
         .leftJoin(
           schema.categories,
           eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .leftJoin(
+          schema.communities,
+          eq(schema.tournaments.communityId, schema.communities.id),
         )
         .leftJoin(
           schema.tournamentVenues,
@@ -4809,6 +4829,10 @@ export class TournamentsRepository {
           eq(schema.tournaments.categoryId, schema.categories.id),
         )
         .leftJoin(
+          schema.communities,
+          eq(schema.tournaments.communityId, schema.communities.id),
+        )
+        .leftJoin(
           schema.tournamentVenues,
           eq(schema.tournaments.venueId, schema.tournamentVenues.id),
         )
@@ -4829,6 +4853,10 @@ export class TournamentsRepository {
         .leftJoin(
           schema.categories,
           eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .leftJoin(
+          schema.communities,
+          eq(schema.tournaments.communityId, schema.communities.id),
         )
         .leftJoin(
           schema.tournamentVenues,

@@ -466,7 +466,7 @@ export class CommunitiesService {
       throw new NotFoundException('User is not a member');
     }
 
-    if (existing.status === 'PENDING') {
+    if (existing.status === 'PENDING' && requesterId !== targetUserId) {
       throw new BadRequestException(
         'Hãy xử lý đơn tham gia bằng luồng duyệt đơn, không xóa trực tiếp.',
       );

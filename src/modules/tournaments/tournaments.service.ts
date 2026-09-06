@@ -875,7 +875,6 @@ export class TournamentsService {
         if (
           community &&
           community.visibility !== 'PRIVATE' &&
-          !isLite &&
           tournament.visibility !== 'PRIVATE'
         ) {
           isPublicCommunity = true;
@@ -1500,7 +1499,9 @@ export class TournamentsService {
         ...(footballMaxReserve !== undefined
           ? { maxReserve: footballMaxReserve }
           : {}),
-        isRanked: dto.isRanked ?? false,
+        // Recurring club tournaments are ranking tournaments by default;
+        // creators can explicitly opt out with isRanked=false.
+        isRanked: dto.isRanked ?? true,
         advanceDays,
         // nextRunAt is the cron due time; nextEventAt is the actual match day.
         nextRunAt: nextCreateAt.toISOString(),
@@ -1774,7 +1775,9 @@ export class TournamentsService {
       description: dto.description || '',
       maxParticipants: maxTeams,
       entryFee: 0,
-      isRanked: dto.isRanked ?? false,
+      // Lite club tournaments are ranking tournaments by default;
+      // creators can explicitly opt out with isRanked=false.
+      isRanked: dto.isRanked ?? true,
       sportRules,
       tournamentConfig: tournamentConfigWithLocation,
       startDate: startDateTime || undefined,
