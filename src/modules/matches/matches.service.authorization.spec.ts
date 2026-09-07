@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { MatchesService } from './matches.service';
 
 describe('MatchesService object-level football authority', () => {
@@ -12,6 +16,7 @@ describe('MatchesService object-level football authority', () => {
     updateScore: jest.fn(),
     updateRefereeId: jest.fn(),
     updateStatus: jest.fn(),
+    canAccessLiveMatch: jest.fn(),
   };
   const gateway = {
     broadcastScoreUpdate: jest.fn(),
@@ -20,6 +25,7 @@ describe('MatchesService object-level football authority', () => {
   const rankings = {};
   const notifications = {};
   const redis = {
+    hgetall: jest.fn(),
     hset: jest.fn(),
     getClient: jest.fn(() => ({ expire: jest.fn() })),
     delByPattern: jest.fn(),
@@ -73,6 +79,30 @@ describe('MatchesService object-level football authority', () => {
       ...baseMatch,
       status: 'ONGOING',
     });
+    repository.canAccessLiveMatch.mockResolvedValue(true);
+    redis.hgetall.mockResolvedValue({});
+  });
+
+  it('allows an authenticated club/Lite actor to read a match detail', async () => {
+    await expect(
+      service.findOne('match-1', {
+        sub: 'member-1',
+        roles: ['PLAYER'],
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: 'match-1' }));
+    expect(repository.canAccessLiveMatch).toHaveBeenCalledWith(
+      'match-1',
+      'member-1',
+      ['PLAYER'],
+    );
+  });
+
+  it('keeps inaccessible match detail hidden with a not-found response', async () => {
+    repository.canAccessLiveMatch.mockResolvedValue(false);
+
+    await expect(
+      service.findOne('match-1', { sub: 'outsider', roles: ['PLAYER'] }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('allows an accepted player-referee assigned to the match to enter score', async () => {
@@ -86,6 +116,106 @@ describe('MatchesService object-level football authority', () => {
       ),
     ).resolves.toBeDefined();
     expect(repository.updateScore).toHaveBeenCalled();
+  });
+
+  it('allows any authenticated Super Lite actor to start without management access', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      status: 'SCHEDULED',
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+    repository.updateStatus.mockResolvedValue({
+      ...baseMatch,
+      status: 'ONGOING',
+    });
+
+    await expect(
+      service.updateStatus(
+        'match-1',
+        { sub: 'outsider-1', roles: ['PLAYER'] } as never,
+        { status: 'ONGOING' } as never,
+      ),
+    ).resolves.toBeDefined();
+    expect(repository.updateStatus).toHaveBeenCalled();
+  });
+
+  it('allows any authenticated Super Lite actor to score without management access', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'outsider-1', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 1, p2SetsWon: 0 } as never,
+      ),
+    ).resolves.toBeDefined();
+    expect(repository.updateScore).toHaveBeenCalled();
+  });
+
+  it('allows an authenticated non-member to score a Super Lite match', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'outsider', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 0, p2SetsWon: 0 } as never,
+      ),
+    ).resolves.toBeDefined();
+    expect(repository.updateScore).toHaveBeenCalled();
+  });
+
+  it('rejects an authenticated user who cannot access a private Super Lite match', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        visibility: 'PRIVATE',
+        tournamentConfig: { isLite: true, mode: 'LITE' },
+      },
+    });
+    repository.canAccessLiveMatch.mockResolvedValue(false);
+
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'outsider', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 0, p2SetsWon: 0 } as never,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.updateScore).not.toHaveBeenCalled();
+  });
+
+  it('does not classify Quick scoring mode as Super Lite live access', async () => {
+    repository.findById.mockResolvedValue({
+      ...baseMatch,
+      tournament: {
+        ...baseMatch.tournament,
+        tournamentConfig: { isLite: false, mode: 'LITE' },
+      },
+    });
+    await expect(
+      service.updateScore(
+        'match-1',
+        { sub: 'roster-member-1', roles: ['PLAYER'] } as never,
+        { p1SetsWon: 1, p2SetsWon: 0 } as never,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.updateScore).not.toHaveBeenCalled();
   });
 
   it('allows a co-organizer scoped to this tournament to enter score', async () => {

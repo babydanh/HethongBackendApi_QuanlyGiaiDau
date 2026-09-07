@@ -1,5 +1,12 @@
-import { SPORT_RULE_KINDS, type SportRuleKind, type SportScoringModel } from './sport-rule-kind.type';
-import type { ResolvedSportRulesConfig, SportRuleResolutionInput } from './sport-rules.types';
+import {
+  SPORT_RULE_KINDS,
+  type SportRuleKind,
+  type SportScoringModel,
+} from './sport-rule-kind.type';
+import type {
+  ResolvedSportRulesConfig,
+  SportRuleResolutionInput,
+} from './sport-rules.types';
 
 interface SportDefaults {
   kind: SportRuleKind;
@@ -88,7 +95,10 @@ function normalizeKind(raw: unknown): SportRuleKind | null {
     return null;
   }
 
-  const normalized = raw.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  const normalized = raw
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
   if (normalized === 'PICKLEBALL') {
     return 'PICKLEBALL_RALLY';
   }
@@ -97,14 +107,18 @@ function normalizeKind(raw: unknown): SportRuleKind | null {
     : null;
 }
 
-function inferKindFromCategoryName(categorySlug?: string | null, categoryName?: string | null): SportRuleKind | null {
-  const normalizeCategoryText = (value?: string | null) => String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[đĐ]/g, 'd')
-    .toLowerCase()
-    .replace(/[-_]+/g, ' ')
-    .trim();
+function inferKindFromCategoryName(
+  categorySlug?: string | null,
+  categoryName?: string | null,
+): SportRuleKind | null {
+  const normalizeCategoryText = (value?: string | null) =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[đĐ]/g, 'd')
+      .toLowerCase()
+      .replace(/[-_]+/g, ' ')
+      .trim();
   const slug = normalizeCategoryText(categorySlug);
   const name = normalizeCategoryText(categoryName);
   const combined = `${slug} ${name}`;
@@ -112,7 +126,11 @@ function inferKindFromCategoryName(categorySlug?: string | null, categoryName?: 
   if (combined.includes('badminton') || combined.includes('cau long')) {
     return 'BADMINTON';
   }
-  if (combined.includes('table tennis') || combined.includes('bong ban') || combined.includes('ping pong')) {
+  if (
+    combined.includes('table tennis') ||
+    combined.includes('bong ban') ||
+    combined.includes('ping pong')
+  ) {
     return 'TABLE_TENNIS';
   }
   if (combined.includes('pickleball')) {
@@ -121,14 +139,21 @@ function inferKindFromCategoryName(categorySlug?: string | null, categoryName?: 
   if (combined.includes('tennis') || combined.includes('quan vot')) {
     return 'TENNIS';
   }
-  if (combined.includes('football') || combined.includes('bong da') || combined.includes('soccer')) {
+  if (
+    combined.includes('football') ||
+    combined.includes('bong da') ||
+    combined.includes('soccer')
+  ) {
     return 'FOOTBALL';
   }
 
   return null;
 }
 
-function getNestedRecord(source: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+function getNestedRecord(
+  source: Record<string, unknown> | null,
+  key: string,
+): Record<string, unknown> | null {
   if (!source) {
     return null;
   }
@@ -140,7 +165,9 @@ function getRoundOverride(
   roundNumber: number | null | undefined,
 ): Record<string, unknown> | null {
   const source = asRecord(config);
-  const rounds = getNestedRecord(source, 'rounds') || getNestedRecord(source, 'roundConfigs');
+  const rounds =
+    getNestedRecord(source, 'rounds') ||
+    getNestedRecord(source, 'roundConfigs');
   if (!rounds || roundNumber == null) {
     return null;
   }
@@ -148,7 +175,9 @@ function getRoundOverride(
   return asRecord(rounds[String(roundNumber)]);
 }
 
-function getScoringView(source: Record<string, unknown> | null): Record<string, unknown> | null {
+function getScoringView(
+  source: Record<string, unknown> | null,
+): Record<string, unknown> | null {
   if (!source) {
     return null;
   }
@@ -201,18 +230,30 @@ function readBoolean(
   return undefined;
 }
 
-function readExplicitKind(source: Record<string, unknown> | null): SportRuleKind | undefined {
+function readExplicitKind(
+  source: Record<string, unknown> | null,
+): SportRuleKind | undefined {
   if (!source) {
     return undefined;
   }
 
-  return normalizeKind(source.kind) || normalizeKind(getScoringView(source)?.kind) || undefined;
+  return (
+    normalizeKind(source.kind) ||
+    normalizeKind(getScoringView(source)?.kind) ||
+    undefined
+  );
 }
 
-function areKindsCompatible(categoryKind: SportRuleKind | undefined, configuredKind: SportRuleKind | undefined) {
+function areKindsCompatible(
+  categoryKind: SportRuleKind | undefined,
+  configuredKind: SportRuleKind | undefined,
+) {
   if (!categoryKind || !configuredKind) return true;
   if (categoryKind === configuredKind) return true;
-  return categoryKind.startsWith('PICKLEBALL_') && configuredKind.startsWith('PICKLEBALL_');
+  return (
+    categoryKind.startsWith('PICKLEBALL_') &&
+    configuredKind.startsWith('PICKLEBALL_')
+  );
 }
 
 function resolveRuleKind(
@@ -228,12 +269,16 @@ function resolveRuleKind(
   const tournamentRules = asRecord(input.tournamentSportRules);
   const categoryConfig = asRecord(input.categoryConfig);
   const categoryDefaults = getNestedRecord(categoryConfig, 'defaultSportRules');
-  const categoryKind = normalizeKind(categoryConfig?.ruleKind) ||
+  const categoryKind =
+    normalizeKind(categoryConfig?.ruleKind) ||
     readExplicitKind(categoryDefaults) ||
     inferKindFromCategoryName(input.categorySlug, input.categoryName) ||
     undefined;
   const tournamentKind = readExplicitKind(tournamentRules);
-  const compatibleTournamentKind = areKindsCompatible(categoryKind, tournamentKind)
+  const compatibleTournamentKind = areKindsCompatible(
+    categoryKind,
+    tournamentKind,
+  )
     ? tournamentKind
     : undefined;
 
@@ -249,11 +294,14 @@ function resolveRuleKind(
   );
 }
 
-export function resolveEffectiveSportRules(input: SportRuleResolutionInput): ResolvedSportRulesConfig {
+export function resolveEffectiveSportRules(
+  input: SportRuleResolutionInput,
+): ResolvedSportRulesConfig {
   const tournamentRules = asRecord(input.tournamentSportRules);
   const categoryConfig = asRecord(input.categoryConfig);
   const categoryDefaults = getNestedRecord(categoryConfig, 'defaultSportRules');
-  const stageConfig = asRecord(input.stageConfig) || asRecord(input.stageRoundConfig);
+  const stageConfig =
+    asRecord(input.stageConfig) || asRecord(input.stageRoundConfig);
   const groupConfig = asRecord(input.groupConfig);
   const stageRoundOverride = getRoundOverride(stageConfig, input.roundNumber);
   const groupRoundOverride = getRoundOverride(groupConfig, input.roundNumber);
@@ -265,13 +313,19 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     groupRoundOverride,
     matchOverride,
   });
-  const categoryKind = normalizeKind(categoryConfig?.ruleKind) ||
+  const categoryKind =
+    normalizeKind(categoryConfig?.ruleKind) ||
     readExplicitKind(categoryDefaults) ||
     inferKindFromCategoryName(input.categorySlug, input.categoryName) ||
     undefined;
   const tournamentKind = readExplicitKind(tournamentRules);
-  const tournamentRulesMatchCategory = areKindsCompatible(categoryKind, tournamentKind);
-  const effectiveTournamentRules = tournamentRulesMatchCategory ? tournamentRules : null;
+  const tournamentRulesMatchCategory = areKindsCompatible(
+    categoryKind,
+    tournamentKind,
+  );
+  const effectiveTournamentRules = tournamentRulesMatchCategory
+    ? tournamentRules
+    : null;
   const defaults = SPORT_DEFAULTS[kind];
 
   const scoringSources = [
@@ -290,10 +344,18 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
   let bestOf = defaults.setsToWin * 2 - 1;
   let setsToWin = defaults.setsToWin;
   for (const source of scoringSources) {
-    const sourceBestOf = readNumber([source], ['bestOf', 'best_of', 'bestOfSets', 'max_sets']);
+    const sourceBestOf = readNumber(
+      [source],
+      ['bestOf', 'best_of', 'bestOfSets', 'max_sets'],
+    );
     const sourceSetsToWin = readNumber([source], ['setsToWin', 'sets_to_win']);
     if (sourceBestOf != null || sourceSetsToWin != null) {
-      bestOf = Math.max(1, Math.trunc(sourceBestOf ?? (Math.max(1, Math.trunc(sourceSetsToWin!)) * 2 - 1)));
+      bestOf = Math.max(
+        1,
+        Math.trunc(
+          sourceBestOf ?? Math.max(1, Math.trunc(sourceSetsToWin!)) * 2 - 1,
+        ),
+      );
       setsToWin = Math.ceil(bestOf / 2);
       break;
     }
@@ -314,19 +376,25 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     ),
   );
 
-  const mustWinByTwo = readBoolean(scoringSources, [
-    'mustWinByTwo',
-    'must_win_by_two',
-    'winByTwo',
-    'win_by_two',
-    'deuceEnabled',
-    'deuce_enabled',
-  ]) ?? defaults.mustWinByTwo;
+  const mustWinByTwo =
+    readBoolean(scoringSources, [
+      'mustWinByTwo',
+      'must_win_by_two',
+      'winByTwo',
+      'win_by_two',
+      'deuceEnabled',
+      'deuce_enabled',
+    ]) ?? defaults.mustWinByTwo;
 
   const maxPoints = Math.max(
     pointsPerSet,
     Math.trunc(
-      readNumber(scoringSources, ['maxPoints', 'max_points', 'maxPointsPerSet', 'capAt']) ?? defaults.maxPoints,
+      readNumber(scoringSources, [
+        'maxPoints',
+        'max_points',
+        'maxPointsPerSet',
+        'capAt',
+      ]) ?? defaults.maxPoints,
     ),
   );
 
@@ -335,7 +403,8 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     Math.max(
       0,
       Math.trunc(
-        readNumber(scoringSources, ['tiebreakAt', 'tiebreak_at']) ?? defaults.tiebreakAt,
+        readNumber(scoringSources, ['tiebreakAt', 'tiebreak_at']) ??
+          defaults.tiebreakAt,
       ),
     ),
   );
@@ -344,9 +413,10 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
     'tiebreakPoints',
     'tiebreak_points',
   ]);
-  const tiebreakPoints = tiebreakPointsValue == null
-    ? defaults.tiebreakPoints
-    : Math.max(1, Math.trunc(tiebreakPointsValue));
+  const tiebreakPoints =
+    tiebreakPointsValue == null
+      ? defaults.tiebreakPoints
+      : Math.max(1, Math.trunc(tiebreakPointsValue));
 
   const version = Math.max(
     1,
@@ -354,19 +424,48 @@ export function resolveEffectiveSportRules(input: SportRuleResolutionInput): Res
   );
 
   const tournamentConfigObj = asRecord(input.tournamentConfig);
-  const mode = tournamentConfigObj?.mode === 'LITE'
-    ? 'LITE'
-    : scoringSources.some((s) => s?.mode === 'LITE' || s?.rulesPreset === 'LITE')
+  // A Super Lite tournament is identified by `isLite` and deliberately does
+  // not need a scoring preset. Keep that product mode in the same scoring
+  // contract as an explicit LITE preset so the app and API validate the same
+  // payload.
+  const tournamentScoringMode = String(
+    tournamentConfigObj?.scoringMode ?? tournamentConfigObj?.scoring_mode ?? '',
+  )
+    .trim()
+    .toUpperCase();
+  const hasOpenScoringPreset = ['LITE', 'OPEN', 'FREE'].includes(
+    tournamentScoringMode,
+  );
+  const mode =
+    tournamentConfigObj?.isLite === true || tournamentConfigObj?.mode === 'LITE'
       ? 'LITE'
-      : 'STRICT';
+      : hasOpenScoringPreset
+        ? 'LITE'
+        : scoringSources.some((s) =>
+              ['LITE', 'OPEN', 'FREE'].includes(
+                String(
+                  s?.mode ??
+                    s?.rulesPreset ??
+                    s?.scoringMode ??
+                    s?.scoring_mode ??
+                    '',
+                )
+                  .trim()
+                  .toUpperCase(),
+              ),
+            )
+          ? 'LITE'
+          : 'STRICT';
 
   return {
     version,
     kind,
     scoringModel: defaults.scoringModel,
-    format: scoringSources
-      .map((source) => getNestedRecord(source, 'format'))
-      .find((format): format is Record<string, unknown> => format !== null) || {},
+    format:
+      scoringSources
+        .map((source) => getNestedRecord(source, 'format'))
+        .find((format): format is Record<string, unknown> => format !== null) ||
+      {},
     bestOf,
     setsToWin,
     pointsPerSet,

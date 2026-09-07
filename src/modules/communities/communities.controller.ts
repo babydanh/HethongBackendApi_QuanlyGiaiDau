@@ -26,6 +26,7 @@ import { ReviewCommunityDto } from './dto/review-community.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { UpdateMemberTagsDto } from './dto/update-member-tags.dto';
+import { AdjustMemberEloDto } from './dto/adjust-member-elo.dto';
 import { CreateTagPresetDto } from './dto/create-tag-preset.dto';
 import { JoinCommunityDto } from './dto/join-community.dto';
 import { ReviewJoinDto } from './dto/review-join.dto';
@@ -246,6 +247,26 @@ export class CommunitiesController {
       id,
       userId,
       updateMemberTagsDto.tags,
+      user.roles,
+    );
+  }
+
+  @Post(':id/members/:userId/elo')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Điều phối ELO thành viên CLB (Chỉ OWNER/MODERATOR)' })
+  @ApiResponse({ status: 200, description: 'Cập nhật ELO thành công' })
+  @ApiResponse({ status: 403, description: 'Không có quyền điều phối ELO' })
+  async adjustMemberElo(
+    @CurrentUser() user: { id: string; roles: string[] },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() adjustMemberEloDto: AdjustMemberEloDto,
+  ) {
+    return await this.communitiesService.adjustMemberElo(
+      user.id,
+      id,
+      userId,
+      adjustMemberEloDto,
       user.roles,
     );
   }

@@ -15,6 +15,7 @@ import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
 import { venueCourts } from './venues.schema';
 import { tournamentGroups, tournamentParticipants, tournaments, tournamentStages } from './tournaments.schema';
+import { clubMatchSessionMatches } from './club-match-sessions.schema';
 
 export const groupStandings = pgTable('group_standings', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -176,8 +177,11 @@ export const matchEloOutbox = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     matchId: uuid('match_id')
-      .references(() => matches.id, { onDelete: 'restrict' })
-      .notNull(),
+      .references(() => matches.id, { onDelete: 'restrict' }),
+    clubMatchSessionMatchId: uuid('club_match_session_match_id').references(
+      () => clubMatchSessionMatches.id,
+      { onDelete: 'restrict' },
+    ),
     status: varchar('status', { length: 20 }).default('PENDING').notNull(),
     attempts: integer('attempts').default(0).notNull(),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
@@ -193,6 +197,13 @@ export const matchEloOutbox = pgTable(
   },
   (table) => ({
     matchIdUnique: uniqueIndex('match_elo_outbox_match_id_unique').on(table.matchId),
+    clubMatchSessionMatchIdUnique: uniqueIndex(
+      'match_elo_outbox_club_session_match_id_unique',
+    ).on(table.clubMatchSessionMatchId),
+    exactlyOneContext: check(
+      'match_elo_outbox_exactly_one_context_check',
+      sql`(${table.matchId} IS NOT NULL) <> (${table.clubMatchSessionMatchId} IS NOT NULL)`,
+    ),
     idxEloOutboxClaim: index('idx_elo_outbox_claim').on(table.status, table.nextAttemptAt),
     idxEloOutboxLease: index('idx_elo_outbox_lease')
       .on(table.lockedAt)

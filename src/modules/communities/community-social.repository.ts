@@ -126,6 +126,10 @@ export class CommunitySocialRepository {
           bannerUrl: schema.tournaments.bannerUrl,
           maxParticipants: schema.tournaments.maxParticipants,
           inviteCode: schema.tournaments.inviteCode,
+          // Keep the Lite/advanced boundary explicit for mobile clients. The
+          // community feed intentionally selects a compact tournament shape,
+          // so clients cannot infer Lite from the omitted tournamentConfig.
+          isTournamentLite: sql<boolean>`COALESCE((${schema.tournaments.tournamentConfig}->>'isLite')::boolean, false) = true OR ${schema.tournaments.tournamentConfig}->>'mode' = 'LITE'`,
           hasBracket: sql<boolean>`EXISTS (
             SELECT 1
             FROM ${schema.tournamentStages}
@@ -419,6 +423,32 @@ export class CommunitySocialRepository {
         eq(schema.communityMembers.status, 'JOINED'),
         inArray(schema.communityMembers.userId, userIds),
       ));
+  }
+
+  async getAllNotificationPreferences(communityId: string, excludeUserId?: string) {
+    const conditions = [
+      eq(schema.communityMembers.communityId, communityId),
+      eq(schema.communityMembers.status, 'JOINED'),
+    ];
+    if (excludeUserId) {
+      conditions.push(sql`${schema.communityMembers.userId} != ${excludeUserId}`);
+    }
+    return this.db
+      .select({
+        userId: schema.communityMembers.userId,
+        notificationPreference: schema.communityMembers.notificationPreference,
+        socialMuted: schema.communityMemberSocialPreferences.muted,
+        socialNotificationsEnabled: schema.communityMemberSocialPreferences.notificationsEnabled,
+      })
+      .from(schema.communityMembers)
+      .leftJoin(
+        schema.communityMemberSocialPreferences,
+        and(
+          eq(schema.communityMemberSocialPreferences.communityId, schema.communityMembers.communityId),
+          eq(schema.communityMemberSocialPreferences.userId, schema.communityMembers.userId),
+        ),
+      )
+      .where(and(...conditions));
   }
 
   async updatePostStatus(postId: string, status: 'PUBLISHED' | 'REJECTED' | 'HIDDEN') {

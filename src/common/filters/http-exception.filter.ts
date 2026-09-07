@@ -20,6 +20,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let message = exception.message || 'Internal Server Error';
     let code = 'INTERNAL_SERVER_ERROR';
     let details: unknown = null;
+    let extensions: Record<string, unknown> = {};
 
     if (exception instanceof BaseException) {
       status = exception.getStatus();
@@ -73,8 +74,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
         } else {
           message = (resObj.message as string) || message;
         }
-        code = (resObj.error as string) || 'HTTP_EXCEPTION';
+        code =
+          (typeof resObj.code === 'string' ? resObj.code : undefined) ||
+          (typeof resObj.error === 'string' ? resObj.error : undefined) ||
+          'HTTP_EXCEPTION';
         details = details || resObj.details || null;
+        extensions = Object.fromEntries(
+          Object.entries(resObj).filter(
+            ([key]) =>
+              !['statusCode', 'message', 'error', 'code', 'details'].includes(key),
+          ),
+        );
       }
     } else {
       console.error('[Unhandled Exception]:', exception);
@@ -90,6 +100,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       details,
       timestamp: new Date().toISOString(),
       path: request.url,
+      ...extensions,
     });
   }
 }

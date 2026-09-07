@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   UnauthorizedException,
   UnprocessableEntityException,
+  Optional,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { randomUUID } from 'node:crypto';
@@ -26,6 +27,7 @@ import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import type { MatchBroadcastData } from './interfaces/match-broadcast.interface';
 import { RankingsService } from '../rankings/rankings.service';
+import { EloOutboxProcessor } from '../rankings/elo-outbox.processor';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import {
@@ -53,6 +55,7 @@ export class MatchesService {
     private readonly rankingsService: RankingsService,
     private readonly notificationsService: NotificationsService,
     private readonly redisService: RedisService,
+    @Optional() private readonly eloOutboxProcessor?: EloOutboxProcessor,
   ) {}
 
   @Cron('*/10 * * * *')
@@ -189,6 +192,66 @@ export class MatchesService {
     };
   }
 
+  /**
+   * Super Lite has an open scorecard, but it still has a tournament winner
+   * when its final bracket match is completed.  Do not wait for generated TBD
+   * placeholders/bye fixtures to become COMPLETED; those are not playable
+   * matches and previously kept a finished Lite tournament in progress.
+   */
+  private isSuperLiteFinalMatch(
+    match: Awaited<ReturnType<MatchesRepository['findById']>>,
+  ) {
+    if (!match) return false;
+    const rawConfig = match.tournament?.tournamentConfig;
+    const config = (
+      typeof rawConfig === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(rawConfig);
+            } catch {
+              return {};
+            }
+          })()
+        : rawConfig ?? {}
+    ) as Record<string, unknown>;
+    const isSuperLite =
+      config?.isLite === true ||
+      (String(config?.mode || '').toUpperCase() === 'LITE' &&
+        config?.hideAdvancedSettings === true);
+    const stageType = String(match.stage?.type || '').toUpperCase();
+    if (!isSuperLite || stageType === 'ROUND_ROBIN') return false;
+
+    const branch = String(match.bracketBranch || '').toUpperCase();
+    const stageName = String(match.stage?.name || '').toLowerCase();
+    const isThirdPlace =
+      branch === 'THIRD_PLACE' ||
+      branch.includes('THIRD_PLACE') ||
+      stageName.includes('third place') ||
+      stageName.includes('hạng 3') ||
+      stageName.includes('hang 3');
+    if (isThirdPlace) return false;
+
+    // Playoff matches used to break round-robin ties and are also terminal
+    // nodes, but they do not decide the tournament champion. Only the main
+    // elimination branch or an explicitly named final may close Super Lite.
+    const isExplicitFinal =
+      branch === 'FINAL' ||
+      branch === 'GRAND_FINALS' ||
+      stageName.includes('chung kết') ||
+      stageName.includes('chung ket') ||
+      stageName.includes('grand final') ||
+      stageName.includes('final');
+    if (branch === 'PLAYOFF' || (!isExplicitFinal && branch !== 'MAIN')) {
+      return false;
+    }
+
+    // A playable final is the terminal match of an elimination branch.  The
+    // absence of both links is the persisted bracket contract for a final;
+    // requiring an elimination stage prevents round-robin fixtures from
+    // closing the whole tournament after their first result.
+    return !match.nextMatchId && !match.loserNextMatchId;
+  }
+
   private async finalizeCompletedMatch(
     existing: Awaited<ReturnType<MatchesRepository['findById']>>,
     matchId: string,
@@ -266,7 +329,8 @@ export class MatchesService {
     // NOTE-3 (T12): ELO is now enqueued inside the completion transaction via
     // match_elo_outbox (see matches.repository completeMatchInTx). The worker
     // (EloOutboxProcessor) owns processMatchResult with retry + idempotency.
-    // No inline call here — a failure can no longer be swallowed silently.
+    // Dispatch only after commit. Cron remains the durable retry path.
+    void this.eloOutboxProcessor?.dispatchNow();
 
     if (existing.tournamentId) {
       try {
@@ -274,7 +338,9 @@ export class MatchesService {
           await this.matchesRepository.checkAllMatchesCompleted(
             existing.tournamentId,
           );
-        if (allCompleted) {
+        const isSuperLiteFinal =
+          Boolean(winnerId) && this.isSuperLiteFinalMatch(existing);
+        if (allCompleted || isSuperLiteFinal) {
           await this.matchesRepository.updateTournamentStatus(
             existing.tournamentId,
             'COMPLETED',
@@ -776,14 +842,19 @@ export class MatchesService {
     courtIds: string[],
     divisionId?: string,
   ) {
-    const tournament = await this.matchesRepository.findScheduleTournament(tournamentId);
+    const tournament =
+      await this.matchesRepository.findScheduleTournament(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
     const isManager =
       this.isAdmin(user) ||
       tournament.createdBy === user.sub ||
-      (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
-    if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
+      (await this.matchesRepository.isTournamentManager(
+        tournamentId,
+        user.sub,
+      ));
+    if (!isManager)
+      throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
 
     const query = new QueryMatchDto();
     query.tournamentId = tournamentId;
@@ -792,7 +863,9 @@ export class MatchesService {
     const result = await this.matchesRepository.findAll(query);
     const rows = Array.isArray(result?.data) ? result.data : [];
     const safeValue = (row: unknown, key: string): unknown =>
-      row && typeof row === 'object' ? (row as Record<string, unknown>)[key] : undefined;
+      row && typeof row === 'object'
+        ? (row as Record<string, unknown>)[key]
+        : undefined;
 
     return {
       tournament: {
@@ -823,38 +896,55 @@ export class MatchesService {
     user: JwtPayload,
     dto: CreateSchedulePlanDto,
   ) {
-    const tournament = await this.matchesRepository.findScheduleTournament(tournamentId);
+    const tournament =
+      await this.matchesRepository.findScheduleTournament(tournamentId);
     if (!tournament) throw new NotFoundException('Tournament not found');
 
     const isManager =
       this.isAdmin(user) ||
       tournament.createdBy === user.sub ||
-      (await this.matchesRepository.isTournamentManager(tournamentId, user.sub));
-    if (!isManager) throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
+      (await this.matchesRepository.isTournamentManager(
+        tournamentId,
+        user.sub,
+      ));
+    if (!isManager)
+      throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
 
     // Normalize optional DTO defaults explicitly; do not rely on class-transformer
     // preserving property initializers under whitelist/transform settings.
     const timingModel = dto.timingModel ?? 'MATCH_TOTAL';
-    const requestedDurationMinutes = Number.isInteger(dto.durationMinutes) ? dto.durationMinutes : 45;
-    const requestedBufferMinutes = Number.isInteger(dto.bufferMinutes) ? dto.bufferMinutes : 5;
+    const requestedDurationMinutes = Number.isInteger(dto.durationMinutes)
+      ? dto.durationMinutes
+      : 45;
+    const requestedBufferMinutes = Number.isInteger(dto.bufferMinutes)
+      ? dto.bufferMinutes
+      : 5;
     const unitDurationMinutes = Number.isInteger(dto.unitDurationMinutes)
       ? dto.unitDurationMinutes
       : requestedDurationMinutes;
     const unitCount = Number.isInteger(dto.unitCount) ? dto.unitCount : 1;
-    const betweenUnitBreakMinutes = Number.isInteger(dto.betweenUnitBreakMinutes)
+    const betweenUnitBreakMinutes = Number.isInteger(
+      dto.betweenUnitBreakMinutes,
+    )
       ? dto.betweenUnitBreakMinutes
       : 0;
     const changeoverMinutes = Number.isInteger(dto.changeoverMinutes)
       ? dto.changeoverMinutes
       : requestedBufferMinutes;
-    const durationMinutes = timingModel === 'MATCH_TOTAL'
-      ? requestedDurationMinutes
-      : unitDurationMinutes * unitCount + betweenUnitBreakMinutes * Math.max(0, unitCount - 1);
+    const durationMinutes =
+      timingModel === 'MATCH_TOTAL'
+        ? requestedDurationMinutes
+        : unitDurationMinutes * unitCount +
+          betweenUnitBreakMinutes * Math.max(0, unitCount - 1);
     const bufferMinutes = changeoverMinutes;
-    const gridIncrementMinutes = [5, 10, 15, 30, 60].includes(dto.gridIncrementMinutes ?? 30)
-      ? (dto.gridIncrementMinutes ?? 30) as 5 | 10 | 15 | 30 | 60
+    const gridIncrementMinutes = [5, 10, 15, 30, 60].includes(
+      dto.gridIncrementMinutes ?? 30,
+    )
+      ? ((dto.gridIncrementMinutes ?? 30) as 5 | 10 | 15 | 30 | 60)
       : 30;
-    const minimumStartIntervalMinutes = Number.isInteger(dto.minimumStartIntervalMinutes)
+    const minimumStartIntervalMinutes = Number.isInteger(
+      dto.minimumStartIntervalMinutes,
+    )
       ? Math.min(240, Math.max(5, dto.minimumStartIntervalMinutes))
       : 30;
 
@@ -871,7 +961,9 @@ export class MatchesService {
       dto.divisionId,
     );
     if (courts.length !== uniqueCourtIds.length) {
-      throw new UnprocessableEntityException('Một hoặc nhiều sân không thuộc phạm vi giải hoặc đã bị vô hiệu hóa');
+      throw new UnprocessableEntityException(
+        'Một hoặc nhiều sân không thuộc phạm vi giải hoặc đã bị vô hiệu hóa',
+      );
     }
 
     const durationMs = durationMinutes * 60_000;
@@ -889,10 +981,17 @@ export class MatchesService {
     const windowEnd = dto.operatingWindow
       ? new Date(dto.operatingWindow.end)
       : dateWithTournamentTime(tournament.endDate, '22:00');
-    if (!Number.isFinite(windowStart.getTime()) || !Number.isFinite(windowEnd.getTime()) || windowEnd <= windowStart) {
+    if (
+      !Number.isFinite(windowStart.getTime()) ||
+      !Number.isFinite(windowEnd.getTime()) ||
+      windowEnd <= windowStart
+    ) {
       throw new BadRequestException('Khung giờ xếp lịch không hợp lệ');
     }
-    if (windowStart.toISOString().slice(0, 10) !== requestedDay || windowEnd.toISOString().slice(0, 10) !== requestedDay) {
+    if (
+      windowStart.toISOString().slice(0, 10) !== requestedDay ||
+      windowEnd.toISOString().slice(0, 10) !== requestedDay
+    ) {
       throw new BadRequestException('Khung giờ phải nằm trong ngày đã chọn');
     }
 
@@ -902,22 +1001,28 @@ export class MatchesService {
       tournamentId,
     });
     if (allMatches.meta.hasMore) {
-      throw new UnprocessableEntityException('Phạm vi giải có quá nhiều trận cho một lần preview; hãy chọn một phân hạng');
+      throw new UnprocessableEntityException(
+        'Phạm vi giải có quá nhiều trận cho một lần preview; hãy chọn một phân hạng',
+      );
     }
     const scopedMatches = dto.divisionId
-      ? (await this.matchesRepository.findAll({
-          page: 1,
-          limit: 500,
-          tournamentId,
-          divisionId: dto.divisionId,
-        })).data
+      ? (
+          await this.matchesRepository.findAll({
+            page: 1,
+            limit: 500,
+            tournamentId,
+            divisionId: dto.divisionId,
+          })
+        ).data
       : allMatches.data;
     const scopeById = new Map(scopedMatches.map((match) => [match.id, match]));
     const selectedMatches = dto.matchIds
       ? dto.matchIds.map((matchId) => scopeById.get(matchId))
       : scopedMatches;
     if (dto.matchIds && selectedMatches.some((match) => !match)) {
-      throw new UnprocessableEntityException('Một hoặc nhiều trận không thuộc phân hạng hoặc giải đấu này');
+      throw new UnprocessableEntityException(
+        'Một hoặc nhiều trận không thuộc phân hạng hoặc giải đấu này',
+      );
     }
 
     type Interval = { start: number; end: number; participantIds: string[] };
@@ -934,11 +1039,17 @@ export class MatchesService {
       }
     };
     for (const match of allMatches.data) {
-      if (!match.courtId || !match.scheduledAt || !['SCHEDULED', 'ONGOING'].includes(match.status)) continue;
+      if (
+        !match.courtId ||
+        !match.scheduledAt ||
+        !['SCHEDULED', 'ONGOING'].includes(match.status)
+      )
+        continue;
       const start = new Date(match.scheduledAt).getTime();
       if (!Number.isFinite(start)) continue;
       const end = start + durationMs + bufferMs;
-      if (end <= windowStart.getTime() || start >= windowEnd.getTime()) continue;
+      if (end <= windowStart.getTime() || start >= windowEnd.getTime())
+        continue;
       addBusy(match.courtId, {
         start,
         end,
@@ -955,14 +1066,21 @@ export class MatchesService {
       const step = minimumStartIntervalMinutes * 60_000;
       return windowStart.getTime() + Math.ceil(elapsed / step) * step;
     };
-    const assignments: Array<{ matchId: string; courtId: string; scheduledAt: string }> = [];
+    const assignments: Array<{
+      matchId: string;
+      courtId: string;
+      scheduledAt: string;
+    }> = [];
     const skipped: Array<{ matchId: string; reason: string }> = [];
-    const eligible = selectedMatches.filter((match): match is NonNullable<typeof match> => Boolean(match));
-    eligible.sort((a, b) =>
-      a.roundNumber - b.roundNumber ||
-      (a.leg ?? 0) - (b.leg ?? 0) ||
-      a.matchOrder - b.matchOrder ||
-      a.id.localeCompare(b.id),
+    const eligible = selectedMatches.filter(
+      (match): match is NonNullable<typeof match> => Boolean(match),
+    );
+    eligible.sort(
+      (a, b) =>
+        a.roundNumber - b.roundNumber ||
+        (a.leg ?? 0) - (b.leg ?? 0) ||
+        a.matchOrder - b.matchOrder ||
+        a.id.localeCompare(b.id),
     );
 
     for (const match of eligible) {
@@ -971,10 +1089,15 @@ export class MatchesService {
         continue;
       }
       if (!match.participant1Id || !match.participant2Id) {
-        skipped.push({ matchId: match.id, reason: 'TBD_OR_DEPENDENCY_BLOCKED' });
+        skipped.push({
+          matchId: match.id,
+          reason: 'TBD_OR_DEPENDENCY_BLOCKED',
+        });
         continue;
       }
-      if (['COMPLETED', 'CANCELLED', 'DISPUTED', 'ONGOING'].includes(match.status)) {
+      if (
+        ['COMPLETED', 'CANCELLED', 'DISPUTED', 'ONGOING'].includes(match.status)
+      ) {
         skipped.push({ matchId: match.id, reason: 'TERMINAL_OR_ONGOING' });
         continue;
       }
@@ -989,15 +1112,28 @@ export class MatchesService {
         const participantIds = [match.participant1Id, match.participant2Id];
         while (candidateStart + durationMs + bufferMs <= windowEnd.getTime()) {
           const candidateEnd = candidateStart + durationMs + bufferMs;
-          const courtConflict = (busyByCourt.get(court.id) || []).find((interval) => overlaps(candidateStart, candidateEnd, interval));
+          const courtConflict = (busyByCourt.get(court.id) || []).find(
+            (interval) => overlaps(candidateStart, candidateEnd, interval),
+          );
           const participantConflict = participantIds
-            .flatMap((participantId) => busyByParticipant.get(participantId) || [])
-            .find((interval) => overlaps(candidateStart, candidateEnd, interval));
+            .flatMap(
+              (participantId) => busyByParticipant.get(participantId) || [],
+            )
+            .find((interval) =>
+              overlaps(candidateStart, candidateEnd, interval),
+            );
           if (!courtConflict && !participantConflict) break;
-          const nextAvailable = Math.max(courtConflict?.end || 0, participantConflict?.end || 0, candidateStart + 60_000);
+          const nextAvailable = Math.max(
+            courtConflict?.end || 0,
+            participantConflict?.end || 0,
+            candidateStart + 60_000,
+          );
           candidateStart = snapToGrid(nextAvailable);
         }
-        if (candidateStart + durationMs + bufferMs <= windowEnd.getTime() && (!best || candidateStart < best.start)) {
+        if (
+          candidateStart + durationMs + bufferMs <= windowEnd.getTime() &&
+          (!best || candidateStart < best.start)
+        ) {
           best = { courtId: court.id, start: candidateStart };
         }
       }
@@ -1020,7 +1156,9 @@ export class MatchesService {
 
     const scheduleVersion = [
       tournament.updatedAt.toISOString(),
-      ...allMatches.data.map((match) => `${match.id}:${match.revision ?? 0}:${match.updatedAt}`).sort(),
+      ...allMatches.data
+        .map((match) => `${match.id}:${match.revision ?? 0}:${match.updatedAt}`)
+        .sort(),
     ].join('|');
     return {
       statusCode: 200,
@@ -1075,24 +1213,22 @@ export class MatchesService {
     return result;
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: JwtPayload) {
     const match = await this.matchesRepository.findById(id);
     if (!match) {
       throw new NotFoundException('Match not found');
     }
-    const t = match.tournament;
-    if (
-      t &&
-      (t.visibility !== 'PUBLIC' ||
-        [
-          'DRAFT',
-          'PENDING_APPROVAL',
-          'SUSPENDED',
-          'CANCELLED',
-          'PENDING_DELETE',
-          'pending_delete',
-        ].includes(t.status))
-    ) {
+
+    const systemRoles = [
+      ...(user?.roles ?? []),
+      ...(user?.role ? [user.role] : []),
+    ];
+    const canAccess = await this.matchesRepository.canAccessLiveMatch(
+      id,
+      user?.sub,
+      systemRoles,
+    );
+    if (!canAccess) {
       throw new NotFoundException('Match not found');
     }
     if (match.status === 'ONGOING') {
@@ -1133,13 +1269,42 @@ export class MatchesService {
       );
     }
 
+    const tournamentConfig = existing.tournament?.tournamentConfig as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const isLiteTournament =
+      tournamentConfig?.isLite === true ||
+      (String(tournamentConfig?.mode || '').toUpperCase() === 'LITE' &&
+        tournamentConfig?.hideAdvancedSettings === true);
     const isReferee = existing.refereeId === user.sub;
     const isTournamentManager = await this.isTournamentManager(existing, user);
     const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
       existing.tournamentId,
       user.sub,
     );
-    if (!isTournamentManager && !isReferee && !acceptedReferee) {
+    const canAccessSuperLiteMatch = isLiteTournament
+      ? await this.matchesRepository.canAccessLiveMatch(
+          id,
+          user.sub,
+          [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+        )
+      : false;
+    // Super Lite deliberately exposes the shared score board to any
+    // authenticated user who can access the match. Management, bracket and
+    // scheduling permissions remain protected by the checks above/below.
+    const canScoreSuperLite =
+      isLiteTournament &&
+      (canAccessSuperLiteMatch ||
+        isTournamentManager ||
+        isReferee ||
+        acceptedReferee);
+    if (
+      !isTournamentManager &&
+      !isReferee &&
+      !acceptedReferee &&
+      !canScoreSuperLite
+    ) {
       throw new ForbiddenException(
         'Bạn không có quyền nhập điểm cho trận đấu này',
       );
@@ -1199,19 +1364,11 @@ export class MatchesService {
         // bypass the sport validator. Football draws and shootouts are valid
         // domain outcomes and are therefore validated with football rules.
         const resolvedConfig = resolvedMatchConfig;
-        const tournamentConfig = existing.tournament?.tournamentConfig as
-          | Record<string, unknown>
-          | undefined;
-        const sportRules = existing.tournament?.sportRules as
-          | Record<string, unknown>
-          | undefined;
-        const matchConfig = existing.matchConfig as
-          | Record<string, unknown>
-          | undefined;
-        resolvedConfig.mode =
-          (tournamentConfig?.mode as string | undefined) ||
-          (sportRules?.mode as string | undefined) ||
-          (matchConfig?.mode as string | undefined);
+        // `resolveMatchConfig` already applies the full hierarchy, including
+        // a Quick tournament's explicit sportRules.mode=LITE. Do not replace
+        // that scoring mode with tournamentConfig.mode=STRICT: the latter is
+        // the product/access discriminator for standard tournaments.
+        if (isLiteTournament) resolvedConfig.mode = 'LITE';
         const validation =
           resolvedConfig.kind === 'FOOTBALL'
             ? validateScoreDetails(scoreDetails, resolvedConfig)
@@ -1236,39 +1393,33 @@ export class MatchesService {
       } else {
         // Resolve config hierarchy (Stage -> Round -> Match)
         const resolvedConfig = resolvedMatchConfig;
-        const tournamentConfig = existing.tournament?.tournamentConfig as
-          | Record<string, unknown>
-          | undefined;
-        const sportRules = existing.tournament?.sportRules as
-          | Record<string, unknown>
-          | undefined;
-        const matchConfig = existing.matchConfig as
-          | Record<string, unknown>
-          | undefined;
-
-        resolvedConfig.mode =
-          (tournamentConfig?.mode as string | undefined) ||
-          (sportRules?.mode as string | undefined) ||
-          (matchConfig?.mode as string | undefined);
+        // Keep scoring mode independent from the product mode. In particular,
+        // Quick may persist tournamentConfig.mode=STRICT together with an
+        // explicit open sportRules.mode=LITE.
+        if (isLiteTournament) resolvedConfig.mode = 'LITE';
         const validation = validateScoreDetails(scoreDetails, resolvedConfig);
         p1SetsWon = validation.p1SetsWon;
         p2SetsWon = validation.p2SetsWon;
 
-        // Suggest winner automatically
-        if (p1SetsWon >= validation.setsToWin) {
-          if (winnerId && winnerId !== existing.participant1Id) {
-            throw new BadRequestException(
-              'WinnerId không khớp với kết quả set thắng.',
-            );
+        // Strict presets derive a winner from the configured set target.
+        // Super Lite is an open scorecard: each manually closed set is
+        // history, so winning the first set must not finalize the match.
+        if (resolvedConfig.mode !== 'LITE') {
+          if (p1SetsWon >= validation.setsToWin) {
+            if (winnerId && winnerId !== existing.participant1Id) {
+              throw new BadRequestException(
+                'WinnerId không khớp với kết quả set thắng.',
+              );
+            }
+            winnerId = existing.participant1Id || undefined;
+          } else if (p2SetsWon >= validation.setsToWin) {
+            if (winnerId && winnerId !== existing.participant2Id) {
+              throw new BadRequestException(
+                'WinnerId không khớp với kết quả set thắng.',
+              );
+            }
+            winnerId = existing.participant2Id || undefined;
           }
-          winnerId = existing.participant1Id || undefined;
-        } else if (p2SetsWon >= validation.setsToWin) {
-          if (winnerId && winnerId !== existing.participant2Id) {
-            throw new BadRequestException(
-              'WinnerId không khớp với kết quả set thắng.',
-            );
-          }
-          winnerId = existing.participant2Id || undefined;
         }
       }
     }
@@ -1509,12 +1660,41 @@ export class MatchesService {
     }
 
     const isReferee = existing.refereeId === user.sub;
+    const tournamentConfig = existing.tournament?.tournamentConfig as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const isLiteTournament =
+      tournamentConfig?.isLite === true ||
+      (String(tournamentConfig?.mode || '').toUpperCase() === 'LITE' &&
+        tournamentConfig?.hideAdvancedSettings === true);
     const isTournamentManager = await this.isTournamentManager(existing, user);
     const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
       existing.tournamentId,
       user.sub,
     );
-    if (!isTournamentManager && !isReferee && !acceptedReferee) {
+    const canAccessSuperLiteMatch = isLiteTournament
+      ? await this.matchesRepository.canAccessLiveMatch(
+          id,
+          user.sub,
+          [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+        )
+      : false;
+    // Super Lite deliberately exposes the shared score board to any
+    // authenticated user who can access the match. Management, bracket and
+    // scheduling permissions remain protected by the checks above/below.
+    const canStartSuperLite =
+      isLiteTournament &&
+      (canAccessSuperLiteMatch ||
+        isTournamentManager ||
+        isReferee ||
+        acceptedReferee);
+    if (
+      !isTournamentManager &&
+      !isReferee &&
+      !acceptedReferee &&
+      !canStartSuperLite
+    ) {
       throw new ForbiddenException(
         'Bạn không có quyền thay đổi trạng thái trận đấu này',
       );

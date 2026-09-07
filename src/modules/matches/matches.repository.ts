@@ -21,6 +21,7 @@ import {
   lte,
   ne,
   lt,
+  gt,
   desc,
 } from 'drizzle-orm';
 import { QueryMatchDto } from './dto/query-match.dto';
@@ -84,6 +85,7 @@ export class MatchesRepository {
         id: schema.tournaments.id,
         createdBy: schema.tournaments.createdBy,
         communityId: schema.tournaments.communityId,
+        tournamentType: schema.tournaments.tournamentType,
         visibility: schema.tournaments.visibility,
         status: schema.tournaments.status,
       })
@@ -114,7 +116,12 @@ export class MatchesRepository {
       return privileged;
     }
 
-    if (tournament.visibility !== 'PRIVATE') return true;
+    // Club tournaments are private to the club even when their visibility
+    // column is PUBLIC.  Otherwise a public-looking Club Super Lite match
+    // would let any authenticated user open the live room and submit scores.
+    const isClubTournament =
+      Boolean(tournament.communityId) || tournament.tournamentType === 'CLUB';
+    if (tournament.visibility !== 'PRIVATE' && !isClubTournament) return true;
     if (!userId) return false;
     if (privileged) return true;
 
@@ -272,7 +279,9 @@ export class MatchesRepository {
             select 1 from ${schema.tournaments} t
             where t.id = ${schema.matches.tournamentId}
             and t.deleted_at is null
-            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)` : sql``}
+            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
+              and not (t.tournament_config @> '{"isLite": true}'::jsonb
+                or t.tournament_config @> '{"mode": "LITE"}'::jsonb)` : sql``}
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
           or exists (
@@ -281,7 +290,9 @@ export class MatchesRepository {
             join ${schema.tournaments} t on s.tournament_id = t.id
             where g.id = ${schema.matches.groupId}
             and t.deleted_at is null
-            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)` : sql``}
+            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
+              and not (t.tournament_config @> '{"isLite": true}'::jsonb
+                or t.tournament_config @> '{"mode": "LITE"}'::jsonb)` : sql``}
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
         )`,
@@ -465,8 +476,13 @@ export class MatchesRepository {
         const cursorDate = new Date(decodedCursor.updatedAt);
         // Postgres updated_at has microsecond precision while JS Date has millisecond precision.
         // We compare: updated_at < cursorDate OR (date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', cursorDate) AND id < cursorId)
-        cursorCondition = sql`(${schema.matches.updatedAt} < ${cursorDate} OR (date_trunc('milliseconds', ${schema.matches.updatedAt}) = date_trunc('milliseconds', ${cursorDate}) AND ${schema.matches.id} < ${decodedCursor.id}))`;
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
+        cursorCondition = or(
+          lt(schema.matches.updatedAt, cursorDate),
+          and(
+            eq(schema.matches.updatedAt, cursorDate),
+            lt(schema.matches.id, decodedCursor.id),
+          ),
+        ) as SQL;
       }
     }
 
@@ -1875,6 +1891,32 @@ export class MatchesRepository {
     ].filter((participantId): participantId is string =>
       Boolean(participantId),
     );
+
+    // Mock fixtures are useful for previewing a bracket, but they must never
+    // create an ELO outbox item.  The processor also guards this path, yet
+    // skipping at enqueue keeps the ranked history clean and avoids needless
+    // background work when a mock bracket is finalized.
+    const mockParticipants = participantIds.length
+      ? await tx
+          .select({ isMock: schema.tournamentParticipants.isMock })
+          .from(schema.tournamentParticipants)
+          .where(inArray(schema.tournamentParticipants.id, participantIds))
+      : [];
+    const mockRosterUsers = participantIds.length
+      ? await tx
+          .select({ isMock: schema.users.isMock })
+          .from(schema.tournamentRosters)
+          .innerJoin(
+            schema.users,
+            eq(schema.tournamentRosters.userId, schema.users.id),
+          )
+          .where(
+            inArray(schema.tournamentRosters.participantId, participantIds),
+          )
+      : [];
+    const hasMockParticipant =
+      mockParticipants.some((participant) => participant.isMock) ||
+      mockRosterUsers.some((roster) => roster.isMock);
     const consentRows = participantIds.length
       ? await tx
           .select({
@@ -1905,7 +1947,8 @@ export class MatchesRepository {
     if (
       eloTournament?.isRanked &&
       (winnerId || isFootballTeamMatch) &&
-      allParticipantsConsented
+      allParticipantsConsented &&
+      !hasMockParticipant
     ) {
       await tx
         .insert(schema.matchEloOutbox)

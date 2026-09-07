@@ -6,18 +6,21 @@ const categoryConfig = {
 };
 
 describe('resolveEffectiveSportRules', () => {
-  it.each([1, 3, 5])('supports BO%s for round-robin group overrides', (bestOf) => {
-    const resolved = resolveEffectiveSportRules({
-      categoryConfig,
-      tournamentSportRules: { bestOf: 3 },
-      stageConfig: { bestOf: 5 },
-      groupConfig: { bestOf },
-      roundNumber: 1,
-    });
+  it.each([1, 3, 5])(
+    'supports BO%s for round-robin group overrides',
+    (bestOf) => {
+      const resolved = resolveEffectiveSportRules({
+        categoryConfig,
+        tournamentSportRules: { bestOf: 3 },
+        stageConfig: { bestOf: 5 },
+        groupConfig: { bestOf },
+        roundNumber: 1,
+      });
 
-    expect(resolved.bestOf).toBe(bestOf);
-    expect(resolved.setsToWin).toBe(Math.ceil(bestOf / 2));
-  });
+      expect(resolved.bestOf).toBe(bestOf);
+      expect(resolved.setsToWin).toBe(Math.ceil(bestOf / 2));
+    },
+  );
 
   it('applies preset -> tournament -> stage -> group -> round -> match precedence', () => {
     const base = {
@@ -29,7 +32,10 @@ describe('resolveEffectiveSportRules', () => {
     };
 
     expect(resolveEffectiveSportRules(base).bestOf).toBe(3);
-    expect(resolveEffectiveSportRules({ ...base, matchConfig: { bestOf: 5 } }).bestOf).toBe(5);
+    expect(
+      resolveEffectiveSportRules({ ...base, matchConfig: { bestOf: 5 } })
+        .bestOf,
+    ).toBe(5);
   });
 
   it('keeps legacy direct values when a nested scoring block is present', () => {
@@ -51,6 +57,34 @@ describe('resolveEffectiveSportRules', () => {
 
     expect(resolved.bestOf).toBe(5);
     expect(resolved.pointsPerSet).toBe(15);
+  });
+
+  it('treats a Super Lite tournament without a preset as LITE scoring', () => {
+    const resolved = resolveEffectiveSportRules({
+      categoryConfig,
+      tournamentConfig: { isLite: true },
+    });
+
+    expect(resolved.mode).toBe('LITE');
+  });
+
+  it('treats the Quick open preset as LITE without granting Super Lite access', () => {
+    const resolved = resolveEffectiveSportRules({
+      categoryConfig,
+      tournamentConfig: { isLite: false, mode: 'STRICT' },
+      tournamentSportRules: { mode: 'LITE' },
+    });
+
+    expect(resolved.mode).toBe('LITE');
+  });
+
+  it('treats the legacy FREE scoring marker as an open scorecard', () => {
+    const resolved = resolveEffectiveSportRules({
+      categoryConfig,
+      tournamentConfig: { isLite: false, mode: 'STRICT', scoringMode: 'FREE' },
+    });
+
+    expect(resolved.mode).toBe('LITE');
   });
 
   it('falls back to the category sport when legacy tournament rules have another sport', () => {

@@ -14,6 +14,8 @@ import { RoomType } from './dto/create-room.dto';
 import { extractLinkPreview } from './utils/link-preview.util';
 
 import { FirebaseService } from '../firebase/firebase.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { buildCommunityChatMessageNotification } from '../notifications/notification-builder';
 
 @Injectable()
 export class ChatService {
@@ -23,6 +25,7 @@ export class ChatService {
     private readonly chatRepository: ChatRepository,
     private readonly chatGateway: ChatGateway,
     private readonly firebaseService: FirebaseService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async getUserRooms(userId: string) {
@@ -37,6 +40,14 @@ export class ChatService {
     }
   }
 
+  private directPolicyDenied() {
+    return new ForbiddenException({
+      statusCode: 403,
+      code: 'NO_SHARED_CURRENT_CLUB',
+      message: 'Hai người dùng phải đang cùng là thành viên JOINED của ít nhất một CLB.',
+    });
+  }
+
   private async assertDirectRoomAccess(userId: string, roomId: string) {
     if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
       throw new ForbiddenException('Bạn không có quyền truy cập phòng chat này.');
@@ -44,31 +55,26 @@ export class ChatService {
 
     const otherUserId = (await this.chatRepository.getRoomMemberIds(roomId))
       .find((memberId) => memberId !== userId);
-    if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
+    if (!otherUserId) throw this.directPolicyDenied();
+    if (await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
       throw new ForbiddenException('Bạn không thể tương tác trong cuộc trò chuyện này vì đã bị chặn.');
     }
+    await this.assertCanDirectMessage(userId, otherUserId);
   }
 
-  /// Người gửi là stranger khi chưa từng nhắn direct và không cùng CLB JOINED.
-  /// Stranger chỉ được nhắn khi người nhận chủ động bật opt-in.
   async assertCanDirectMessage(fromUserId: string, toUserId: string) {
-    if (fromUserId === toUserId) return;
+    if (fromUserId === toUserId) throw this.directPolicyDenied();
 
     try {
-      const allowed = await this.chatRepository.getAllowStrangerMessages(toUserId);
-      if (allowed) return;
-      if (await this.chatRepository.isAcquainted(fromUserId, toUserId)) return;
+      if (await this.chatRepository.shareCurrentJoinedCommunity(fromUserId, toUserId)) return;
     } catch (error) {
-      // A privacy-check failure must never become a server error for the
-      // sender. Treat it as a restricted recipient and preserve the same
-      // user-facing policy response as the normal denial path.
       this.logger.warn(
-        `Unable to complete stranger-message policy check for ${toUserId}; denying direct room creation.`,
+        `Unable to verify shared current club for ${fromUserId} and ${toUserId}; denying direct messaging.`,
         error instanceof Error ? error.message : String(error),
       );
     }
 
-    throw new ForbiddenException('Người dùng này không nhận tin nhắn từ người lạ.');
+    throw this.directPolicyDenied();
   }
 
   async getDirectMessagePolicy(fromUserId: string, toUserId: string) {
@@ -86,18 +92,23 @@ export class ChatService {
       await this.assertCanDirectMessage(fromUserId, toUserId);
       return { canMessage: true, reasonCode: null };
     } catch (error) {
-      if (
-        error instanceof ForbiddenException &&
-        error.message.includes('Người dùng này không nhận tin nhắn từ người lạ')
-      ) {
-        return { canMessage: false, reasonCode: 'STRANGER_MESSAGES_DISABLED' as const };
+      if (error instanceof ForbiddenException) {
+        const response = error.getResponse();
+        if (
+          typeof response === 'object' &&
+          response !== null &&
+          'code' in response &&
+          response.code === 'NO_SHARED_CURRENT_CLUB'
+        ) {
+          return { canMessage: false, reasonCode: 'NO_SHARED_CURRENT_CLUB' as const };
+        }
       }
 
       this.logger.error(
         `Unable to resolve direct-message policy for ${fromUserId} -> ${toUserId}.`,
         error instanceof Error ? error.stack : String(error),
       );
-      return { canMessage: false, reasonCode: 'POLICY_CHECK_FAILED' as const };
+      return { canMessage: false, reasonCode: 'NO_SHARED_CURRENT_CLUB' as const };
     }
   }
 
@@ -242,12 +253,11 @@ export class ChatService {
     if (roomType === RoomType.DIRECT) {
       const otherUserId = (await this.chatRepository.getRoomMemberIds(data.roomId))
         .find((memberId) => memberId !== userId);
-      if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
+      if (!otherUserId) throw this.directPolicyDenied();
+      if (await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
         throw new ForbiddenException('Không thể gửi tin nhắn vì một trong hai người đã chặn nhau.');
       }
-      if (otherUserId) {
-        await this.assertCanDirectMessage(userId, otherUserId);
-      }
+      await this.assertCanDirectMessage(userId, otherUserId);
     }
 
     const message = await this.chatRepository.saveMessage(userId, {
@@ -301,11 +311,12 @@ export class ChatService {
             .map((m) => m.userId);
         }
 
-        if (recipientIds.length > 0) {
-          const senderUser = await this.chatRepository.findUserById(userId);
-          const senderName = senderUser?.fullName || 'Một thành viên';
-          const title = room.name ? `${senderName} (${room.name})` : senderName;
-          const body = messageText || (attachmentsUrls.length > 0 ? '📷 Đã gửi hình ảnh' : 'Tin nhắn mới');
+        const senderUser = await this.chatRepository.findUserById(userId);
+        const senderName = senderUser?.fullName || 'Một thành viên';
+        const title = room.name ? `${senderName} (${room.name})` : senderName;
+        const body = messageText || (attachmentsUrls.length > 0 ? '📷 Đã gửi hình ảnh' : 'Tin nhắn mới');
+
+        if (recipientIds.length > 0 && roomType !== RoomType.CLUB) {
 
           await this.firebaseService.sendPushToUsers(recipientIds, {
             title,
@@ -316,6 +327,25 @@ export class ChatService {
               messageId: message.id,
             },
           });
+        }
+
+        if (roomType === RoomType.CLUB && room.communityId) {
+          await Promise.all(
+            recipientIds.map((receiverId) =>
+              this.notificationsService.sendNotification(
+                buildCommunityChatMessageNotification({
+                  communityId: room.communityId!,
+                  communityName: room.name || 'CLB',
+                  senderName,
+                  receiverId,
+                  senderId: userId,
+                  roomId: data.roomId,
+                  messageId: message.id,
+                  content: body,
+                }),
+              ),
+            ),
+          );
         }
       } catch {
         // Fire-and-forget push error handling
@@ -341,11 +371,7 @@ export class ChatService {
         throw new ForbiddenException('You are not a member of this chat room');
       }
       if (roomType === RoomType.DIRECT) {
-        const otherUserId = (await this.chatRepository.getRoomMemberIds(roomId))
-          .find((memberId) => memberId !== userId);
-        if (otherUserId && await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
-          throw new ForbiddenException('Bạn không thể truy cập cuộc trò chuyện này vì đã bị chặn.');
-        }
+        await this.assertDirectRoomAccess(userId, roomId);
       }
     }
 

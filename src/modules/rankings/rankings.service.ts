@@ -473,11 +473,25 @@ export class RankingsService {
     scope: 'PUBLIC' | 'COMMUNITY',
     communityId?: string,
     genderRestriction?: string,
+    directRoster?: {
+      winnerUserIds: string[];
+      loserUserIds: string[];
+      scoreDetails?: Record<string, unknown> | null;
+      winnerWasSideA: boolean;
+    },
   ) {
     const db = this.rankingsRepository.getDbInstance();
 
     // 1. Fetch rosters
-    const winnerRosters = await db
+    const winnerRosters = directRoster
+      ? await db
+          .select({
+            userId: schema.users.id,
+            userIsMock: schema.users.isMock,
+          })
+          .from(schema.users)
+          .where(inArray(schema.users.id, directRoster.winnerUserIds))
+      : await db
       .select({
         userId: schema.tournamentRosters.userId,
         userIsMock: schema.users.isMock,
@@ -497,7 +511,15 @@ export class RankingsService {
       )
       .where(eq(schema.tournamentRosters.participantId, winnerParticipantId));
 
-    const loserRosters = await db
+    const loserRosters = directRoster
+      ? await db
+          .select({
+            userId: schema.users.id,
+            userIsMock: schema.users.isMock,
+          })
+          .from(schema.users)
+          .where(inArray(schema.users.id, directRoster.loserUserIds))
+      : await db
       .select({
         userId: schema.tournamentRosters.userId,
         userIsMock: schema.users.isMock,
@@ -524,7 +546,9 @@ export class RankingsService {
     }
 
     const hasMockPlayer = [...winnerRosters, ...loserRosters].some(
-      (roster) => roster.userIsMock || roster.participantIsMock,
+      (roster) =>
+        roster.userIsMock ||
+        ('participantIsMock' in roster && roster.participantIsMock),
     );
     if (hasMockPlayer) {
       return {
@@ -534,8 +558,12 @@ export class RankingsService {
       };
     }
 
-    const winnerUserIds = winnerRosters.map((r) => r.userId);
-    const loserUserIds = loserRosters.map((r) => r.userId);
+    const winnerUserIds = directRoster
+      ? directRoster.winnerUserIds
+      : winnerRosters.map((r) => r.userId);
+    const loserUserIds = directRoster
+      ? directRoster.loserUserIds
+      : loserRosters.map((r) => r.userId);
     const isDoublesMatch = ['DOUBLES', 'MIXED_DOUBLES'].includes(matchType);
     const expectedRosterSize = isDoublesMatch ? 2 : 1;
     if (
@@ -549,8 +577,17 @@ export class RankingsService {
 
     // 2a. Fetch match scoreDetails để tính Score Factor Modifier
     let scoreRatio: number | undefined;
+    if (directRoster) {
+      scoreRatio = this.extractScoreRatio(
+        directRoster.scoreDetails,
+        directRoster.winnerWasSideA ? 'SIDE_A' : 'SIDE_B',
+        'SIDE_A',
+      );
+    }
     try {
-      const [matchData] = await db
+      const [matchData] = directRoster
+        ? []
+        : await db
         .select({
           participant1Id: schema.matches.participant1Id,
           scoreDetails: schema.matches.scoreDetails,
@@ -2142,5 +2179,97 @@ export class RankingsService {
       tournament.communityId || undefined,
       effectiveGenderRestriction || undefined,
     );
+  }
+
+  /**
+   * Resolves the separate club-session context, then delegates to the exact
+   * same individual/pair ELO engine used by tournament matches.
+   */
+  async processClubMatchResultFromOutbox(matchId: string) {
+    const [row] = await this.db
+      .select({
+        match: schema.clubMatchSessionMatches,
+        session: schema.clubMatchSessions,
+      })
+      .from(schema.clubMatchSessionMatches)
+      .innerJoin(
+        schema.clubMatchSessions,
+        eq(
+          schema.clubMatchSessions.id,
+          schema.clubMatchSessionMatches.sessionId,
+        ),
+      )
+      .where(eq(schema.clubMatchSessionMatches.id, matchId))
+      .limit(1);
+    if (!row) throw new Error(`Club match ${matchId} not found`);
+    if (
+      row.match.status !== 'COMPLETED' ||
+      !row.match.winnerSide ||
+      row.session.status === 'CANCELLED'
+    ) {
+      await this.db
+        .update(schema.clubMatchSessionMatches)
+        .set({ eloStatus: 'SKIPPED_CANCELLED', updatedAt: new Date() })
+        .where(eq(schema.clubMatchSessionMatches.id, matchId));
+      return { success: true, skipped: true, reason: 'NOT_ELIGIBLE' };
+    }
+    if (!row.session.isRanked) {
+      await this.db
+        .update(schema.clubMatchSessionMatches)
+        .set({ eloStatus: 'NOT_RANKED', updatedAt: new Date() })
+        .where(eq(schema.clubMatchSessionMatches.id, matchId));
+      return { success: true, skipped: true, reason: 'NOT_RANKED' };
+    }
+    const winnerUserIds =
+      row.match.winnerSide === 'A'
+        ? row.match.sideAUserIds
+        : row.match.sideBUserIds;
+    const loserUserIds =
+      row.match.winnerSide === 'A'
+        ? row.match.sideBUserIds
+        : row.match.sideAUserIds;
+    const result = await this.processMatchResult(
+      matchId,
+      row.match.winnerSide === 'A' ? 'SIDE_A' : 'SIDE_B',
+      row.match.winnerSide === 'A' ? 'SIDE_B' : 'SIDE_A',
+      row.session.categoryId,
+      row.match.matchType,
+      'COMMUNITY',
+      row.session.communityId,
+      undefined,
+      {
+        winnerUserIds,
+        loserUserIds,
+        scoreDetails: row.match.scoreDetails as Record<string, unknown>,
+        winnerWasSideA: row.match.winnerSide === 'A',
+      },
+    );
+    if (
+      result &&
+      'skipped' in result &&
+      result.skipped &&
+      result.reason === 'MOCK_PARTICIPANT'
+    ) {
+      await this.db
+        .update(schema.clubMatchSessionMatches)
+        .set({ eloStatus: 'SKIPPED_MOCK', updatedAt: new Date() })
+        .where(eq(schema.clubMatchSessionMatches.id, matchId));
+      return result;
+    }
+    const logs = await this.db
+      .select({
+        userId: schema.eloHistoryLogs.userId,
+        changedPoints: schema.eloHistoryLogs.changedPoints,
+      })
+      .from(schema.eloHistoryLogs)
+      .where(eq(schema.eloHistoryLogs.matchId, matchId));
+    const eloDelta = Object.fromEntries(
+      logs.map((log) => [log.userId, log.changedPoints]),
+    );
+    await this.db
+      .update(schema.clubMatchSessionMatches)
+      .set({ eloStatus: 'APPLIED', eloDelta, updatedAt: new Date() })
+      .where(eq(schema.clubMatchSessionMatches.id, matchId));
+    return result;
   }
 }

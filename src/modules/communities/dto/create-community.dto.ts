@@ -68,10 +68,10 @@ export class CreateCommunityDto {
   @IsUUID('4', { each: true })
   categoryIds?: string[];
 
-  @ApiProperty({ description: 'Mã tỉnh/thành phố' })
+  @ApiPropertyOptional({ description: 'Mã tỉnh/thành phố' })
   @IsString()
-  @IsNotEmpty()
-  provinceCode: string;
+  @IsOptional()
+  provinceCode?: string;
 
   @ApiPropertyOptional({ description: 'Mã quận/huyện' })
   @IsString()

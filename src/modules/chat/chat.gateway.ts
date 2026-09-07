@@ -128,16 +128,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const isSupportStaff =
       hasRole(user, UserRole.ADMIN) || hasRole(user, UserRole.MODERATOR);
-    // P2D.1: room CLUB kiểm tra qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
-    const isMember = user?.sub
-      ? await this.chatRepository.canAccessRoom(roomId, user.sub)
-      : false;
-    const roomRecord = !isMember && isSupportStaff
-      ? await this.chatRepository.findRoomById(roomId)
-      : null;
+    const roomRecord = await this.chatRepository.findRoomById(roomId);
+    let isMember = false;
+    try {
+      isMember = user?.sub
+        ? await this.chatRepository.canAccessRoom(roomId, user.sub)
+        : false;
+      if (isMember && roomRecord?.type === 'DIRECT' && user?.sub) {
+        const otherUserId = (await this.chatRepository.getRoomMemberIds(roomId))
+          .find((memberId) => memberId !== user.sub);
+        isMember = !!otherUserId &&
+          !(await this.chatRepository.isBlockedBetween(user.sub, otherUserId)) &&
+          await this.chatRepository.shareCurrentJoinedCommunity(user.sub, otherUserId);
+      }
+    } catch {
+      isMember = false;
+    }
 
-    if (!isMember && (!roomRecord || roomRecord.type !== 'SUPPORT')) {
-      return { event: 'chat:error', data: 'Forbidden' };
+    if (!isMember && (!isSupportStaff || roomRecord?.type !== 'SUPPORT')) {
+      return {
+        event: 'chat:error',
+        data: roomRecord?.type === 'DIRECT' ? 'NO_SHARED_CURRENT_CLUB' : 'Forbidden',
+      };
     }
 
     const room = `chat:${roomId}`;
@@ -201,22 +213,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const user = client.data.user as JwtPayload | undefined;
     if (!user?.sub || !payload?.content?.trim()) return { event: 'chat:error', data: 'Invalid message' };
     const room = await this.chatRepository.findRoomById(payload.roomId);
-    const canAccess = await this.chatRepository.canAccessRoom(payload.roomId, user.sub);
+    let canAccess = false;
+    try {
+      canAccess = await this.chatRepository.canAccessRoom(payload.roomId, user.sub);
+    } catch {
+      canAccess = false;
+    }
     if (!room || !canAccess) return { event: 'chat:error', data: 'Forbidden' };
     if (room.type === 'DIRECT') {
       const otherUserId = (await this.chatRepository.getRoomMemberIds(payload.roomId))
         .find((memberId) => memberId !== user.sub);
-      if (otherUserId && await this.chatRepository.isBlockedBetween(user.sub, otherUserId)) {
+      if (!otherUserId) return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
+      if (await this.chatRepository.isBlockedBetween(user.sub, otherUserId)) {
         return { event: 'chat:error', data: 'Blocked' };
       }
-      // Người nhận không nhận tin nhắn người lạ và người gửi không quen nhau.
-      // (Dùng repository trực tiếp — tránh vòng DI ChatService ↔ ChatGateway.)
-      if (otherUserId) {
-        const allowStrangers = await this.chatRepository.getAllowStrangerMessages(otherUserId);
-        const acquainted = allowStrangers || await this.chatRepository.isAcquainted(user.sub, otherUserId);
-        if (!acquainted) {
-          return { event: 'chat:error', data: 'Người dùng này không nhận tin nhắn từ người lạ.' };
+      try {
+        if (!(await this.chatRepository.shareCurrentJoinedCommunity(user.sub, otherUserId))) {
+          return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
         }
+      } catch {
+        return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
       }
     }
     const persisted = await this.chatRepository.saveMessage(user.sub, { roomId: payload.roomId, messageText: payload.content.trim() });
@@ -307,7 +323,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleClubTyping(@MessageBody() payload: ClubTypingPayload, @ConnectedSocket() client: Socket) {
     const user = client.data.user as JwtPayload | undefined;
     if (!user?.sub || !payload?.roomId || typeof payload.isTyping !== 'boolean') return { event: 'chat:error', data: 'Invalid typing payload' };
-    if (!(await this.chatRepository.canAccessRoom(payload.roomId, user.sub))) return { event: 'chat:error', data: 'Forbidden' };
+    const room = await this.chatRepository.findRoomById(payload.roomId);
+    try {
+      if (!(await this.chatRepository.canAccessRoom(payload.roomId, user.sub))) {
+        return { event: 'chat:error', data: 'Forbidden' };
+      }
+      if (room?.type === 'DIRECT') {
+        const otherUserId = (await this.chatRepository.getRoomMemberIds(payload.roomId))
+          .find((memberId) => memberId !== user.sub);
+        if (
+          !otherUserId ||
+          await this.chatRepository.isBlockedBetween(user.sub, otherUserId) ||
+          !(await this.chatRepository.shareCurrentJoinedCommunity(user.sub, otherUserId))
+        ) {
+          return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
+        }
+      }
+    } catch {
+      return {
+        event: 'chat:error',
+        data: room?.type === 'DIRECT' ? 'NO_SHARED_CURRENT_CLUB' : 'Forbidden',
+      };
+    }
     client.to(`chat:${payload.roomId}`).emit('chat:typing', { roomId: payload.roomId, userId: user.sub, isTyping: payload.isTyping });
     return { event: 'typing:ack', data: payload };
   }
@@ -346,6 +383,36 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   broadcastPollVoted(roomId: string, messageId: string, metadata: unknown) {
     this.server.to(`chat:${roomId}`).emit('chat:poll:voted', { roomId, messageId, metadata });
+  }
+
+  async markRoomRead(roomId: string, userId: string) {
+    const room = await this.chatRepository.findRoomById(roomId);
+    try {
+      if (!room || !(await this.chatRepository.canAccessRoom(roomId, userId))) {
+        return { event: 'chat:error', data: 'Forbidden' };
+      }
+      if (room.type === 'DIRECT') {
+        const otherUserId = (await this.chatRepository.getRoomMemberIds(roomId))
+          .find((memberId) => memberId !== userId);
+        if (!otherUserId || await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
+          return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
+        }
+        if (!(await this.chatRepository.shareCurrentJoinedCommunity(userId, otherUserId))) {
+          return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
+        }
+      }
+      const state = await this.chatRepository.markRead(roomId, userId);
+      const readAt = state?.lastReadAt
+        ? new Date(state.lastReadAt).toISOString()
+        : new Date().toISOString();
+      this.broadcastRoomRead(roomId, userId, readAt);
+      return { event: 'chat:room:read:ack', data: state };
+    } catch {
+      return {
+        event: 'chat:error',
+        data: room?.type === 'DIRECT' ? 'NO_SHARED_CURRENT_CLUB' : 'Forbidden',
+      };
+    }
   }
 
   broadcastRoomRead(roomId: string, userId: string, readAt: string) {

@@ -11,7 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { MatchesRepository } from './matches.repository';
+import { MatchContextAdapter } from './match-context.adapter';
 import { extractWsToken } from '../../common/guards/ws-jwt.guard';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { MatchBroadcastData } from './interfaces/match-broadcast.interface';
@@ -34,6 +34,7 @@ export class LiveScoreGateway
 
   private readonly clientMatchRooms = new Map<string, Set<string>>();
   private readonly clientTournamentRooms = new Map<string, Set<string>>();
+  private readonly clientClubSessionRooms = new Map<string, Set<string>>();
   private readonly zombieDisconnectTimers = new Map<string, NodeJS.Timeout>();
   
   // Bộ đệm gộp tin (Batching) cho viewer counts
@@ -46,7 +47,7 @@ export class LiveScoreGateway
   private readonly loopMonitor = monitorEventLoopDelay({ resolution: 20 });
 
   constructor(
-    private readonly matchesRepository: MatchesRepository,
+    private readonly matchContextAdapter: MatchContextAdapter,
     private readonly jwtService: JwtService,
   ) {
     this.loopMonitor.enable();
@@ -106,8 +107,10 @@ export class LiveScoreGateway
       if (client.connected) {
         const joinedRooms = this.clientMatchRooms.get(client.id);
         const joinedTournamentRooms = this.clientTournamentRooms.get(client.id);
+        const joinedClubSessionRooms = this.clientClubSessionRooms.get(client.id);
         if ((!joinedRooms || joinedRooms.size === 0) &&
-            (!joinedTournamentRooms || joinedTournamentRooms.size === 0)) {
+            (!joinedTournamentRooms || joinedTournamentRooms.size === 0) &&
+            (!joinedClubSessionRooms || joinedClubSessionRooms.size === 0)) {
           this.logger.warn(`Disconnecting zombie client ${client.id} due to inactivity (not joined any match).`);
           client.disconnect(true);
         }
@@ -132,6 +135,7 @@ export class LiveScoreGateway
       this.clientMatchRooms.delete(client.id);
     }
     this.clientTournamentRooms.delete(client.id);
+    this.clientClubSessionRooms.delete(client.id);
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
@@ -165,7 +169,7 @@ export class LiveScoreGateway
 
     if (
       !normalizedMatchId ||
-      !(await this.matchesRepository.canAccessLiveMatch(
+      !(await this.matchContextAdapter.canAccessLiveMatch(
         normalizedMatchId,
         user?.sub,
         roles,
@@ -230,7 +234,7 @@ export class LiveScoreGateway
 
     if (
       !normalizedTournamentId ||
-      !(await this.matchesRepository.canAccessLiveTournament(
+      !(await this.matchContextAdapter.canAccessLiveTournament(
         normalizedTournamentId,
         user?.sub,
         roles,
@@ -289,6 +293,41 @@ export class LiveScoreGateway
     };
   }
 
+  @SubscribeMessage('joinClubMatchSession')
+  async handleJoinClubMatchSession(
+    @MessageBody() sessionId: string,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+    const user = client.data.user as JwtPayload | undefined;
+    const roles = Array.isArray(user?.roles) ? user.roles : user?.role ? [user.role] : [];
+    if (
+      !normalizedSessionId ||
+      !(await this.matchContextAdapter.canAccessClubMatchSession(normalizedSessionId, user?.sub, roles))
+    ) {
+      throw new WsException('CLUB_MATCH_SESSION_ACCESS_DENIED');
+    }
+    const room = `club-match-session:${normalizedSessionId}`;
+    client.join(room);
+    const joined = this.clientClubSessionRooms.get(client.id) ?? new Set<string>();
+    joined.add(normalizedSessionId);
+    this.clientClubSessionRooms.set(client.id, joined);
+    return { event: 'joined', data: room };
+  }
+
+  @SubscribeMessage('leaveClubMatchSession')
+  handleLeaveClubMatchSession(
+    @MessageBody() sessionId: string,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = `club-match-session:${sessionId}`;
+    client.leave(room);
+    const joined = this.clientClubSessionRooms.get(client.id);
+    joined?.delete(sessionId);
+    if (joined?.size === 0) this.clientClubSessionRooms.delete(client.id);
+    return { event: 'left', data: room };
+  }
+
   // Tối ưu hoá: Mã hóa 1 lần (Single JSON stringify) + Chống áp lực ngược (Volatile drop)
   broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
@@ -306,6 +345,25 @@ export class LiveScoreGateway
     if (tournamentId) {
       this.server.to(`tournament:${tournamentId}`).emit('match:update', rawPayload);
     }
+  }
+
+  broadcastClubSessionMatchUpdate(
+    sessionId: string,
+    matchId: string,
+    matchData: unknown,
+    event: 'score:update' | 'match:status' | 'elo:update',
+  ) {
+    if (!this.server) return;
+    const rawPayload = JSON.stringify({
+      ...(typeof matchData === 'object' && matchData !== null ? matchData : {}),
+      id: matchId,
+      contextType: 'CLUB_SOCIAL_MATCH_SESSION',
+      clubMatchSessionId: sessionId,
+    });
+    this.server.to(`match:${matchId}`).emit(event, rawPayload);
+    this.server
+      .to(`club-match-session:${sessionId}`)
+      .emit('match:update', rawPayload);
   }
 
   broadcastRegistrationUpdate(

@@ -24,6 +24,7 @@ import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
@@ -43,10 +44,14 @@ export class MatchesController {
 
   @Public()
   @SkipThrottle()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết trận đấu' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.matchesService.findOne(id);
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    return this.matchesService.findOne(id, user);
   }
 
   @Public()
@@ -66,7 +71,11 @@ export class MatchesController {
     @Body() createMatchCommentDto: CreateMatchCommentDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return await this.matchesService.createComment(id, user, createMatchCommentDto);
+    return await this.matchesService.createComment(
+      id,
+      user,
+      createMatchCommentDto,
+    );
   }
 
   @Patch(':id/score')
@@ -75,6 +84,22 @@ export class MatchesController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật tỷ số trận đấu' })
   async updateScore(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateMatchScoreDto: UpdateMatchScoreDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.updateScore(id, user, updateMatchScoreDto);
+  }
+
+  /**
+   * Super Lite Live entry point. Authentication is still required by the
+   * global JwtAuthGuard; the service verifies the canonical Super Lite flag
+   * and never grants management permissions through this route.
+   */
+  @Patch(':id/lite-score')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tài khoản đã đăng nhập cập nhật tỷ số Super Lite' })
+  async updateLiteScore(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateMatchScoreDto: UpdateMatchScoreDto,
     @CurrentUser() user: JwtPayload,
@@ -94,7 +119,31 @@ export class MatchesController {
     @Body() updateMatchStatusDto: UpdateMatchStatusDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return await this.matchesService.updateStatus(id, user, updateMatchStatusDto);
+    return await this.matchesService.updateStatus(
+      id,
+      user,
+      updateMatchStatusDto,
+    );
+  }
+
+  /**
+   * Super Lite Live entry point. Any authenticated user with access to the
+   * match may start/finish it; scheduling and operations remain protected by
+   * their existing management endpoints.
+   */
+  @Patch(':id/lite-status')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tài khoản đã đăng nhập đổi trạng thái Super Lite' })
+  async updateLiteStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateMatchStatusDto: UpdateMatchStatusDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.updateStatus(
+      id,
+      user,
+      updateMatchStatusDto,
+    );
   }
 
   @Patch(':id/schedule')
@@ -107,14 +156,20 @@ export class MatchesController {
     @Body() updateMatchScheduleDto: UpdateMatchScheduleDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return await this.matchesService.updateSchedule(id, user, updateMatchScheduleDto);
+    return await this.matchesService.updateSchedule(
+      id,
+      user,
+      updateMatchScheduleDto,
+    );
   }
 
   @Patch(':id/operation')
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu' })
+  @ApiOperation({
+    summary: 'Áp dụng quyết định nghiệp vụ đặc biệt cho trận đấu',
+  })
   async operateMatch(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() operateMatchDto: OperateMatchDto,
@@ -133,7 +188,13 @@ export class MatchesController {
     @Body() body: { userId: string; type: 'MUTE' | 'BAN'; reason?: string },
     @CurrentUser() user: JwtPayload,
   ) {
-    return await this.matchesService.muteUser(id, body.userId, body.type, body.reason, user);
+    return await this.matchesService.muteUser(
+      id,
+      body.userId,
+      body.type,
+      body.reason,
+      user,
+    );
   }
 
   @Delete(':id/unmute-user/:userId')

@@ -16,12 +16,14 @@ import { QueryCommunityDto } from './dto/query-community.dto';
 import { ReviewCommunityDto } from './dto/review-community.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
+import { AdjustMemberEloDto, EloOperation } from './dto/adjust-member-elo.dto';
 import { UserRole } from '../../common/constants/enums';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildCommunityBannedNotification,
   buildCommunityInviteNotification,
   buildCommunityInviteRevokedNotification,
+  buildCommunityJoinReviewedNotification,
   buildCommunityKickedNotification,
   buildCommunityOwnershipTransferredNotification,
   buildCommunityRoleDemotedNotification,
@@ -465,7 +467,7 @@ export class CommunitiesService {
       throw new NotFoundException('User is not a member');
     }
 
-    if (existing.status === 'PENDING') {
+    if (existing.status === 'PENDING' && requesterId !== targetUserId) {
       throw new BadRequestException(
         'Hãy xử lý đơn tham gia bằng luồng duyệt đơn, không xóa trực tiếp.',
       );
@@ -584,12 +586,26 @@ export class CommunitiesService {
     }
 
     const newStatus = action === 'APPROVE' ? 'JOINED' : 'REJECTED';
-    return await this.communitiesRepository.updateMemberStatus(
+    const updatedMember = await this.communitiesRepository.updateMemberStatus(
       id,
       memberId,
       newStatus,
       userId,
     );
+
+    if (updatedMember) {
+      const community = await this.findById(id);
+      await this.notificationsService.sendNotification(
+        buildCommunityJoinReviewedNotification({
+          communityId: id,
+          communityName: community.name,
+          receiverId: memberId,
+          approved: action === 'APPROVE',
+        }),
+      );
+    }
+
+    return updatedMember;
   }
 
   async followCommunity(userId: string, id: string) {
@@ -1234,5 +1250,91 @@ export class CommunitiesService {
 
   async getMyNotificationPreferences(userId: string) {
     return await this.communitiesRepository.getMyNotificationPreferences(userId);
+  }
+
+  async adjustMemberElo(
+    operatorUserId: string,
+    communityId: string,
+    targetUserId: string,
+    dto: AdjustMemberEloDto,
+    userRoles: string[] = [],
+  ): Promise<{ userId: string; newElo: number; changedPoints: number }> {
+    const isSysAdmin =
+      userRoles.includes('ADMIN') || userRoles.includes('SUPER_ADMIN');
+
+    // 1. Verify operator permission (OWNER or MODERATOR or SYS_ADMIN)
+    if (!isSysAdmin) {
+      await this.checkPermissions(communityId, operatorUserId, userRoles, [
+        'OWNER',
+        'MODERATOR',
+      ]);
+    }
+
+    // 2. Verify target member exists in community
+    const targetMember = await this.communitiesRepository.findMember(
+      communityId,
+      targetUserId,
+    );
+    if (!targetMember || targetMember.status !== 'JOINED') {
+      throw new NotFoundException(
+        'Thành viên không tồn tại hoặc chưa tham gia câu lạc bộ.',
+      );
+    }
+
+    // 3. Resolve community category / sport
+    const communitySports =
+      await this.communitiesRepository.getCommunitySports(communityId);
+    let categoryId = communitySports?.[0]?.categoryId;
+    if (!categoryId) {
+      const defaultCat =
+        await this.communitiesRepository.findDefaultCategory();
+      categoryId = defaultCat?.id;
+    }
+    if (!categoryId) {
+      throw new BadRequestException(
+        'Câu lạc bộ chưa được gán môn thể thao hợp lệ.',
+      );
+    }
+
+    // 4. Find or create communityRankings for target member (default 1000)
+    const currentRanking =
+      await this.communitiesRepository.findCommunityRanking(
+        communityId,
+        targetUserId,
+        categoryId,
+      );
+    const currentElo = currentRanking?.eloPoints ?? 1000;
+    const currentPeak = currentRanking?.peakElo ?? 1000;
+
+    let newElo = currentElo;
+    if (dto.operation === EloOperation.ADD) {
+      newElo = currentElo + dto.points;
+    } else if (dto.operation === EloOperation.SUBTRACT) {
+      newElo = Math.max(0, currentElo - dto.points);
+    } else if (dto.operation === EloOperation.SET) {
+      newElo = Math.max(0, dto.points);
+    }
+
+    const peakElo = Math.max(currentPeak, newElo);
+    const changedPoints = newElo - currentElo;
+
+    await this.communitiesRepository.upsertCommunityRanking({
+      communityId,
+      userId: targetUserId,
+      categoryId,
+      eloPoints: newElo,
+      peakElo,
+      matchType: 'SINGLES',
+    });
+
+    this.logger.log(
+      `Đã điều phối ELO cho thành viên ${targetUserId} trong CLB ${communityId}: ${currentElo} -> ${newElo} (${dto.operation} ${dto.points}) bởi ${operatorUserId}`,
+    );
+
+    return {
+      userId: targetUserId,
+      newElo,
+      changedPoints,
+    };
   }
 }

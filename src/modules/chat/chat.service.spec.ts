@@ -4,8 +4,7 @@ import { RoomType } from './dto/create-room.dto';
 
 function createService(repository: Record<string, jest.Mock>) {
   const defaultRepo = {
-    getAllowStrangerMessages: jest.fn().mockResolvedValue(true),
-    isAcquainted: jest.fn().mockResolvedValue(true),
+    shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(true),
     ...repository,
   };
   const gateway = {
@@ -56,28 +55,12 @@ describe('ChatService authorization regressions', () => {
     expect(repository.getUserRoomById).not.toHaveBeenCalled();
   });
 
-  it('denies a stranger when the recipient has not opted in', async () => {
-    const repository = {
-      isActiveUser: jest.fn().mockResolvedValue(true),
-      isBlockedBetween: jest.fn().mockResolvedValue(false),
-      getAllowStrangerMessages: jest.fn().mockResolvedValue(false),
-      isAcquainted: jest.fn().mockResolvedValue(false),
-    };
-    const { service } = createService(repository);
-
-    await expect(service.createRoom('user-a', {
-      type: RoomType.DIRECT,
-      memberIds: ['user-b'],
-    })).rejects.toBeInstanceOf(ForbiddenException);
-  });
-
-  it('allows a stranger only when the recipient explicitly opts in', async () => {
+  it('allows DIRECT creation only for users sharing a current JOINED club', async () => {
     const room = { id: 'room-1', type: RoomType.DIRECT };
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      getAllowStrangerMessages: jest.fn().mockResolvedValue(true),
-      isAcquainted: jest.fn().mockResolvedValue(false),
+      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(true),
       getOrCreateDirectRoom: jest.fn().mockResolvedValue(room),
       getRoomDetails: jest.fn().mockResolvedValue(room),
     };
@@ -89,29 +72,68 @@ describe('ChatService authorization regressions', () => {
     })).resolves.toEqual(room);
   });
 
-  it('returns the stable privacy denial code from the policy endpoint', async () => {
+  it.each([
+    'different clubs',
+    'same tournament only',
+    'former member with no row',
+    'non-JOINED membership',
+    'prior direct history',
+    'friend or follower',
+    'recipient stranger opt-in',
+  ])('denies DIRECT creation for %s', async () => {
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      getAllowStrangerMessages: jest.fn().mockResolvedValue(false),
-      isAcquainted: jest.fn().mockResolvedValue(false),
+      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(false),
+      getOrCreateDirectRoom: jest.fn(),
+    };
+    const { service } = createService(repository);
+
+    const promise = service.createRoom('user-a', {
+      type: RoomType.DIRECT,
+      memberIds: ['user-b'],
+    });
+    await expect(promise).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'NO_SHARED_CURRENT_CLUB' }),
+    });
+    expect(repository.getOrCreateDirectRoom).not.toHaveBeenCalled();
+  });
+
+  it('returns the stable shared-club denial code from the policy endpoint', async () => {
+    const repository = {
+      isActiveUser: jest.fn().mockResolvedValue(true),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(false),
     };
     const { service } = createService(repository);
 
     await expect(service.getDirectMessagePolicy('user-a', 'user-b')).resolves.toEqual({
       canMessage: false,
-      reasonCode: 'STRANGER_MESSAGES_DISABLED',
+      reasonCode: 'NO_SHARED_CURRENT_CLUB',
     });
   });
 
-  it('rechecks privacy when sending in an existing direct room', async () => {
+  it('fails closed when the shared-club policy lookup errors', async () => {
+    const repository = {
+      isActiveUser: jest.fn().mockResolvedValue(true),
+      isBlockedBetween: jest.fn().mockResolvedValue(false),
+      shareCurrentJoinedCommunity: jest.fn().mockRejectedValue(new Error('database unavailable')),
+    };
+    const { service } = createService(repository);
+
+    await expect(service.getDirectMessagePolicy('user-a', 'user-b')).resolves.toEqual({
+      canMessage: false,
+      reasonCode: 'NO_SHARED_CURRENT_CLUB',
+    });
+  });
+
+  it('rechecks current shared-club membership when sending in an existing direct room', async () => {
     const repository = {
       findRoomById: jest.fn().mockResolvedValue({ id: 'room-1', type: RoomType.DIRECT }),
       isMemberOfRoom: jest.fn().mockResolvedValue(true),
       getRoomMemberIds: jest.fn().mockResolvedValue(['user-a', 'user-b']),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      getAllowStrangerMessages: jest.fn().mockResolvedValue(false),
-      isAcquainted: jest.fn().mockResolvedValue(false),
+      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(false),
       saveMessage: jest.fn(),
     };
     const { service } = createService(repository);
@@ -119,7 +141,9 @@ describe('ChatService authorization regressions', () => {
     await expect(service.sendMessage('user-a', {
       roomId: 'room-1',
       messageText: 'hello',
-    })).rejects.toBeInstanceOf(ForbiddenException);
+    })).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'NO_SHARED_CURRENT_CLUB' }),
+    });
     expect(repository.saveMessage).not.toHaveBeenCalled();
   });
 

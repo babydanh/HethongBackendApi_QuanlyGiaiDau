@@ -18,6 +18,10 @@ describe('Tournament security hardening — structural contracts', () => {
     path.join(__dirname, '../matches/matches.controller.ts'),
     'utf8',
   );
+  const tournamentsControllerSource = fs.readFileSync(
+    path.join(__dirname, 'tournaments.controller.ts'),
+    'utf8',
+  );
   const matchesServiceSource = fs.readFileSync(
     path.join(__dirname, '../matches/matches.service.ts'),
     'utf8',
@@ -48,11 +52,30 @@ describe('Tournament security hardening — structural contracts', () => {
 
   it('keeps football draft registrations ineligible for payment until the roster is complete', () => {
     expect(repositorySource).toContain('hasUndersizedFootballRoster');
-    expect(repositorySource).toContain("hasUndersizedFootballRoster\n            ? 'PENDING'");
+    // Keep this structural contract independent from Prettier indentation.
+    // The production branch may be reformatted without changing the payment
+    // eligibility rule.
+    expect(repositorySource.replace(/\s+/g, ' ')).toContain(
+      "hasUndersizedFootballRoster ? 'PENDING'",
+    );
     expect(repositorySource).toContain('const nextParticipantStatus =');
     expect(repositorySource).toContain(".set({ teamStatus: nextParticipantStatus })");
+  });
+
+  it('keeps Super Lite live scoring separate from participant kick management', () => {
+    expect(matchesServiceSource).toContain('const canScoreSuperLite');
+    expect(matchesServiceSource).toContain('const canStartSuperLite');
+    expect(tournamentsControllerSource).toContain(
+      "@Post(':id/participants/:participantId/kick')",
+    );
+    expect(tournamentsControllerSource).not.toContain(
+      "@Post(':id/participants/:participantId/kick')\n  @Public()",
+    );
+    expect(serviceSource).toContain('async kickParticipant(');
+    expect(serviceSource).toContain(
+      "'Bạn không có quyền loại người tham gia này'",
+    );
   });
 });
 
 export {};
-

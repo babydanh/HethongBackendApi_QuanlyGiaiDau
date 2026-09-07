@@ -4,11 +4,17 @@ import type { RankingsService } from './rankings.service';
 describe('EloOutboxProcessor — claim & state machine (NOTE-3, T13)', () => {
   let processor: EloOutboxProcessor;
   let mockDb: { execute: jest.Mock };
-  let mockRankings: { processMatchResultFromOutbox: jest.Mock };
+  let mockRankings: {
+    processMatchResultFromOutbox: jest.Mock;
+    processClubMatchResultFromOutbox: jest.Mock;
+  };
 
   beforeEach(() => {
     mockDb = { execute: jest.fn() };
-    mockRankings = { processMatchResultFromOutbox: jest.fn().mockResolvedValue(undefined) };
+    mockRankings = {
+      processMatchResultFromOutbox: jest.fn().mockResolvedValue(undefined),
+      processClubMatchResultFromOutbox: jest.fn().mockResolvedValue(undefined),
+    };
     processor = new EloOutboxProcessor(
       mockDb as never,
       mockRankings as unknown as RankingsService,
@@ -59,6 +65,30 @@ describe('EloOutboxProcessor — claim & state machine (NOTE-3, T13)', () => {
       const lastUpdate = sqlOf(mockDb.execute.mock.calls.at(-1)!);
       expect(lastUpdate).toContain("status = 'PROCESSED'");
       expect(lastUpdate).toContain('locked_at = NULL');
+    });
+
+    it('routes a club-session outbox row through the shared ELO processor', async () => {
+      mockDb.execute.mockResolvedValueOnce([]);
+      const publish = jest.fn().mockResolvedValue(undefined);
+      processor.setClubMatchUpdatePublisher(publish);
+
+      await (processor as unknown as {
+        processClaimed(row: {
+          id: string;
+          match_id: null;
+          club_match_session_match_id: string;
+        }): Promise<void>;
+      }).processClaimed({
+        id: 'o-club',
+        match_id: null,
+        club_match_session_match_id: 'club-match-1',
+      });
+
+      expect(
+        mockRankings.processClubMatchResultFromOutbox,
+      ).toHaveBeenCalledWith('club-match-1');
+      expect(mockRankings.processMatchResultFromOutbox).not.toHaveBeenCalled();
+      expect(publish).toHaveBeenCalledWith('club-match-1');
     });
 
     it('returns a retryable failure to PENDING with backoff below the cap', async () => {

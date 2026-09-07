@@ -38,9 +38,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       findById: jest.fn().mockResolvedValue(existingMatch),
       isTournamentManager: jest.fn().mockResolvedValue(false),
       isRefereeAccepted: jest.fn().mockResolvedValue(false),
+      canAccessLiveMatch: jest.fn().mockResolvedValue(true),
       completeMatch: jest.fn(),
       updateScore: jest.fn(),
       checkAllMatchesCompleted: jest.fn().mockResolvedValue(false),
+      updateTournamentStatus: jest.fn().mockResolvedValue(undefined),
       getRostersForParticipants: jest.fn().mockResolvedValue([]),
       getFollowerUserIds: jest.fn().mockResolvedValue([]),
     };
@@ -58,7 +60,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       del: jest.fn().mockResolvedValue(undefined),
       delByPattern: jest.fn().mockResolvedValue(undefined),
       hset: jest.fn().mockResolvedValue(undefined),
-      getClient: jest.fn(() => ({ expire: jest.fn().mockResolvedValue(undefined) }) as any),
+      getClient: jest.fn(
+        () => ({ expire: jest.fn().mockResolvedValue(undefined) }) as any,
+      ),
     };
 
     service = new MatchesService(
@@ -71,17 +75,98 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
   });
 
   describe('finalizeCompletedMatch', () => {
+    it('auto-completes a Super Lite tournament when its terminal final has a winner', async () => {
+      const liteFinal = {
+        ...existingMatch,
+        bracketBranch: 'MAIN',
+        tournament: {
+          ...existingMatch.tournament,
+          tournamentConfig: { isLite: true, mode: 'LITE' },
+        },
+      };
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...liteFinal, status: 'COMPLETED' });
+
+      await service['finalizeCompletedMatch'](
+        liteFinal as never,
+        'match-1',
+        'p1',
+        'referee-1',
+      );
+
+      expect(mockRepo.checkAllMatchesCompleted).toHaveBeenCalledWith(
+        'tournament-1',
+      );
+      expect(mockRepo.updateTournamentStatus).toHaveBeenCalledWith(
+        'tournament-1',
+        'COMPLETED',
+      );
+    });
+
+    it('does not end Super Lite from a third-place result', async () => {
+      const thirdPlace = {
+        ...existingMatch,
+        bracketBranch: 'THIRD_PLACE',
+        tournament: {
+          ...existingMatch.tournament,
+          tournamentConfig: { isLite: true, mode: 'LITE' },
+        },
+      };
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...thirdPlace, status: 'COMPLETED' });
+
+      await service['finalizeCompletedMatch'](
+        thirdPlace as never,
+        'match-1',
+        'p1',
+        'referee-1',
+      );
+
+      expect(mockRepo.updateTournamentStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not end Super Lite from a terminal round-robin playoff', async () => {
+      const playoff = {
+        ...existingMatch,
+        bracketBranch: 'PLAYOFF',
+        tournament: {
+          ...existingMatch.tournament,
+          tournamentConfig: { isLite: true, mode: 'LITE' },
+        },
+      };
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...playoff, status: 'COMPLETED' });
+
+      await service['finalizeCompletedMatch'](
+        playoff as never,
+        'match-1',
+        'p1',
+        'referee-1',
+      );
+
+      expect(mockRepo.updateTournamentStatus).not.toHaveBeenCalled();
+    });
+
     it('surfaces stale-revision completion conflict as 409 with currentRevision', async () => {
       mockRepo.completeMatch = jest
         .fn()
         .mockResolvedValue({ conflict: true, currentMatch: { revision: 9 } });
 
       await expect(
-        service['finalizeCompletedMatch'](existingMatch as never, 'match-1', 'p1', 'referee-1', {
-          p1SetsWon: 2,
-          p2SetsWon: 1,
-          expectedRevision: 7,
-        }),
+        service['finalizeCompletedMatch'](
+          existingMatch as never,
+          'match-1',
+          'p1',
+          'referee-1',
+          {
+            p1SetsWon: 2,
+            p2SetsWon: 1,
+            expectedRevision: 7,
+          },
+        ),
       ).rejects.toThrow(ConflictException);
 
       // Conflict must NOT trigger any side effect.
@@ -112,11 +197,17 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
     it('passes expectedRevision through to the repository completion call', async () => {
       mockRepo.completeMatch = jest.fn().mockResolvedValue(existingMatch);
 
-      await service['finalizeCompletedMatch'](existingMatch as never, 'match-1', 'p1', 'referee-1', {
-        p1SetsWon: 2,
-        p2SetsWon: 1,
-        expectedRevision: 7,
-      });
+      await service['finalizeCompletedMatch'](
+        existingMatch as never,
+        'match-1',
+        'p1',
+        'referee-1',
+        {
+          p1SetsWon: 2,
+          p2SetsWon: 1,
+          expectedRevision: 7,
+        },
+      );
 
       expect(mockRepo.completeMatch).toHaveBeenCalledWith(
         'match-1',
@@ -129,7 +220,12 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       mockRepo.completeMatch = jest.fn().mockResolvedValue(existingMatch);
       mockRedis.del = jest.fn().mockResolvedValue(undefined);
 
-      await service['finalizeCompletedMatch'](existingMatch as never, 'match-1', 'p1', 'referee-1');
+      await service['finalizeCompletedMatch'](
+        existingMatch as never,
+        'match-1',
+        'p1',
+        'referee-1',
+      );
 
       expect(mockRedis.del).toHaveBeenCalledWith('match:live:match-1');
       expect(mockGateway.broadcastMatchStatus).toHaveBeenCalled();
@@ -181,6 +277,91 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       );
     });
 
+    it('keeps Super Lite ongoing after a manually closed set', async () => {
+      const liteMatch = {
+        ...existingMatch,
+        p1SetsWon: 0,
+        p2SetsWon: 0,
+        tournament: {
+          ...existingMatch.tournament,
+          tournamentConfig: { isLite: true, mode: 'LITE' },
+        },
+      };
+      mockRepo.findById = jest.fn().mockResolvedValue(liteMatch);
+      mockRepo.updateScore = jest.fn().mockResolvedValue({
+        ...liteMatch,
+        p1SetsWon: 1,
+        p2SetsWon: 0,
+        status: 'ONGOING',
+      });
+
+      await service.updateScore(
+        'match-1',
+        { sub: 'referee-1', roles: ['REFEREE'] } as never,
+        {
+          p1SetsWon: 1,
+          p2SetsWon: 0,
+          scoreDetails: {
+            sets: [{ team1Score: 11, team2Score: 7, isFinished: true }],
+          },
+        } as never,
+      );
+
+      expect(mockRepo.updateScore).toHaveBeenCalledWith(
+        'match-1',
+        'referee-1',
+        expect.objectContaining({
+          p1SetsWon: 1,
+          p2SetsWon: 0,
+          scoreDetails: {
+            sets: [{ team1Score: 11, team2Score: 7, isFinished: true }],
+          },
+        }),
+      );
+      expect(mockRepo.completeMatch).not.toHaveBeenCalled();
+    });
+
+    it('keeps Quick open scoring ongoing even when tournament product mode is STRICT', async () => {
+      const quickMatch = {
+        ...existingMatch,
+        p1SetsWon: 2,
+        p2SetsWon: 0,
+        tournament: {
+          ...existingMatch.tournament,
+          tournamentConfig: { isLite: false, mode: 'STRICT' },
+          sportRules: {
+            kind: 'BADMINTON',
+            mode: 'LITE',
+            bestOf: 5,
+            pointsPerSet: 21,
+          },
+        },
+      };
+      mockRepo.findById = jest.fn().mockResolvedValue(quickMatch);
+      mockRepo.updateScore = jest.fn().mockResolvedValue({
+        ...quickMatch,
+        status: 'ONGOING',
+      });
+
+      await service.updateScore(
+        'match-1',
+        { sub: 'referee-1', roles: ['REFEREE'] } as never,
+        {
+          p1SetsWon: 2,
+          p2SetsWon: 0,
+          scoreDetails: {
+            sets: [
+              { team1Score: 21, team2Score: 15, isFinished: true },
+              { team1Score: 21, team2Score: 18, isFinished: true },
+            ],
+          },
+        } as never,
+      );
+
+      expect(mockRepo.updateScore).toHaveBeenCalled();
+      expect(mockRepo.completeMatch).not.toHaveBeenCalled();
+    });
+
     it('rejects a football score update without the canonical football payload', async () => {
       mockRepo.findById = jest.fn().mockResolvedValue({
         ...existingMatch,
@@ -220,7 +401,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       };
       mockRepo.findById = jest.fn().mockResolvedValue(secondLeg);
       mockRepo.findCompletedTieLeg = jest.fn().mockResolvedValue(firstLeg);
-      mockRepo.updateScore = jest.fn().mockResolvedValue({ ...secondLeg, status: 'ONGOING' });
+      mockRepo.updateScore = jest
+        .fn()
+        .mockResolvedValue({ ...secondLeg, status: 'ONGOING' });
 
       await service.updateScore(
         'match-1',
@@ -259,7 +442,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       };
       mockRepo.findById = jest.fn().mockResolvedValue(secondLeg);
       mockRepo.findCompletedTieLeg = jest.fn().mockResolvedValue(firstLeg);
-      mockRepo.completeMatch = jest.fn().mockResolvedValue({ ...secondLeg, status: 'COMPLETED' });
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...secondLeg, status: 'COMPLETED' });
 
       await service.updateScore(
         'match-1',
@@ -278,7 +463,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         } as never,
       );
 
-      expect(mockRepo.completeMatch).toHaveBeenCalledWith('match-1', 'p1', expect.any(Object));
+      expect(mockRepo.completeMatch).toHaveBeenCalledWith(
+        'match-1',
+        'p1',
+        expect.any(Object),
+      );
     });
   });
 
@@ -302,7 +491,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
 
     it('uses football goals instead of generic set counters', async () => {
       mockRepo.findById = jest.fn().mockResolvedValue(footballMatch);
-      mockRepo.completeMatch = jest.fn().mockResolvedValue({ ...footballMatch, status: 'COMPLETED' });
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...footballMatch, status: 'COMPLETED' });
 
       await service.updateStatus(
         'match-1',
@@ -350,7 +541,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       };
       mockRepo.findById = jest.fn().mockResolvedValue(firstLeg);
       mockRepo.findCompletedTieLeg = jest.fn().mockResolvedValue(null);
-      mockRepo.completeMatch = jest.fn().mockResolvedValue({ ...firstLeg, status: 'COMPLETED' });
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...firstLeg, status: 'COMPLETED' });
 
       await service.updateStatus(
         'match-1',
@@ -384,7 +577,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       };
       mockRepo.findById = jest.fn().mockResolvedValue(secondLeg);
       mockRepo.findCompletedTieLeg = jest.fn().mockResolvedValue(firstLeg);
-      mockRepo.completeMatch = jest.fn().mockResolvedValue({ ...secondLeg, status: 'COMPLETED' });
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...secondLeg, status: 'COMPLETED' });
 
       await service.updateStatus(
         'match-1',
@@ -395,7 +590,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       // The current leg is a draw, while the aggregate winner is participant 1;
       // repository completion receives null for the leg result and resolves
       // advancement from both completed legs.
-      expect(mockRepo.completeMatch).toHaveBeenCalledWith('match-1', null, expect.any(Object));
+      expect(mockRepo.completeMatch).toHaveBeenCalledWith(
+        'match-1',
+        null,
+        expect.any(Object),
+      );
     });
 
     it('requires aggregate shootout only when both legs are tied', async () => {
@@ -426,7 +625,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       };
       mockRepo.findById = jest.fn().mockResolvedValue(secondLeg);
       mockRepo.findCompletedTieLeg = jest.fn().mockResolvedValue(firstLeg);
-      mockRepo.completeMatch = jest.fn().mockResolvedValue({ ...secondLeg, status: 'COMPLETED' });
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...secondLeg, status: 'COMPLETED' });
 
       await service.updateStatus(
         'match-1',
@@ -434,7 +635,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         { status: 'COMPLETED' } as never,
       );
 
-      expect(mockRepo.completeMatch).toHaveBeenCalledWith('match-1', 'p1', expect.any(Object));
+      expect(mockRepo.completeMatch).toHaveBeenCalledWith(
+        'match-1',
+        'p1',
+        expect.any(Object),
+      );
     });
   });
 
@@ -455,7 +660,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       await service.operateMatch(
         'match-1',
         { sub: 'creator-1', roles: ['ORGANIZER'] } as never,
-        { action: 'NO_SHOW', reason: 'Đội không đến sân', winnerId: 'p1' } as never,
+        {
+          action: 'NO_SHOW',
+          reason: 'Đội không đến sân',
+          winnerId: 'p1',
+        } as never,
       );
 
       expect(mockRepo.completeMatch).toHaveBeenCalledWith(
@@ -491,7 +700,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       await service.operateMatch(
         'match-1',
         { sub: 'creator-1', roles: ['ORGANIZER'] } as never,
-        { action: 'WALKOVER', reason: 'Không đủ đội hình', winnerId: 'p2' } as never,
+        {
+          action: 'WALKOVER',
+          reason: 'Không đủ đội hình',
+          winnerId: 'p2',
+        } as never,
       );
 
       expect(mockRepo.completeMatch).toHaveBeenCalledWith(
@@ -521,7 +734,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         service.operateMatch(
           'match-1',
           { sub: 'creator-1', roles: ['ORGANIZER'] } as never,
-          { action: 'RETIREMENT', reason: 'Đội xin dừng trận', winnerId: 'p1' } as never,
+          {
+            action: 'RETIREMENT',
+            reason: 'Đội xin dừng trận',
+            winnerId: 'p1',
+          } as never,
         ),
       ).rejects.toThrow('cần scoreDetails.football hợp lệ');
       expect(mockRepo.completeMatch).not.toHaveBeenCalled();
@@ -545,7 +762,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       await service.operateMatch(
         'match-1',
         { sub: 'creator-1', roles: ['ORGANIZER'] } as never,
-        { action: 'RETIREMENT', reason: 'Đội xin dừng trận', winnerId: 'p1' } as never,
+        {
+          action: 'RETIREMENT',
+          reason: 'Đội xin dừng trận',
+          winnerId: 'p1',
+        } as never,
       );
 
       expect(mockRepo.completeMatch).toHaveBeenCalledWith(

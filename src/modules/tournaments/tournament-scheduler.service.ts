@@ -365,7 +365,7 @@ export class TournamentSchedulerService {
               tournamentId: newTournament[0].id,
               type: 'TOURNAMENT_ANNOUNCEMENT',
               body: `⚡ CLB vừa mở giải đấu định kỳ: **${newName}**! Nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`,
-              mediaUrls: newTournament[0].bannerUrl ? [newTournament[0].bannerUrl] : [],
+              mediaUrls: [],
               status: 'PUBLISHED',
             });
           } catch (feedErr) {

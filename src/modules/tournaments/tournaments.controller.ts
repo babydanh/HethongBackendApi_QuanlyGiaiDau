@@ -682,7 +682,6 @@ export class TournamentsController {
   }
 
   @Post('lite')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({
     summary:
@@ -883,8 +882,7 @@ export class TournamentsController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @Verified()
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa giải đấu (Soft Delete)' })
   async remove(
@@ -1265,7 +1263,6 @@ export class TournamentsController {
   }
 
   @Patch(':id/referees/:refereeId/respond')
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Trọng tài chấp nhận/từ chối lời mời làm trọng tài',
@@ -1351,8 +1348,6 @@ export class TournamentsController {
   }
 
   @Post(':id/mock-participants')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Sinh danh sách VĐV giả lập để test' })
   async seedMockParticipants(
@@ -1412,8 +1407,6 @@ export class TournamentsController {
   }
 
   @Delete(':id/mock-participants')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa toàn bộ VĐV giả lập' })
   async clearMockParticipants(
@@ -1430,8 +1423,6 @@ export class TournamentsController {
   }
 
   @Delete(':id/participants/:participantId/mock')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Xóa một participant giả lập' })
   async deleteMockParticipant(
@@ -1636,6 +1627,40 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.cancelTournament(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Patch(':id/recurring/toggle')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Bật/Tắt (Tạm dừng hoặc Kích hoạt lại) lịch tự động tạo giải định kỳ',
+  })
+  async toggleRecurringTournament(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('enabled') enabled: boolean,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.toggleRecurringTournament(
+      id,
+      enabled,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Delete(':id/recurring')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Xóa hoàn toàn lịch tự động tạo giải định kỳ (tắt recurring khỏi giải)',
+  })
+  async deleteRecurringTournament(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.deleteRecurringTournament(
       id,
       user.sub,
       this.getSystemRoles(user),

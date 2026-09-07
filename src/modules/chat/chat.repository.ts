@@ -121,7 +121,7 @@ export class ChatRepository {
         name: string | null;
         type: string;
         createdAt: Date;
-        participants: { id: string; fullName: string | null; avatarUrl: string | null }[];
+        participants: { id: string; fullName: string | null; avatarUrl: string | null; lastReadAt: Date | null }[];
         lastMessage?: {
           id: string;
           senderId: string | null;
@@ -133,20 +133,31 @@ export class ChatRepository {
         unreadCount: number;
         communityId: string | null;
         canSendMessages?: boolean;
-        messageRestriction?: 'STRANGER' | 'BLOCKED' | null;
+        messageRestriction?: 'NO_SHARED_CURRENT_CLUB' | 'BLOCKED' | null;
       }[] = [];
 
       for (const room of roomsWithMembership) {
         try {
           // Get participants
-          let participants: { id: string; fullName: string | null; avatarUrl: string | null }[] = [];
+          let participants: { id: string; fullName: string | null; avatarUrl: string | null; lastReadAt: Date | null }[] = [];
           try {
             if (room.type === 'CLUB' && room.communityId) {
               const members = await this.getClubRoomMembers(room.communityId);
+              const readStates = await this.db
+                .select({
+                  userId: schema.chatReadStates.userId,
+                  lastReadAt: schema.chatReadStates.lastReadAt,
+                })
+                .from(schema.chatReadStates)
+                .where(eq(schema.chatReadStates.roomId, room.id));
+              const lastReadAtByUserId = new Map(
+                readStates.map((state) => [state.userId, state.lastReadAt]),
+              );
               participants = members.map((m) => ({
                 id: m.id,
                 fullName: m.fullName,
                 avatarUrl: m.avatarUrl,
+                lastReadAt: lastReadAtByUserId.get(m.id) ?? null,
               }));
             } else {
               participants = await this.db
@@ -154,10 +165,18 @@ export class ChatRepository {
                   id: schema.users.id,
                   fullName: schema.profiles.fullName,
                   avatarUrl: schema.profiles.avatarUrl,
+                  lastReadAt: schema.chatReadStates.lastReadAt,
                 })
                 .from(schema.chatRoomMembers)
                 .innerJoin(schema.users, eq(schema.chatRoomMembers.userId, schema.users.id))
                 .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+                .leftJoin(
+                  schema.chatReadStates,
+                  and(
+                    eq(schema.chatReadStates.roomId, room.id),
+                    eq(schema.chatReadStates.userId, schema.users.id),
+                  ),
+                )
                 .where(eq(schema.chatRoomMembers.roomId, room.id));
             }
           } catch (pErr) {
@@ -221,24 +240,25 @@ export class ChatRepository {
           }
 
           let canSendMessages = true;
-          let messageRestriction: 'STRANGER' | 'BLOCKED' | null = null;
+          let messageRestriction: 'NO_SHARED_CURRENT_CLUB' | 'BLOCKED' | null = null;
           if (room.type === 'DIRECT') {
             const otherParticipant = participants.find((participant) => participant.id !== userId);
-            if (otherParticipant) {
+            if (!otherParticipant) {
+              canSendMessages = false;
+              messageRestriction = 'NO_SHARED_CURRENT_CLUB';
+            } else {
               try {
                 if (await this.isBlockedBetween(userId, otherParticipant.id)) {
                   canSendMessages = false;
                   messageRestriction = 'BLOCKED';
-                } else if (
-                  !(await this.getAllowStrangerMessages(otherParticipant.id)) &&
-                  !(await this.isAcquainted(userId, otherParticipant.id))
-                ) {
+                } else if (!(await this.shareCurrentJoinedCommunity(userId, otherParticipant.id))) {
                   canSendMessages = false;
-                  messageRestriction = 'STRANGER';
+                  messageRestriction = 'NO_SHARED_CURRENT_CLUB';
                 }
               } catch (err) {
-                this.logger.warn(`Failed to check restriction for direct room ${room.id}:`, err);
-                canSendMessages = true;
+                this.logger.warn(`Failed to project direct permission for room ${room.id}:`, err);
+                canSendMessages = false;
+                messageRestriction = 'NO_SHARED_CURRENT_CLUB';
               }
             }
           }
@@ -450,86 +470,36 @@ export class ChatRepository {
     return !!record;
   }
 
-  /// Cài đặt riêng tư của người nhận: cho phép người lạ nhắn tin (mặc định false).
-  async getAllowStrangerMessages(userId: string): Promise<boolean> {
-    try {
-      const [row] = await this.db
-        .select({ allow: schema.profiles.allowStrangerMessages })
-        .from(schema.profiles)
-        .where(eq(schema.profiles.userId, userId))
-        .limit(1);
-      return row?.allow ?? false;
-    } catch (error) {
-      // Privacy checks must fail closed. A schema/read failure must never turn
-      // a recipient who disabled stranger messages into an implicitly open inbox.
-      this.logger.error(
-        `Unable to read stranger-message privacy for ${userId}; denying stranger access. Apply the allow_stranger_messages migration.`,
-        error instanceof Error ? error.message : String(error),
-      );
-      return false;
-    }
-  }
-
-  /// Hai người "quen nhau" nếu đã từng có tin nhắn direct hoặc cùng là
-  /// thành viên JOINED của ít nhất 1 CLB. Ngược lại là người lạ.
-  async isAcquainted(firstUserId: string, secondUserId: string): Promise<boolean> {
-    try {
-      const [directMessageHistory] = await this.db
-        .select({ id: schema.chatMessages.id })
-        .from(schema.chatMessages)
-        .innerJoin(schema.chatRooms, eq(schema.chatMessages.roomId, schema.chatRooms.id))
-        .where(and(
-          eq(schema.chatRooms.type, 'DIRECT'),
+  /**
+   * DIRECT authorization source of truth. Both users must currently have a
+   * JOINED membership row for the same community. History, follows,
+   * friendships, tournaments and profile opt-ins are intentionally ignored.
+   * Query failures are not swallowed so callers can deny with the stable
+   * fail-closed policy result.
+   */
+  async shareCurrentJoinedCommunity(
+    firstUserId: string,
+    secondUserId: string,
+  ): Promise<boolean> {
+    const [sharedCommunity] = await this.db
+      .select({ communityId: schema.communityMembers.communityId })
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.userId, firstUserId),
+          eq(schema.communityMembers.status, 'JOINED'),
           sql`EXISTS (
-            SELECT 1 FROM chat_room_members first_member
-            WHERE first_member.room_id = ${schema.chatMessages.roomId}
-              AND first_member.user_id = ${firstUserId}
+            SELECT 1
+            FROM community_members other_member
+            WHERE other_member.community_id = ${schema.communityMembers.communityId}
+              AND other_member.user_id = ${secondUserId}
+              AND other_member.status = 'JOINED'
           )`,
-          sql`EXISTS (
-            SELECT 1 FROM chat_room_members second_member
-            WHERE second_member.room_id = ${schema.chatMessages.roomId}
-              AND second_member.user_id = ${secondUserId}
-          )`,
-        ))
-        .limit(1);
-      if (directMessageHistory) return true;
+        ),
+      )
+      .limit(1);
 
-      const secondUserMemberships = await this.db
-        .select({ communityId: schema.communityMembers.communityId })
-        .from(schema.communityMembers)
-        .where(
-          and(
-            eq(schema.communityMembers.userId, secondUserId),
-            eq(schema.communityMembers.status, 'JOINED'),
-          ),
-        );
-
-      const secondUserCommunityIds = secondUserMemberships.map((m) => m.communityId);
-      if (secondUserCommunityIds.length > 0) {
-        const [sharedCommunity] = await this.db
-          .select({ id: schema.communityMembers.id })
-          .from(schema.communityMembers)
-          .where(
-            and(
-              eq(schema.communityMembers.userId, firstUserId),
-              eq(schema.communityMembers.status, 'JOINED'),
-              inArray(schema.communityMembers.communityId, secondUserCommunityIds),
-            ),
-          )
-          .limit(1);
-        if (sharedCommunity) return true;
-      }
-
-      return false;
-    } catch (error) {
-      // If acquaintance data cannot be read, fail closed: the service will
-      // return its normal 403 for a restricted recipient rather than a 500.
-      this.logger.warn(
-        `Unable to verify acquaintance for ${firstUserId} and ${secondUserId}.`,
-        error instanceof Error ? error.message : String(error),
-      );
-      return false;
-    }
+    return !!sharedCommunity;
   }
 
   async createBlock(blockerId: string, blockedId: string) {
@@ -825,7 +795,7 @@ export class ChatRepository {
       senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Sporto Player')`,
       senderAvatar: schema.profiles.avatarUrl,
       senderAvatarUrl: schema.profiles.avatarUrl,
-    }).from(schema.chatMessages).innerJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
+    }).from(schema.chatMessages).leftJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
       .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId)).where(and(...conditions))
       .orderBy(desc(schema.chatMessages.createdAt), desc(schema.chatMessages.id)).limit(limit + 1);
 
