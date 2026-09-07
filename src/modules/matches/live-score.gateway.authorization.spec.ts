@@ -31,7 +31,7 @@ describe('LiveScoreGateway room authorization', () => {
     };
     jwtService = { verify: jest.fn() };
     gateway = new LiveScoreGateway(
-      repository as unknown as MatchesRepository,
+      repository as never,
       jwtService as unknown as JwtService,
     );
     gateway.server = {

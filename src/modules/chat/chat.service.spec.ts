@@ -15,10 +15,17 @@ function createService(repository: Record<string, jest.Mock>) {
     notifyDirectRoomUpdated: jest.fn(),
   };
   const firebase = { sendPushToUsers: jest.fn() };
+  const notifications = { sendNotification: jest.fn() };
   return {
-    service: new ChatService(defaultRepo as never, gateway as never, firebase as never),
+    service: new ChatService(
+      defaultRepo as never,
+      gateway as never,
+      firebase as never,
+      notifications as never,
+    ),
     gateway,
     firebase,
+    notifications,
   };
 }
 

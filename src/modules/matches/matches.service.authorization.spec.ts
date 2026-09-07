@@ -87,6 +87,7 @@ describe('MatchesService object-level football authority', () => {
     await expect(
       service.findOne('match-1', {
         sub: 'member-1',
+        email: 'member-1@example.com',
         roles: ['PLAYER'],
       }),
     ).resolves.toEqual(expect.objectContaining({ id: 'match-1' }));
@@ -101,7 +102,11 @@ describe('MatchesService object-level football authority', () => {
     repository.canAccessLiveMatch.mockResolvedValue(false);
 
     await expect(
-      service.findOne('match-1', { sub: 'outsider', roles: ['PLAYER'] }),
+      service.findOne('match-1', {
+        sub: 'outsider',
+        email: 'outsider@example.com',
+        roles: ['PLAYER'],
+      }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
