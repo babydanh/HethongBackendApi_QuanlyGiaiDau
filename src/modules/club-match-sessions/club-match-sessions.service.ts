@@ -936,7 +936,10 @@ export class ClubMatchSessionsService {
       apiError(ConflictException, 'SESSION_NOT_ACCEPTING_MATCHES');
     const sideA = uniqueSorted(dto.sideAUserIds);
     const sideB = uniqueSorted(dto.sideBUserIds);
-    const expectedSize = dto.matchType === 'SINGLES' ? 1 : 2;
+    const sideSize = sideA.length;
+    const inferredMatchType =
+      dto.matchType ?? (sideSize === 1 ? 'SINGLES' : 'DOUBLES');
+    const expectedSize = inferredMatchType === 'SINGLES' ? 1 : 2;
     const all = [...sideA, ...sideB];
     if (
       sideA.length !== expectedSize ||
@@ -949,7 +952,7 @@ export class ClubMatchSessionsService {
       sessionId,
       sideA,
       sideB,
-      matchType: dto.matchType,
+      matchType: inferredMatchType,
       scheduledAt: dto.scheduledAt ?? null,
       confirmWarnings: Boolean(dto.confirmWarnings),
     };
@@ -1013,7 +1016,7 @@ export class ClubMatchSessionsService {
           createdBy: actor.id,
           sideAUserIds: sideA,
           sideBUserIds: sideB,
-          matchType: dto.matchType,
+          matchType: inferredMatchType,
           scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
           eloStatus: current.session.isRanked ? 'WAITING_RESULT' : 'NOT_RANKED',
         })

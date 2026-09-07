@@ -263,7 +263,8 @@ export class CreateClubMatchDto {
   sideBUserIds: string[];
 
   @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
-  matchType: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+  @IsOptional()
+  matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
 
   @IsDateString()
   @IsOptional()
