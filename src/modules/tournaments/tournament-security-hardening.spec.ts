@@ -52,7 +52,12 @@ describe('Tournament security hardening — structural contracts', () => {
 
   it('keeps football draft registrations ineligible for payment until the roster is complete', () => {
     expect(repositorySource).toContain('hasUndersizedFootballRoster');
-    expect(repositorySource).toContain("hasUndersizedFootballRoster\n            ? 'PENDING'");
+    // Keep this structural contract independent from Prettier indentation.
+    // The production branch may be reformatted without changing the payment
+    // eligibility rule.
+    expect(repositorySource.replace(/\s+/g, ' ')).toContain(
+      "hasUndersizedFootballRoster ? 'PENDING'",
+    );
     expect(repositorySource).toContain('const nextParticipantStatus =');
     expect(repositorySource).toContain(".set({ teamStatus: nextParticipantStatus })");
   });

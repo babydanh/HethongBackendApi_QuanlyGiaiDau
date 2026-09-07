@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Optional,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isDeepStrictEqual } from 'node:util';
@@ -71,6 +72,7 @@ import {
   buildRegistrationTimeoutNotification,
   buildStaffAddedNotification,
   buildTournamentCancelledNotification,
+  buildCommunityPostNewNotification,
 } from '../notifications/notification-builder';
 import { RedisService } from '../../providers/redis/redis.service';
 import { StorageService } from '../../providers/storage/storage.service';
@@ -94,6 +96,8 @@ import { CreateBatchCourtsDto } from '../venues/dto/create-batch-courts.dto';
 
 @Injectable()
 export class TournamentsService {
+  private readonly logger = new Logger(TournamentsService.name);
+
   constructor(
     private readonly tournamentsRepository: TournamentsRepository,
     private readonly bracketGeneratorService: BracketGeneratorService,
@@ -1195,13 +1199,23 @@ export class TournamentsService {
       !record.parentId
     ) {
       try {
-        await this.communitySocialRepository.createTournamentPost(
+        const post = await this.communitySocialRepository.createTournamentPost(
           record.communityId,
           userId,
           record.id,
           record.name,
           record.bannerUrl,
         );
+        if (post?.id) {
+          void this.notifyCommunityTournamentCreated({
+            communityId: record.communityId,
+            tournamentId: record.id,
+            tournamentName: record.name,
+            senderId: userId,
+            postId: post.id,
+            isLite: false,
+          });
+        }
       } catch (err) {
         console.error('Failed to auto-post tournament to community feed:', err);
       }
@@ -2010,15 +2024,24 @@ export class TournamentsService {
     // Auto-post to Community Feed
     if (fullDto.communityId && (!requestedPublic || isAdmin)) {
       try {
-        await this.communitySocialRepository.createTournamentPost(
+        const post = await this.communitySocialRepository.createTournamentPost(
           fullDto.communityId,
-
           userId,
           record.id,
           record.name,
           record.bannerUrl,
           isSuperLite,
         );
+        if (post?.id) {
+          void this.notifyCommunityTournamentCreated({
+            communityId: fullDto.communityId,
+            tournamentId: record.id,
+            tournamentName: record.name,
+            senderId: userId,
+            postId: post.id,
+            isLite: isSuperLite,
+          });
+        }
       } catch (err) {
         console.error('Failed to auto-post tournament to community feed:', err);
       }
@@ -2055,6 +2078,74 @@ export class TournamentsService {
       joinUrl: `${frontendUrl}${joinPath}`,
       qrPayload: `${frontendUrl}${joinPath}`,
     };
+  }
+
+  private async notifyCommunityTournamentCreated(params: {
+    communityId: string;
+    tournamentId: string;
+    tournamentName: string;
+    senderId: string;
+    postId: string;
+    isLite?: boolean;
+  }) {
+    try {
+      if (
+        typeof this.communitySocialRepository.getAllNotificationPreferences !==
+        'function'
+      ) {
+        return;
+      }
+      const community =
+        typeof this.tournamentsRepository.findCommunityById === 'function'
+          ? await this.tournamentsRepository.findCommunityById(params.communityId)
+          : null;
+      const communityName = community?.name || 'Câu lạc bộ';
+
+      const authorProfile =
+        typeof this.tournamentsRepository.findUserProfile === 'function'
+          ? await this.tournamentsRepository.findUserProfile(params.senderId)
+          : null;
+      const senderName = authorProfile?.fullName?.trim() || 'Ban quản trị';
+
+      const preferences =
+        await this.communitySocialRepository.getAllNotificationPreferences(
+          params.communityId,
+          params.senderId,
+        );
+
+      const title = params.isLite
+        ? `⚡ Giải đấu nhanh mới tại ${communityName}`
+        : `🏆 Giải đấu mới tại ${communityName}`;
+      const content = `${senderName} vừa mở giải đấu "${params.tournamentName}". Nhấn để xem và đăng ký tham gia ngay!`;
+      const redirectUrl = `/communities/${params.communityId}?postId=${encodeURIComponent(params.postId)}`;
+
+      await Promise.all(
+        preferences
+          .filter(
+            (preference) =>
+              preference.notificationPreference === 'ALL' &&
+              preference.socialMuted !== true &&
+              preference.socialNotificationsEnabled !== false,
+          )
+          .map((preference) =>
+            this.notificationsService.sendNotification(
+              buildCommunityPostNewNotification({
+                communityId: params.communityId,
+                communityName,
+                senderName,
+                receiverId: preference.userId,
+                senderId: params.senderId,
+                postId: params.postId,
+                title,
+                content,
+                redirectUrl,
+              }),
+            ),
+          ),
+      );
+    } catch (err) {
+      console.error('Failed to dispatch community tournament notifications:', err);
+    }
   }
 
   async getLiteJoinStatus(inviteCode: string, userId?: string) {

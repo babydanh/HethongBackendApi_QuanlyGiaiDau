@@ -257,13 +257,16 @@ export const buildCommunityPostNewNotification = (params: {
   receiverId: string;
   senderId?: string;
   postId: string;
+  title?: string;
+  content?: string;
+  redirectUrl?: string;
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
   senderId: params.senderId,
   type: NOTIFICATION_TYPES.COMMUNITY_POST_NEW,
-  title: `Bài viết mới trong CLB ${params.communityName}`,
-  content: `${params.senderName} vừa đăng một bài viết mới trong CLB.`,
-  redirectUrl: getCommunityRedirect(params.communityId, params.postId),
+  title: params.title || `Bài viết mới trong CLB ${params.communityName}`,
+  content: params.content || `${params.senderName} vừa đăng một bài viết mới trong CLB.`,
+  redirectUrl: params.redirectUrl || getCommunityRedirect(params.communityId, params.postId),
 });
 
 export const buildCommunityChatMessageNotification = (params: {
