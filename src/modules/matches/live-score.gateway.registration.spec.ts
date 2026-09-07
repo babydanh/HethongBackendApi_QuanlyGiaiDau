@@ -50,4 +50,28 @@ describe('LiveScoreGateway registration updates', () => {
     });
     gateway.onApplicationShutdown();
   });
+
+  it('publishes a club match only to its match and session rooms', () => {
+    const gateway = new LiveScoreGateway({} as any, {} as any);
+    const emit = jest.fn();
+    const to = jest.fn(() => ({ emit }));
+    (gateway as unknown as { server: unknown }).server = { to };
+
+    gateway.broadcastClubSessionMatchUpdate(
+      'session-1',
+      'match-1',
+      { status: 'ONGOING', revision: 2 },
+      'score:update',
+    );
+
+    expect(to).toHaveBeenNthCalledWith(1, 'match:match-1');
+    expect(to).toHaveBeenNthCalledWith(2, 'club-match-session:session-1');
+    const [, rawPayload] = emit.mock.calls[0] as [string, string];
+    expect(JSON.parse(rawPayload)).toMatchObject({
+      id: 'match-1',
+      clubMatchSessionId: 'session-1',
+      contextType: 'CLUB_SOCIAL_MATCH_SESSION',
+    });
+    gateway.onApplicationShutdown();
+  });
 });

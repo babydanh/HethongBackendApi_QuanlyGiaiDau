@@ -20,6 +20,11 @@ import { AdminRankingService } from './admin-ranking.service';
     FootballTeamEloService,
     AdminRankingService,
   ],
-  exports: [RankingsService, EloEngineService, FootballTeamEloService],
+  exports: [
+    RankingsService,
+    EloEngineService,
+    EloOutboxProcessor,
+    FootballTeamEloService,
+  ],
 })
 export class RankingsModule {}

@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   UnauthorizedException,
   UnprocessableEntityException,
+  Optional,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { randomUUID } from 'node:crypto';
@@ -26,6 +27,7 @@ import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import type { MatchBroadcastData } from './interfaces/match-broadcast.interface';
 import { RankingsService } from '../rankings/rankings.service';
+import { EloOutboxProcessor } from '../rankings/elo-outbox.processor';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import {
@@ -53,6 +55,7 @@ export class MatchesService {
     private readonly rankingsService: RankingsService,
     private readonly notificationsService: NotificationsService,
     private readonly redisService: RedisService,
+    @Optional() private readonly eloOutboxProcessor?: EloOutboxProcessor,
   ) {}
 
   @Cron('*/10 * * * *')
@@ -326,7 +329,8 @@ export class MatchesService {
     // NOTE-3 (T12): ELO is now enqueued inside the completion transaction via
     // match_elo_outbox (see matches.repository completeMatchInTx). The worker
     // (EloOutboxProcessor) owns processMatchResult with retry + idempotency.
-    // No inline call here — a failure can no longer be swallowed silently.
+    // Dispatch only after commit. Cron remains the durable retry path.
+    void this.eloOutboxProcessor?.dispatchNow();
 
     if (existing.tournamentId) {
       try {

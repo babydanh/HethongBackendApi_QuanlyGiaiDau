@@ -45,6 +45,7 @@ import { FootballTeamsModule } from './modules/football-teams/football-teams.mod
 import { FirebaseModule } from './modules/firebase/firebase.module';
 import { SponsorsModule } from './modules/sponsors/sponsors.module';
 import { AdvertisementsModule } from './modules/advertisements/advertisements.module';
+import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-match-sessions.module';
 
 @Module({
   imports: [
@@ -101,6 +102,7 @@ import { AdvertisementsModule } from './modules/advertisements/advertisements.mo
     FirebaseModule,
     SponsorsModule,
     AdvertisementsModule,
+    ClubMatchSessionsModule,
   ],
   controllers: [AppController],
   providers: [

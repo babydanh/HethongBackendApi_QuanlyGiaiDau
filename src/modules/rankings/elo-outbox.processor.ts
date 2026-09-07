@@ -27,6 +27,7 @@ const LEASE_TIMEOUT_MINUTES = 5;
 export class EloOutboxProcessor {
   private readonly logger = new Logger(EloOutboxProcessor.name);
   private readonly instanceId: string;
+  private running = false;
 
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
@@ -38,6 +39,8 @@ export class EloOutboxProcessor {
 
   @Cron(CronExpression.EVERY_30_SECONDS)
   async processOutbox(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
     let claimed = 0;
     try {
       while (claimed < 20) {
@@ -48,11 +51,18 @@ export class EloOutboxProcessor {
       }
     } catch (err) {
       this.logger.error(`ELO outbox cycle failed: ${(err as Error).message}`, (err as Error).stack);
+    } finally {
+      this.running = false;
     }
   }
 
+  /** Fire-and-forget safe entry point used only after the score transaction commits. */
+  async dispatchNow(): Promise<void> {
+    await this.processOutbox();
+  }
+
   private async claimOne(): Promise<
-    | { id: string; match_id: string }
+    | { id: string; match_id: string | null; club_match_session_match_id: string | null }
     | null
   > {
     const result = (await this.db.execute(sql`
@@ -76,15 +86,31 @@ export class EloOutboxProcessor {
           attempts = attempts + 1,
           last_error = NULL
       WHERE id IN (SELECT id FROM candidate)
-      RETURNING id, match_id
-    `)) as unknown as Array<{ id: string; match_id: string }>;
+      RETURNING id, match_id, club_match_session_match_id
+    `)) as unknown as Array<{
+      id: string;
+      match_id: string | null;
+      club_match_session_match_id: string | null;
+    }>;
 
     return result[0] ?? null;
   }
 
-  private async processClaimed(row: { id: string; match_id: string }): Promise<void> {
+  private async processClaimed(row: {
+    id: string;
+    match_id: string | null;
+    club_match_session_match_id: string | null;
+  }): Promise<void> {
     try {
-      await this.rankingsService.processMatchResultFromOutbox(row.match_id);
+      if (row.club_match_session_match_id) {
+        await this.rankingsService.processClubMatchResultFromOutbox(
+          row.club_match_session_match_id,
+        );
+      } else if (row.match_id) {
+        await this.rankingsService.processMatchResultFromOutbox(row.match_id);
+      } else {
+        throw new Error('ELO outbox row has no match context');
+      }
       await this.db.execute(sql`
         UPDATE match_elo_outbox
         SET status = 'PROCESSED', processed_at = now(), locked_at = NULL, locked_by = NULL
@@ -108,7 +134,13 @@ export class EloOutboxProcessor {
               last_error = ${message}
           WHERE id = ${row.id}
         `);
-        this.logger.warn(`ELO outbox retry (attempt ${attempts}/${RETRY_CAP}) for match ${row.match_id}: ${message}`);
+        if (row.club_match_session_match_id) {
+          await this.db.execute(sql`
+            UPDATE club_match_session_matches SET elo_status = 'FAILED_RETRYABLE', updated_at = now()
+            WHERE id = ${row.club_match_session_match_id}
+          `);
+        }
+        this.logger.warn(`ELO outbox retry (attempt ${attempts}/${RETRY_CAP}) for match ${row.match_id ?? row.club_match_session_match_id}: ${message}`);
       } else {
         // Terminal failure after retry cap.
         await this.db.execute(sql`
@@ -116,7 +148,13 @@ export class EloOutboxProcessor {
           SET status = 'FAILED', locked_at = NULL, locked_by = NULL, last_error = ${message}
           WHERE id = ${row.id}
         `);
-        this.logger.error(`ELO outbox FAILED (terminal) for match ${row.match_id}: ${message}`);
+        if (row.club_match_session_match_id) {
+          await this.db.execute(sql`
+            UPDATE club_match_session_matches SET elo_status = 'FAILED_TERMINAL', updated_at = now()
+            WHERE id = ${row.club_match_session_match_id}
+          `);
+        }
+        this.logger.error(`ELO outbox FAILED (terminal) for match ${row.match_id ?? row.club_match_session_match_id}: ${message}`);
       }
     }
   }
