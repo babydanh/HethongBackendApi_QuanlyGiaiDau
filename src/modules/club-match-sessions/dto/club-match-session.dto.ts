@@ -37,6 +37,13 @@ export class CreateClubMatchSessionDto {
   @IsOptional()
   isRanked?: boolean;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  @Max(128)
+  @IsOptional()
+  maxParticipants?: number;
+
   @IsDateString()
   @IsOptional()
   startAt?: string;
@@ -68,6 +75,13 @@ export class UpdateClubMatchSessionDto {
   @IsBoolean()
   @IsOptional()
   isRanked?: boolean;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  @Max(128)
+  @IsOptional()
+  maxParticipants?: number;
 
   @IsDateString()
   @IsOptional()

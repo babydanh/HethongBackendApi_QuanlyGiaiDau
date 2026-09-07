@@ -67,6 +67,7 @@ describe('ClubMatchSessionsService', () => {
       expect.objectContaining({
         registrationMode: 'MIXED',
         isRanked: true,
+        maxParticipants: 16,
         startAt: null,
         endAt: null,
       }),

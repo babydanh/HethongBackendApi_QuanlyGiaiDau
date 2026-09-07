@@ -78,10 +78,7 @@ export class ClubMatchSessionsService {
     if (!context || context.status !== 'ACTIVE') {
       apiError(NotFoundException, 'CLUB_NOT_FOUND');
     }
-    if (
-      !this.isPlatformAdmin(actor) &&
-      context.memberStatus !== 'JOINED'
-    ) {
+    if (!this.isPlatformAdmin(actor) && context.memberStatus !== 'JOINED') {
       apiError(ForbiddenException, 'CLUB_ACTIVE_MEMBERSHIP_REQUIRED');
     }
     return context;
@@ -144,11 +141,7 @@ export class ClubMatchSessionsService {
     };
   }
 
-  async create(
-    actor: Actor,
-    dto: CreateClubMatchSessionDto,
-    locale?: string,
-  ) {
+  async create(actor: Actor, dto: CreateClubMatchSessionDto, locale?: string) {
     const community = await this.requireManager(dto.communityId, actor);
     if (!community.categoryId) {
       apiError(BadRequestException, 'CLUB_SPORT_REQUIRED');
@@ -169,17 +162,14 @@ export class ClubMatchSessionsService {
       description: dto.description?.trim() || null,
       registrationMode: dto.registrationMode ?? 'MIXED',
       isRanked: dto.isRanked ?? true,
+      maxParticipants: dto.maxParticipants ?? 16,
       startAt,
       endAt,
     });
     return this.get(created.id, actor, locale);
   }
 
-  async list(
-    actor: Actor,
-    query: QueryClubMatchSessionsDto,
-    locale?: string,
-  ) {
+  async list(actor: Actor, query: QueryClubMatchSessionsDto, locale?: string) {
     const access = await this.requireCommunityAccess(query.communityId, actor);
     const canManage =
       this.isPlatformAdmin(actor) || MANAGER_ROLES.has(access.memberRole ?? '');
@@ -210,14 +200,14 @@ export class ClubMatchSessionsService {
 
   async get(sessionId: string, actor: Actor, locale?: string) {
     const row = await this.requireSession(sessionId, actor);
-    const [membership, viewerParticipant, viewerPreferences] = await Promise.all([
-      this.repository.findMembership(row.session.communityId, actor.id),
-      this.repository.findParticipant(sessionId, actor.id),
-      this.repository.findPreference(sessionId, actor.id),
-    ]);
+    const [membership, viewerParticipant, viewerPreferences] =
+      await Promise.all([
+        this.repository.findMembership(row.session.communityId, actor.id),
+        this.repository.findParticipant(sessionId, actor.id),
+        this.repository.findPreference(sessionId, actor.id),
+      ]);
     const canManage =
-      this.isPlatformAdmin(actor) ||
-      MANAGER_ROLES.has(membership?.role ?? '');
+      this.isPlatformAdmin(actor) || MANAGER_ROLES.has(membership?.role ?? '');
     const projected = this.projectSession(row, locale, canManage);
     return projected
       ? {
@@ -284,6 +274,8 @@ export class ClubMatchSessionsService {
           registrationMode:
             dto.registrationMode ?? current.session.registrationMode,
           isRanked: dto.isRanked ?? current.session.isRanked,
+          maxParticipants:
+            dto.maxParticipants ?? current.session.maxParticipants,
           startAt,
           endAt,
           updatedAt: new Date(),
@@ -326,9 +318,12 @@ export class ClubMatchSessionsService {
           ? 'ENDED'
           : 'CANCELLED';
     const allowed =
-      (nextStatus === 'CLOSED' && ['OPEN', 'LIVE'].includes(current.session.status)) ||
-      (nextStatus === 'ENDED' && ['OPEN', 'LIVE', 'CLOSED'].includes(current.session.status)) ||
-      (nextStatus === 'CANCELLED' && !TERMINAL_SESSION_STATUSES.has(current.session.status));
+      (nextStatus === 'CLOSED' &&
+        ['OPEN', 'LIVE'].includes(current.session.status)) ||
+      (nextStatus === 'ENDED' &&
+        ['OPEN', 'LIVE', 'CLOSED'].includes(current.session.status)) ||
+      (nextStatus === 'CANCELLED' &&
+        !TERMINAL_SESSION_STATUSES.has(current.session.status));
     if (!allowed) apiError(ConflictException, 'INVALID_SESSION_TRANSITION');
     const db = this.repository.getDb();
     await db.transaction(async (tx) => {
@@ -340,7 +335,8 @@ export class ClubMatchSessionsService {
             nextStatus === 'CLOSED' || nextStatus === 'ENDED'
               ? new Date()
               : current.session.registrationClosedAt,
-          endedAt: nextStatus === 'ENDED' ? new Date() : current.session.endedAt,
+          endedAt:
+            nextStatus === 'ENDED' ? new Date() : current.session.endedAt,
           version: sql`${schema.clubMatchSessions.version} + 1`,
           updatedAt: new Date(),
         })
@@ -355,11 +351,18 @@ export class ClubMatchSessionsService {
       if (nextStatus === 'CANCELLED') {
         await tx
           .update(schema.clubMatchSessionMatches)
-          .set({ status: 'CANCELLED', eloStatus: 'SKIPPED_CANCELLED', updatedAt: new Date() })
+          .set({
+            status: 'CANCELLED',
+            eloStatus: 'SKIPPED_CANCELLED',
+            updatedAt: new Date(),
+          })
           .where(
             and(
               eq(schema.clubMatchSessionMatches.sessionId, sessionId),
-              inArray(schema.clubMatchSessionMatches.status, ['SCHEDULED', 'ONGOING']),
+              inArray(schema.clubMatchSessionMatches.status, [
+                'SCHEDULED',
+                'ONGOING',
+              ]),
             ),
           );
       }
@@ -400,6 +403,17 @@ export class ClubMatchSessionsService {
     }
     const db = this.repository.getDb();
     return db.transaction(async (tx) => {
+      const lockedSession = await this.repository.findSessionForUpdate(
+        sessionId,
+        tx,
+      );
+      if (!lockedSession) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+      if (lockedSession.status !== 'OPEN') {
+        apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
+      }
+      if (!['SELF', 'MIXED'].includes(lockedSession.registrationMode)) {
+        apiError(ForbiddenException, 'SELF_REGISTRATION_DISABLED');
+      }
       const existing = await this.repository.findParticipant(
         sessionId,
         actor.id,
@@ -409,15 +423,34 @@ export class ClubMatchSessionsService {
       if (existing?.source === 'MANDATORY') {
         apiError(ConflictException, 'MANDATORY_PARTICIPANT_CANNOT_SELF_CHANGE');
       }
+      const activeCount = await this.repository.countActiveParticipants(
+        sessionId,
+        tx,
+      );
+      if (activeCount >= lockedSession.maxParticipants) {
+        apiError(ConflictException, 'SESSION_CAPACITY_REACHED', {
+          maxParticipants: lockedSession.maxParticipants,
+        });
+      }
       const [participant] = existing
         ? await tx
             .update(schema.clubMatchSessionParticipants)
-            .set({ status: 'ACTIVE', withdrawnAt: null, updatedAt: new Date(), version: sql`${schema.clubMatchSessionParticipants.version} + 1` })
+            .set({
+              status: 'ACTIVE',
+              withdrawnAt: null,
+              updatedAt: new Date(),
+              version: sql`${schema.clubMatchSessionParticipants.version} + 1`,
+            })
             .where(eq(schema.clubMatchSessionParticipants.id, existing.id))
             .returning()
         : await tx
             .insert(schema.clubMatchSessionParticipants)
-            .values({ sessionId, userId: actor.id, source: 'SELF', status: 'ACTIVE' })
+            .values({
+              sessionId,
+              userId: actor.id,
+              source: 'SELF',
+              status: 'ACTIVE',
+            })
             .returning();
       await this.repository.auditUpdate(
         tx,
@@ -436,7 +469,10 @@ export class ClubMatchSessionsService {
     if (TERMINAL_SESSION_STATUSES.has(current.session.status)) {
       apiError(ConflictException, 'SESSION_IS_TERMINAL');
     }
-    const participant = await this.repository.findParticipant(sessionId, actor.id);
+    const participant = await this.repository.findParticipant(
+      sessionId,
+      actor.id,
+    );
     if (!participant || participant.status !== 'ACTIVE') {
       apiError(NotFoundException, 'ACTIVE_PARTICIPANT_NOT_FOUND');
     }
@@ -451,29 +487,56 @@ export class ClubMatchSessionsService {
         .where(
           and(
             eq(schema.clubMatchSessionMatches.sessionId, sessionId),
-            inArray(schema.clubMatchSessionMatches.status, ['SCHEDULED', 'ONGOING']),
+            inArray(schema.clubMatchSessionMatches.status, [
+              'SCHEDULED',
+              'ONGOING',
+            ]),
             isNull(schema.clubMatchSessionMatches.deletedAt),
           ),
         );
       if (
         activeMatches.length > 0 &&
-        (await Promise.all(activeMatches.map((match) => this.repository.findMatch(match.id, tx))))
-          .some((match) => match && [...match.sideAUserIds, ...match.sideBUserIds].includes(actor.id))
+        (
+          await Promise.all(
+            activeMatches.map((match) =>
+              this.repository.findMatch(match.id, tx),
+            ),
+          )
+        ).some(
+          (match) =>
+            match &&
+            [...match.sideAUserIds, ...match.sideBUserIds].includes(actor.id),
+        )
       ) {
         apiError(ConflictException, 'PARTICIPANT_HAS_ACTIVE_MATCH');
       }
       const [updated] = await tx
         .update(schema.clubMatchSessionParticipants)
-        .set({ status: 'WITHDRAWN', withdrawnAt: new Date(), updatedAt: new Date(), version: sql`${schema.clubMatchSessionParticipants.version} + 1` })
+        .set({
+          status: 'WITHDRAWN',
+          withdrawnAt: new Date(),
+          updatedAt: new Date(),
+          version: sql`${schema.clubMatchSessionParticipants.version} + 1`,
+        })
         .where(
           and(
             eq(schema.clubMatchSessionParticipants.id, participant.id),
-            eq(schema.clubMatchSessionParticipants.version, participant.version),
+            eq(
+              schema.clubMatchSessionParticipants.version,
+              participant.version,
+            ),
           ),
         )
         .returning();
       if (!updated) apiError(ConflictException, 'STALE_PARTICIPANT_VERSION');
-      await this.repository.auditUpdate(tx, actor.id, 'club_match_session_participants', participant.id, { status: 'ACTIVE' }, { status: 'WITHDRAWN' });
+      await this.repository.auditUpdate(
+        tx,
+        actor.id,
+        'club_match_session_participants',
+        participant.id,
+        { status: 'ACTIVE' },
+        { status: 'WITHDRAWN' },
+      );
       return updated;
     });
   }
@@ -492,7 +555,9 @@ export class ClubMatchSessionsService {
     if (current.session.status !== 'OPEN') {
       apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
     }
-    if (!['MANAGER_ASSIGN', 'MIXED'].includes(current.session.registrationMode)) {
+    if (
+      !['MANAGER_ASSIGN', 'MIXED'].includes(current.session.registrationMode)
+    ) {
       apiError(ConflictException, 'MANAGER_ASSIGNMENT_DISABLED');
     }
     const userIds = uniqueSorted(dto.userIds);
@@ -506,37 +571,104 @@ export class ClubMatchSessionsService {
         request,
       });
       if (replay) {
-        if (!replay.sameRequest) apiError(ConflictException, 'IDEMPOTENCY_KEY_REUSED');
+        if (!replay.sameRequest)
+          apiError(ConflictException, 'IDEMPOTENCY_KEY_REUSED');
         return replay.result;
+      }
+      const lockedSession = await this.repository.findSessionForUpdate(
+        sessionId,
+        tx,
+      );
+      if (!lockedSession) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+      if (lockedSession.status !== 'OPEN') {
+        apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
+      }
+      if (
+        !['MANAGER_ASSIGN', 'MIXED'].includes(lockedSession.registrationMode)
+      ) {
+        apiError(ConflictException, 'MANAGER_ASSIGNMENT_DISABLED');
       }
       const members = await tx
         .select({ userId: schema.communityMembers.userId })
         .from(schema.communityMembers)
         .where(
           and(
-            eq(schema.communityMembers.communityId, current.session.communityId),
+            eq(
+              schema.communityMembers.communityId,
+              current.session.communityId,
+            ),
             eq(schema.communityMembers.status, 'JOINED'),
             inArray(schema.communityMembers.userId, userIds),
           ),
         );
       if (members.length !== userIds.length) {
-        apiError(BadRequestException, 'ALL_PARTICIPANTS_MUST_BE_ACTIVE_CLUB_MEMBERS');
+        apiError(
+          BadRequestException,
+          'ALL_PARTICIPANTS_MUST_BE_ACTIVE_CLUB_MEMBERS',
+        );
       }
-      const assigned = [] as Array<typeof schema.clubMatchSessionParticipants.$inferSelect>;
+      const activeCount = await this.repository.countActiveParticipants(
+        sessionId,
+        tx,
+      );
+      let newActiveCount = 0;
       for (const userId of userIds) {
-        const existing = await this.repository.findParticipant(sessionId, userId, tx);
+        const existing = await this.repository.findParticipant(
+          sessionId,
+          userId,
+          tx,
+        );
+        if (existing?.status !== 'ACTIVE') newActiveCount += 1;
+      }
+      if (activeCount + newActiveCount > lockedSession.maxParticipants) {
+        apiError(ConflictException, 'SESSION_CAPACITY_REACHED', {
+          maxParticipants: lockedSession.maxParticipants,
+          activeCount,
+        });
+      }
+      const assigned = [] as Array<
+        typeof schema.clubMatchSessionParticipants.$inferSelect
+      >;
+      for (const userId of userIds) {
+        const existing = await this.repository.findParticipant(
+          sessionId,
+          userId,
+          tx,
+        );
         const [row] = existing
           ? await tx
               .update(schema.clubMatchSessionParticipants)
-              .set({ source: 'MANDATORY', status: 'ACTIVE', assignedBy: actor.id, assignedAt: new Date(), withdrawnAt: null, updatedAt: new Date(), version: sql`${schema.clubMatchSessionParticipants.version} + 1` })
+              .set({
+                source: 'MANDATORY',
+                status: 'ACTIVE',
+                assignedBy: actor.id,
+                assignedAt: new Date(),
+                withdrawnAt: null,
+                updatedAt: new Date(),
+                version: sql`${schema.clubMatchSessionParticipants.version} + 1`,
+              })
               .where(eq(schema.clubMatchSessionParticipants.id, existing.id))
               .returning()
           : await tx
               .insert(schema.clubMatchSessionParticipants)
-              .values({ sessionId, userId, source: 'MANDATORY', status: 'ACTIVE', assignedBy: actor.id, assignedAt: new Date() })
+              .values({
+                sessionId,
+                userId,
+                source: 'MANDATORY',
+                status: 'ACTIVE',
+                assignedBy: actor.id,
+                assignedAt: new Date(),
+              })
               .returning();
         assigned.push(row);
-        await this.repository.auditUpdate(tx, actor.id, 'club_match_session_participants', row.id, existing ? { status: existing.status, source: existing.source } : {}, { status: row.status, source: row.source, assignedBy: actor.id });
+        await this.repository.auditUpdate(
+          tx,
+          actor.id,
+          'club_match_session_participants',
+          row.id,
+          existing ? { status: existing.status, source: existing.source } : {},
+          { status: row.status, source: row.source, assignedBy: actor.id },
+        );
       }
       const result = { assignedUserIds: userIds, replayed: false };
       await this.repository.saveCommand(tx, {
@@ -559,13 +691,21 @@ export class ClubMatchSessionsService {
   ) {
     const current = await this.requireSession(sessionId, actor);
     await this.requireManager(current.session.communityId, actor);
-    const participant = await this.repository.findParticipant(sessionId, userId);
+    const participant = await this.repository.findParticipant(
+      sessionId,
+      userId,
+    );
     if (!participant) apiError(NotFoundException, 'PARTICIPANT_NOT_FOUND');
     const db = this.repository.getDb();
     return db.transaction(async (tx) => {
       const [updated] = await tx
         .update(schema.clubMatchSessionParticipants)
-        .set({ status: 'KICKED', withdrawnAt: new Date(), updatedAt: new Date(), version: sql`${schema.clubMatchSessionParticipants.version} + 1` })
+        .set({
+          status: 'KICKED',
+          withdrawnAt: new Date(),
+          updatedAt: new Date(),
+          version: sql`${schema.clubMatchSessionParticipants.version} + 1`,
+        })
         .where(
           and(
             eq(schema.clubMatchSessionParticipants.id, participant.id),
@@ -574,7 +714,14 @@ export class ClubMatchSessionsService {
         )
         .returning();
       if (!updated) apiError(ConflictException, 'STALE_PARTICIPANT_VERSION');
-      await this.repository.auditUpdate(tx, actor.id, 'club_match_session_participants', participant.id, { status: participant.status }, { status: 'KICKED' });
+      await this.repository.auditUpdate(
+        tx,
+        actor.id,
+        'club_match_session_participants',
+        participant.id,
+        { status: participant.status },
+        { status: 'KICKED' },
+      );
       return updated;
     });
   }
@@ -585,7 +732,10 @@ export class ClubMatchSessionsService {
     dto: UpdateClubMatchPreferencesDto,
   ) {
     const current = await this.requireSession(sessionId, actor);
-    const participant = await this.repository.findParticipant(sessionId, actor.id);
+    const participant = await this.repository.findParticipant(
+      sessionId,
+      actor.id,
+    );
     if (!participant || participant.status !== 'ACTIVE') {
       apiError(ForbiddenException, 'ACTIVE_PARTICIPANT_REQUIRED');
     }
@@ -624,28 +774,59 @@ export class ClubMatchSessionsService {
             ),
           );
         if (targets.length !== all.length) {
-          apiError(BadRequestException, 'PREFERENCE_TARGET_MUST_BE_ACTIVE_PARTICIPANT');
+          apiError(
+            BadRequestException,
+            'PREFERENCE_TARGET_MUST_BE_ACTIVE_PARTICIPANT',
+          );
         }
       }
       const [existing] = await tx
         .select()
         .from(schema.clubMatchPreferences)
-        .where(and(eq(schema.clubMatchPreferences.sessionId, sessionId), eq(schema.clubMatchPreferences.userId, actor.id)))
+        .where(
+          and(
+            eq(schema.clubMatchPreferences.sessionId, sessionId),
+            eq(schema.clubMatchPreferences.userId, actor.id),
+          ),
+        )
         .limit(1);
-      if (existing && dto.version !== undefined && dto.version !== existing.version) {
+      if (
+        existing &&
+        dto.version !== undefined &&
+        dto.version !== existing.version
+      ) {
         apiError(ConflictException, 'STALE_PREFERENCE_VERSION');
       }
       const [saved] = existing
         ? await tx
             .update(schema.clubMatchPreferences)
-            .set({ preferredPartnerUserIds: partner, preferredOpponentUserIds: opponent, avoidUserIds: avoid, updatedAt: new Date(), version: sql`${schema.clubMatchPreferences.version} + 1` })
+            .set({
+              preferredPartnerUserIds: partner,
+              preferredOpponentUserIds: opponent,
+              avoidUserIds: avoid,
+              updatedAt: new Date(),
+              version: sql`${schema.clubMatchPreferences.version} + 1`,
+            })
             .where(eq(schema.clubMatchPreferences.id, existing.id))
             .returning()
         : await tx
             .insert(schema.clubMatchPreferences)
-            .values({ sessionId, userId: actor.id, preferredPartnerUserIds: partner, preferredOpponentUserIds: opponent, avoidUserIds: avoid })
+            .values({
+              sessionId,
+              userId: actor.id,
+              preferredPartnerUserIds: partner,
+              preferredOpponentUserIds: opponent,
+              avoidUserIds: avoid,
+            })
             .returning();
-      await this.repository.auditUpdate(tx, actor.id, 'club_match_preferences', saved.id, existing ? { version: existing.version } : {}, { version: saved.version });
+      await this.repository.auditUpdate(
+        tx,
+        actor.id,
+        'club_match_preferences',
+        saved.id,
+        existing ? { version: existing.version } : {},
+        { version: saved.version },
+      );
       return saved;
     });
   }
@@ -656,53 +837,144 @@ export class ClubMatchSessionsService {
     dto: CreateClubMatchDto,
     idempotencyKey?: string,
   ) {
-    if (!idempotencyKey?.trim()) apiError(BadRequestException, 'IDEMPOTENCY_KEY_REQUIRED');
+    if (!idempotencyKey?.trim())
+      apiError(BadRequestException, 'IDEMPOTENCY_KEY_REQUIRED');
     const current = await this.requireSession(sessionId, actor);
-    const membership = await this.repository.findMembership(current.session.communityId, actor.id);
-    const actorParticipant = await this.repository.findParticipant(sessionId, actor.id);
-    const canCreate = this.isPlatformAdmin(actor) || MANAGER_ROLES.has(membership?.role ?? '') || actorParticipant?.status === 'ACTIVE';
+    const membership = await this.repository.findMembership(
+      current.session.communityId,
+      actor.id,
+    );
+    const actorParticipant = await this.repository.findParticipant(
+      sessionId,
+      actor.id,
+    );
+    const canCreate =
+      this.isPlatformAdmin(actor) ||
+      MANAGER_ROLES.has(membership?.role ?? '') ||
+      actorParticipant?.status === 'ACTIVE';
     if (!canCreate) apiError(ForbiddenException, 'MATCH_CREATION_NOT_ALLOWED');
-    if (!['OPEN', 'LIVE'].includes(current.session.status)) apiError(ConflictException, 'SESSION_NOT_ACCEPTING_MATCHES');
+    if (!['OPEN', 'LIVE'].includes(current.session.status))
+      apiError(ConflictException, 'SESSION_NOT_ACCEPTING_MATCHES');
     const sideA = uniqueSorted(dto.sideAUserIds);
     const sideB = uniqueSorted(dto.sideBUserIds);
     const expectedSize = dto.matchType === 'SINGLES' ? 1 : 2;
     const all = [...sideA, ...sideB];
-    if (sideA.length !== expectedSize || sideB.length !== expectedSize || new Set(all).size !== all.length) {
+    if (
+      sideA.length !== expectedSize ||
+      sideB.length !== expectedSize ||
+      new Set(all).size !== all.length
+    ) {
       apiError(BadRequestException, 'INVALID_MATCH_SIDES');
     }
-    const request = { sessionId, sideA, sideB, matchType: dto.matchType, scheduledAt: dto.scheduledAt ?? null, confirmWarnings: Boolean(dto.confirmWarnings) };
+    const request = {
+      sessionId,
+      sideA,
+      sideB,
+      matchType: dto.matchType,
+      scheduledAt: dto.scheduledAt ?? null,
+      confirmWarnings: Boolean(dto.confirmWarnings),
+    };
     const db = this.repository.getDb();
     const result = await db.transaction(async (tx) => {
-      const replay = await this.repository.findCommand(tx, { actorId: actor.id, operation: 'CREATE_MATCH', idempotencyKey: idempotencyKey.trim(), request });
+      const replay = await this.repository.findCommand(tx, {
+        actorId: actor.id,
+        operation: 'CREATE_MATCH',
+        idempotencyKey: idempotencyKey.trim(),
+        request,
+      });
       if (replay) {
-        if (!replay.sameRequest) apiError(ConflictException, 'IDEMPOTENCY_KEY_REUSED');
+        if (!replay.sameRequest)
+          apiError(ConflictException, 'IDEMPOTENCY_KEY_REUSED');
         return replay.result;
       }
       const participants = await tx
         .select({ userId: schema.clubMatchSessionParticipants.userId })
         .from(schema.clubMatchSessionParticipants)
-        .innerJoin(schema.communityMembers, and(eq(schema.communityMembers.userId, schema.clubMatchSessionParticipants.userId), eq(schema.communityMembers.communityId, current.session.communityId), eq(schema.communityMembers.status, 'JOINED')))
-        .where(and(eq(schema.clubMatchSessionParticipants.sessionId, sessionId), eq(schema.clubMatchSessionParticipants.status, 'ACTIVE'), inArray(schema.clubMatchSessionParticipants.userId, all)));
-      if (participants.length !== all.length) apiError(BadRequestException, 'MATCH_PLAYERS_MUST_BE_ACTIVE_PARTICIPANTS');
-      const warnings = await this.repository.getPairingWarnings(tx, sessionId, sideA, sideB);
+        .innerJoin(
+          schema.communityMembers,
+          and(
+            eq(
+              schema.communityMembers.userId,
+              schema.clubMatchSessionParticipants.userId,
+            ),
+            eq(
+              schema.communityMembers.communityId,
+              current.session.communityId,
+            ),
+            eq(schema.communityMembers.status, 'JOINED'),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.clubMatchSessionParticipants.sessionId, sessionId),
+            eq(schema.clubMatchSessionParticipants.status, 'ACTIVE'),
+            inArray(schema.clubMatchSessionParticipants.userId, all),
+          ),
+        );
+      if (participants.length !== all.length)
+        apiError(
+          BadRequestException,
+          'MATCH_PLAYERS_MUST_BE_ACTIVE_PARTICIPANTS',
+        );
+      const warnings = await this.repository.getPairingWarnings(
+        tx,
+        sessionId,
+        sideA,
+        sideB,
+      );
       if (warnings.length > 0 && !dto.confirmWarnings) {
-        apiError(ConflictException, 'PAIRING_WARNINGS_REQUIRE_CONFIRMATION', { warnings });
+        apiError(ConflictException, 'PAIRING_WARNINGS_REQUIRE_CONFIRMATION', {
+          warnings,
+        });
       }
       const [created] = await tx
         .insert(schema.clubMatchSessionMatches)
-        .values({ sessionId, createdBy: actor.id, sideAUserIds: sideA, sideBUserIds: sideB, matchType: dto.matchType, scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null, eloStatus: current.session.isRanked ? 'WAITING_RESULT' : 'NOT_RANKED' })
+        .values({
+          sessionId,
+          createdBy: actor.id,
+          sideAUserIds: sideA,
+          sideBUserIds: sideB,
+          matchType: dto.matchType,
+          scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+          eloStatus: current.session.isRanked ? 'WAITING_RESULT' : 'NOT_RANKED',
+        })
         .returning();
-      await this.repository.auditUpdate(tx, actor.id, 'club_match_session_matches', created.id, {}, { status: created.status, sideAUserIds: sideA, sideBUserIds: sideB });
+      await this.repository.auditUpdate(
+        tx,
+        actor.id,
+        'club_match_session_matches',
+        created.id,
+        {},
+        { status: created.status, sideAUserIds: sideA, sideBUserIds: sideB },
+      );
       const commandResult = { matchId: created.id, warnings, replayed: false };
-      await this.repository.saveCommand(tx, { sessionId, actorId: actor.id, operation: 'CREATE_MATCH', idempotencyKey: idempotencyKey.trim(), request, result: commandResult });
+      await this.repository.saveCommand(tx, {
+        sessionId,
+        actorId: actor.id,
+        operation: 'CREATE_MATCH',
+        idempotencyKey: idempotencyKey.trim(),
+        request,
+        result: commandResult,
+      });
       return commandResult;
     });
-    return { ...result, match: await this.repository.projectMatch(String(result.matchId)) };
+    return {
+      ...result,
+      match: await this.repository.projectMatch(String(result.matchId)),
+    };
   }
 
-  async listMatches(sessionId: string, actor: Actor, query: QueryClubMatchChildrenDto) {
+  async listMatches(
+    sessionId: string,
+    actor: Actor,
+    query: QueryClubMatchChildrenDto,
+  ) {
     await this.requireSession(sessionId, actor);
-    const result = await this.repository.listMatches(sessionId, { status: query.status, cursor: query.cursor, limit: query.limit ?? 30 });
+    const result = await this.repository.listMatches(sessionId, {
+      status: query.status,
+      cursor: query.cursor,
+      limit: query.limit ?? 30,
+    });
     if (result.invalidCursor) apiError(BadRequestException, 'INVALID_CURSOR');
     return { data: result.items, meta: result.meta };
   }
@@ -711,32 +983,61 @@ export class ClubMatchSessionsService {
     const match = await this.repository.findMatch(matchId);
     if (!match) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
     const session = await this.requireSession(match.sessionId, actor);
-    const membership = await this.repository.findMembership(session.session.communityId, actor.id);
-    const canEdit = this.isPlatformAdmin(actor) || MANAGER_ROLES.has(membership?.role ?? '') || [...match.sideAUserIds, ...match.sideBUserIds].includes(actor.id);
-    if (!canEdit) apiError(ForbiddenException, 'MATCH_SCORE_PERMISSION_REQUIRED');
+    const membership = await this.repository.findMembership(
+      session.session.communityId,
+      actor.id,
+    );
+    const canEdit =
+      this.isPlatformAdmin(actor) ||
+      MANAGER_ROLES.has(membership?.role ?? '') ||
+      [...match.sideAUserIds, ...match.sideBUserIds].includes(actor.id);
+    if (!canEdit)
+      apiError(ForbiddenException, 'MATCH_SCORE_PERMISSION_REQUIRED');
     return { match, session };
   }
 
   async startMatch(matchId: string, actor: Actor, expectedRevision?: number) {
     const { match } = await this.requireMatchEditor(matchId, actor);
-    if (match.status === 'ONGOING') return this.repository.projectMatch(matchId);
-    if (match.status !== 'SCHEDULED') apiError(ConflictException, 'MATCH_CANNOT_START');
+    if (match.status === 'ONGOING')
+      return this.repository.projectMatch(matchId);
+    if (match.status !== 'SCHEDULED')
+      apiError(ConflictException, 'MATCH_CANNOT_START');
     const revision = expectedRevision ?? match.revision;
     const db = this.repository.getDb();
     const [updated] = await db
       .update(schema.clubMatchSessionMatches)
-      .set({ status: 'ONGOING', startedAt: new Date(), updatedAt: new Date(), revision: sql`${schema.clubMatchSessionMatches.revision} + 1` })
-      .where(and(eq(schema.clubMatchSessionMatches.id, matchId), eq(schema.clubMatchSessionMatches.revision, revision), eq(schema.clubMatchSessionMatches.status, 'SCHEDULED')))
+      .set({
+        status: 'ONGOING',
+        startedAt: new Date(),
+        updatedAt: new Date(),
+        revision: sql`${schema.clubMatchSessionMatches.revision} + 1`,
+      })
+      .where(
+        and(
+          eq(schema.clubMatchSessionMatches.id, matchId),
+          eq(schema.clubMatchSessionMatches.revision, revision),
+          eq(schema.clubMatchSessionMatches.status, 'SCHEDULED'),
+        ),
+      )
       .returning();
-    if (!updated) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
+    if (!updated)
+      apiError(ConflictException, 'STALE_MATCH_REVISION', {
+        currentRevision: match.revision,
+      });
     const projected = await this.repository.projectMatch(matchId);
-    this.liveScoreGateway.broadcastClubSessionMatchUpdate(match.sessionId, matchId, projected ?? updated, 'match:status');
+    this.liveScoreGateway.broadcastClubSessionMatchUpdate(
+      match.sessionId,
+      matchId,
+      projected ?? updated,
+      'match:status',
+    );
     return projected;
   }
 
   async updateScore(matchId: string, actor: Actor, dto: UpdateMatchScoreDto) {
     const { match } = await this.requireMatchEditor(matchId, actor);
-    if (!['SCHEDULED', 'ONGOING'].includes(match.status)) apiError(ConflictException, 'MATCH_SCORE_LOCKED');
+    if (!['SCHEDULED', 'ONGOING'].includes(match.status))
+      apiError(ConflictException, 'MATCH_SCORE_LOCKED');
     const revision = dto.expectedRevision ?? match.revision;
     const db = this.repository.getDb();
     const [updated] = await db
@@ -752,32 +1053,54 @@ export class ClubMatchSessionsService {
         updatedAt: new Date(),
         revision: sql`${schema.clubMatchSessionMatches.revision} + 1`,
       })
-      .where(and(eq(schema.clubMatchSessionMatches.id, matchId), eq(schema.clubMatchSessionMatches.revision, revision), inArray(schema.clubMatchSessionMatches.status, ['SCHEDULED', 'ONGOING'])))
+      .where(
+        and(
+          eq(schema.clubMatchSessionMatches.id, matchId),
+          eq(schema.clubMatchSessionMatches.revision, revision),
+          inArray(schema.clubMatchSessionMatches.status, [
+            'SCHEDULED',
+            'ONGOING',
+          ]),
+        ),
+      )
       .returning();
-    if (!updated) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
+    if (!updated)
+      apiError(ConflictException, 'STALE_MATCH_REVISION', {
+        currentRevision: match.revision,
+      });
     const projected = await this.repository.projectMatch(matchId);
-    this.liveScoreGateway.broadcastClubSessionMatchUpdate(match.sessionId, matchId, projected ?? updated, 'score:update');
+    this.liveScoreGateway.broadcastClubSessionMatchUpdate(
+      match.sessionId,
+      matchId,
+      projected ?? updated,
+      'score:update',
+    );
     return projected;
   }
 
   async completeMatch(matchId: string, actor: Actor, dto: UpdateMatchScoreDto) {
     const { match, session } = await this.requireMatchEditor(matchId, actor);
-    if (match.status === 'COMPLETED') return this.repository.projectMatch(matchId);
-    if (!['SCHEDULED', 'ONGOING'].includes(match.status)) apiError(ConflictException, 'MATCH_CANNOT_COMPLETE');
-    if (dto.p1SetsWon === dto.p2SetsWon) apiError(BadRequestException, 'MATCH_WINNER_REQUIRED');
+    if (match.status === 'COMPLETED')
+      return this.repository.projectMatch(matchId);
+    if (!['SCHEDULED', 'ONGOING'].includes(match.status))
+      apiError(ConflictException, 'MATCH_CANNOT_COMPLETE');
+    if (dto.p1SetsWon === dto.p2SetsWon)
+      apiError(BadRequestException, 'MATCH_WINNER_REQUIRED');
     const winnerSide = dto.p1SetsWon > dto.p2SetsWon ? 'A' : 'B';
     const revision = dto.expectedRevision ?? match.revision;
     const db = this.repository.getDb();
     const updated = await db.transaction(async (tx) => {
       const playerIds = [...match.sideAUserIds, ...match.sideBUserIds];
-      const users = await tx.select({ id: schema.users.id, isMock: schema.users.isMock }).from(schema.users).where(inArray(schema.users.id, playerIds));
+      const users = await tx
+        .select({ id: schema.users.id, isMock: schema.users.isMock })
+        .from(schema.users)
+        .where(inArray(schema.users.id, playerIds));
       const hasMock = users.some((user) => user.isMock);
-      const eloStatus =
-        !session.session.isRanked
-          ? 'NOT_RANKED'
-          : hasMock
-            ? 'SKIPPED_MOCK'
-            : 'PENDING';
+      const eloStatus = !session.session.isRanked
+        ? 'NOT_RANKED'
+        : hasMock
+          ? 'SKIPPED_MOCK'
+          : 'PENDING';
       const [row] = await tx
         .update(schema.clubMatchSessionMatches)
         .set({
@@ -794,18 +1117,54 @@ export class ClubMatchSessionsService {
           updatedAt: new Date(),
           revision: sql`${schema.clubMatchSessionMatches.revision} + 1`,
         })
-        .where(and(eq(schema.clubMatchSessionMatches.id, matchId), eq(schema.clubMatchSessionMatches.revision, revision), inArray(schema.clubMatchSessionMatches.status, ['SCHEDULED', 'ONGOING'])))
+        .where(
+          and(
+            eq(schema.clubMatchSessionMatches.id, matchId),
+            eq(schema.clubMatchSessionMatches.revision, revision),
+            inArray(schema.clubMatchSessionMatches.status, [
+              'SCHEDULED',
+              'ONGOING',
+            ]),
+          ),
+        )
         .returning();
-      if (!row) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
+      if (!row)
+        apiError(ConflictException, 'STALE_MATCH_REVISION', {
+          currentRevision: match.revision,
+        });
       if (eloStatus === 'PENDING') {
-        await tx.insert(schema.matchEloOutbox).values({ matchId: null, clubMatchSessionMatchId: matchId, status: 'PENDING', attempts: 0 });
+        await tx
+          .insert(schema.matchEloOutbox)
+          .values({
+            matchId: null,
+            clubMatchSessionMatchId: matchId,
+            status: 'PENDING',
+            attempts: 0,
+          });
       }
-      await this.repository.auditUpdate(tx, actor.id, 'club_match_session_matches', matchId, { status: match.status, revision: match.revision }, { status: 'COMPLETED', revision: row.revision, winnerSide, eloStatus });
+      await this.repository.auditUpdate(
+        tx,
+        actor.id,
+        'club_match_session_matches',
+        matchId,
+        { status: match.status, revision: match.revision },
+        { status: 'COMPLETED', revision: row.revision, winnerSide, eloStatus },
+      );
       return row;
     });
     const projected = await this.repository.projectMatch(matchId);
-    this.liveScoreGateway.broadcastClubSessionMatchUpdate(match.sessionId, matchId, projected ?? updated, 'match:status');
-    this.liveScoreGateway.broadcastClubSessionMatchUpdate(match.sessionId, matchId, projected ?? updated, 'score:update');
+    this.liveScoreGateway.broadcastClubSessionMatchUpdate(
+      match.sessionId,
+      matchId,
+      projected ?? updated,
+      'match:status',
+    );
+    this.liveScoreGateway.broadcastClubSessionMatchUpdate(
+      match.sessionId,
+      matchId,
+      projected ?? updated,
+      'score:update',
+    );
     void this.eloOutboxProcessor.dispatchNow();
     return projected;
   }

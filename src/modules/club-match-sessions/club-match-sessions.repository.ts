@@ -1,15 +1,6 @@
 import { createHash } from 'crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  lt,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -33,9 +24,7 @@ function normalizeIds(ids: string[]): string[] {
 }
 
 function fingerprint(value: unknown): string {
-  return createHash('sha256')
-    .update(JSON.stringify(value))
-    .digest('hex');
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 function encodeCursor(createdAt: Date, id: string): string {
@@ -158,6 +147,34 @@ export class ClubMatchSessionsRepository {
     return row ?? null;
   }
 
+  async findSessionForUpdate(id: string, tx: AppTx) {
+    const [row] = await tx
+      .select()
+      .from(schema.clubMatchSessions)
+      .where(
+        and(
+          eq(schema.clubMatchSessions.id, id),
+          isNull(schema.clubMatchSessions.deletedAt),
+        ),
+      )
+      .for('update')
+      .limit(1);
+    return row ?? null;
+  }
+
+  async countActiveParticipants(sessionId: string, tx: AppTx) {
+    const [row] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.clubMatchSessionParticipants)
+      .where(
+        and(
+          eq(schema.clubMatchSessionParticipants.sessionId, sessionId),
+          eq(schema.clubMatchSessionParticipants.status, 'ACTIVE'),
+        ),
+      );
+    return Number(row?.count ?? 0);
+  }
+
   async createSession(input: {
     communityId: string;
     categoryId: string;
@@ -166,6 +183,7 @@ export class ClubMatchSessionsRepository {
     description: string | null;
     registrationMode: 'SELF' | 'MANAGER_ASSIGN' | 'MIXED';
     isRanked: boolean;
+    maxParticipants: number;
     startAt: Date | null;
     endAt: Date | null;
   }) {
@@ -186,6 +204,7 @@ export class ClubMatchSessionsRepository {
           registrationMode: created.registrationMode,
           pairingMode: created.pairingMode,
           isRanked: created.isRanked,
+          maxParticipants: created.maxParticipants,
         },
       );
       return created;
@@ -275,10 +294,7 @@ export class ClubMatchSessionsRepository {
         or(
           lt(schema.clubMatchSessionParticipants.createdAt, cursor.createdAt),
           and(
-            eq(
-              schema.clubMatchSessionParticipants.createdAt,
-              cursor.createdAt,
-            ),
+            eq(schema.clubMatchSessionParticipants.createdAt, cursor.createdAt),
             lt(schema.clubMatchSessionParticipants.id, cursor.id),
           ),
         )!,
@@ -293,10 +309,7 @@ export class ClubMatchSessionsRepository {
       .from(schema.clubMatchSessionParticipants)
       .leftJoin(
         schema.profiles,
-        eq(
-          schema.profiles.userId,
-          schema.clubMatchSessionParticipants.userId,
-        ),
+        eq(schema.profiles.userId, schema.clubMatchSessionParticipants.userId),
       )
       .where(and(...conditions))
       .orderBy(
@@ -383,7 +396,10 @@ export class ClubMatchSessionsRepository {
             avatarUrl: schema.profiles.avatarUrl,
           })
           .from(schema.users)
-          .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+          .leftJoin(
+            schema.profiles,
+            eq(schema.profiles.userId, schema.users.id),
+          )
           .where(inArray(schema.users.id, userIds))
       : [];
     const byId = new Map(users.map((user) => [user.id, user]));
@@ -547,10 +563,7 @@ export class ClubMatchSessionsRepository {
         ),
       );
     const activeUsers = normalizeIds(
-      active.flatMap((match) => [
-        ...match.sideAUserIds,
-        ...match.sideBUserIds,
-      ]),
+      active.flatMap((match) => [...match.sideAUserIds, ...match.sideBUserIds]),
     ).filter((id) => allIds.includes(id));
     if (activeUsers.length > 0) {
       warnings.push({ code: 'PLAYER_ALREADY_ACTIVE', userIds: activeUsers });
@@ -581,7 +594,10 @@ export class ClubMatchSessionsRepository {
             JSON.stringify(normalizeIds(sideAUserIds))),
     );
     if (samePair) {
-      warnings.push({ code: 'REPEATED_PAIRING', userIds: normalizeIds(allIds) });
+      warnings.push({
+        code: 'REPEATED_PAIRING',
+        userIds: normalizeIds(allIds),
+      });
     }
 
     const preferences = await tx

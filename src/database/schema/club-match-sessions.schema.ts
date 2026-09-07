@@ -39,6 +39,7 @@ export const clubMatchSessions = pgTable(
       .default('FREE')
       .notNull(),
     isRanked: boolean('is_ranked').default(true).notNull(),
+    maxParticipants: integer('max_participants').default(16).notNull(),
     startAt: timestamp('start_at', { withTimezone: true }),
     endAt: timestamp('end_at', { withTimezone: true }),
     registrationOpenAt: timestamp('registration_open_at', {
@@ -71,6 +72,10 @@ export const clubMatchSessions = pgTable(
     pairingModeCheck: check(
       'club_match_sessions_pairing_mode_check',
       sql`${table.pairingMode} = 'FREE'`,
+    ),
+    maxParticipantsCheck: check(
+      'club_match_sessions_max_participants_check',
+      sql`${table.maxParticipants} BETWEEN 2 AND 128`,
     ),
     scheduleCheck: check(
       'club_match_sessions_schedule_check',
@@ -238,7 +243,9 @@ export const clubMatchSessionCommands = pgTable(
       .notNull(),
     operation: varchar('operation', { length: 40 }).notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
-    requestFingerprint: varchar('request_fingerprint', { length: 64 }).notNull(),
+    requestFingerprint: varchar('request_fingerprint', {
+      length: 64,
+    }).notNull(),
     result: jsonb('result').$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
