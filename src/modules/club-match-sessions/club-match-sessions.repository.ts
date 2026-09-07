@@ -198,7 +198,7 @@ export class ClubMatchSessionsRepository {
         communityId: created.communityId,
         authorId: created.createdBy,
         clubMatchSessionId: created.id,
-        type: 'CLUB_MATCH_SESSION_ANNOUNCEMENT',
+        type: 'CLUB_SESSION_ANNOUNCEMENT',
         body: `🏸 ${displayName} đã mở đăng ký.`,
         mediaUrls: [],
         status: 'PUBLISHED',

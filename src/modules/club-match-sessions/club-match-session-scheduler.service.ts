@@ -164,7 +164,7 @@ export class ClubMatchSessionSchedulerService {
             communityId: template.communityId,
             authorId: template.createdBy,
             clubMatchSessionId: created.id,
-            type: 'CLUB_MATCH_SESSION_ANNOUNCEMENT',
+            type: 'CLUB_SESSION_ANNOUNCEMENT',
             body: `🏸 Buổi giao lưu mới: **${displayName}** đã mở đăng ký.`,
             mediaUrls: [],
             status: 'PUBLISHED',
