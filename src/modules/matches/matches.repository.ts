@@ -85,6 +85,7 @@ export class MatchesRepository {
         id: schema.tournaments.id,
         createdBy: schema.tournaments.createdBy,
         communityId: schema.tournaments.communityId,
+        tournamentType: schema.tournaments.tournamentType,
         visibility: schema.tournaments.visibility,
         status: schema.tournaments.status,
       })
@@ -115,7 +116,12 @@ export class MatchesRepository {
       return privileged;
     }
 
-    if (tournament.visibility !== 'PRIVATE') return true;
+    // Club tournaments are private to the club even when their visibility
+    // column is PUBLIC.  Otherwise a public-looking Club Super Lite match
+    // would let any authenticated user open the live room and submit scores.
+    const isClubTournament =
+      Boolean(tournament.communityId) || tournament.tournamentType === 'CLUB';
+    if (tournament.visibility !== 'PRIVATE' && !isClubTournament) return true;
     if (!userId) return false;
     if (privileged) return true;
 

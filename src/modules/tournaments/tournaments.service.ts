@@ -915,12 +915,11 @@ export class TournamentsService {
             }
           })()
         : tournament.tournamentConfig
-    ) as Record<string, unknown> | null | undefined;
-    const isLite = Boolean(
-      tourneyConfig?.isLite || tourneyConfig?.mode === 'LITE',
-    );
+    ) as (Record<string, unknown> | null | undefined);
+
     const isClubTournament = Boolean(
-      tournament.communityId || tournament.tournamentType === 'CLUB' || isLite,
+      (tournament.communityId && tournament.communityId.length > 0) ||
+        tournament.tournamentType === 'CLUB',
     );
 
     if (tournament.visibility === 'PRIVATE' || isClubTournament) {
@@ -1592,8 +1591,8 @@ export class TournamentsService {
     }
 
     const tournamentConfig = {
-      mode: isSuperLite ? 'LITE' : 'STRICT',
-      isLite: isSuperLite,
+      mode: 'LITE',
+      isLite: true,
       sportPreset: litePreset.sportPreset,
 
       // Visibility controls discoverability; registrationMode independently
@@ -2894,6 +2893,16 @@ export class TournamentsService {
     // Archive is intentionally non-destructive: matches and ELO history stay intact.
     if (existing.status === 'COMPLETED') {
       const archived = await this.tournamentsRepository.archive(id, userId);
+      // Archived tournaments must no longer be promoted from the club feed.
+      // Keep the tournament/ELO history, but hide every linked announcement.
+      try {
+        await this.communitySocialRepository.softDeletePostsByTournamentId(id);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to soft delete tournament community posts for archived tournament ${id}`,
+          err,
+        );
+      }
       try {
         await this.redisService.delByPattern('tournaments:list:*');
         await this.redisService.delByPattern('matches:list:*');
