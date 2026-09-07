@@ -221,6 +221,12 @@ export class ForceClubMatchParticipantsDto {
   userIds: string[];
 }
 
+export class CreateClubMatchMockParticipantDto {
+  @IsString()
+  @MaxLength(255)
+  name: string;
+}
+
 export class RemoveClubMatchParticipantDto {
   @IsInt()
   @Min(1)

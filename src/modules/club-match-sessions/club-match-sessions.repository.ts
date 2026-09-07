@@ -317,8 +317,13 @@ export class ClubMatchSessionsRepository {
         participant: schema.clubMatchSessionParticipants,
         fullName: schema.profiles.fullName,
         avatarUrl: schema.profiles.avatarUrl,
+        isMock: schema.users.isMock,
       })
       .from(schema.clubMatchSessionParticipants)
+      .leftJoin(
+        schema.users,
+        eq(schema.users.id, schema.clubMatchSessionParticipants.userId),
+      )
       .leftJoin(
         schema.profiles,
         eq(schema.profiles.userId, schema.clubMatchSessionParticipants.userId),

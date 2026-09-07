@@ -16,6 +16,7 @@ import { ClubMatchSessionsService } from './club-match-sessions.service';
 import {
   ClubMatchRevisionDto,
   CreateClubMatchDto,
+  CreateClubMatchMockParticipantDto,
   CreateClubMatchSessionDto,
   ForceClubMatchParticipantsDto,
   QueryClubMatchChildrenDto,
@@ -114,6 +115,15 @@ export class ClubMatchSessionsController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.service.forceParticipants(id, user, dto, idempotencyKey);
+  }
+
+  @Post(':id/participants/mock')
+  createMockParticipant(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateClubMatchMockParticipantDto,
+  ) {
+    return this.service.createMockParticipant(id, user, dto);
   }
 
   @Patch(':id/participants/:userId/remove')

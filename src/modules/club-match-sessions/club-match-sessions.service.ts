@@ -6,13 +6,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import * as schema from '../../database/schema';
 import { LiveScoreGateway } from '../matches/live-score.gateway';
 import { UpdateMatchScoreDto } from '../matches/dto/update-match-score.dto';
 import { EloOutboxProcessor } from '../rankings/elo-outbox.processor';
 import {
   CreateClubMatchDto,
+  CreateClubMatchMockParticipantDto,
   CreateClubMatchSessionDto,
   ForceClubMatchParticipantsDto,
   QueryClubMatchChildrenDto,
@@ -762,6 +763,78 @@ export class ClubMatchSessionsService {
     });
   }
 
+  async createMockParticipant(
+    sessionId: string,
+    actor: Actor,
+    dto: CreateClubMatchMockParticipantDto,
+  ) {
+    const current = await this.requireSession(sessionId, actor);
+    await this.requireManager(current.session.communityId, actor);
+    if (current.session.status !== 'OPEN') {
+      apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
+    }
+    const name = dto.name.trim();
+    if (!name) apiError(BadRequestException, 'MOCK_PARTICIPANT_NAME_REQUIRED');
+
+    const db = this.repository.getDb();
+    return db.transaction(async (tx) => {
+      const lockedSession = await this.repository.findSessionForUpdate(
+        sessionId,
+        tx,
+      );
+      if (!lockedSession) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+      if (lockedSession.status !== 'OPEN') {
+        apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
+      }
+      const activeCount = await this.repository.countActiveParticipants(
+        sessionId,
+        tx,
+      );
+      if (activeCount >= lockedSession.maxParticipants) {
+        apiError(ConflictException, 'SESSION_CAPACITY_REACHED', {
+          maxParticipants: lockedSession.maxParticipants,
+          activeCount,
+        });
+      }
+
+      const email = `mock_${Date.now()}_${Math.random().toString(36).slice(2, 9)}@mock.com`;
+      const [mockUser] = await tx
+        .insert(schema.users)
+        .values({ email, isMock: true })
+        .returning({ id: schema.users.id });
+      await tx.insert(schema.profiles).values({
+        userId: mockUser.id,
+        fullName: name,
+        allowStrangerMessages: false,
+      });
+      const [participant] = await tx
+        .insert(schema.clubMatchSessionParticipants)
+        .values({
+          sessionId,
+          userId: mockUser.id,
+          source: 'MANDATORY',
+          status: 'ACTIVE',
+          assignedBy: actor.id,
+          assignedAt: new Date(),
+        })
+        .returning();
+      await this.repository.auditUpdate(
+        tx,
+        actor.id,
+        'club_match_session_participants',
+        participant.id,
+        {},
+        { status: participant.status, source: participant.source, isMock: true },
+      );
+      return {
+        participant,
+        fullName: name,
+        avatarUrl: null,
+        isMock: true,
+      };
+    });
+  }
+
   async removeParticipant(
     sessionId: string,
     userId: string,
@@ -970,9 +1043,16 @@ export class ClubMatchSessionsService {
         return replay.result;
       }
       const participants = await tx
-        .select({ userId: schema.clubMatchSessionParticipants.userId })
+        .select({
+          userId: schema.clubMatchSessionParticipants.userId,
+          isMock: schema.users.isMock,
+        })
         .from(schema.clubMatchSessionParticipants)
-        .innerJoin(
+        .leftJoin(
+          schema.users,
+          eq(schema.users.id, schema.clubMatchSessionParticipants.userId),
+        )
+        .leftJoin(
           schema.communityMembers,
           and(
             eq(
@@ -991,6 +1071,10 @@ export class ClubMatchSessionsService {
             eq(schema.clubMatchSessionParticipants.sessionId, sessionId),
             eq(schema.clubMatchSessionParticipants.status, 'ACTIVE'),
             inArray(schema.clubMatchSessionParticipants.userId, all),
+            or(
+              eq(schema.users.isMock, true),
+              eq(schema.communityMembers.status, 'JOINED'),
+            ),
           ),
         );
       if (participants.length !== all.length)
