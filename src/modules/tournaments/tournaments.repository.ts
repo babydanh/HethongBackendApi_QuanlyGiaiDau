@@ -4250,17 +4250,6 @@ export class TournamentsRepository {
         ]),
       );
 
-<<<<<<< HEAD
-      matchesList = dbMatches.map((m) => ({
-        ...m,
-        participant1: m.participant1Id
-          ? participantMap.get(m.participant1Id)
-          : null,
-        participant2: m.participant2Id
-          ? participantMap.get(m.participant2Id)
-          : null,
-      }));
-=======
       const stageDivisionMap = new Map(stages.map((s) => [s.id, s.tournamentDivisionId]));
       const groupStageMap = new Map(groups.map((g) => [g.id, g.stageId]));
 
@@ -4278,7 +4267,6 @@ export class TournamentsRepository {
             : null,
         };
       });
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
     }
 
     const groupsMap = new Map<string, BracketGroup[]>();
@@ -8622,33 +8610,19 @@ export class TournamentsRepository {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
-<<<<<<< HEAD
-    // Check active stages/matches via tx (fixes TOCTOU)
-    const [stageCount] = await tx
-      .select({ count: count() })
-      .from(schema.tournamentStages)
-      .where(
-        and(
-          eq(schema.tournamentStages.tournamentId, tournamentId),
-          isNull(schema.tournamentStages.deletedAt),
-        ),
-      );
-    if (stageCount.count > 0) {
-      throw new BadRequestException(
-        'Không thể ghép cặp sau khi đã sinh nhánh đấu.',
-      );
-    }
-    const [matchCount] = await tx
-=======
     // Only block pairing if a match has already started or finished
     const [startedMatchCount] = await tx
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       .select({ count: count() })
       .from(schema.matches)
       .where(
         and(
           eq(schema.matches.tournamentId, tournamentId),
-          ne(schema.matches.status, 'SCHEDULED'),
+          notInArray(schema.matches.status, [
+            'SCHEDULED',
+            'PENDING',
+            'NOT_STARTED',
+            'UPCOMING',
+          ]),
           isNull(schema.matches.deletedAt),
         ),
       );
@@ -8704,7 +8678,6 @@ export class TournamentsRepository {
     if (startedMatchCount.count > 0) {
       throw new BadRequestException(
         'Không thể tách cặp sau khi giải đấu đã bắt đầu thi đấu.',
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       );
     }
 
@@ -8740,11 +8713,7 @@ export class TournamentsRepository {
     userId: string,
   ) {
     return await this.db.transaction(async (tx) => {
-<<<<<<< HEAD
-      await this.assertLitePairableInTx(tx, tournamentId);
-=======
       await this.assertLiteUnpairableInTx(tx, tournamentId);
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       return this.unpairParticipantInTx(
         tx,
         tournamentId,

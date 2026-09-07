@@ -448,24 +448,6 @@ export class MatchesRepository {
       )`);
     }
 
-<<<<<<< HEAD
-    let decodedCursor: { id: string; updatedAt: string } | null = null;
-    if (cursor) {
-      decodedCursor = CursorPaginationHelper.decodeCursor<{
-        id: string;
-        updatedAt: string;
-      }>(cursor);
-      if (decodedCursor) {
-        conditions.push(
-          or(
-            lt(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
-            and(
-              eq(schema.matches.updatedAt, new Date(decodedCursor.updatedAt)),
-              lt(schema.matches.id, decodedCursor.id),
-            ),
-          ) as SQL,
-        );
-=======
     let cursorCondition: SQL | null = null;
     if (cursor) {
       const decodedCursor = CursorPaginationHelper.decodeCursor<{
@@ -474,8 +456,6 @@ export class MatchesRepository {
       }>(cursor);
       if (decodedCursor && decodedCursor.updatedAt && decodedCursor.id) {
         const cursorDate = new Date(decodedCursor.updatedAt);
-        // Postgres updated_at has microsecond precision while JS Date has millisecond precision.
-        // We compare: updated_at < cursorDate OR (date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', cursorDate) AND id < cursorId)
         cursorCondition = or(
           lt(schema.matches.updatedAt, cursorDate),
           and(
@@ -653,11 +633,7 @@ export class MatchesRepository {
     const matchesQuery = this.db
       .select()
       .from(schema.matches)
-<<<<<<< HEAD
-      .where(whereClause)
-=======
       .where(queryWhereClause)
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       .orderBy(desc(schema.matches.updatedAt), desc(schema.matches.id))
       .limit(take)
       .$dynamic();
@@ -1358,32 +1334,6 @@ export class MatchesRepository {
   }
 
   async findAllowedCourtForMatch(
-<<<<<<< HEAD
-    match: { stageId: string; tournamentId: string },
-    courtId: string,
-  ) {
-    const [scope] = await this.db
-      .select({
-        tournamentVenueId: schema.tournaments.venueId,
-        divisionVenueId: schema.tournamentDivisions.venueId,
-      })
-      .from(schema.tournamentStages)
-      .innerJoin(
-        schema.tournaments,
-        eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
-      )
-      .leftJoin(
-        schema.tournamentDivisions,
-        eq(
-          schema.tournamentStages.tournamentDivisionId,
-          schema.tournamentDivisions.id,
-        ),
-      )
-      .where(
-        and(
-          eq(schema.tournamentStages.id, match.stageId),
-          eq(schema.tournamentStages.tournamentId, match.tournamentId),
-=======
     match: { stageId?: string | null; tournamentId: string },
     courtId: string,
   ) {
@@ -1393,20 +1343,11 @@ export class MatchesRepository {
       .where(
         and(
           eq(schema.tournaments.id, match.tournamentId),
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
           isNull(schema.tournaments.deletedAt),
         ),
       )
       .limit(1);
 
-<<<<<<< HEAD
-    if (!scope) return null;
-
-    const venueIds = [scope.tournamentVenueId, scope.divisionVenueId].filter(
-      (venueId): venueId is string => Boolean(venueId),
-    );
-    if (venueIds.length === 0) return null;
-=======
     const divisionVenues = await this.db
       .select({ venueId: schema.tournamentDivisions.venueId })
       .from(schema.tournamentDivisions)
@@ -1428,7 +1369,6 @@ export class MatchesRepository {
             eq(schema.venueCourts.id, courtId),
             eq(schema.venueCourts.status, 'AVAILABLE'),
           );
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
 
     const [court] = await this.db
       .select({
@@ -1438,26 +1378,11 @@ export class MatchesRepository {
         courtAddress: schema.tournamentVenues.locationAddress,
       })
       .from(schema.venueCourts)
-<<<<<<< HEAD
-      .innerJoin(
-        schema.tournamentVenues,
-        eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
-      )
-      .where(
-        and(
-          eq(schema.venueCourts.id, courtId),
-          inArray(schema.venueCourts.venueId, venueIds),
-          eq(schema.venueCourts.status, 'AVAILABLE'),
-          isNull(schema.tournamentVenues.deletedAt),
-        ),
-      )
-=======
       .leftJoin(
         schema.tournamentVenues,
         eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
       )
       .where(courtCondition)
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       .limit(1);
 
     return court ?? null;
@@ -2212,76 +2137,16 @@ export class MatchesRepository {
         courtAddress: string;
       } | null = null;
       if (data.courtId) {
-<<<<<<< HEAD
-        const [scope] = await tx
-          .select({
-            tournamentVenueId: schema.tournaments.venueId,
-            divisionVenueId: schema.tournamentDivisions.venueId,
-          })
-          .from(schema.tournamentStages)
-          .innerJoin(
-            schema.tournaments,
-            eq(schema.tournamentStages.tournamentId, schema.tournaments.id),
-          )
-          .leftJoin(
-            schema.tournamentDivisions,
-            eq(
-              schema.tournamentStages.tournamentDivisionId,
-              schema.tournamentDivisions.id,
-            ),
-          )
-          .where(
-            and(
-              eq(schema.tournamentStages.id, existing.stageId),
-              eq(schema.tournamentStages.tournamentId, existing.tournamentId),
-=======
         const [tournament] = await tx
           .select({ venueId: schema.tournaments.venueId })
           .from(schema.tournaments)
           .where(
             and(
               eq(schema.tournaments.id, existing.tournamentId),
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
               isNull(schema.tournaments.deletedAt),
             ),
           )
           .limit(1);
-<<<<<<< HEAD
-        const venueIds = [
-          scope?.tournamentVenueId,
-          scope?.divisionVenueId,
-        ].filter((venueId): venueId is string => Boolean(venueId));
-        if (venueIds.length === 0) {
-          throw new BadRequestException(
-            'Giải đấu chưa cấu hình địa điểm thi đấu hợp lệ.',
-          );
-        }
-        const [court] = await tx
-          .select({
-            courtName: schema.venueCourts.courtName,
-            courtAddress: schema.tournamentVenues.locationAddress,
-          })
-          .from(schema.venueCourts)
-          .innerJoin(
-            schema.tournamentVenues,
-            eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
-          )
-          .where(
-            and(
-              eq(schema.venueCourts.id, data.courtId),
-              inArray(schema.venueCourts.venueId, venueIds),
-              eq(schema.venueCourts.status, 'AVAILABLE'),
-              isNull(schema.tournamentVenues.deletedAt),
-            ),
-          )
-          .limit(1);
-        if (!court) {
-          throw new BadRequestException(
-            'Sân được chọn không thuộc địa điểm thi đấu của giải này hoặc đang không hoạt động.',
-          );
-        }
-        canonicalCourt = court;
-=======
 
         const divisionVenues = await tx
           .select({ venueId: schema.tournamentDivisions.venueId })
@@ -2327,7 +2192,6 @@ export class MatchesRepository {
           courtName: court.courtName,
           courtAddress: court.courtAddress || '',
         };
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
       }
 
       const effectiveCourtName = canonicalCourt
@@ -2349,22 +2213,6 @@ export class MatchesRepository {
         throw new BadRequestException('Thời gian thi đấu không hợp lệ.');
       }
 
-<<<<<<< HEAD
-      // Kiểm tra scheduling conflict: cùng sân, cùng giải, trong khung ±2h.
-      // Use effective values so partial edits (only time or only court) are
-      // checked against the existing schedule as well.
-      if (effectiveScheduledAt) {
-        const scheduledDate = effectiveScheduledAt;
-        const conflictStart = new Date(
-          scheduledDate.getTime() - 2 * 60 * 60 * 1000,
-        );
-        const conflictEnd = new Date(
-          scheduledDate.getTime() + 2 * 60 * 60 * 1000,
-        );
-        // Only live reservations occupy a court/time slot. Historical
-        // completed matches and cancelled fixtures must not block a later
-        // reschedule (especially when a tournament reuses the same courts).
-=======
       // Kiểm tra scheduling conflict: cùng sân hoặc cùng đội có khoảng thời gian thi đấu chồng lấn (exact time overlap)
       if (effectiveScheduledAt) {
         const scheduledDate = effectiveScheduledAt;
@@ -2380,24 +2228,18 @@ export class MatchesRepository {
         const windowStart = new Date(currentStartMs - 2 * 60 * 60 * 1000);
         const windowEnd = new Date(currentStartMs + 2 * 60 * 60 * 1000);
 
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
         const activeScheduledStatuses = inArray(schema.matches.status, [
           'SCHEDULED',
           'ONGOING',
         ]);
 
         if (effectiveCourtName) {
-<<<<<<< HEAD
-          const conflict = await tx
-            .select({ id: schema.matches.id })
-=======
           const candidateMatches = await tx
             .select({
               id: schema.matches.id,
               scheduledAt: schema.matches.scheduledAt,
               matchConfig: schema.matches.matchConfig,
             })
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
             .from(schema.matches)
             .where(
               and(
@@ -2406,17 +2248,6 @@ export class MatchesRepository {
                 ne(schema.matches.id, id),
                 isNull(schema.matches.deletedAt),
                 activeScheduledStatuses,
-<<<<<<< HEAD
-                gte(schema.matches.scheduledAt, conflictStart),
-                lte(schema.matches.scheduledAt, conflictEnd),
-              ),
-            )
-            .limit(1);
-
-          if (conflict.length > 0) {
-            throw new BadRequestException(
-              `Sân ${effectiveCourtName} đã có trận đấu khác trong khung giờ này (${conflictStart.toLocaleTimeString('vi-VN')} - ${conflictEnd.toLocaleTimeString('vi-VN')}).`,
-=======
                 gte(schema.matches.scheduledAt, windowStart),
                 lte(schema.matches.scheduledAt, windowEnd),
               ),
@@ -2435,7 +2266,6 @@ export class MatchesRepository {
           if (courtConflict) {
             throw new BadRequestException(
               `Sân ${effectiveCourtName} đã có trận đấu khác trong cùng khung giờ.`,
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
             );
           }
         }
@@ -2447,17 +2277,11 @@ export class MatchesRepository {
           Boolean(participantId),
         );
         if (participantIds.length > 0) {
-<<<<<<< HEAD
-          const participantConflict = await tx
-            .select({
-              id: schema.matches.id,
-=======
           const candidateParticipantMatches = await tx
             .select({
               id: schema.matches.id,
               scheduledAt: schema.matches.scheduledAt,
               matchConfig: schema.matches.matchConfig,
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
               participant1Id: schema.matches.participant1Id,
               participant2Id: schema.matches.participant2Id,
             })
@@ -2468,26 +2292,13 @@ export class MatchesRepository {
                 ne(schema.matches.id, id),
                 isNull(schema.matches.deletedAt),
                 activeScheduledStatuses,
-<<<<<<< HEAD
-                gte(schema.matches.scheduledAt, conflictStart),
-                lte(schema.matches.scheduledAt, conflictEnd),
-=======
                 gte(schema.matches.scheduledAt, windowStart),
                 lte(schema.matches.scheduledAt, windowEnd),
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
                 or(
                   inArray(schema.matches.participant1Id, participantIds),
                   inArray(schema.matches.participant2Id, participantIds),
                 ),
               ),
-<<<<<<< HEAD
-            )
-            .limit(1);
-
-          if (participantConflict.length > 0) {
-            throw new BadRequestException(
-              'Một đội đã có trận đấu khác trong khung giờ này.',
-=======
             );
 
           const participantConflict = candidateParticipantMatches.find((m) => {
@@ -2503,7 +2314,6 @@ export class MatchesRepository {
           if (participantConflict) {
             throw new BadRequestException(
               'Một đội đã có trận đấu khác trong cùng khung giờ.',
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
             );
           }
         }
