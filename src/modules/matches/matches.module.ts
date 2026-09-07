@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MatchesService } from './matches.service';
 import { MatchesController } from './matches.controller';
 import { TournamentScheduleController } from './tournament-schedule.controller';
@@ -9,9 +9,16 @@ import { AuthModule } from '../auth/auth.module';
 import { RankingsModule } from '../rankings/rankings.module';
 import { RedisModule } from '../../providers/redis/redis.module';
 import { MatchContextAdapter } from './match-context.adapter';
+import { ClubMatchSessionsModule } from '../club-match-sessions/club-match-sessions.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, RankingsModule, RedisModule],
+  imports: [
+    DatabaseModule,
+    AuthModule,
+    RankingsModule,
+    RedisModule,
+    forwardRef(() => ClubMatchSessionsModule),
+  ],
   controllers: [MatchesController, TournamentScheduleController],
   providers: [
     MatchesService,

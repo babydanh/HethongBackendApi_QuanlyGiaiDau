@@ -420,12 +420,86 @@ export class ClubMatchSessionsRepository {
           .where(inArray(schema.users.id, userIds))
       : [];
     const byId = new Map(users.map((user) => [user.id, user]));
+    const projectMembers = (userIdsForSide: string[]) =>
+      userIdsForSide.map((userId) => {
+        const user = byId.get(userId);
+        return {
+          userId,
+          id: userId,
+          fullName: user?.fullName ?? null,
+          avatarUrl: user?.avatarUrl ?? null,
+          isMock: user?.isMock === true,
+        };
+      });
+    const sideAMembers = projectMembers(match.sideAUserIds);
+    const sideBMembers = projectMembers(match.sideBUserIds);
+    const sideAName =
+      sideAMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
+      'Đội A';
+    const sideBName =
+      sideBMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
+      'Đội B';
+    const sportRules = {
+      mode: 'LITE' as const,
+      kind: session.categorySlug,
+    };
+    const tournamentConfig = {
+      isLite: true,
+      mode: 'LITE' as const,
+      hideAdvancedSettings: true,
+      scoringMode: 'FREE',
+    };
+    const winnerId =
+      match.winnerSide === 'A'
+        ? 'SIDE_A'
+        : match.winnerSide === 'B'
+          ? 'SIDE_B'
+          : null;
     return {
       ...match,
       contextType: 'CLUB_SOCIAL_MATCH_SESSION' as const,
       clubMatchSessionId: match.sessionId,
       tournamentId: null,
+      groupId: null,
       stageId: null,
+      stageType: 'SOCIAL_SESSION',
+      roundNumber: 1,
+      matchOrder: 1,
+      bracketBranch: 'SOCIAL_SESSION',
+      isBye: false,
+      team1Id: 'SIDE_A',
+      team2Id: 'SIDE_B',
+      participant1Id: 'SIDE_A',
+      participant2Id: 'SIDE_B',
+      team1Name: sideAName,
+      team2Name: sideBName,
+      sport: session.categorySlug,
+      sportRules,
+      effectiveSportRules: sportRules,
+      tournamentConfig,
+      scheduledAt: match.scheduledAt?.toISOString() ?? null,
+      winnerId,
+      loserId:
+        winnerId === 'SIDE_A'
+          ? 'SIDE_B'
+          : winnerId === 'SIDE_B'
+            ? 'SIDE_A'
+            : null,
+      team1Members: sideAMembers,
+      team2Members: sideBMembers,
+      team1MemberInfos: sideAMembers,
+      team2MemberInfos: sideBMembers,
+      tournament: {
+        name: session.session.name || 'Buổi giao lưu CLB',
+        createdBy: session.session.createdBy,
+        communityId: session.session.communityId,
+        categoryName: session.categoryName,
+        categorySlug: session.categorySlug,
+        categoryConfig: session.categoryConfig,
+        sportRules,
+        tournamentConfig,
+        isRanked: session.session.isRanked,
+      },
       session: {
         id: session.session.id,
         resolvedName: session.session.name,
@@ -438,11 +512,13 @@ export class ClubMatchSessionsRepository {
       },
       participant1: {
         id: 'SIDE_A',
-        members: match.sideAUserIds.map((userId) => byId.get(userId)),
+        teamName: sideAName,
+        members: sideAMembers,
       },
       participant2: {
         id: 'SIDE_B',
-        members: match.sideBUserIds.map((userId) => byId.get(userId)),
+        teamName: sideBName,
+        members: sideBMembers,
       },
     };
   }

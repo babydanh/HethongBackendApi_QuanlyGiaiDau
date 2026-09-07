@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -7,6 +8,7 @@ import {
   UnauthorizedException,
   UnprocessableEntityException,
   Optional,
+  forwardRef,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { randomUUID } from 'node:crypto';
@@ -46,6 +48,8 @@ import {
   isAdminUser,
   isMatchOwnerOrAdmin,
 } from '../../common/helpers/role.helper';
+import { MatchContextAdapter } from './match-context.adapter';
+import { ClubMatchSessionsService } from '../club-match-sessions/club-match-sessions.service';
 
 @Injectable()
 export class MatchesService {
@@ -55,6 +59,10 @@ export class MatchesService {
     private readonly rankingsService: RankingsService,
     private readonly notificationsService: NotificationsService,
     private readonly redisService: RedisService,
+    @Optional() private readonly matchContextAdapter?: MatchContextAdapter,
+    @Optional()
+    @Inject(forwardRef(() => ClubMatchSessionsService))
+    private readonly clubMatchSessionsService?: ClubMatchSessionsService,
     @Optional() private readonly eloOutboxProcessor?: EloOutboxProcessor,
   ) {}
 
@@ -1214,6 +1222,16 @@ export class MatchesService {
   }
 
   async findOne(id: string, user?: JwtPayload) {
+    const context = await this.matchContextAdapter?.resolve(id);
+    if (context?.type === 'CLUB_SOCIAL_MATCH_SESSION') {
+      if (!user?.sub || !this.clubMatchSessionsService) {
+        throw new NotFoundException('Match not found');
+      }
+      return this.clubMatchSessionsService.getLiveMatch(id, {
+        id: user.sub,
+        roles: [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+      });
+    }
     const match = await this.matchesRepository.findById(id);
     if (!match) {
       throw new NotFoundException('Match not found');
@@ -1255,6 +1273,27 @@ export class MatchesService {
     user: JwtPayload,
     updateMatchScoreDto: UpdateMatchScoreDto,
   ) {
+    const context = await this.matchContextAdapter?.resolve(id);
+    if (context?.type === 'CLUB_SOCIAL_MATCH_SESSION') {
+      if (!this.clubMatchSessionsService) {
+        throw new NotFoundException('Match not found');
+      }
+      const actor = {
+        id: user.sub,
+        roles: [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+      };
+      return updateMatchScoreDto.winnerId
+        ? this.clubMatchSessionsService.completeMatch(
+            id,
+            actor,
+            updateMatchScoreDto,
+          )
+        : this.clubMatchSessionsService.updateScore(
+            id,
+            actor,
+            updateMatchScoreDto,
+          );
+    }
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
     if (existing.status === 'COMPLETED') {
@@ -1634,6 +1673,21 @@ export class MatchesService {
     user: JwtPayload,
     updateMatchStatusDto: UpdateMatchStatusDto,
   ) {
+    const context = await this.matchContextAdapter?.resolve(id);
+    if (context?.type === 'CLUB_SOCIAL_MATCH_SESSION') {
+      if (!this.clubMatchSessionsService) {
+        throw new NotFoundException('Match not found');
+      }
+      if (updateMatchStatusDto.status === 'ONGOING') {
+        return this.clubMatchSessionsService.startMatch(id, {
+          id: user.sub,
+          roles: [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+        });
+      }
+      throw new BadRequestException(
+        'Hãy chốt điểm trong bảng tính điểm để hoàn tất trận giao lưu.',
+      );
+    }
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
     if (existing.status === 'COMPLETED') {

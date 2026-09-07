@@ -158,6 +158,7 @@ export class ClubMatchSessionsService {
     if (!row) return null;
     return {
       ...row.session,
+      registrationMode: 'MIXED' as const,
       resolvedName: this.resolveName(
         row.session.name,
         row.communityName,
@@ -239,7 +240,7 @@ export class ClubMatchSessionsService {
       createdBy: actor.id,
       name: dto.name?.trim() || null,
       description: dto.description?.trim() || null,
-      registrationMode: dto.registrationMode ?? 'MIXED',
+      registrationMode: 'MIXED',
       isRanked: dto.isRanked ?? true,
       maxParticipants: dto.maxParticipants ?? 16,
       sessionConfig,
@@ -265,6 +266,7 @@ export class ClubMatchSessionsService {
     return {
       data: result.items.map((item) => ({
         ...item.session,
+        registrationMode: 'MIXED' as const,
         resolvedName: this.resolveName(
           item.session.name,
           item.communityName,
@@ -298,7 +300,6 @@ export class ClubMatchSessionsService {
             ...projected.capabilities,
             canJoin:
               row.session.status === 'OPEN' &&
-              ['SELF', 'MIXED'].includes(row.session.registrationMode) &&
               viewerParticipant?.status !== 'ACTIVE',
             canWithdraw:
               !TERMINAL_SESSION_STATUSES.has(row.session.status) &&
@@ -310,6 +311,13 @@ export class ClubMatchSessionsService {
           },
         }
       : null;
+  }
+
+  async getLiveMatch(matchId: string, actor: Actor) {
+    const match = await this.repository.findMatch(matchId);
+    if (!match) return null;
+    await this.requireSession(match.sessionId, actor);
+    return this.repository.projectMatch(matchId);
   }
 
   async update(
@@ -351,8 +359,7 @@ export class ClubMatchSessionsService {
             dto.description === undefined
               ? current.session.description
               : dto.description?.trim() || null,
-          registrationMode:
-            dto.registrationMode ?? current.session.registrationMode,
+          registrationMode: 'MIXED',
           isRanked: dto.isRanked ?? current.session.isRanked,
           maxParticipants:
             dto.maxParticipants ?? current.session.maxParticipants,
@@ -465,7 +472,10 @@ export class ClubMatchSessionsService {
   ) {
     await this.requireSession(sessionId, actor);
     const result = await this.repository.listParticipants(sessionId, {
-      status: query.status,
+      // The participant tab and match builder are active-roster surfaces.
+      // Keep withdrawn/kicked rows queryable explicitly for audit/history,
+      // but never mix them into the default active count/list.
+      status: query.status ?? 'ACTIVE',
       cursor: query.cursor,
       limit: query.limit ?? 30,
     });
@@ -478,9 +488,6 @@ export class ClubMatchSessionsService {
     if (current.session.status !== 'OPEN') {
       apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
     }
-    if (!['SELF', 'MIXED'].includes(current.session.registrationMode)) {
-      apiError(ForbiddenException, 'SELF_REGISTRATION_DISABLED');
-    }
     const db = this.repository.getDb();
     return db.transaction(async (tx) => {
       const lockedSession = await this.repository.findSessionForUpdate(
@@ -490,9 +497,6 @@ export class ClubMatchSessionsService {
       if (!lockedSession) apiError(NotFoundException, 'SESSION_NOT_FOUND');
       if (lockedSession.status !== 'OPEN') {
         apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
-      }
-      if (!['SELF', 'MIXED'].includes(lockedSession.registrationMode)) {
-        apiError(ForbiddenException, 'SELF_REGISTRATION_DISABLED');
       }
       const existing = await this.repository.findParticipant(
         sessionId,
@@ -635,11 +639,6 @@ export class ClubMatchSessionsService {
     if (current.session.status !== 'OPEN') {
       apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
     }
-    if (
-      !['MANAGER_ASSIGN', 'MIXED'].includes(current.session.registrationMode)
-    ) {
-      apiError(ConflictException, 'MANAGER_ASSIGNMENT_DISABLED');
-    }
     const userIds = uniqueSorted(dto.userIds);
     const request = { sessionId, userIds };
     const db = this.repository.getDb();
@@ -662,11 +661,6 @@ export class ClubMatchSessionsService {
       if (!lockedSession) apiError(NotFoundException, 'SESSION_NOT_FOUND');
       if (lockedSession.status !== 'OPEN') {
         apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
-      }
-      if (
-        !['MANAGER_ASSIGN', 'MIXED'].includes(lockedSession.registrationMode)
-      ) {
-        apiError(ConflictException, 'MANAGER_ASSIGNMENT_DISABLED');
       }
       const members = await tx
         .select({ userId: schema.communityMembers.userId })

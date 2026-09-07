@@ -164,6 +164,19 @@ export class ClubMatchSessionsController {
     return this.service.listMatches(id, user, query);
   }
 
+  /**
+   * Authenticated live snapshot for a free club-session match.
+   * This is deliberately separate from the tournament match read route so a
+   * session match never needs a synthetic tournament id on the client.
+   */
+  @Get('matches/:matchId')
+  getMatch(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+  ) {
+    return this.service.getLiveMatch(matchId, user);
+  }
+
   @Post('matches/:matchId/start')
   startMatch(
     @CurrentUser() user: RequestUser,

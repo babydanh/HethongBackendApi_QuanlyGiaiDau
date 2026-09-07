@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, Min, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsInt, Min, IsObject, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import type { FootballScoreDetailsDto } from './football-score-details.dto';
 
 export class UpdateMatchScoreDto {
@@ -22,11 +22,15 @@ export class UpdateMatchScoreDto {
   scoreDetails?: Record<string, unknown> & { football?: FootballScoreDetailsDto };
 
   @ApiPropertyOptional({
-    example: 'uuid-participant',
-    description: 'ID của người thắng cuộc',
+    example: 'uuid-participant hoặc SIDE_A',
+    description:
+      'ID participant của người thắng; trận giao lưu dùng SIDE_A hoặc SIDE_B',
   })
   @IsOptional()
-  @IsUUID()
+  @IsString()
+  @Matches(
+    /^(SIDE_[AB]|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i,
+  )
   winnerId?: string;
 
   @ApiPropertyOptional({
