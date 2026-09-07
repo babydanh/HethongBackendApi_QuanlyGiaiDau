@@ -943,16 +943,7 @@ export class CommunitiesRepository {
           eq(schema.tournaments.visibility, 'COMMUNITY'),
           eq(schema.tournaments.visibility, 'RESTRICTED'),
         )
-<<<<<<< HEAD
       : eq(schema.tournaments.visibility, 'PUBLIC');
-=======
-      : and(
-          eq(schema.tournaments.visibility, 'PUBLIC'),
-          // Super Lite tournaments are hidden from non-members
-          sql`COALESCE((${schema.tournaments.tournamentConfig}->>'isLite')::boolean, false) = false`,
-          sql`COALESCE(${schema.tournaments.tournamentConfig}->>'mode', '') != 'LITE'`,
-        );
->>>>>>> 6f27f8743fee26ca90ead8e7ebdc75d8bc9cb683
     let condition = and(
       eq(schema.tournaments.communityId, communityId),
       visibilityCondition,
@@ -1605,80 +1596,5 @@ export class CommunitiesRepository {
         ),
       );
     return rows;
-  }
-
-  async findCommunityRanking(communityId: string, userId: string, categoryId: string) {
-    const [row] = await this.db
-      .select()
-      .from(schema.communityRankings)
-      .where(
-        and(
-          eq(schema.communityRankings.communityId, communityId),
-          eq(schema.communityRankings.userId, userId),
-          eq(schema.communityRankings.categoryId, categoryId),
-        ),
-      )
-      .limit(1);
-    return row || null;
-  }
-
-  async upsertCommunityRanking(data: {
-    communityId: string;
-    userId: string;
-    categoryId: string;
-    eloPoints: number;
-    peakElo: number;
-    matchType?: string;
-  }) {
-    const existing = await this.findCommunityRanking(data.communityId, data.userId, data.categoryId);
-    const now = new Date();
-    if (existing) {
-      await this.db
-        .update(schema.communityRankings)
-        .set({
-          eloPoints: data.eloPoints,
-          peakElo: data.peakElo,
-          lastActiveAt: now,
-          updatedAt: now,
-        })
-        .where(eq(schema.communityRankings.id, existing.id));
-    } else {
-      await this.db.insert(schema.communityRankings).values({
-        communityId: data.communityId,
-        userId: data.userId,
-        categoryId: data.categoryId,
-        matchType: data.matchType || 'SINGLES',
-        eloPoints: data.eloPoints,
-        peakElo: data.peakElo,
-        lastActiveAt: now,
-        lastDecayAt: now,
-        updatedAt: now,
-      });
-    }
-  }
-
-  async getCommunitySports(communityId: string) {
-    return await this.db
-      .select({
-        categoryId: schema.communitySports.categoryId,
-        categoryName: schema.categories.name,
-      })
-      .from(schema.communitySports)
-      .innerJoin(
-        schema.categories,
-        eq(schema.communitySports.categoryId, schema.categories.id),
-      )
-      .where(eq(schema.communitySports.communityId, communityId));
-  }
-
-  async findDefaultCategory() {
-    const [cat] = await this.db
-      .select()
-      .from(schema.categories)
-      .where(ilike(schema.categories.name, '%pickle%'))
-      .limit(1);
-    if (cat) return cat;
-    const [firstCat] = await this.db.select().from(schema.categories).limit(1);
-    return firstCat || null;
   }
 }
