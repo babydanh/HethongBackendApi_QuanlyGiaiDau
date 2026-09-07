@@ -69,6 +69,8 @@ describe('EloOutboxProcessor — claim & state machine (NOTE-3, T13)', () => {
 
     it('routes a club-session outbox row through the shared ELO processor', async () => {
       mockDb.execute.mockResolvedValueOnce([]);
+      const publish = jest.fn().mockResolvedValue(undefined);
+      processor.setClubMatchUpdatePublisher(publish);
 
       await (processor as unknown as {
         processClaimed(row: {
@@ -86,6 +88,7 @@ describe('EloOutboxProcessor — claim & state machine (NOTE-3, T13)', () => {
         mockRankings.processClubMatchResultFromOutbox,
       ).toHaveBeenCalledWith('club-match-1');
       expect(mockRankings.processMatchResultFromOutbox).not.toHaveBeenCalled();
+      expect(publish).toHaveBeenCalledWith('club-match-1');
     });
 
     it('returns a retryable failure to PENDING with backoff below the cap', async () => {

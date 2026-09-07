@@ -51,7 +51,20 @@ export class ClubMatchSessionsService {
     private readonly repository: ClubMatchSessionsRepository,
     private readonly liveScoreGateway: LiveScoreGateway,
     private readonly eloOutboxProcessor: EloOutboxProcessor,
-  ) {}
+  ) {
+    this.eloOutboxProcessor.setClubMatchUpdatePublisher?.(async (matchId) => {
+      const match = await this.repository.findMatch(matchId);
+      const projected = await this.repository.projectMatch(matchId);
+      if (match && projected) {
+        this.liveScoreGateway.broadcastClubSessionMatchUpdate(
+          match.sessionId,
+          matchId,
+          projected,
+          'elo:update',
+        );
+      }
+    });
+  }
 
   private isPlatformAdmin(actor: Actor): boolean {
     return Boolean(actor.roles?.some((role) => role === 'ADMIN'));
@@ -197,14 +210,36 @@ export class ClubMatchSessionsService {
 
   async get(sessionId: string, actor: Actor, locale?: string) {
     const row = await this.requireSession(sessionId, actor);
-    const membership = await this.repository.findMembership(
-      row.session.communityId,
-      actor.id,
-    );
+    const [membership, viewerParticipant, viewerPreferences] = await Promise.all([
+      this.repository.findMembership(row.session.communityId, actor.id),
+      this.repository.findParticipant(sessionId, actor.id),
+      this.repository.findPreference(sessionId, actor.id),
+    ]);
     const canManage =
       this.isPlatformAdmin(actor) ||
       MANAGER_ROLES.has(membership?.role ?? '');
-    return this.projectSession(row, locale, canManage);
+    const projected = this.projectSession(row, locale, canManage);
+    return projected
+      ? {
+          ...projected,
+          viewerParticipant,
+          viewerPreferences,
+          capabilities: {
+            ...projected.capabilities,
+            canJoin:
+              row.session.status === 'OPEN' &&
+              ['SELF', 'MIXED'].includes(row.session.registrationMode) &&
+              viewerParticipant?.status !== 'ACTIVE',
+            canWithdraw:
+              !TERMINAL_SESSION_STATUSES.has(row.session.status) &&
+              viewerParticipant?.status === 'ACTIVE' &&
+              viewerParticipant.source === 'SELF',
+            canCreateMatch:
+              ['OPEN', 'LIVE'].includes(row.session.status) &&
+              (canManage || viewerParticipant?.status === 'ACTIVE'),
+          },
+        }
+      : null;
   }
 
   async update(
@@ -706,7 +741,17 @@ export class ClubMatchSessionsService {
     const db = this.repository.getDb();
     const [updated] = await db
       .update(schema.clubMatchSessionMatches)
-      .set({ status: 'ONGOING', startedAt: match.startedAt ?? new Date(), p1SetsWon: dto.p1SetsWon, p2SetsWon: dto.p2SetsWon, scoreDetails: dto.scoreDetails ?? {}, updatedAt: new Date(), revision: sql`${schema.clubMatchSessionMatches.revision} + 1` })
+      .set({
+        status: 'ONGOING',
+        startedAt: match.startedAt ?? new Date(),
+        p1SetsWon: dto.p1SetsWon,
+        p2SetsWon: dto.p2SetsWon,
+        ...(dto.scoreDetails !== undefined
+          ? { scoreDetails: dto.scoreDetails }
+          : {}),
+        updatedAt: new Date(),
+        revision: sql`${schema.clubMatchSessionMatches.revision} + 1`,
+      })
       .where(and(eq(schema.clubMatchSessionMatches.id, matchId), eq(schema.clubMatchSessionMatches.revision, revision), inArray(schema.clubMatchSessionMatches.status, ['SCHEDULED', 'ONGOING'])))
       .returning();
     if (!updated) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
@@ -735,7 +780,20 @@ export class ClubMatchSessionsService {
             : 'PENDING';
       const [row] = await tx
         .update(schema.clubMatchSessionMatches)
-        .set({ status: 'COMPLETED', p1SetsWon: dto.p1SetsWon, p2SetsWon: dto.p2SetsWon, scoreDetails: dto.scoreDetails ?? {}, winnerSide, completedAt: new Date(), scoreConfirmedBy: actor.id, eloStatus, updatedAt: new Date(), revision: sql`${schema.clubMatchSessionMatches.revision} + 1` })
+        .set({
+          status: 'COMPLETED',
+          p1SetsWon: dto.p1SetsWon,
+          p2SetsWon: dto.p2SetsWon,
+          ...(dto.scoreDetails !== undefined
+            ? { scoreDetails: dto.scoreDetails }
+            : {}),
+          winnerSide,
+          completedAt: new Date(),
+          scoreConfirmedBy: actor.id,
+          eloStatus,
+          updatedAt: new Date(),
+          revision: sql`${schema.clubMatchSessionMatches.revision} + 1`,
+        })
         .where(and(eq(schema.clubMatchSessionMatches.id, matchId), eq(schema.clubMatchSessionMatches.revision, revision), inArray(schema.clubMatchSessionMatches.status, ['SCHEDULED', 'ONGOING'])))
         .returning();
       if (!row) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });

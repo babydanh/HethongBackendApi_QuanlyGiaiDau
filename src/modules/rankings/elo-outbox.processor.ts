@@ -28,6 +28,7 @@ export class EloOutboxProcessor {
   private readonly logger = new Logger(EloOutboxProcessor.name);
   private readonly instanceId: string;
   private running = false;
+  private clubMatchUpdatePublisher?: (matchId: string) => Promise<void>;
 
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
@@ -59,6 +60,23 @@ export class EloOutboxProcessor {
   /** Fire-and-forget safe entry point used only after the score transaction commits. */
   async dispatchNow(): Promise<void> {
     await this.processOutbox();
+  }
+
+  setClubMatchUpdatePublisher(
+    publisher: (matchId: string) => Promise<void>,
+  ): void {
+    this.clubMatchUpdatePublisher = publisher;
+  }
+
+  private async publishClubMatchUpdate(matchId: string | null): Promise<void> {
+    if (!matchId || !this.clubMatchUpdatePublisher) return;
+    try {
+      await this.clubMatchUpdatePublisher(matchId);
+    } catch (error) {
+      this.logger.warn(
+        `Unable to publish club match ELO update for ${matchId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   private async claimOne(): Promise<
@@ -116,6 +134,7 @@ export class EloOutboxProcessor {
         SET status = 'PROCESSED', processed_at = now(), locked_at = NULL, locked_by = NULL
         WHERE id = ${row.id}
       `);
+      await this.publishClubMatchUpdate(row.club_match_session_match_id);
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       // Retryable (transient) + under cap → back to PENDING with backoff.
@@ -140,6 +159,7 @@ export class EloOutboxProcessor {
             WHERE id = ${row.club_match_session_match_id}
           `);
         }
+        await this.publishClubMatchUpdate(row.club_match_session_match_id);
         this.logger.warn(`ELO outbox retry (attempt ${attempts}/${RETRY_CAP}) for match ${row.match_id ?? row.club_match_session_match_id}: ${message}`);
       } else {
         // Terminal failure after retry cap.
@@ -154,6 +174,7 @@ export class EloOutboxProcessor {
             WHERE id = ${row.club_match_session_match_id}
           `);
         }
+        await this.publishClubMatchUpdate(row.club_match_session_match_id);
         this.logger.error(`ELO outbox FAILED (terminal) for match ${row.match_id ?? row.club_match_session_match_id}: ${message}`);
       }
     }

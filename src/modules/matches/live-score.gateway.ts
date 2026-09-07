@@ -351,7 +351,7 @@ export class LiveScoreGateway
     sessionId: string,
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status',
+    event: 'score:update' | 'match:status' | 'elo:update',
   ) {
     if (!this.server) return;
     const rawPayload = JSON.stringify({

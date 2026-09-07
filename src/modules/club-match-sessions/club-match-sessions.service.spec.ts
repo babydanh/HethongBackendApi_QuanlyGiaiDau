@@ -7,9 +7,14 @@ describe('ClubMatchSessionsService', () => {
     createSession: jest.fn(),
     findSession: jest.fn(),
     findMembership: jest.fn(),
+    findParticipant: jest.fn(),
+    findPreference: jest.fn(),
   };
   const gateway = { broadcastClubSessionMatchUpdate: jest.fn() };
-  const processor = { dispatchNow: jest.fn() };
+  const processor = {
+    dispatchNow: jest.fn(),
+    setClubMatchUpdatePublisher: jest.fn(),
+  };
   let service: ClubMatchSessionsService;
 
   beforeEach(() => {
@@ -49,6 +54,8 @@ describe('ClubMatchSessionsService', () => {
       role: 'OWNER',
       status: 'JOINED',
     });
+    repository.findParticipant.mockResolvedValue(null);
+    repository.findPreference.mockResolvedValue(null);
 
     const result = await service.create(
       { id: 'owner-1', roles: [] },

@@ -336,6 +336,24 @@ export class ClubMatchSessionsRepository {
     return row ?? null;
   }
 
+  async findPreference(
+    sessionId: string,
+    userId: string,
+    tx: AppDbOrTx = this.db,
+  ) {
+    const [row] = await tx
+      .select()
+      .from(schema.clubMatchPreferences)
+      .where(
+        and(
+          eq(schema.clubMatchPreferences.sessionId, sessionId),
+          eq(schema.clubMatchPreferences.userId, userId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
   async findMatch(id: string, tx: AppDbOrTx = this.db) {
     const [row] = await tx
       .select()
