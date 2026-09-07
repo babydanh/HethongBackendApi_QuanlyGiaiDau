@@ -184,6 +184,7 @@ export class ClubMatchSessionsRepository {
     registrationMode: 'SELF' | 'MANAGER_ASSIGN' | 'MIXED';
     isRanked: boolean;
     maxParticipants: number;
+    sessionConfig: Record<string, unknown>;
     startAt: Date | null;
     endAt: Date | null;
   }) {
@@ -192,6 +193,17 @@ export class ClubMatchSessionsRepository {
         .insert(schema.clubMatchSessions)
         .values({ ...input, status: 'OPEN', pairingMode: 'FREE' })
         .returning();
+      const displayName = input.name?.trim() || 'Buổi giao lưu CLB';
+      await tx.insert(schema.communityPosts).values({
+        communityId: created.communityId,
+        authorId: created.createdBy,
+        clubMatchSessionId: created.id,
+        type: 'CLUB_MATCH_SESSION_ANNOUNCEMENT',
+        body: `🏸 ${displayName} đã mở đăng ký.`,
+        mediaUrls: [],
+        status: 'PUBLISHED',
+        idempotencyKey: `club-match-session:${created.id}:created`,
+      });
       await this.auditService.logCreate(
         tx,
         input.createdBy,

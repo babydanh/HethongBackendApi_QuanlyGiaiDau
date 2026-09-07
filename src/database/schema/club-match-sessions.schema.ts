@@ -40,6 +40,7 @@ export const clubMatchSessions = pgTable(
       .notNull(),
     isRanked: boolean('is_ranked').default(true).notNull(),
     maxParticipants: integer('max_participants').default(16).notNull(),
+    sessionConfig: jsonb('session_config').default('{}').notNull(),
     startAt: timestamp('start_at', { withTimezone: true }),
     endAt: timestamp('end_at', { withTimezone: true }),
     registrationOpenAt: timestamp('registration_open_at', {

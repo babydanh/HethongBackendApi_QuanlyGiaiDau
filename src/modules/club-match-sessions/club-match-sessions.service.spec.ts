@@ -68,6 +68,7 @@ describe('ClubMatchSessionsService', () => {
         registrationMode: 'MIXED',
         isRanked: true,
         maxParticipants: 16,
+        sessionConfig: {},
         startAt: null,
         endAt: null,
       }),
@@ -76,6 +77,71 @@ describe('ClubMatchSessionsService', () => {
       resolvedName: 'Club social match session Riverside Club',
       capabilities: { bracket: false, pairingMode: 'FREE' },
     });
+  });
+
+  it('stores a Lite-compatible recurring schedule without creating a bracket', async () => {
+    repository.findCommunityContext.mockResolvedValue({
+      id: 'community-1',
+      name: 'Riverside Club',
+      status: 'ACTIVE',
+      categoryId: 'category-1',
+      memberRole: 'OWNER',
+      memberStatus: 'JOINED',
+    });
+    repository.createSession.mockResolvedValue({ id: 'session-recurring' });
+    repository.findSession.mockResolvedValue({
+      session: {
+        id: 'session-recurring',
+        communityId: 'community-1',
+        categoryId: 'category-1',
+        name: 'Thứ bảy giao lưu',
+        pairingMode: 'FREE',
+        isRanked: true,
+      },
+      communityName: 'Riverside Club',
+      categoryName: 'Pickleball',
+      categorySlug: 'pickleball',
+      categoryConfig: {},
+    });
+    repository.findMembership.mockResolvedValue({
+      role: 'OWNER',
+      status: 'JOINED',
+    });
+    repository.findParticipant.mockResolvedValue(null);
+    repository.findPreference.mockResolvedValue(null);
+
+    await service.create(
+      { id: 'owner-1', roles: [] },
+      {
+        communityId: 'community-1',
+        name: 'Thứ bảy giao lưu',
+        isRecurring: true,
+        recurringFrequency: 'WEEKLY',
+        recurringDaysOfWeek: [6],
+        recurringTimeOfDay: '18:00',
+        recurringAdvanceDays: 3,
+      },
+      'vi',
+    );
+
+    expect(repository.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registrationMode: 'MIXED',
+        isRanked: true,
+        maxParticipants: 16,
+        sessionConfig: {
+          recurring: expect.objectContaining({
+            enabled: true,
+            frequency: 'WEEKLY',
+            daysOfWeek: [6],
+            timeOfDay: '18:00',
+            advanceDays: 3,
+          }),
+        },
+        startAt: expect.any(Date),
+        endAt: expect.any(Date),
+      }),
+    );
   });
 
   it('rejects a joined non-manager creating a session', async () => {

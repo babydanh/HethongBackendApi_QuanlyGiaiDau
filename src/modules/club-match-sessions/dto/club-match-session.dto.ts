@@ -12,6 +12,7 @@ import {
   IsUUID,
   Max,
   MaxLength,
+  Matches,
   Min,
 } from 'class-validator';
 
@@ -43,6 +44,41 @@ export class CreateClubMatchSessionDto {
   @Max(128)
   @IsOptional()
   maxParticipants?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isRecurring?: boolean;
+
+  @IsIn(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'])
+  @IsOptional()
+  recurringFrequency?: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  @IsOptional()
+  recurringDayOfWeek?: number;
+
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
+  @ArrayMaxSize(7)
+  @IsArray()
+  @IsOptional()
+  recurringDaysOfWeek?: number[];
+
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  recurringTimeOfDay?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  @IsOptional()
+  recurringAdvanceDays?: number;
 
   @IsDateString()
   @IsOptional()
@@ -82,6 +118,41 @@ export class UpdateClubMatchSessionDto {
   @Max(128)
   @IsOptional()
   maxParticipants?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isRecurring?: boolean;
+
+  @IsIn(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'])
+  @IsOptional()
+  recurringFrequency?: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  @IsOptional()
+  recurringDayOfWeek?: number;
+
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
+  @ArrayMaxSize(7)
+  @IsArray()
+  @IsOptional()
+  recurringDaysOfWeek?: number[];
+
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  recurringTimeOfDay?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  @IsOptional()
+  recurringAdvanceDays?: number;
 
   @IsDateString()
   @IsOptional()

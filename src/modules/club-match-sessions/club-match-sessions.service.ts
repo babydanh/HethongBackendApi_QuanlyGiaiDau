@@ -28,6 +28,42 @@ type Actor = { id: string; roles?: string[] };
 
 const MANAGER_ROLES = new Set(['OWNER', 'MODERATOR']);
 const TERMINAL_SESSION_STATUSES = new Set(['ENDED', 'CANCELLED']);
+function calculateNextRecurringDate(
+  frequency: string,
+  daysOfWeek: number[] | number,
+  timeOfDay: string,
+  fromDate = new Date(),
+): Date {
+  const [hours, minutes] = (timeOfDay || '18:00').split(':').map(Number);
+  const target = new Date(fromDate);
+  target.setHours(hours, minutes, 0, 0);
+  if (frequency === 'DAILY') {
+    target.setDate(target.getDate() + 1);
+    return target;
+  }
+  if (frequency === 'MONTHLY') {
+    target.setMonth(target.getMonth() + 1);
+    return target;
+  }
+  const days = Array.isArray(daysOfWeek)
+    ? daysOfWeek.length > 0
+      ? daysOfWeek
+      : [6]
+    : [daysOfWeek];
+  const currentDay = fromDate.getDay();
+  const isTodayPast = fromDate.getTime() >= target.getTime();
+  let minDaysAhead = 999;
+  for (const day of days) {
+    let diff = (day - currentDay + 7) % 7;
+    if (diff === 0 && isTodayPast) diff = frequency === 'BIWEEKLY' ? 14 : 7;
+    if (diff > 0 && diff < minDaysAhead) minDaysAhead = diff;
+  }
+  target.setDate(
+    fromDate.getDate() + (minDaysAhead === 999 ? 7 : minDaysAhead),
+  );
+  target.setHours(hours, minutes, 0, 0);
+  return target;
+}
 
 function apiError(
   ExceptionType:
@@ -149,10 +185,52 @@ export class ClubMatchSessionsService {
     if (dto.categoryId && dto.categoryId !== community.categoryId) {
       apiError(BadRequestException, 'CATEGORY_NOT_ALLOWED_FOR_CLUB');
     }
-    const startAt = dto.startAt ? new Date(dto.startAt) : null;
-    const endAt = dto.endAt ? new Date(dto.endAt) : null;
+    let startAt = dto.startAt ? new Date(dto.startAt) : null;
+    let endAt = dto.endAt ? new Date(dto.endAt) : null;
     if (startAt && endAt && endAt < startAt) {
       apiError(BadRequestException, 'INVALID_SESSION_DATE_RANGE');
+    }
+    let sessionConfig: Record<string, unknown> = {};
+    if (dto.isRecurring) {
+      const frequency = dto.recurringFrequency ?? 'WEEKLY';
+      const timeOfDay = dto.recurringTimeOfDay ?? '18:00';
+      const daysOfWeek = dto.recurringDaysOfWeek?.length
+        ? dto.recurringDaysOfWeek
+        : [dto.recurringDayOfWeek ?? startAt?.getDay() ?? 6];
+      const requestedStart =
+        startAt && !Number.isNaN(startAt.getTime()) ? startAt : null;
+      const firstEventAt =
+        requestedStart && requestedStart.getTime() > Date.now()
+          ? requestedStart
+          : calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay);
+      const durationMinutes =
+        startAt && endAt
+          ? Math.max(
+              1,
+              Math.round((endAt.getTime() - startAt.getTime()) / 60000),
+            )
+          : 60;
+      startAt = firstEventAt;
+      endAt = new Date(firstEventAt.getTime() + durationMinutes * 60000);
+      const advanceDays = dto.recurringAdvanceDays ?? 0;
+      const nextRunAt = new Date(
+        firstEventAt.getTime() - advanceDays * 86400000,
+      );
+      sessionConfig = {
+        recurring: {
+          enabled: true,
+          frequency,
+          dayOfWeek: daysOfWeek[0],
+          daysOfWeek,
+          timeOfDay,
+          advanceDays,
+          durationMinutes,
+          templateName: dto.name?.trim() || null,
+          nextRunAt: nextRunAt.toISOString(),
+          nextEventAt: firstEventAt.toISOString(),
+          lastGeneratedAt: new Date().toISOString(),
+        },
+      };
     }
     const created = await this.repository.createSession({
       communityId: dto.communityId,
@@ -163,6 +241,7 @@ export class ClubMatchSessionsService {
       registrationMode: dto.registrationMode ?? 'MIXED',
       isRanked: dto.isRanked ?? true,
       maxParticipants: dto.maxParticipants ?? 16,
+      sessionConfig,
       startAt,
       endAt,
     });
@@ -1133,14 +1212,12 @@ export class ClubMatchSessionsService {
           currentRevision: match.revision,
         });
       if (eloStatus === 'PENDING') {
-        await tx
-          .insert(schema.matchEloOutbox)
-          .values({
-            matchId: null,
-            clubMatchSessionMatchId: matchId,
-            status: 'PENDING',
-            attempts: 0,
-          });
+        await tx.insert(schema.matchEloOutbox).values({
+          matchId: null,
+          clubMatchSessionMatchId: matchId,
+          status: 'PENDING',
+          attempts: 0,
+        });
       }
       await this.repository.auditUpdate(
         tx,
