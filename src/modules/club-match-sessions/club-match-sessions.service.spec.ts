@@ -15,6 +15,7 @@ describe('ClubMatchSessionsService', () => {
     dispatchNow: jest.fn(),
     setClubMatchUpdatePublisher: jest.fn(),
   };
+  const rankingsService = {};
   let service: ClubMatchSessionsService;
 
   beforeEach(() => {
@@ -23,6 +24,7 @@ describe('ClubMatchSessionsService', () => {
       repository as never,
       gateway as never,
       processor as never,
+      rankingsService as never,
     );
   });
 

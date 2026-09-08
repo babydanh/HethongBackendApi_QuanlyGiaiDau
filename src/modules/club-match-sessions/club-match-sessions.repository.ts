@@ -66,7 +66,7 @@ export class ClubMatchSessionsRepository {
 
   async findCommunityContext(
     communityId: string,
-    actorId: string,
+    actorId: string | undefined,
     tx: AppDbOrTx = this.db,
   ) {
     const [row] = await tx
@@ -85,10 +85,12 @@ export class ClubMatchSessionsRepository {
       )
       .leftJoin(
         schema.communityMembers,
-        and(
-          eq(schema.communityMembers.communityId, schema.communities.id),
-          eq(schema.communityMembers.userId, actorId),
-        ),
+        actorId
+          ? and(
+              eq(schema.communityMembers.communityId, schema.communities.id),
+              eq(schema.communityMembers.userId, actorId),
+            )
+          : sql`false`,
       )
       .where(
         and(

@@ -1251,10 +1251,18 @@ export class ClubMatchSessionsService {
   }
 
   async listStandaloneMatches(
-    actor: Actor,
+    actor: Actor | undefined,
     query: QueryClubStandaloneMatchesDto,
   ) {
-    await this.requireCommunityAccess(query.communityId, actor);
+    // Public read: only require the community exists and is ACTIVE.
+    // Non-members (and unauthenticated web visitors) can view the club activity feed.
+    const context = await this.repository.findCommunityContext(
+      query.communityId,
+      actor?.id,
+    );
+    if (!context || context.status !== 'ACTIVE') {
+      apiError(NotFoundException, 'CLUB_NOT_FOUND');
+    }
     const result = await this.repository.listStandaloneMatches(query.communityId, {
       status: query.status,
       cursor: query.cursor,

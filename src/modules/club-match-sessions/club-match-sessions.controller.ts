@@ -9,9 +9,12 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { UpdateMatchScoreDto } from '../matches/dto/update-match-score.dto';
 import { ClubMatchSessionsService } from './club-match-sessions.service';
 import {
@@ -65,9 +68,11 @@ export class ClubMatchSessionsController {
     return this.service.createStandaloneMatch(user, dto, idempotencyKey);
   }
 
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('standalone-matches')
   listStandaloneMatches(
-    @CurrentUser() user: RequestUser,
+    @CurrentUser() user: RequestUser | undefined,
     @Query() query: QueryClubStandaloneMatchesDto,
   ) {
     return this.service.listStandaloneMatches(user, query);
