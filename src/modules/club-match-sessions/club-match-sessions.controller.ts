@@ -86,6 +86,46 @@ export class ClubMatchSessionsController {
     return this.service.deleteStandaloneMatch(matchId, user);
   }
 
+  /**
+   * Authenticated live snapshot for a free club-session match.
+   * This is deliberately separate from the tournament match read route so a
+   * session match never needs a synthetic tournament id on the client.
+   */
+  @Get('matches/:matchId')
+  getMatch(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+  ) {
+    return this.service.getLiveMatch(matchId, user);
+  }
+
+  @Post('matches/:matchId/start')
+  startMatch(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Body() dto: ClubMatchRevisionDto,
+  ) {
+    return this.service.startMatch(matchId, user, dto.expectedRevision);
+  }
+
+  @Patch('matches/:matchId/score')
+  updateScore(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Body() dto: UpdateMatchScoreDto,
+  ) {
+    return this.service.updateScore(matchId, user, dto);
+  }
+
+  @Post('matches/:matchId/complete')
+  completeMatch(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Body() dto: UpdateMatchScoreDto,
+  ) {
+    return this.service.completeMatch(matchId, user, dto);
+  }
+
   @Get(':id')
   get(
     @CurrentUser() user: RequestUser,
@@ -195,45 +235,5 @@ export class ClubMatchSessionsController {
     @Query() query: QueryClubMatchChildrenDto,
   ) {
     return this.service.listMatches(id, user, query);
-  }
-
-  /**
-   * Authenticated live snapshot for a free club-session match.
-   * This is deliberately separate from the tournament match read route so a
-   * session match never needs a synthetic tournament id on the client.
-   */
-  @Get('matches/:matchId')
-  getMatch(
-    @CurrentUser() user: RequestUser,
-    @Param('matchId', ParseUUIDPipe) matchId: string,
-  ) {
-    return this.service.getLiveMatch(matchId, user);
-  }
-
-  @Post('matches/:matchId/start')
-  startMatch(
-    @CurrentUser() user: RequestUser,
-    @Param('matchId', ParseUUIDPipe) matchId: string,
-    @Body() dto: ClubMatchRevisionDto,
-  ) {
-    return this.service.startMatch(matchId, user, dto.expectedRevision);
-  }
-
-  @Patch('matches/:matchId/score')
-  updateScore(
-    @CurrentUser() user: RequestUser,
-    @Param('matchId', ParseUUIDPipe) matchId: string,
-    @Body() dto: UpdateMatchScoreDto,
-  ) {
-    return this.service.updateScore(matchId, user, dto);
-  }
-
-  @Post('matches/:matchId/complete')
-  completeMatch(
-    @CurrentUser() user: RequestUser,
-    @Param('matchId', ParseUUIDPipe) matchId: string,
-    @Body() dto: UpdateMatchScoreDto,
-  ) {
-    return this.service.completeMatch(matchId, user, dto);
   }
 }

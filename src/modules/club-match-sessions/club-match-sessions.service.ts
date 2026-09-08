@@ -98,11 +98,13 @@ export class ClubMatchSessionsService {
       const match = await this.repository.findMatch(matchId);
       const projected = await this.repository.projectMatch(matchId);
       if (match && projected) {
+        const session = await this.repository.findSession(match.sessionId);
         this.liveScoreGateway.broadcastClubSessionMatchUpdate(
           match.sessionId,
           matchId,
           projected,
           'elo:update',
+          session?.session.communityId,
         );
       }
     });
@@ -113,6 +115,7 @@ export class ClubMatchSessionsService {
           matchId,
           projected,
           'elo:update',
+          projected.community?.id,
         );
       }
     });
@@ -1165,9 +1168,19 @@ export class ClubMatchSessionsService {
       });
       return commandResult;
     });
+    const projected = await this.repository.projectMatch(String(result.matchId));
+    if (projected && !result.replayed) {
+      this.liveScoreGateway.broadcastClubSessionMatchUpdate(
+        current.session.id,
+        String(result.matchId),
+        projected,
+        'match:update',
+        current.session.communityId,
+      );
+    }
     return {
       ...result,
-      match: await this.repository.projectMatch(String(result.matchId)),
+      match: projected,
     };
   }
 
@@ -1271,9 +1284,18 @@ export class ClubMatchSessionsService {
       );
       return { matchId: created.id, replayed: false };
     });
+    const projected = await this.repository.projectStandaloneMatch(result.matchId);
+    if (projected && !result.replayed) {
+      this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
+        result.matchId,
+        projected,
+        'match:update',
+        dto.communityId,
+      );
+    }
     return {
       ...result,
-      match: await this.repository.projectStandaloneMatch(result.matchId),
+      match: projected,
     };
   }
 
@@ -1373,6 +1395,7 @@ export class ClubMatchSessionsService {
       matchId,
       { id: matchId, status: 'CANCELLED', deleted: true },
       'match:status',
+      match.communityId,
     );
     return { deleted: true, eloReverted };
   }
@@ -1433,7 +1456,7 @@ export class ClubMatchSessionsService {
     actor: Actor,
     expectedRevision?: number,
   ) {
-    const { match } = await this.requireStandaloneMatchEditor(matchId, actor);
+    const { match, community } = await this.requireStandaloneMatchEditor(matchId, actor);
     if (match.status === 'ONGOING') return this.repository.projectStandaloneMatch(matchId);
     if (match.status !== 'SCHEDULED') apiError(ConflictException, 'MATCH_CANNOT_START');
     const revision = expectedRevision ?? match.revision;
@@ -1455,7 +1478,7 @@ export class ClubMatchSessionsService {
       .returning();
     if (!updated) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
     const projected = await this.repository.projectStandaloneMatch(matchId);
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'match:status');
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'match:status', community.id);
     return projected;
   }
 
@@ -1464,7 +1487,7 @@ export class ClubMatchSessionsService {
     actor: Actor,
     dto: UpdateMatchScoreDto,
   ) {
-    const { match } = await this.requireStandaloneMatchEditor(matchId, actor);
+    const { match, community } = await this.requireStandaloneMatchEditor(matchId, actor);
     this.validateMaxSets(dto);
     if (!['SCHEDULED', 'ONGOING'].includes(match.status))
       apiError(ConflictException, 'MATCH_SCORE_LOCKED');
@@ -1490,7 +1513,7 @@ export class ClubMatchSessionsService {
       .returning();
     if (!updated) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
     const projected = await this.repository.projectStandaloneMatch(matchId);
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'score:update');
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'score:update', community.id);
     return projected;
   }
 
@@ -1563,8 +1586,8 @@ export class ClubMatchSessionsService {
       return row;
     });
     const projected = await this.repository.projectStandaloneMatch(matchId);
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'match:status');
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'score:update');
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'match:status', match.communityId);
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'score:update', match.communityId);
     void this.eloOutboxProcessor.dispatchNow();
     return projected;
   }
@@ -1573,7 +1596,7 @@ export class ClubMatchSessionsService {
     if (!(await this.repository.findMatch(matchId))) {
       return this.startStandaloneMatch(matchId, actor, expectedRevision);
     }
-    const { match } = await this.requireMatchEditor(matchId, actor);
+    const { match, session } = await this.requireMatchEditor(matchId, actor);
     if (match.status === 'ONGOING')
       return this.repository.projectMatch(matchId);
     if (match.status !== 'SCHEDULED')
@@ -1606,6 +1629,7 @@ export class ClubMatchSessionsService {
       matchId,
       projected ?? updated,
       'match:status',
+      session.session.communityId,
     );
     return projected;
   }
@@ -1614,7 +1638,7 @@ export class ClubMatchSessionsService {
     if (!(await this.repository.findMatch(matchId))) {
       return this.updateStandaloneScore(matchId, actor, dto);
     }
-    const { match } = await this.requireMatchEditor(matchId, actor);
+    const { match, session } = await this.requireMatchEditor(matchId, actor);
     this.validateMaxSets(dto);
     if (!['SCHEDULED', 'ONGOING'].includes(match.status))
       apiError(ConflictException, 'MATCH_SCORE_LOCKED');
@@ -1654,6 +1678,7 @@ export class ClubMatchSessionsService {
       matchId,
       projected ?? updated,
       'score:update',
+      session.session.communityId,
     );
     return projected;
   }
@@ -1740,12 +1765,14 @@ export class ClubMatchSessionsService {
       matchId,
       projected ?? updated,
       'match:status',
+      session.session.communityId,
     );
     this.liveScoreGateway.broadcastClubSessionMatchUpdate(
       match.sessionId,
       matchId,
       projected ?? updated,
       'score:update',
+      session.session.communityId,
     );
     void this.eloOutboxProcessor.dispatchNow();
     return projected;

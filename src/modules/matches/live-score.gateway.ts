@@ -35,6 +35,7 @@ export class LiveScoreGateway
   private readonly clientMatchRooms = new Map<string, Set<string>>();
   private readonly clientTournamentRooms = new Map<string, Set<string>>();
   private readonly clientClubSessionRooms = new Map<string, Set<string>>();
+  private readonly clientClubCommunityRooms = new Map<string, Set<string>>();
   private readonly zombieDisconnectTimers = new Map<string, NodeJS.Timeout>();
   
   // Bộ đệm gộp tin (Batching) cho viewer counts
@@ -108,9 +109,11 @@ export class LiveScoreGateway
         const joinedRooms = this.clientMatchRooms.get(client.id);
         const joinedTournamentRooms = this.clientTournamentRooms.get(client.id);
         const joinedClubSessionRooms = this.clientClubSessionRooms.get(client.id);
+        const joinedClubCommunityRooms = this.clientClubCommunityRooms.get(client.id);
         if ((!joinedRooms || joinedRooms.size === 0) &&
             (!joinedTournamentRooms || joinedTournamentRooms.size === 0) &&
-            (!joinedClubSessionRooms || joinedClubSessionRooms.size === 0)) {
+            (!joinedClubSessionRooms || joinedClubSessionRooms.size === 0) &&
+            (!joinedClubCommunityRooms || joinedClubCommunityRooms.size === 0)) {
           this.logger.warn(`Disconnecting zombie client ${client.id} due to inactivity (not joined any match).`);
           client.disconnect(true);
         }
@@ -136,6 +139,7 @@ export class LiveScoreGateway
     }
     this.clientTournamentRooms.delete(client.id);
     this.clientClubSessionRooms.delete(client.id);
+    this.clientClubCommunityRooms.delete(client.id);
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
@@ -328,6 +332,43 @@ export class LiveScoreGateway
     return { event: 'left', data: room };
   }
 
+  @SubscribeMessage('joinClubCommunity')
+  async handleJoinClubCommunity(
+    @MessageBody() communityId: string,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const normalizedCommunityId = typeof communityId === 'string' ? communityId.trim() : '';
+    const user = client.data.user as JwtPayload | undefined;
+    const roles = Array.isArray(user?.roles) ? user.roles : user?.role ? [user.role] : [];
+    if (
+      !normalizedCommunityId ||
+      !(await this.matchContextAdapter.canAccessClubCommunity(normalizedCommunityId, user?.sub, roles))
+    ) {
+      throw new WsException('CLUB_COMMUNITY_ACCESS_DENIED');
+    }
+
+    const room = `club-community:${normalizedCommunityId}`;
+    client.join(room);
+    const joined = this.clientClubCommunityRooms.get(client.id) ?? new Set<string>();
+    joined.add(normalizedCommunityId);
+    this.clientClubCommunityRooms.set(client.id, joined);
+    return { event: 'joined', data: room };
+  }
+
+  @SubscribeMessage('leaveClubCommunity')
+  handleLeaveClubCommunity(
+    @MessageBody() communityId: string,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const normalizedCommunityId = typeof communityId === 'string' ? communityId.trim() : '';
+    const room = `club-community:${normalizedCommunityId}`;
+    client.leave(room);
+    const joined = this.clientClubCommunityRooms.get(client.id);
+    joined?.delete(normalizedCommunityId);
+    if (joined?.size === 0) this.clientClubCommunityRooms.delete(client.id);
+    return { event: 'left', data: room };
+  }
+
   // Tối ưu hoá: Mã hóa 1 lần (Single JSON stringify) + Chống áp lực ngược (Volatile drop)
   broadcastScoreUpdate(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
@@ -351,7 +392,8 @@ export class LiveScoreGateway
     sessionId: string,
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update',
+    communityId?: string | null,
   ) {
     if (!this.server) return;
     const rawPayload = JSON.stringify({
@@ -364,12 +406,16 @@ export class LiveScoreGateway
     this.server
       .to(`club-match-session:${sessionId}`)
       .emit('match:update', rawPayload);
+    if (communityId) {
+      this.server.to(`club-community:${communityId}`).emit('match:update', rawPayload);
+    }
   }
 
   broadcastClubStandaloneMatchUpdate(
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update',
+    communityId?: string | null,
   ) {
     if (!this.server) return;
     const rawPayload = JSON.stringify({
@@ -381,6 +427,9 @@ export class LiveScoreGateway
       tournamentId: null,
     });
     this.server.to(`match:${matchId}`).emit(event, rawPayload);
+    if (communityId) {
+      this.server.to(`club-community:${communityId}`).emit('match:update', rawPayload);
+    }
   }
 
   broadcastRegistrationUpdate(
