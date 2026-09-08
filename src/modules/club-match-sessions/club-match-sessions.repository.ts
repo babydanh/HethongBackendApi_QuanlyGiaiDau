@@ -481,6 +481,7 @@ export class ClubMatchSessionsRepository {
     return {
       ...match,
       contextType: 'CLUB_SOCIAL_MATCH_SESSION' as const,
+      isStandaloneMatch: false,
       clubMatchSessionId: match.sessionId,
       tournamentId: null,
       groupId: null,
