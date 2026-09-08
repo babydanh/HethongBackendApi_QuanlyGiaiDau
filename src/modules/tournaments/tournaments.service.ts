@@ -208,7 +208,9 @@ export class TournamentsService {
     );
     return (
       (member?.status === 'JOINED' || member?.status === 'ACTIVE') &&
-      ['OWNER', 'MODERATOR'].includes(member.role?.toUpperCase?.() ?? member.role)
+      ['OWNER', 'MODERATOR'].includes(
+        member.role?.toUpperCase?.() ?? member.role,
+      )
     );
   }
 
@@ -915,11 +917,11 @@ export class TournamentsService {
             }
           })()
         : tournament.tournamentConfig
-    ) as (Record<string, unknown> | null | undefined);
+    ) as Record<string, unknown> | null | undefined;
 
     const isClubTournament = Boolean(
       (tournament.communityId && tournament.communityId.length > 0) ||
-        tournament.tournamentType === 'CLUB',
+      tournament.tournamentType === 'CLUB',
     );
 
     if (tournament.visibility === 'PRIVATE' || isClubTournament) {
@@ -2096,7 +2098,9 @@ export class TournamentsService {
       }
       const community =
         typeof this.tournamentsRepository.findCommunityById === 'function'
-          ? await this.tournamentsRepository.findCommunityById(params.communityId)
+          ? await this.tournamentsRepository.findCommunityById(
+              params.communityId,
+            )
           : null;
       const communityName = community?.name || 'Câu lạc bộ';
 
@@ -2143,7 +2147,10 @@ export class TournamentsService {
           ),
       );
     } catch (err) {
-      console.error('Failed to dispatch community tournament notifications:', err);
+      console.error(
+        'Failed to dispatch community tournament notifications:',
+        err,
+      );
     }
   }
 
@@ -3250,8 +3257,13 @@ export class TournamentsService {
     } else if (divisions.length > 1) {
       // If no divisionId is specified but tournament has multiple divisions,
       // check if this is a Lite tournament and default to first division
-      const configCheck = (existing.tournamentConfig || {}) as Record<string, unknown>;
-      const isLiteTournament = (configCheck.isLite as boolean | undefined) === true || configCheck.mode === 'LITE';
+      const configCheck = (existing.tournamentConfig || {}) as Record<
+        string,
+        unknown
+      >;
+      const isLiteTournament =
+        (configCheck.isLite as boolean | undefined) === true ||
+        configCheck.mode === 'LITE';
       if (isLiteTournament) {
         division = divisions[0];
         divisionId = divisions[0].id;
@@ -3400,7 +3412,9 @@ export class TournamentsService {
       await this.redisService.del(`matches:tournament:${id}`);
       await this.redisService.del(`tournament:${id}`);
     } catch (cacheErr) {
-      this.logger.warn(`Failed to clear cache for tournament ${id}: ${cacheErr}`);
+      this.logger.warn(
+        `Failed to clear cache for tournament ${id}: ${cacheErr}`,
+      );
     }
 
     return result;
@@ -3461,7 +3475,9 @@ export class TournamentsService {
       await this.redisService.del(`matches:tournament:${id}`);
       await this.redisService.del(`tournament:${id}`);
     } catch (cacheErr) {
-      this.logger.warn(`Failed to clear cache for tournament ${id}: ${cacheErr}`);
+      this.logger.warn(
+        `Failed to clear cache for tournament ${id}: ${cacheErr}`,
+      );
     }
 
     return result;
@@ -3953,6 +3969,7 @@ export class TournamentsService {
     userId: string,
     registerTournamentDto: RegisterTournamentDto,
     inviteCode?: string,
+    actorUserId?: string,
   ) {
     const tournament = await this.tournamentsRepository.findById(id);
     if (!tournament) {
@@ -4223,7 +4240,12 @@ export class TournamentsService {
       >;
       if (config.seedingMethod === 'ELO') {
         const divisionId = result.participant.tournamentDivisionId;
-        await this.autoSeedFromElo(id, userId, [], divisionId ?? undefined);
+        await this.autoSeedFromElo(
+          id,
+          actorUserId ?? userId,
+          [],
+          divisionId ?? undefined,
+        );
       }
     } catch (err) {
       console.error('Failed to auto-seed after registration:', err);
@@ -4236,6 +4258,56 @@ export class TournamentsService {
     });
 
     return result;
+  }
+
+  async addLiteClubMember(
+    tournamentId: string,
+    memberUserId: string,
+    actorUserId: string,
+    systemRoles: string[] = [],
+  ) {
+    const { tournament } = await this.checkLiteAuthorization(
+      tournamentId,
+      actorUserId,
+      systemRoles,
+    );
+
+    if (!tournament.communityId) {
+      throw new BadRequestException(
+        'Chỉ giải Super Lite thuộc câu lạc bộ mới hỗ trợ thêm thành viên CLB.',
+      );
+    }
+
+    const member = await this.tournamentsRepository.findCommunityMember(
+      tournament.communityId,
+      memberUserId,
+    );
+    if (!member || member.status !== 'JOINED') {
+      throw new ForbiddenException(
+        'Thành viên được chọn không còn là thành viên đang hoạt động của câu lạc bộ.',
+      );
+    }
+
+    const profile =
+      await this.tournamentsRepository.findUserProfile(memberUserId);
+    if (!profile?.fullName?.trim()) {
+      throw new BadRequestException(
+        'Thành viên cần cập nhật họ tên trong hồ sơ trước khi thêm vào giải.',
+      );
+    }
+
+    // Keep the selected member as the participant/roster leader. The manager
+    // is only the authorizing actor; this preserves identity and team logic.
+    return this.register(
+      tournamentId,
+      memberUserId,
+      {
+        teamName: profile.fullName.trim(),
+        rankingConsent: tournament.isRanked === true,
+      },
+      undefined,
+      actorUserId,
+    );
   }
 
   async joinTeam(

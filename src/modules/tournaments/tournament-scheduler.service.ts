@@ -46,12 +46,43 @@ export class TournamentSchedulerService {
             status: 'REGISTRATION_CLOSED',
             updatedAt: new Date(),
           })
-          .where(eq(schema.tournaments.id, tournament.id));
+          .where(
+            and(
+              eq(schema.tournaments.id, tournament.id),
+              eq(schema.tournaments.status, 'REGISTRATION_OPEN'),
+            ),
+          );
 
         this.logger.log(`Tournament ${tournament.id} ("${tournament.name}") registration auto-closed.`);
       }
     } catch (err) {
       this.logger.error('Error in handleAutoCloseRegistration cron job:', err.message);
+    }
+  }
+
+  /** Đồng bộ các giải đã qua thời điểm kết thúc về trạng thái COMPLETED. */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async handleAutoCompleteExpiredTournaments() {
+    this.logger.log('Running auto-complete expired tournaments cron job...');
+    try {
+      const now = new Date();
+      const completed = await this.db
+        .update(schema.tournaments)
+        .set({ status: 'COMPLETED', updatedAt: now })
+        .where(
+          and(
+            isNull(schema.tournaments.deletedAt),
+            lte(schema.tournaments.endDate, now),
+            sql`${schema.tournaments.status} IN ('REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'UPCOMING', 'IN_PROGRESS')`,
+          ),
+        )
+        .returning({ id: schema.tournaments.id, name: schema.tournaments.name });
+
+      if (completed.length > 0) {
+        this.logger.log(`Auto-completed ${completed.length} expired tournament(s).`);
+      }
+    } catch (err) {
+      this.logger.error('Error in handleAutoCompleteExpiredTournaments cron job:', err.message);
     }
   }
 

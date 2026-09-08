@@ -25,6 +25,7 @@ import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
+import { AddLiteClubMemberDto } from './dto/add-lite-club-member.dto';
 import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
 import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
@@ -311,7 +312,9 @@ export class TournamentsController {
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER)
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Lấy danh sách tất cả các địa điểm thi đấu kèm sân của giải' })
+  @ApiOperation({
+    summary: 'Lấy danh sách tất cả các địa điểm thi đấu kèm sân của giải',
+  })
   async getTournamentVenues(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
@@ -330,7 +333,12 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Tạo địa điểm thi đấu mới cho giải' })
   async createTournamentVenue(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: CreateVenueDto & { isDefault?: boolean; initialCourtCount?: number; courtPrefix?: string },
+    @Body()
+    dto: CreateVenueDto & {
+      isDefault?: boolean;
+      initialCourtCount?: number;
+      courtPrefix?: string;
+    },
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.createTournamentVenue(
@@ -748,6 +756,22 @@ export class TournamentsController {
   ) {
     return this.tournamentsService.getLiteParticipants(
       id,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post('lite/:id/club-members')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Thêm thành viên CLB vào giải Super Lite' })
+  async addLiteClubMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddLiteClubMemberDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addLiteClubMember(
+      id,
+      dto.userId,
       user.sub,
       this.getSystemRoles(user),
     );
@@ -1627,7 +1651,8 @@ export class TournamentsController {
   @Patch(':id/recurring/toggle')
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Bật/Tắt (Tạm dừng hoặc Kích hoạt lại) lịch tự động tạo giải định kỳ',
+    summary:
+      'Bật/Tắt (Tạm dừng hoặc Kích hoạt lại) lịch tự động tạo giải định kỳ',
   })
   async toggleRecurringTournament(
     @Param('id', ParseUUIDPipe) id: string,
@@ -1645,7 +1670,8 @@ export class TournamentsController {
   @Delete(':id/recurring')
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Xóa hoàn toàn lịch tự động tạo giải định kỳ (tắt recurring khỏi giải)',
+    summary:
+      'Xóa hoàn toàn lịch tự động tạo giải định kỳ (tắt recurring khỏi giải)',
   })
   async deleteRecurringTournament(
     @Param('id', ParseUUIDPipe) id: string,

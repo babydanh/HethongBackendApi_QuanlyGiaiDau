@@ -105,6 +105,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       findById: jest.fn(),
       findCategory: jest.fn(),
       findCommunityMember: jest.fn(),
+      findUserProfile: jest.fn(),
       isCoOrganizer: jest.fn(),
       hasNonDeletedStagesOrMatches: jest.fn(),
       findBracket: jest.fn(),
@@ -300,6 +301,55 @@ describe('TournamentsService — Lite pairing guards', () => {
           [],
         ),
       ).rejects.toThrow();
+    });
+  });
+
+  describe('addLiteClubMember', () => {
+    it('keeps the selected JOINED member as the roster leader', async () => {
+      mockRepo.findById!.mockResolvedValue(liteTournament);
+      mockRepo.findCommunityMember!
+        .mockResolvedValueOnce({ role: 'MODERATOR', status: 'JOINED' })
+        .mockResolvedValueOnce({ role: 'MEMBER', status: 'JOINED' });
+      mockRepo.findUserProfile!.mockResolvedValue({
+        fullName: 'Thành viên CLB',
+      });
+      const registerSpy = jest
+        .spyOn(service, 'register')
+        .mockResolvedValue({ participant: { id: 'participant-1' } } as any);
+
+      await service.addLiteClubMember(
+        'tournament-1',
+        'member-1',
+        'moderator-1',
+      );
+
+      expect(registerSpy).toHaveBeenCalledWith(
+        'tournament-1',
+        'member-1',
+        {
+          teamName: 'Thành viên CLB',
+          rankingConsent: false,
+        },
+        undefined,
+        'moderator-1',
+      );
+    });
+
+    it('rejects a member who left the club before registration', async () => {
+      mockRepo.findById!.mockResolvedValue(liteTournament);
+      mockRepo.findCommunityMember!
+        .mockResolvedValueOnce({ role: 'MODERATOR', status: 'JOINED' })
+        .mockResolvedValueOnce({ role: 'MEMBER', status: 'LEFT' });
+      const registerSpy = jest.spyOn(service, 'register');
+
+      await expect(
+        service.addLiteClubMember(
+          'tournament-1',
+          'former-member-1',
+          'moderator-1',
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(registerSpy).not.toHaveBeenCalled();
     });
   });
 
