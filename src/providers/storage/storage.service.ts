@@ -1,13 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary, UploadApiErrorResponse, UploadApiResponse } from 'cloudinary';
 import * as streamifier from 'streamifier';
+import { like, or } from 'drizzle-orm';
+import { PG_CONNECTION } from '../../database/database.module';
+import type { AppDb } from '../../database/db.types';
+import { communities } from '../../database/schema/communities.schema';
+import { extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
 
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
+  ) {
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
     const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
     const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
@@ -44,7 +52,29 @@ export class StorageService {
     });
   }
 
-  deleteFile(publicId: string): Promise<unknown> {
+  async deleteFile(publicId: string): Promise<unknown> {
+    // Upload URLs are reused by tournaments and galleries. Those consumers do
+    // not own a file still referenced by a club, including an archived club.
+    // Escape SQL LIKE wildcards; compare parsed IDs before deciding to retain.
+    const escapedId = publicId.replace(/[\\%_]/g, '\\$&');
+    const candidates = await this.db
+      .select({ logoUrl: communities.logoUrl, bannerUrl: communities.bannerUrl })
+      .from(communities)
+      .where(or(
+        like(communities.logoUrl, `%/${escapedId}.%`),
+        like(communities.bannerUrl, `%/${escapedId}.%`),
+        like(communities.logoUrl, `%/${escapedId}`),
+        like(communities.bannerUrl, `%/${escapedId}`),
+      ));
+    if (candidates.some((club) =>
+      [club.logoUrl, club.bannerUrl].some((url) =>
+        extractStoredImagePublicId(url) === publicId,
+      ),
+    )) {
+      this.logger.debug('Retained storage asset referenced by club media');
+      return { result: 'skipped', reason: 'community_media_reference' };
+    }
+    // A failed lookup rejects before reaching Cloudinary: fail closed.
     return new Promise((resolve, reject) => {
       cloudinary.uploader.destroy(publicId, (error, result) => {
         if (error) {
