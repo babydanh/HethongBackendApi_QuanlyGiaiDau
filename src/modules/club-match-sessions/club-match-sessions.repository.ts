@@ -412,6 +412,15 @@ export class ClubMatchSessionsRepository {
     return row ?? null;
   }
 
+  async findStandaloneMatchIncludingDeleted(id: string) {
+    const [row] = await this.db
+      .select()
+      .from(schema.clubStandaloneMatches)
+      .where(eq(schema.clubStandaloneMatches.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
   async projectMatch(id: string) {
     const match = await this.findMatch(id);
     if (!match) return null;

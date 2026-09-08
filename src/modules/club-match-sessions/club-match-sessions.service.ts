@@ -1266,7 +1266,13 @@ export class ClubMatchSessionsService {
 
   async deleteStandaloneMatch(matchId: string, actor: Actor) {
     const match = await this.repository.findStandaloneMatch(matchId);
-    if (!match) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
+    if (!match) {
+      const deletedMatch =
+        await this.repository.findStandaloneMatchIncludingDeleted(matchId);
+      if (!deletedMatch) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
+      await this.requireCommunityAccess(deletedMatch.communityId, actor);
+      return { deleted: true, eloReverted: false, replayed: true };
+    }
     const community = await this.requireCommunityAccess(match.communityId, actor);
     const canDelete =
       this.isPlatformAdmin(actor) ||
