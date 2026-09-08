@@ -32,6 +32,19 @@ export const communitySocialSettings = pgTable('community_social_settings', {
   memberTaggingPolicy: varchar('member_tagging_policy', { length: 30 })
     .default('MEMBERS')
     .notNull(),
+  memberMatchCreationEnabled: boolean('member_match_creation_enabled')
+    .default(true)
+    .notNull(),
+  memberMatchScoringEnabled: boolean('member_match_scoring_enabled')
+    .default(true)
+    .notNull(),
+  memberMatchDeletionEnabled: boolean('member_match_deletion_enabled')
+    .default(false)
+    .notNull(),
+  matchScoringPresets: jsonb('match_scoring_presets')
+    .$type<Record<string, unknown>>()
+    .default(sql`'{}'::jsonb`)
+    .notNull(),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

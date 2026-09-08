@@ -7,6 +7,7 @@ import type { UpdateCommunitySocialSettingsDto } from './dto/update-community-so
 import type { ReportCommunityContentDto } from './dto/report-community-content.dto';
 import type { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { sanitizeScoringPresets } from '../club-match-sessions/scoring-preset';
 import {
   buildCommunityPostApprovedNotification,
   buildCommunityPostCommentedNotification,
@@ -138,6 +139,12 @@ export class CommunitySocialService {
       chatEnabled: dto.chatEnabled,
       publicFeed: dto.publicFeed,
       memberTaggingPolicy: dto.memberTaggingPolicy,
+      memberMatchCreationEnabled: dto.memberMatchCreationEnabled,
+      memberMatchScoringEnabled: dto.memberMatchScoringEnabled,
+      memberMatchDeletionEnabled: dto.memberMatchDeletionEnabled,
+      matchScoringPresets: dto.matchScoringPresets
+        ? sanitizeScoringPresets(dto.matchScoringPresets)
+        : undefined,
     });
   }
 

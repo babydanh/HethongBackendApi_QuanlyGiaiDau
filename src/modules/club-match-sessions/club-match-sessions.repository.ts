@@ -5,6 +5,7 @@ import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { AuditService } from '../audit/audit.service';
+import { selectScoringPreset } from './scoring-preset';
 
 type MatchType = 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
 type SessionStatus = 'OPEN' | 'LIVE' | 'CLOSED' | 'ENDED' | 'CANCELLED';
@@ -75,13 +76,25 @@ export class ClubMatchSessionsRepository {
         name: schema.communities.name,
         status: schema.communities.status,
         categoryId: schema.communitySports.categoryId,
+        categorySlug: schema.categories.slug,
         memberRole: schema.communityMembers.role,
         memberStatus: schema.communityMembers.status,
+        memberMatchCreationEnabled:
+          schema.communitySocialSettings.memberMatchCreationEnabled,
+        memberMatchScoringEnabled:
+          schema.communitySocialSettings.memberMatchScoringEnabled,
+        memberMatchDeletionEnabled:
+          schema.communitySocialSettings.memberMatchDeletionEnabled,
+        matchScoringPresets: schema.communitySocialSettings.matchScoringPresets,
       })
       .from(schema.communities)
       .leftJoin(
         schema.communitySports,
         eq(schema.communitySports.communityId, schema.communities.id),
+      )
+      .leftJoin(
+        schema.categories,
+        eq(schema.categories.id, schema.communitySports.categoryId),
       )
       .leftJoin(
         schema.communityMembers,
@@ -91,6 +104,13 @@ export class ClubMatchSessionsRepository {
               eq(schema.communityMembers.userId, actorId),
             )
           : sql`false`,
+      )
+      .leftJoin(
+        schema.communitySocialSettings,
+        eq(
+          schema.communitySocialSettings.communityId,
+          schema.communities.id,
+        ),
       )
       .where(
         and(
@@ -465,6 +485,10 @@ export class ClubMatchSessionsRepository {
       sideBMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
       'Đội B';
     const sportRules = {
+      ...selectScoringPreset(
+        { [session.categorySlug ?? '']: match.scoreConfig },
+        session.categorySlug,
+      ),
       mode: 'LITE' as const,
       kind: session.categorySlug,
     };
@@ -614,6 +638,10 @@ export class ClubMatchSessionsRepository {
       ...(configuredRules && typeof configuredRules === 'object'
         ? (configuredRules as Record<string, unknown>)
         : {}),
+      ...selectScoringPreset(
+        { [context.categorySlug ?? '']: match.scoreConfig },
+        context.categorySlug,
+      ),
       mode: 'LITE',
       kind: context.categorySlug,
       scoringMode: 'FREE',

@@ -27,10 +27,11 @@ import {
   UpdateClubMatchSessionDto,
 } from './dto/club-match-session.dto';
 import { ClubMatchSessionsRepository } from './club-match-sessions.repository';
+import { selectScoringPreset } from './scoring-preset';
 
 type Actor = { id: string; roles?: string[] };
 
-const MANAGER_ROLES = new Set(['OWNER', 'MODERATOR']);
+const MANAGER_ROLES = new Set(['OWNER', 'ADMIN', 'MODERATOR']);
 const TERMINAL_SESSION_STATUSES = new Set(['ENDED', 'CANCELLED']);
 function calculateNextRecurringDate(
   frequency: string,
@@ -1023,6 +1024,10 @@ export class ClubMatchSessionsService {
       current.session.communityId,
       actor.id,
     );
+    const community = await this.repository.findCommunityContext(
+      current.session.communityId,
+      actor.id,
+    );
     const actorParticipant = await this.repository.findParticipant(
       sessionId,
       actor.id,
@@ -1030,7 +1035,9 @@ export class ClubMatchSessionsService {
     const canCreate =
       this.isPlatformAdmin(actor) ||
       MANAGER_ROLES.has(membership?.role ?? '') ||
-      actorParticipant?.status === 'ACTIVE';
+      (community?.memberMatchCreationEnabled !== false &&
+        (actorParticipant?.status === 'ACTIVE' ||
+          membership?.status === 'JOINED'));
     if (!canCreate) apiError(ForbiddenException, 'MATCH_CREATION_NOT_ALLOWED');
     if (!['OPEN', 'LIVE'].includes(current.session.status))
       apiError(ConflictException, 'SESSION_NOT_ACCEPTING_MATCHES');
@@ -1128,6 +1135,13 @@ export class ClubMatchSessionsService {
           sideAUserIds: sideA,
           sideBUserIds: sideB,
           matchType: inferredMatchType,
+          scoreConfig: (() => {
+            const preset = selectScoringPreset(
+              community?.matchScoringPresets,
+              current.categorySlug,
+            );
+            return Object.keys(preset).length > 0 ? preset : null;
+          })(),
           scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
           eloStatus: current.session.isRanked ? 'WAITING_RESULT' : 'NOT_RANKED',
         })
@@ -1166,6 +1180,12 @@ export class ClubMatchSessionsService {
       apiError(BadRequestException, 'IDEMPOTENCY_KEY_REQUIRED');
     const community = await this.requireCommunityAccess(dto.communityId, actor);
     if (!community.categoryId) apiError(BadRequestException, 'CLUB_SPORT_REQUIRED');
+    const isManager =
+      this.isPlatformAdmin(actor) ||
+      MANAGER_ROLES.has(community.memberRole ?? '');
+    if (!isManager && community.memberMatchCreationEnabled === false) {
+      apiError(ForbiddenException, 'MATCH_CREATION_NOT_ALLOWED');
+    }
     const categoryId = community.categoryId;
 
     const sideA = uniqueSorted(dto.sideAUserIds);
@@ -1212,6 +1232,10 @@ export class ClubMatchSessionsService {
         apiError(BadRequestException, 'MATCH_PLAYERS_MUST_BE_CLUB_MEMBERS');
       }
       const isRanked = dto.isRanked !== false;
+      const scoreConfig = selectScoringPreset(
+        community.matchScoringPresets,
+        community.categorySlug,
+      );
       const [created] = await tx
         .insert(schema.clubStandaloneMatches)
         .values({
@@ -1223,6 +1247,8 @@ export class ClubMatchSessionsService {
           sideBUserIds: sideB,
           matchType,
           isRanked,
+          scoreConfig:
+            Object.keys(scoreConfig).length > 0 ? scoreConfig : null,
           eloStatus: isRanked ? 'WAITING_RESULT' : 'NOT_RANKED',
           scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
         })
@@ -1240,6 +1266,7 @@ export class ClubMatchSessionsService {
           sideAUserIds: sideA,
           sideBUserIds: sideB,
           isRanked,
+          scoreConfig,
         },
       );
       return { matchId: created.id, replayed: false };
@@ -1282,10 +1309,20 @@ export class ClubMatchSessionsService {
       return { deleted: true, eloReverted: false, replayed: true };
     }
     const community = await this.requireCommunityAccess(match.communityId, actor);
-    const canDelete =
+    const membership = await this.repository.findMembership(
+      match.communityId,
+      actor.id,
+    );
+    const isManager =
       this.isPlatformAdmin(actor) ||
-      MANAGER_ROLES.has(community.memberRole ?? '') ||
-      match.createdBy === actor.id;
+      MANAGER_ROLES.has(community.memberRole ?? '');
+    const isCompleted = match.status === 'COMPLETED';
+    const canDelete =
+      isManager ||
+      (isCompleted &&
+        (match.createdBy === actor.id ||
+          (community.memberMatchDeletionEnabled === true &&
+            membership?.status === 'JOINED')));
     if (!canDelete) apiError(ForbiddenException, 'MATCH_DELETE_PERMISSION_REQUIRED');
 
     const db = this.repository.getDb();
@@ -1363,10 +1400,15 @@ export class ClubMatchSessionsService {
       session.session.communityId,
       actor.id,
     );
+    const community = await this.repository.findCommunityContext(
+      session.session.communityId,
+      actor.id,
+    );
     const canEdit =
       this.isPlatformAdmin(actor) ||
       MANAGER_ROLES.has(membership?.role ?? '') ||
-      [...match.sideAUserIds, ...match.sideBUserIds].includes(actor.id);
+      (membership?.status === 'JOINED' &&
+        community?.memberMatchScoringEnabled !== false);
     if (!canEdit)
       apiError(ForbiddenException, 'MATCH_SCORE_PERMISSION_REQUIRED');
     return { match, session };
@@ -1380,7 +1422,8 @@ export class ClubMatchSessionsService {
     const canEdit =
       this.isPlatformAdmin(actor) ||
       MANAGER_ROLES.has(membership?.role ?? '') ||
-      [...match.sideAUserIds, ...match.sideBUserIds].includes(actor.id);
+      (membership?.status === 'JOINED' &&
+        community.memberMatchScoringEnabled !== false);
     if (!canEdit) apiError(ForbiddenException, 'MATCH_SCORE_PERMISSION_REQUIRED');
     return { match, community };
   }

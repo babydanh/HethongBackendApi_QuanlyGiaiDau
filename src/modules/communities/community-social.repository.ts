@@ -24,6 +24,10 @@ export class CommunitySocialRepository {
       chatEnabled: true,
       publicFeed: true,
       memberTaggingPolicy: 'MEMBERS',
+      memberMatchCreationEnabled: true,
+      memberMatchScoringEnabled: true,
+      memberMatchDeletionEnabled: false,
+      matchScoringPresets: {},
     };
   }
 
@@ -229,7 +233,7 @@ export class CommunitySocialRepository {
     };
   }
 
-  async updateSettings(communityId: string, values: Partial<Pick<typeof schema.communitySocialSettings.$inferInsert, 'postingPolicy' | 'postApprovalRequired' | 'commentsEnabled' | 'chatEnabled' | 'publicFeed' | 'memberTaggingPolicy'>>) {
+  async updateSettings(communityId: string, values: Partial<typeof schema.communitySocialSettings.$inferInsert>) {
     const [settings] = await this.db
       .insert(schema.communitySocialSettings)
       .values({ communityId, ...values })

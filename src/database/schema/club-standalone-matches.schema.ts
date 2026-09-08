@@ -35,6 +35,7 @@ export const clubStandaloneMatches = pgTable(
     isRanked: boolean('is_ranked').default(true).notNull(),
     status: varchar('status', { length: 20 }).default('SCHEDULED').notNull(),
     scoreDetails: jsonb('score_details').default('{}').notNull(),
+    scoreConfig: jsonb('score_config').$type<Record<string, unknown> | null>(),
     p1SetsWon: integer('p1_sets_won').default(0).notNull(),
     p2SetsWon: integer('p2_sets_won').default(0).notNull(),
     winnerSide: varchar('winner_side', { length: 8 }),
