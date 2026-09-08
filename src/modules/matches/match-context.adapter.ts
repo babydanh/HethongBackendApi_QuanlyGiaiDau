@@ -113,4 +113,26 @@ export class MatchContextAdapter {
       .limit(1);
     return Boolean(row);
   }
+
+  async canAccessClubCommunity(communityId: string, userId?: string | null, roles: string[] = []) {
+    if (roles.includes('ADMIN')) return true;
+    if (!userId) return false;
+    const [row] = await this.db
+      .select({ id: schema.communityMembers.userId })
+      .from(schema.communityMembers)
+      .innerJoin(
+        schema.communities,
+        eq(schema.communities.id, schema.communityMembers.communityId),
+      )
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+          eq(schema.communityMembers.status, 'JOINED'),
+          isNull(schema.communities.deletedAt),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
 }
