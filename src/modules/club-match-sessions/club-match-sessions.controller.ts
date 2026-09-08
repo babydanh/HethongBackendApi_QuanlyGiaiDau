@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -16,11 +17,13 @@ import { ClubMatchSessionsService } from './club-match-sessions.service';
 import {
   ClubMatchRevisionDto,
   CreateClubMatchDto,
+  CreateClubStandaloneMatchDto,
   CreateClubMatchMockParticipantDto,
   CreateClubMatchSessionDto,
   ForceClubMatchParticipantsDto,
   QueryClubMatchChildrenDto,
   QueryClubMatchSessionsDto,
+  QueryClubStandaloneMatchesDto,
   RemoveClubMatchParticipantDto,
   TransitionClubMatchSessionDto,
   UpdateClubMatchPreferencesDto,
@@ -51,6 +54,31 @@ export class ClubMatchSessionsController {
     @Headers('accept-language') locale?: string,
   ) {
     return this.service.list(user, query, locale);
+  }
+
+  @Post('standalone-matches')
+  createStandaloneMatch(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: CreateClubStandaloneMatchDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.service.createStandaloneMatch(user, dto, idempotencyKey);
+  }
+
+  @Get('standalone-matches')
+  listStandaloneMatches(
+    @CurrentUser() user: RequestUser,
+    @Query() query: QueryClubStandaloneMatchesDto,
+  ) {
+    return this.service.listStandaloneMatches(user, query);
+  }
+
+  @Delete('standalone-matches/:matchId')
+  deleteStandaloneMatch(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+  ) {
+    return this.service.deleteStandaloneMatch(matchId, user);
   }
 
   @Get(':id')

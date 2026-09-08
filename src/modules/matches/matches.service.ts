@@ -1223,7 +1223,10 @@ export class MatchesService {
 
   async findOne(id: string, user?: JwtPayload) {
     const context = await this.matchContextAdapter?.resolve(id);
-    if (context?.type === 'CLUB_SOCIAL_MATCH_SESSION') {
+    if (
+      context?.type === 'CLUB_SOCIAL_MATCH_SESSION' ||
+      context?.type === 'CLUB_STANDALONE_MATCH'
+    ) {
       if (!user?.sub || !this.clubMatchSessionsService) {
         throw new NotFoundException('Match not found');
       }
@@ -1274,7 +1277,10 @@ export class MatchesService {
     updateMatchScoreDto: UpdateMatchScoreDto,
   ) {
     const context = await this.matchContextAdapter?.resolve(id);
-    if (context?.type === 'CLUB_SOCIAL_MATCH_SESSION') {
+    if (
+      context?.type === 'CLUB_SOCIAL_MATCH_SESSION' ||
+      context?.type === 'CLUB_STANDALONE_MATCH'
+    ) {
       if (!this.clubMatchSessionsService) {
         throw new NotFoundException('Match not found');
       }
@@ -1674,7 +1680,10 @@ export class MatchesService {
     updateMatchStatusDto: UpdateMatchStatusDto,
   ) {
     const context = await this.matchContextAdapter?.resolve(id);
-    if (context?.type === 'CLUB_SOCIAL_MATCH_SESSION') {
+    if (
+      context?.type === 'CLUB_SOCIAL_MATCH_SESSION' ||
+      context?.type === 'CLUB_STANDALONE_MATCH'
+    ) {
       if (!this.clubMatchSessionsService) {
         throw new NotFoundException('Match not found');
       }

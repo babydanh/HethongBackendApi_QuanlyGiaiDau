@@ -29,6 +29,7 @@ export class EloOutboxProcessor {
   private readonly instanceId: string;
   private running = false;
   private clubMatchUpdatePublisher?: (matchId: string) => Promise<void>;
+  private standaloneMatchUpdatePublisher?: (matchId: string) => Promise<void>;
 
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
@@ -68,6 +69,12 @@ export class EloOutboxProcessor {
     this.clubMatchUpdatePublisher = publisher;
   }
 
+  setStandaloneMatchUpdatePublisher(
+    publisher: (matchId: string) => Promise<void>,
+  ): void {
+    this.standaloneMatchUpdatePublisher = publisher;
+  }
+
   private async publishClubMatchUpdate(matchId: string | null): Promise<void> {
     if (!matchId || !this.clubMatchUpdatePublisher) return;
     try {
@@ -79,8 +86,24 @@ export class EloOutboxProcessor {
     }
   }
 
+  private async publishStandaloneMatchUpdate(matchId: string | null): Promise<void> {
+    if (!matchId || !this.standaloneMatchUpdatePublisher) return;
+    try {
+      await this.standaloneMatchUpdatePublisher(matchId);
+    } catch (error) {
+      this.logger.warn(
+        `Unable to publish standalone match ELO update for ${matchId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
   private async claimOne(): Promise<
-    | { id: string; match_id: string | null; club_match_session_match_id: string | null }
+    | {
+        id: string;
+        match_id: string | null;
+        club_match_session_match_id: string | null;
+        standalone_match_id: string | null;
+      }
     | null
   > {
     const result = (await this.db.execute(sql`
@@ -104,11 +127,12 @@ export class EloOutboxProcessor {
           attempts = attempts + 1,
           last_error = NULL
       WHERE id IN (SELECT id FROM candidate)
-      RETURNING id, match_id, club_match_session_match_id
+      RETURNING id, match_id, club_match_session_match_id, standalone_match_id
     `)) as unknown as Array<{
       id: string;
       match_id: string | null;
       club_match_session_match_id: string | null;
+      standalone_match_id: string | null;
     }>;
 
     return result[0] ?? null;
@@ -118,11 +142,16 @@ export class EloOutboxProcessor {
     id: string;
     match_id: string | null;
     club_match_session_match_id: string | null;
+    standalone_match_id: string | null;
   }): Promise<void> {
     try {
       if (row.club_match_session_match_id) {
         await this.rankingsService.processClubMatchResultFromOutbox(
           row.club_match_session_match_id,
+        );
+      } else if (row.standalone_match_id) {
+        await this.rankingsService.processStandaloneMatchResultFromOutbox(
+          row.standalone_match_id,
         );
       } else if (row.match_id) {
         await this.rankingsService.processMatchResultFromOutbox(row.match_id);
@@ -135,6 +164,7 @@ export class EloOutboxProcessor {
         WHERE id = ${row.id}
       `);
       await this.publishClubMatchUpdate(row.club_match_session_match_id);
+      await this.publishStandaloneMatchUpdate(row.standalone_match_id);
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       // Retryable (transient) + under cap → back to PENDING with backoff.
@@ -159,7 +189,14 @@ export class EloOutboxProcessor {
             WHERE id = ${row.club_match_session_match_id}
           `);
         }
+        if (row.standalone_match_id) {
+          await this.db.execute(sql`
+            UPDATE club_standalone_matches SET elo_status = 'FAILED_RETRYABLE', updated_at = now()
+            WHERE id = ${row.standalone_match_id}
+          `);
+        }
         await this.publishClubMatchUpdate(row.club_match_session_match_id);
+        await this.publishStandaloneMatchUpdate(row.standalone_match_id);
         this.logger.warn(`ELO outbox retry (attempt ${attempts}/${RETRY_CAP}) for match ${row.match_id ?? row.club_match_session_match_id}: ${message}`);
       } else {
         // Terminal failure after retry cap.
@@ -174,7 +211,14 @@ export class EloOutboxProcessor {
             WHERE id = ${row.club_match_session_match_id}
           `);
         }
+        if (row.standalone_match_id) {
+          await this.db.execute(sql`
+            UPDATE club_standalone_matches SET elo_status = 'FAILED_TERMINAL', updated_at = now()
+            WHERE id = ${row.standalone_match_id}
+          `);
+        }
         await this.publishClubMatchUpdate(row.club_match_session_match_id);
+        await this.publishStandaloneMatchUpdate(row.standalone_match_id);
         this.logger.error(`ELO outbox FAILED (terminal) for match ${row.match_id ?? row.club_match_session_match_id}: ${message}`);
       }
     }

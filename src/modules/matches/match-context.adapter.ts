@@ -12,6 +12,12 @@ export type MatchContext =
       matchId: string;
       clubMatchSessionId: string;
       communityId: string;
+    }
+  | {
+      type: 'CLUB_STANDALONE_MATCH';
+      matchId: string;
+      standaloneMatchId: string;
+      communityId: string;
     };
 
 /**
@@ -43,8 +49,24 @@ export class MatchContextAdapter {
       .innerJoin(schema.clubMatchSessions, eq(schema.clubMatchSessions.id, schema.clubMatchSessionMatches.sessionId))
       .where(and(eq(schema.clubMatchSessionMatches.id, matchId), isNull(schema.clubMatchSessionMatches.deletedAt), isNull(schema.clubMatchSessions.deletedAt)))
       .limit(1);
-    return clubMatch
-      ? { type: 'CLUB_SOCIAL_MATCH_SESSION', matchId, ...clubMatch }
+    if (clubMatch) {
+      return { type: 'CLUB_SOCIAL_MATCH_SESSION', matchId, ...clubMatch };
+    }
+    const [standaloneMatch] = await this.db
+      .select({
+        standaloneMatchId: schema.clubStandaloneMatches.id,
+        communityId: schema.clubStandaloneMatches.communityId,
+      })
+      .from(schema.clubStandaloneMatches)
+      .where(
+        and(
+          eq(schema.clubStandaloneMatches.id, matchId),
+          isNull(schema.clubStandaloneMatches.deletedAt),
+        ),
+      )
+      .limit(1);
+    return standaloneMatch
+      ? { type: 'CLUB_STANDALONE_MATCH', matchId, ...standaloneMatch }
       : null;
   }
 
@@ -58,7 +80,9 @@ export class MatchContextAdapter {
     if (context.type === 'TOURNAMENT') {
       return this.matchesRepository.canAccessLiveTournament(context.tournamentId, userId, roles);
     }
-    return this.canAccessClubMatchSession(context.clubMatchSessionId, userId, roles);
+    return context.type === 'CLUB_SOCIAL_MATCH_SESSION'
+      ? this.canAccessClubMatchSession(context.clubMatchSessionId, userId, roles)
+      : this.canAccessClubStandaloneMatch(context.communityId, userId, roles);
   }
 
   async canAccessClubMatchSession(sessionId: string, userId?: string | null, roles: string[] = []) {
@@ -69,6 +93,23 @@ export class MatchContextAdapter {
       .from(schema.clubMatchSessions)
       .innerJoin(schema.communityMembers, and(eq(schema.communityMembers.communityId, schema.clubMatchSessions.communityId), eq(schema.communityMembers.userId, userId), eq(schema.communityMembers.status, 'JOINED')))
       .where(and(eq(schema.clubMatchSessions.id, sessionId), isNull(schema.clubMatchSessions.deletedAt)))
+      .limit(1);
+    return Boolean(row);
+  }
+
+  async canAccessClubStandaloneMatch(communityId: string, userId?: string | null, roles: string[] = []) {
+    if (roles.includes('ADMIN')) return true;
+    if (!userId) return false;
+    const [row] = await this.db
+      .select({ id: schema.communityMembers.userId })
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+          eq(schema.communityMembers.status, 'JOINED'),
+        ),
+      )
       .limit(1);
     return Boolean(row);
   }

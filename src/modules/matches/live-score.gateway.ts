@@ -366,6 +366,23 @@ export class LiveScoreGateway
       .emit('match:update', rawPayload);
   }
 
+  broadcastClubStandaloneMatchUpdate(
+    matchId: string,
+    matchData: unknown,
+    event: 'score:update' | 'match:status' | 'elo:update',
+  ) {
+    if (!this.server) return;
+    const rawPayload = JSON.stringify({
+      ...(typeof matchData === 'object' && matchData !== null ? matchData : {}),
+      id: matchId,
+      contextType: 'CLUB_STANDALONE_MATCH',
+      standaloneMatchId: matchId,
+      clubMatchSessionId: null,
+      tournamentId: null,
+    });
+    this.server.to(`match:${matchId}`).emit(event, rawPayload);
+  }
+
   broadcastRegistrationUpdate(
     tournamentId: string,
     payload: { participantId?: string; divisionId?: string | null; action: string },

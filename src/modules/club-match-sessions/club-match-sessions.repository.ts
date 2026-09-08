@@ -398,6 +398,20 @@ export class ClubMatchSessionsRepository {
     return row ?? null;
   }
 
+  async findStandaloneMatch(id: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select()
+      .from(schema.clubStandaloneMatches)
+      .where(
+        and(
+          eq(schema.clubStandaloneMatches.id, id),
+          isNull(schema.clubStandaloneMatches.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
   async projectMatch(id: string) {
     const match = await this.findMatch(id);
     if (!match) return null;
@@ -523,6 +537,140 @@ export class ClubMatchSessionsRepository {
     };
   }
 
+  async projectStandaloneMatch(id: string) {
+    const match = await this.findStandaloneMatch(id);
+    if (!match) return null;
+    const [context] = await this.db
+      .select({
+        communityName: schema.communities.name,
+        categoryName: schema.categories.name,
+        categorySlug: schema.categories.slug,
+        categoryConfig: schema.categories.categoryConfig,
+      })
+      .from(schema.clubStandaloneMatches)
+      .innerJoin(
+        schema.communities,
+        eq(schema.communities.id, schema.clubStandaloneMatches.communityId),
+      )
+      .innerJoin(
+        schema.categories,
+        eq(schema.categories.id, schema.clubStandaloneMatches.categoryId),
+      )
+      .where(eq(schema.clubStandaloneMatches.id, id))
+      .limit(1);
+    if (!context) return null;
+
+    const userIds = [...match.sideAUserIds, ...match.sideBUserIds];
+    const users = userIds.length
+      ? await this.db
+          .select({
+            id: schema.users.id,
+            isMock: schema.users.isMock,
+            fullName: schema.profiles.fullName,
+            avatarUrl: schema.profiles.avatarUrl,
+          })
+          .from(schema.users)
+          .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+          .where(inArray(schema.users.id, userIds))
+      : [];
+    const byId = new Map(users.map((user) => [user.id, user]));
+    const projectMembers = (ids: string[]) =>
+      ids.map((userId) => {
+        const user = byId.get(userId);
+        return {
+          userId,
+          id: userId,
+          fullName: user?.fullName ?? null,
+          avatarUrl: user?.avatarUrl ?? null,
+          isMock: user?.isMock === true,
+        };
+      });
+    const sideAMembers = projectMembers(match.sideAUserIds);
+    const sideBMembers = projectMembers(match.sideBUserIds);
+    const sideAName =
+      sideAMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
+      'Đội A';
+    const sideBName =
+      sideBMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
+      'Đội B';
+    const rawCategoryConfig = context.categoryConfig;
+    const configuredRules =
+      rawCategoryConfig && typeof rawCategoryConfig === 'object'
+        ? (rawCategoryConfig as Record<string, unknown>).defaultSportRules
+        : null;
+    const sportRules: Record<string, unknown> = {
+      ...(configuredRules && typeof configuredRules === 'object'
+        ? (configuredRules as Record<string, unknown>)
+        : {}),
+      mode: 'LITE',
+      kind: context.categorySlug,
+      scoringMode: 'FREE',
+      maxSets: 10,
+    };
+    const tournamentConfig = {
+      isLite: true,
+      mode: 'LITE',
+      scoringMode: 'FREE',
+      maxSets: 10,
+      hideAdvancedSettings: true,
+    };
+    const winnerId =
+      match.winnerSide === 'A'
+        ? 'SIDE_A'
+        : match.winnerSide === 'B'
+          ? 'SIDE_B'
+          : null;
+    return {
+      ...match,
+      contextType: 'CLUB_STANDALONE_MATCH' as const,
+      standaloneMatchId: match.id,
+      clubMatchSessionId: null,
+      tournamentId: null,
+      groupId: null,
+      stageId: null,
+      stageType: 'CLUB_STANDALONE',
+      roundNumber: 1,
+      matchOrder: 1,
+      bracketBranch: 'CLUB_STANDALONE',
+      isBye: false,
+      team1Id: 'SIDE_A',
+      team2Id: 'SIDE_B',
+      participant1Id: 'SIDE_A',
+      participant2Id: 'SIDE_B',
+      team1Name: sideAName,
+      team2Name: sideBName,
+      sport: context.categorySlug,
+      sportKey: context.categorySlug,
+      sportRules,
+      effectiveSportRules: sportRules,
+      tournamentConfig,
+      scheduledAt: match.scheduledAt?.toISOString() ?? null,
+      winnerId,
+      loserId:
+        winnerId === 'SIDE_A'
+          ? 'SIDE_B'
+          : winnerId === 'SIDE_B'
+            ? 'SIDE_A'
+            : null,
+      team1Members: sideAMembers,
+      team2Members: sideBMembers,
+      team1MemberInfos: sideAMembers,
+      team2MemberInfos: sideBMembers,
+      tournament: null,
+      session: null,
+      community: {
+        id: match.communityId,
+        name: context.communityName,
+        categoryId: match.categoryId,
+        categoryName: context.categoryName,
+        categorySlug: context.categorySlug,
+        categoryConfig: context.categoryConfig,
+      },
+      participant1: { id: 'SIDE_A', teamName: sideAName, members: sideAMembers },
+      participant2: { id: 'SIDE_B', teamName: sideBName, members: sideBMembers },
+    };
+  }
+
   async listMatches(
     sessionId: string,
     input: { status?: string; cursor?: string; limit: number },
@@ -564,6 +712,59 @@ export class ClubMatchSessionsRepository {
     const lastMatch = selected.at(-1)
       ? await this.findMatch(selected.at(-1)!.id)
       : null;
+    return {
+      invalidCursor: false as const,
+      items,
+      meta: {
+        hasMore,
+        nextCursor:
+          hasMore && lastMatch
+            ? encodeCursor(lastMatch.createdAt, lastMatch.id)
+            : null,
+      },
+    };
+  }
+
+  async listStandaloneMatches(
+    communityId: string,
+    input: { status?: string; cursor?: string; limit: number },
+  ) {
+    const cursor = decodeCursor(input.cursor);
+    const conditions = [
+      eq(schema.clubStandaloneMatches.communityId, communityId),
+      isNull(schema.clubStandaloneMatches.deletedAt),
+    ];
+    if (input.status) {
+      conditions.push(eq(schema.clubStandaloneMatches.status, input.status));
+    }
+    if (input.cursor) {
+      if (!cursor) return { invalidCursor: true as const };
+      conditions.push(
+        or(
+          lt(schema.clubStandaloneMatches.createdAt, cursor.createdAt),
+          and(
+            eq(schema.clubStandaloneMatches.createdAt, cursor.createdAt),
+            lt(schema.clubStandaloneMatches.id, cursor.id),
+          ),
+        )!,
+      );
+    }
+    const rows = await this.db
+      .select({ id: schema.clubStandaloneMatches.id })
+      .from(schema.clubStandaloneMatches)
+      .where(and(...conditions))
+      .orderBy(
+        desc(schema.clubStandaloneMatches.createdAt),
+        desc(schema.clubStandaloneMatches.id),
+      )
+      .limit(input.limit + 1);
+    const hasMore = rows.length > input.limit;
+    const selected = hasMore ? rows.slice(0, input.limit) : rows;
+    const items = (
+      await Promise.all(selected.map((row) => this.projectStandaloneMatch(row.id)))
+    ).filter(Boolean);
+    const [last] = selected.slice(-1);
+    const lastMatch = last ? await this.findStandaloneMatch(last.id) : null;
     return {
       invalidCursor: false as const,
       items,

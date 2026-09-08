@@ -2181,6 +2181,260 @@ export class RankingsService {
     );
   }
 
+  async processStandaloneMatchResultFromOutbox(matchId: string) {
+    const [row] = await this.db
+      .select({ match: schema.clubStandaloneMatches })
+      .from(schema.clubStandaloneMatches)
+      .where(eq(schema.clubStandaloneMatches.id, matchId))
+      .limit(1);
+    if (!row) throw new Error(`Standalone club match ${matchId} not found`);
+    if (
+      row.match.status !== 'COMPLETED' ||
+      !row.match.winnerSide
+    ) {
+      await this.db
+        .update(schema.clubStandaloneMatches)
+        .set({ eloStatus: 'SKIPPED_CANCELLED', updatedAt: new Date() })
+        .where(eq(schema.clubStandaloneMatches.id, matchId));
+      return { success: true, skipped: true, reason: 'NOT_ELIGIBLE' };
+    }
+    if (!row.match.isRanked) {
+      await this.db
+        .update(schema.clubStandaloneMatches)
+        .set({ eloStatus: 'NOT_RANKED', updatedAt: new Date() })
+        .where(eq(schema.clubStandaloneMatches.id, matchId));
+      return { success: true, skipped: true, reason: 'NOT_RANKED' };
+    }
+
+    const winnerUserIds =
+      row.match.winnerSide === 'A'
+        ? row.match.sideAUserIds
+        : row.match.sideBUserIds;
+    const loserUserIds =
+      row.match.winnerSide === 'A'
+        ? row.match.sideBUserIds
+        : row.match.sideAUserIds;
+    const playerIds = [...winnerUserIds, ...loserUserIds];
+
+    // Capture the exact pre-result rows before the shared ELO engine creates or
+    // updates anything. Delete uses this snapshot instead of guessing a
+    // reverse delta, so streaks/counters/pair ELO are restored as well.
+    await this.db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(schema.clubStandaloneMatches)
+        .where(eq(schema.clubStandaloneMatches.id, matchId))
+        .for('update')
+        .limit(1);
+      if (!locked || locked.eloSnapshot) return;
+      const communityRanks = await tx
+        .select()
+        .from(schema.communityRankings)
+        .where(
+          and(
+            eq(schema.communityRankings.communityId, locked.communityId),
+            eq(schema.communityRankings.categoryId, locked.categoryId),
+            eq(schema.communityRankings.matchType, locked.matchType),
+            isNull(schema.communityRankings.genderRestriction),
+            inArray(schema.communityRankings.userId, playerIds),
+          ),
+        );
+      const pairRanks = ['DOUBLES', 'MIXED_DOUBLES'].includes(locked.matchType)
+        ? await tx
+            .select()
+            .from(schema.pairRanks)
+            .where(
+              and(
+                eq(schema.pairRanks.communityId, locked.communityId),
+                eq(schema.pairRanks.categoryId, locked.categoryId),
+                eq(schema.pairRanks.matchType, locked.matchType),
+                eq(schema.pairRanks.scope, 'COMMUNITY'),
+                isNull(schema.pairRanks.genderRestriction),
+                inArray(schema.pairRanks.user1Id, playerIds),
+                inArray(schema.pairRanks.user2Id, playerIds),
+              ),
+            )
+        : [];
+      await tx
+        .update(schema.clubStandaloneMatches)
+        .set({
+          eloSnapshot: {
+            communityRanks: communityRanks.map((rank) => ({
+              ...rank,
+              lastActiveAt: rank.lastActiveAt.toISOString(),
+              lastDecayAt: rank.lastDecayAt.toISOString(),
+              updatedAt: rank.updatedAt.toISOString(),
+            })),
+            pairRanks: pairRanks.map((rank) => ({
+              ...rank,
+              lastActiveAt: rank.lastActiveAt.toISOString(),
+              lastDecayAt: rank.lastDecayAt.toISOString(),
+              updatedAt: rank.updatedAt.toISOString(),
+            })),
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.clubStandaloneMatches.id, matchId));
+    });
+
+    const result = await this.processMatchResult(
+      matchId,
+      row.match.winnerSide === 'A' ? 'SIDE_A' : 'SIDE_B',
+      row.match.winnerSide === 'A' ? 'SIDE_B' : 'SIDE_A',
+      row.match.categoryId,
+      row.match.matchType,
+      'COMMUNITY',
+      row.match.communityId,
+      undefined,
+      {
+        winnerUserIds,
+        loserUserIds,
+        scoreDetails: row.match.scoreDetails as Record<string, unknown>,
+        winnerWasSideA: row.match.winnerSide === 'A',
+      },
+    );
+    if (
+      result &&
+      'skipped' in result &&
+      result.skipped &&
+      result.reason === 'MOCK_PARTICIPANT'
+    ) {
+      await this.db
+        .update(schema.clubStandaloneMatches)
+        .set({ eloStatus: 'SKIPPED_MOCK', updatedAt: new Date() })
+        .where(eq(schema.clubStandaloneMatches.id, matchId));
+      return result;
+    }
+    const logs = await this.db
+      .select({
+        userId: schema.eloHistoryLogs.userId,
+        changedPoints: schema.eloHistoryLogs.changedPoints,
+      })
+      .from(schema.eloHistoryLogs)
+      .where(eq(schema.eloHistoryLogs.matchId, matchId));
+    const eloDelta = Object.fromEntries(
+      logs.map((log) => [log.userId, log.changedPoints]),
+    );
+    await this.db
+      .update(schema.clubStandaloneMatches)
+      .set({ eloStatus: 'APPLIED', eloDelta, updatedAt: new Date() })
+      .where(eq(schema.clubStandaloneMatches.id, matchId));
+    return result;
+  }
+
+  async rollbackStandaloneMatchResult(matchId: string, tx?: AppTx) {
+    if (tx) return this.rollbackStandaloneMatchResultInTx(matchId, tx);
+    return this.db.transaction((transaction) =>
+      this.rollbackStandaloneMatchResultInTx(matchId, transaction),
+    );
+  }
+
+  private async rollbackStandaloneMatchResultInTx(
+    matchId: string,
+    tx: AppTx,
+  ) {
+    const [match] = await tx
+      .select()
+      .from(schema.clubStandaloneMatches)
+      .where(eq(schema.clubStandaloneMatches.id, matchId))
+      .for('update')
+      .limit(1);
+    if (!match || match.eloStatus !== 'APPLIED') return false;
+    const snapshot = match.eloSnapshot as {
+      communityRanks?: Array<Record<string, unknown>>;
+      pairRanks?: Array<Record<string, unknown>>;
+    } | null;
+    if (!snapshot) {
+      throw new BadRequestException('Không có snapshot ELO để hoàn tác trận này.');
+    }
+    const restoreDate = (value: unknown) =>
+      value ? new Date(String(value)) : new Date();
+    const snapshotCommunityUserIds = new Set(
+      (snapshot.communityRanks ?? []).map((rank) => String(rank.userId)),
+    );
+    const playerIds = [...match.sideAUserIds, ...match.sideBUserIds];
+    for (const rank of snapshot.communityRanks ?? []) {
+      await tx
+        .update(schema.communityRankings)
+        .set({
+          eloPoints: Number(rank.eloPoints),
+          matchesPlayed: Number(rank.matchesPlayed),
+          adminLeaderboardEligible: Boolean(rank.adminLeaderboardEligible),
+          matchesWon: Number(rank.matchesWon),
+          winStreak: Number(rank.winStreak),
+          peakElo: Number(rank.peakElo),
+          lastActiveAt: restoreDate(rank.lastActiveAt),
+          lastDecayAt: restoreDate(rank.lastDecayAt),
+          updatedAt: restoreDate(rank.updatedAt),
+        })
+        .where(eq(schema.communityRankings.id, String(rank.id)));
+    }
+    // A player with no snapshot row was created by this result. Remove only
+    // that player's first row; a later result has a higher counter and is kept.
+    for (const userId of playerIds.filter((id) => !snapshotCommunityUserIds.has(String(id)))) {
+      await tx
+        .delete(schema.communityRankings)
+        .where(
+          and(
+            eq(schema.communityRankings.communityId, match.communityId),
+            eq(schema.communityRankings.categoryId, match.categoryId),
+            eq(schema.communityRankings.matchType, match.matchType),
+            isNull(schema.communityRankings.genderRestriction),
+            eq(schema.communityRankings.userId, userId),
+            eq(schema.communityRankings.matchesPlayed, 1),
+          ),
+        );
+    }
+    const snapshotPairKeys = new Set(
+      (snapshot.pairRanks ?? []).map((rank) =>
+        `${String(rank.user1Id)}:${String(rank.user2Id)}`,
+      ),
+    );
+    const pairCandidates = [match.sideAUserIds, match.sideBUserIds]
+      .filter((side) => side.length === 2)
+      .map((side) => [...side].sort())
+      .filter(([user1Id, user2Id]) =>
+        !snapshotPairKeys.has(`${user1Id}:${user2Id}`),
+      );
+    for (const rank of snapshot.pairRanks ?? []) {
+      await tx
+        .update(schema.pairRanks)
+        .set({
+          eloPoints: Number(rank.eloPoints),
+          peakElo: Number(rank.peakElo),
+          matchesPlayed: Number(rank.matchesPlayed),
+          adminLeaderboardEligible: Boolean(rank.adminLeaderboardEligible),
+          matchesWon: Number(rank.matchesWon),
+          winStreak: Number(rank.winStreak),
+          lastActiveAt: restoreDate(rank.lastActiveAt),
+          lastDecayAt: restoreDate(rank.lastDecayAt),
+          updatedAt: restoreDate(rank.updatedAt),
+        })
+        .where(eq(schema.pairRanks.id, String(rank.id)));
+    }
+    for (const [user1Id, user2Id] of pairCandidates) {
+      await tx
+        .delete(schema.pairRanks)
+        .where(
+          and(
+            eq(schema.pairRanks.user1Id, user1Id),
+            eq(schema.pairRanks.user2Id, user2Id),
+            eq(schema.pairRanks.communityId, match.communityId),
+            eq(schema.pairRanks.categoryId, match.categoryId),
+            eq(schema.pairRanks.matchType, match.matchType),
+            eq(schema.pairRanks.scope, 'COMMUNITY'),
+            isNull(schema.pairRanks.genderRestriction),
+            eq(schema.pairRanks.matchesPlayed, 1),
+          ),
+        );
+    }
+    await tx
+      .delete(schema.eloHistoryLogs)
+      .where(eq(schema.eloHistoryLogs.matchId, matchId));
+    await this.invalidateLeaderboardCache(match.categoryId);
+    return true;
+  }
+
   /**
    * Resolves the separate club-session context, then delegates to the exact
    * same individual/pair ELO engine used by tournament matches.

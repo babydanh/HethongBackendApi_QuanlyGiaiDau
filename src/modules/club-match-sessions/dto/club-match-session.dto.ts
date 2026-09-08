@@ -213,6 +213,26 @@ export class QueryClubMatchChildrenDto {
   status?: string;
 }
 
+export class QueryClubStandaloneMatchesDto {
+  @IsUUID()
+  communityId: string;
+
+  @IsString()
+  @IsOptional()
+  cursor?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  @IsOptional()
+  limit?: number;
+
+  @IsIn(['SCHEDULED', 'ONGOING', 'COMPLETED', 'CANCELLED'])
+  @IsOptional()
+  status?: string;
+}
+
 export class ForceClubMatchParticipantsDto {
   @IsArray()
   @ArrayMinSize(1)
@@ -279,6 +299,35 @@ export class CreateClubMatchDto {
   @IsBoolean()
   @IsOptional()
   confirmWarnings?: boolean;
+}
+
+export class CreateClubStandaloneMatchDto {
+  @IsUUID()
+  communityId: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2)
+  @IsUUID('4', { each: true })
+  sideAUserIds: string[];
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2)
+  @IsUUID('4', { each: true })
+  sideBUserIds: string[];
+
+  @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
+  @IsOptional()
+  matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+
+  @IsBoolean()
+  @IsOptional()
+  isRanked?: boolean;
+
+  @IsDateString()
+  @IsOptional()
+  scheduledAt?: string;
 }
 
 export class ClubMatchRevisionDto {

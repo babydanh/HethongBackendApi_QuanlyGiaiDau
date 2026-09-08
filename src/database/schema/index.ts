@@ -24,3 +24,4 @@ export * from './community_tag_presets.schema';
 export * from './football.schema';
 export * from './user-devices.schema';
 export * from './club-match-sessions.schema';
+export * from './club-standalone-matches.schema';

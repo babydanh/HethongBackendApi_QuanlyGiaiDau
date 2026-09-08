@@ -16,6 +16,7 @@ import { users } from './users.schema';
 import { venueCourts } from './venues.schema';
 import { tournamentGroups, tournamentParticipants, tournaments, tournamentStages } from './tournaments.schema';
 import { clubMatchSessionMatches } from './club-match-sessions.schema';
+import { clubStandaloneMatches } from './club-standalone-matches.schema';
 
 export const groupStandings = pgTable('group_standings', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -182,6 +183,10 @@ export const matchEloOutbox = pgTable(
       () => clubMatchSessionMatches.id,
       { onDelete: 'restrict' },
     ),
+    standaloneMatchId: uuid('standalone_match_id').references(
+      () => clubStandaloneMatches.id,
+      { onDelete: 'restrict' },
+    ),
     status: varchar('status', { length: 20 }).default('PENDING').notNull(),
     attempts: integer('attempts').default(0).notNull(),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
@@ -202,7 +207,7 @@ export const matchEloOutbox = pgTable(
     ).on(table.clubMatchSessionMatchId),
     exactlyOneContext: check(
       'match_elo_outbox_exactly_one_context_check',
-      sql`(${table.matchId} IS NOT NULL) <> (${table.clubMatchSessionMatchId} IS NOT NULL)`,
+      sql`num_nonnulls(${table.matchId}, ${table.clubMatchSessionMatchId}, ${table.standaloneMatchId}) = 1`,
     ),
     idxEloOutboxClaim: index('idx_elo_outbox_claim').on(table.status, table.nextAttemptAt),
     idxEloOutboxLease: index('idx_elo_outbox_lease')
