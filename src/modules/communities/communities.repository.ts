@@ -1075,7 +1075,17 @@ export class CommunitiesRepository {
         source: sql<string>`'SESSION'`,
         tournamentId: sql<string | null>`NULL`,
         sessionId: schema.clubMatchSessionMatches.sessionId,
-        title: schema.clubMatchSessions.name,
+        title: sql<string>`coalesce(
+          nullif(concat_ws(' vs ',
+            nullif((select string_agg(p.full_name, ' & ' order by p.full_name)
+              from profiles p
+              where p.user_id = any(${schema.clubMatchSessionMatches.sideAUserIds})), ''),
+            nullif((select string_agg(p.full_name, ' & ' order by p.full_name)
+              from profiles p
+              where p.user_id = any(${schema.clubMatchSessionMatches.sideBUserIds})), '')
+          ), ''),
+          ${schema.clubMatchSessions.name}
+        )`,
         tournamentName: schema.clubMatchSessions.name,
         status: schema.clubMatchSessionMatches.status,
         scheduledAt: schema.clubMatchSessionMatches.scheduledAt,
@@ -1105,7 +1115,17 @@ export class CommunitiesRepository {
         source: sql<string>`'STANDALONE'`,
         tournamentId: sql<string | null>`NULL`,
         sessionId: sql<string | null>`NULL`,
-        title: sql<string>`'Trận riêng'`,
+        title: sql<string>`coalesce(
+          nullif(concat_ws(' vs ',
+            nullif((select string_agg(p.full_name, ' & ' order by p.full_name)
+              from profiles p
+              where p.user_id = any(${schema.clubStandaloneMatches.sideAUserIds})), ''),
+            nullif((select string_agg(p.full_name, ' & ' order by p.full_name)
+              from profiles p
+              where p.user_id = any(${schema.clubStandaloneMatches.sideBUserIds})), '')
+          ), ''),
+          'Trận riêng'
+        )`,
         tournamentName: sql<string | null>`NULL`,
         status: schema.clubStandaloneMatches.status,
         scheduledAt: schema.clubStandaloneMatches.scheduledAt,
