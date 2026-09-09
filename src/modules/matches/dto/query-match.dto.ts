@@ -119,6 +119,14 @@ export class QueryMatchDto extends CursorPaginationDto {
   isPublicOnly?: boolean;
 
   @ApiPropertyOptional({
+    description: 'Chỉ lấy trận thuộc stage đang hoạt động của giải đấu',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  activeStageOnly?: boolean;
+
+  @ApiPropertyOptional({
     example: 'GROUP_STAGE_KNOCKOUT',
     description: 'Lọc theo thể thức thi đấu: SINGLE_ELIMINATION, DOUBLE_ELIMINATION, ROUND_ROBIN, GROUP_STAGE_KNOCKOUT',
     enum: ['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'],

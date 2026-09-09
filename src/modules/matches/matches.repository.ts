@@ -222,17 +222,45 @@ export class MatchesRepository {
       isRanked,
       matchType,
       search,
+      activeStageOnly,
     } = query;
     const publicOnly = query.publicOnly ?? query.isPublicOnly;
     const catId = query.categoryId || query.category_id;
     const take = limit + 1; // Fetch 1 extra to determine hasMore
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
+    const requestedStatuses = status
+      ?.split(',')
+      .map((value: string) => value.trim().toUpperCase())
+      .filter(Boolean) ?? [];
+    const liveStatuses = new Set([
+      'ONGOING',
+      'IN_PROGRESS',
+      'LIVE',
+      'PLAYING',
+    ]);
+    // An empty status filter is also allowed to return live rows (for example
+    // the public all-matches feed), so it must use the same stale-live guard.
+    const liveStatusRequested =
+      requestedStatuses.length === 0 ||
+      requestedStatuses.some((value) => liveStatuses.has(value));
 
     const conditions: SQL[] = [];
 
-    // Enforce soft delete filters
+    // Always exclude soft-deleted match rows. Organizer bracket reads opt into
+    // activeStageOnly because public match history may intentionally include
+    // completed results from an earlier bracket generation.
     conditions.push(isNull(schema.matches.deletedAt));
+    if (activeStageOnly) {
+      conditions.push(sql`exists (
+        select 1
+        from ${schema.tournamentStages} active_stage
+        where active_stage.id = ${schema.matches.stageId}
+          and active_stage.tournament_id = ${schema.matches.tournamentId}
+          and active_stage.deleted_at is null
+      )
+      `);
+    }
 
     const isAllCategory = (val: string) => {
       const normalized = val
@@ -338,13 +366,8 @@ export class MatchesRepository {
     }
 
     if (status) {
-      const rawStatuses = status
-        .split(',')
-        .map((s: string) => s.trim().toUpperCase())
-        .filter(Boolean);
-
       const expandedStatuses = new Set<string>();
-      for (const s of rawStatuses) {
+      for (const s of requestedStatuses) {
         expandedStatuses.add(s);
         if (
           s === 'COMPLETED' ||
@@ -377,6 +400,27 @@ export class MatchesRepository {
           inArray(sql`upper(${schema.matches.status})`, statusList),
         );
       }
+    }
+
+    // A live read must never resurrect an ONGOING row from a soft-deleted
+    // bracket generation. Mixed feeds keep historical completed rows, but
+    // their tournament live subset is still required to belong to an active
+    // stage. Standalone/club matches without a tournament remain eligible.
+    // Keep this outside the status block because an empty public status filter
+    // is also allowed to return live rows.
+    if (liveStatusRequested && !activeStageOnly) {
+      conditions.push(sql`(
+        ${schema.matches.tournamentId} is null
+        or
+        upper(${schema.matches.status}) not in ('ONGOING', 'IN_PROGRESS', 'LIVE', 'PLAYING')
+        or exists (
+          select 1
+          from ${schema.tournamentStages} active_live_stage
+          where active_live_stage.id = ${schema.matches.stageId}
+            and active_live_stage.tournament_id = ${schema.matches.tournamentId}
+            and active_live_stage.deleted_at is null
+        )
+      )`);
     }
 
     if (userId) {
@@ -2447,6 +2491,13 @@ export class MatchesRepository {
           eq(schema.matches.tournamentId, tournamentId),
           sql`${schema.matches.status} != 'COMPLETED'`,
           isNull(schema.matches.deletedAt),
+          sql`exists (
+            select 1
+            from ${schema.tournamentStages} active_completion_stage
+            where active_completion_stage.id = ${schema.matches.stageId}
+              and active_completion_stage.tournament_id = ${schema.matches.tournamentId}
+              and active_completion_stage.deleted_at is null
+          )`,
         ),
       );
     return Number(activeMatches[0]?.count || 0) === 0;

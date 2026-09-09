@@ -51,6 +51,10 @@ import {
 import { MatchContextAdapter } from './match-context.adapter';
 import { ClubMatchSessionsService } from '../club-match-sessions/club-match-sessions.service';
 
+// Bump when the read-scope contract changes so an old Redis list response
+// cannot survive a deployment and reintroduce stale live rows.
+const MATCH_LIST_CACHE_VERSION = 'v2';
+
 @Injectable()
 export class MatchesService {
   constructor(
@@ -1202,7 +1206,7 @@ export class MatchesService {
   }
 
   async findAll(query: QueryMatchDto) {
-    const cacheKey = `matches:list:${JSON.stringify(query)}`;
+    const cacheKey = `matches:list:${MATCH_LIST_CACHE_VERSION}:${JSON.stringify(query)}`;
     try {
       const cached = await this.redisService.get(cacheKey);
       if (cached) return JSON.parse(cached);

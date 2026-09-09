@@ -656,7 +656,13 @@ export class TournamentsRepository {
           schema.tournamentStages,
           eq(schema.tournamentGroups.stageId, schema.tournamentStages.id),
         )
-        .where(eq(schema.tournamentStages.tournamentId, id));
+        .where(
+          and(
+            eq(schema.tournamentStages.tournamentId, id),
+            isNull(schema.tournamentStages.deletedAt),
+            isNull(schema.matches.deletedAt),
+          ),
+        );
       matchesTotal = totalCount.count;
 
       const [completedCount] = await this.db
@@ -673,6 +679,8 @@ export class TournamentsRepository {
         .where(
           and(
             eq(schema.tournamentStages.tournamentId, id),
+            isNull(schema.tournamentStages.deletedAt),
+            isNull(schema.matches.deletedAt),
             eq(schema.matches.status, 'COMPLETED'),
           ),
         );
@@ -692,6 +700,8 @@ export class TournamentsRepository {
         .where(
           and(
             eq(schema.tournamentStages.tournamentId, id),
+            isNull(schema.tournamentStages.deletedAt),
+            isNull(schema.matches.deletedAt),
             eq(schema.matches.status, 'ONGOING'),
           ),
         );
@@ -4209,7 +4219,12 @@ export class TournamentsRepository {
       const dbMatches = await this.db
         .select()
         .from(schema.matches)
-        .where(inArray(schema.matches.groupId, groupIds))
+        .where(
+          and(
+            inArray(schema.matches.groupId, groupIds),
+            isNull(schema.matches.deletedAt),
+          ),
+        )
         .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
 
       const participants = await this.db
