@@ -14,7 +14,10 @@ import { sql } from 'drizzle-orm';
 import { communities } from './communities.schema';
 import { users } from './users.schema';
 import { tournaments } from './tournaments.schema';
-import { clubMatchSessions } from './club-match-sessions.schema';
+import {
+  clubMatchSessionMatches,
+  clubMatchSessions,
+} from './club-match-sessions.schema';
 
 export const communitySocialSettings = pgTable('community_social_settings', {
   communityId: uuid('community_id')
@@ -116,6 +119,37 @@ export const communityPosts = pgTable(
     idempotencyUnique: uniqueIndex('uq_community_posts_idempotency')
       .on(table.communityId, table.authorId, table.idempotencyKey)
       .where(sql`${table.idempotencyKey} IS NOT NULL`),
+  }),
+);
+
+// One row per club-session match makes digest claiming atomic. Keep
+// publishedAt even when a post is soft-deleted so the same match cannot be
+// published again by a later retry.
+export const clubMatchDigestItems = pgTable(
+  'club_match_digest_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .references(() => clubMatchSessions.id, { onDelete: 'cascade' })
+      .notNull(),
+    matchId: uuid('match_id')
+      .references(() => clubMatchSessionMatches.id, { onDelete: 'cascade' })
+      .notNull(),
+    postId: uuid('post_id').references(() => communityPosts.id, {
+      onDelete: 'set null',
+    }),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    matchUnique: uniqueIndex('club_match_digest_items_match_unique').on(
+      table.matchId,
+    ),
+    pendingSessionIndex: index(
+      'club_match_digest_items_pending_session_idx',
+    ).on(table.sessionId, table.publishedAt, table.createdAt, table.id),
   }),
 );
 

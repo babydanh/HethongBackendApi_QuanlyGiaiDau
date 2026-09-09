@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -107,10 +107,7 @@ export class ClubMatchSessionsRepository {
       )
       .leftJoin(
         schema.communitySocialSettings,
-        eq(
-          schema.communitySocialSettings.communityId,
-          schema.communities.id,
-        ),
+        eq(schema.communitySocialSettings.communityId, schema.communities.id),
       )
       .where(
         and(
@@ -479,11 +476,15 @@ export class ClubMatchSessionsRepository {
     const sideAMembers = projectMembers(match.sideAUserIds);
     const sideBMembers = projectMembers(match.sideBUserIds);
     const sideAName =
-      sideAMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
-      'Đội A';
+      sideAMembers
+        .map((member) => member.fullName)
+        .filter(Boolean)
+        .join(' · ') || 'Đội A';
     const sideBName =
-      sideBMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
-      'Đội B';
+      sideBMembers
+        .map((member) => member.fullName)
+        .filter(Boolean)
+        .join(' · ') || 'Đội B';
     const sportRules = {
       ...selectScoringPreset(
         { [session.categorySlug ?? '']: match.scoreConfig },
@@ -606,7 +607,10 @@ export class ClubMatchSessionsRepository {
             avatarUrl: schema.profiles.avatarUrl,
           })
           .from(schema.users)
-          .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+          .leftJoin(
+            schema.profiles,
+            eq(schema.profiles.userId, schema.users.id),
+          )
           .where(inArray(schema.users.id, userIds))
       : [];
     const byId = new Map(users.map((user) => [user.id, user]));
@@ -624,11 +628,15 @@ export class ClubMatchSessionsRepository {
     const sideAMembers = projectMembers(match.sideAUserIds);
     const sideBMembers = projectMembers(match.sideBUserIds);
     const sideAName =
-      sideAMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
-      'Đội A';
+      sideAMembers
+        .map((member) => member.fullName)
+        .filter(Boolean)
+        .join(' · ') || 'Đội A';
     const sideBName =
-      sideBMembers.map((member) => member.fullName).filter(Boolean).join(' · ') ||
-      'Đội B';
+      sideBMembers
+        .map((member) => member.fullName)
+        .filter(Boolean)
+        .join(' · ') || 'Đội B';
     const rawCategoryConfig = context.categoryConfig;
     const configuredRules =
       rawCategoryConfig && typeof rawCategoryConfig === 'object'
@@ -706,8 +714,16 @@ export class ClubMatchSessionsRepository {
         categorySlug: context.categorySlug,
         categoryConfig: context.categoryConfig,
       },
-      participant1: { id: 'SIDE_A', teamName: sideAName, members: sideAMembers },
-      participant2: { id: 'SIDE_B', teamName: sideBName, members: sideBMembers },
+      participant1: {
+        id: 'SIDE_A',
+        teamName: sideAName,
+        members: sideAMembers,
+      },
+      participant2: {
+        id: 'SIDE_B',
+        teamName: sideBName,
+        members: sideBMembers,
+      },
     };
   }
 
@@ -801,7 +817,9 @@ export class ClubMatchSessionsRepository {
     const hasMore = rows.length > input.limit;
     const selected = hasMore ? rows.slice(0, input.limit) : rows;
     const items = (
-      await Promise.all(selected.map((row) => this.projectStandaloneMatch(row.id)))
+      await Promise.all(
+        selected.map((row) => this.projectStandaloneMatch(row.id)),
+      )
     ).filter(Boolean);
     const [last] = selected.slice(-1);
     const lastMatch = last ? await this.findStandaloneMatch(last.id) : null;
@@ -816,6 +834,135 @@ export class ClubMatchSessionsRepository {
             : null,
       },
     };
+  }
+
+  async publishClubMatchDigest(
+    tx: AppTx,
+    sessionId: string,
+    flushRemainder: boolean,
+  ) {
+    // Match creation is concurrent. Serialize only digest selection per
+    // session so two creators cannot include the same match in two posts.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`club-match-digest:${sessionId}`}))`,
+    );
+
+    const [session] = await tx
+      .select({
+        id: schema.clubMatchSessions.id,
+        communityId: schema.clubMatchSessions.communityId,
+        createdBy: schema.clubMatchSessions.createdBy,
+        name: schema.clubMatchSessions.name,
+      })
+      .from(schema.clubMatchSessions)
+      .where(eq(schema.clubMatchSessions.id, sessionId))
+      .limit(1);
+    if (!session) return { postsCreated: 0, matchesPublished: 0 };
+
+    let postsCreated = 0;
+    let matchesPublished = 0;
+    while (true) {
+      const pending = await tx
+        .select({
+          itemId: schema.clubMatchDigestItems.id,
+          matchId: schema.clubMatchDigestItems.matchId,
+          sideAUserIds: schema.clubMatchSessionMatches.sideAUserIds,
+          sideBUserIds: schema.clubMatchSessionMatches.sideBUserIds,
+          status: schema.clubMatchSessionMatches.status,
+          p1SetsWon: schema.clubMatchSessionMatches.p1SetsWon,
+          p2SetsWon: schema.clubMatchSessionMatches.p2SetsWon,
+        })
+        .from(schema.clubMatchDigestItems)
+        .innerJoin(
+          schema.clubMatchSessionMatches,
+          eq(
+            schema.clubMatchSessionMatches.id,
+            schema.clubMatchDigestItems.matchId,
+          ),
+        )
+        .where(
+          and(
+            eq(schema.clubMatchDigestItems.sessionId, sessionId),
+            isNull(schema.clubMatchDigestItems.publishedAt),
+            isNull(schema.clubMatchSessionMatches.deletedAt),
+            sql`${schema.clubMatchSessionMatches.status} <> 'CANCELLED'`,
+          ),
+        )
+        .orderBy(
+          asc(schema.clubMatchDigestItems.createdAt),
+          asc(schema.clubMatchDigestItems.id),
+        )
+        .limit(4);
+
+      if (pending.length === 0) break;
+      if (!flushRemainder && pending.length < 4) break;
+
+      const userIds = [
+        ...new Set(
+          pending.flatMap((match) => [
+            ...match.sideAUserIds,
+            ...match.sideBUserIds,
+          ]),
+        ),
+      ];
+      const names = userIds.length
+        ? await tx
+            .select({
+              id: schema.users.id,
+              fullName: schema.profiles.fullName,
+            })
+            .from(schema.users)
+            .leftJoin(
+              schema.profiles,
+              eq(schema.profiles.userId, schema.users.id),
+            )
+            .where(inArray(schema.users.id, userIds))
+        : [];
+      const nameById = new Map(
+        names.map((user) => [user.id, user.fullName || 'VĐV']),
+      );
+      const formatSide = (ids: string[]) =>
+        ids.map((id) => nameById.get(id) ?? 'VĐV').join(' · ');
+      const formatResult = (match: (typeof pending)[number]) =>
+        match.status === 'COMPLETED'
+          ? ` · ${match.p1SetsWon}-${match.p2SetsWon}`
+          : ' · chưa có điểm';
+      const lines = pending.map(
+        (match, index) =>
+          `${index + 1}. ${formatSide(match.sideAUserIds)} vs ${formatSide(match.sideBUserIds)}${formatResult(match)}`,
+      );
+      const matchFingerprint = createHash('sha256')
+        .update(pending.map((match) => match.matchId).join(':'))
+        .digest('hex')
+        .slice(0, 32);
+      const [post] = await tx
+        .insert(schema.communityPosts)
+        .values({
+          communityId: session.communityId,
+          authorId: session.createdBy,
+          clubMatchSessionId: session.id,
+          type: 'CLUB_MATCH_DIGEST',
+          body: `🏸 Cập nhật tự động từ CLB\n${session.name || 'Buổi giao lưu CLB'}\n\n${lines.join('\n')}`,
+          mediaUrls: [],
+          status: 'PUBLISHED',
+          idempotencyKey:
+            `club-match-digest:${session.id}:${matchFingerprint}`.slice(0, 128),
+        })
+        .returning({ id: schema.communityPosts.id });
+      await tx
+        .update(schema.clubMatchDigestItems)
+        .set({ postId: post.id, publishedAt: new Date() })
+        .where(
+          inArray(
+            schema.clubMatchDigestItems.id,
+            pending.map((match) => match.itemId),
+          ),
+        );
+      postsCreated += 1;
+      matchesPublished += pending.length;
+      if (!flushRemainder) break;
+    }
+    return { postsCreated, matchesPublished };
   }
 
   async saveCommand(

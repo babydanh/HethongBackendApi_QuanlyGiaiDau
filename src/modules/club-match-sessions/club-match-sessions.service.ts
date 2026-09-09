@@ -108,17 +108,19 @@ export class ClubMatchSessionsService {
         );
       }
     });
-    this.eloOutboxProcessor.setStandaloneMatchUpdatePublisher?.(async (matchId) => {
-      const projected = await this.repository.projectStandaloneMatch(matchId);
-      if (projected) {
-        this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
-          matchId,
-          projected,
-          'elo:update',
-          projected.community?.id,
-        );
-      }
-    });
+    this.eloOutboxProcessor.setStandaloneMatchUpdatePublisher?.(
+      async (matchId) => {
+        const projected = await this.repository.projectStandaloneMatch(matchId);
+        if (projected) {
+          this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
+            matchId,
+            projected,
+            'elo:update',
+            projected.community?.id,
+          );
+        }
+      },
+    );
   }
 
   private isPlatformAdmin(actor: Actor): boolean {
@@ -490,6 +492,9 @@ export class ClubMatchSessionsService {
             ),
           );
       }
+      if (nextStatus === 'ENDED') {
+        await this.repository.publishClubMatchDigest(tx, sessionId, true);
+      }
       await this.repository.auditUpdate(
         tx,
         actor.id,
@@ -855,7 +860,11 @@ export class ClubMatchSessionsService {
         'club_match_session_participants',
         participant.id,
         {},
-        { status: participant.status, source: participant.source, isMock: true },
+        {
+          status: participant.status,
+          source: participant.source,
+          isMock: true,
+        },
       );
       return {
         participant,
@@ -1149,6 +1158,10 @@ export class ClubMatchSessionsService {
           eloStatus: current.session.isRanked ? 'WAITING_RESULT' : 'NOT_RANKED',
         })
         .returning();
+      await tx
+        .insert(schema.clubMatchDigestItems)
+        .values({ sessionId, matchId: created.id });
+      await this.repository.publishClubMatchDigest(tx, sessionId, false);
       await this.repository.auditUpdate(
         tx,
         actor.id,
@@ -1168,7 +1181,9 @@ export class ClubMatchSessionsService {
       });
       return commandResult;
     });
-    const projected = await this.repository.projectMatch(String(result.matchId));
+    const projected = await this.repository.projectMatch(
+      String(result.matchId),
+    );
     if (projected && !result.replayed) {
       this.liveScoreGateway.broadcastClubSessionMatchUpdate(
         current.session.id,
@@ -1192,7 +1207,8 @@ export class ClubMatchSessionsService {
     if (!idempotencyKey?.trim())
       apiError(BadRequestException, 'IDEMPOTENCY_KEY_REQUIRED');
     const community = await this.requireCommunityAccess(dto.communityId, actor);
-    if (!community.categoryId) apiError(BadRequestException, 'CLUB_SPORT_REQUIRED');
+    if (!community.categoryId)
+      apiError(BadRequestException, 'CLUB_SPORT_REQUIRED');
     const isManager =
       this.isPlatformAdmin(actor) ||
       MANAGER_ROLES.has(community.memberRole ?? '');
@@ -1203,7 +1219,8 @@ export class ClubMatchSessionsService {
 
     const sideA = uniqueSorted(dto.sideAUserIds);
     const sideB = uniqueSorted(dto.sideBUserIds);
-    const matchType = dto.matchType ?? (sideA.length === 1 ? 'SINGLES' : 'DOUBLES');
+    const matchType =
+      dto.matchType ?? (sideA.length === 1 ? 'SINGLES' : 'DOUBLES');
     const expectedSize = matchType === 'SINGLES' ? 1 : 2;
     const all = [...sideA, ...sideB];
     if (
@@ -1225,7 +1242,10 @@ export class ClubMatchSessionsService {
         .where(
           and(
             eq(schema.clubStandaloneMatches.createdBy, actor.id),
-            eq(schema.clubStandaloneMatches.idempotencyKey, idempotencyKey.trim()),
+            eq(
+              schema.clubStandaloneMatches.idempotencyKey,
+              idempotencyKey.trim(),
+            ),
           ),
         )
         .limit(1);
@@ -1260,8 +1280,7 @@ export class ClubMatchSessionsService {
           sideBUserIds: sideB,
           matchType,
           isRanked,
-          scoreConfig:
-            Object.keys(scoreConfig).length > 0 ? scoreConfig : null,
+          scoreConfig: Object.keys(scoreConfig).length > 0 ? scoreConfig : null,
           eloStatus: isRanked ? 'WAITING_RESULT' : 'NOT_RANKED',
           scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
         })
@@ -1284,7 +1303,9 @@ export class ClubMatchSessionsService {
       );
       return { matchId: created.id, replayed: false };
     });
-    const projected = await this.repository.projectStandaloneMatch(result.matchId);
+    const projected = await this.repository.projectStandaloneMatch(
+      result.matchId,
+    );
     if (projected && !result.replayed) {
       this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
         result.matchId,
@@ -1312,11 +1333,14 @@ export class ClubMatchSessionsService {
     if (!context || context.status !== 'ACTIVE') {
       apiError(NotFoundException, 'CLUB_NOT_FOUND');
     }
-    const result = await this.repository.listStandaloneMatches(query.communityId, {
-      status: query.status,
-      cursor: query.cursor,
-      limit: query.limit ?? 30,
-    });
+    const result = await this.repository.listStandaloneMatches(
+      query.communityId,
+      {
+        status: query.status,
+        cursor: query.cursor,
+        limit: query.limit ?? 30,
+      },
+    );
     if (result.invalidCursor) apiError(BadRequestException, 'INVALID_CURSOR');
     return { data: result.items, meta: result.meta };
   }
@@ -1330,7 +1354,10 @@ export class ClubMatchSessionsService {
       await this.requireCommunityAccess(deletedMatch.communityId, actor);
       return { deleted: true, eloReverted: false, replayed: true };
     }
-    const community = await this.requireCommunityAccess(match.communityId, actor);
+    const community = await this.requireCommunityAccess(
+      match.communityId,
+      actor,
+    );
     const membership = await this.repository.findMembership(
       match.communityId,
       actor.id,
@@ -1345,7 +1372,8 @@ export class ClubMatchSessionsService {
         (match.createdBy === actor.id ||
           (community.memberMatchDeletionEnabled === true &&
             membership?.status === 'JOINED')));
-    if (!canDelete) apiError(ForbiddenException, 'MATCH_DELETE_PERMISSION_REQUIRED');
+    if (!canDelete)
+      apiError(ForbiddenException, 'MATCH_DELETE_PERMISSION_REQUIRED');
 
     const db = this.repository.getDb();
     let eloReverted = false;
@@ -1440,14 +1468,21 @@ export class ClubMatchSessionsService {
   private async requireStandaloneMatchEditor(matchId: string, actor: Actor) {
     const match = await this.repository.findStandaloneMatch(matchId);
     if (!match) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
-    const community = await this.requireCommunityAccess(match.communityId, actor);
-    const membership = await this.repository.findMembership(match.communityId, actor.id);
+    const community = await this.requireCommunityAccess(
+      match.communityId,
+      actor,
+    );
+    const membership = await this.repository.findMembership(
+      match.communityId,
+      actor.id,
+    );
     const canEdit =
       this.isPlatformAdmin(actor) ||
       MANAGER_ROLES.has(membership?.role ?? '') ||
       (membership?.status === 'JOINED' &&
         community.memberMatchScoringEnabled !== false);
-    if (!canEdit) apiError(ForbiddenException, 'MATCH_SCORE_PERMISSION_REQUIRED');
+    if (!canEdit)
+      apiError(ForbiddenException, 'MATCH_SCORE_PERMISSION_REQUIRED');
     return { match, community };
   }
 
@@ -1456,11 +1491,17 @@ export class ClubMatchSessionsService {
     actor: Actor,
     expectedRevision?: number,
   ) {
-    const { match, community } = await this.requireStandaloneMatchEditor(matchId, actor);
-    if (match.status === 'ONGOING') return this.repository.projectStandaloneMatch(matchId);
-    if (match.status !== 'SCHEDULED') apiError(ConflictException, 'MATCH_CANNOT_START');
+    const { match, community } = await this.requireStandaloneMatchEditor(
+      matchId,
+      actor,
+    );
+    if (match.status === 'ONGOING')
+      return this.repository.projectStandaloneMatch(matchId);
+    if (match.status !== 'SCHEDULED')
+      apiError(ConflictException, 'MATCH_CANNOT_START');
     const revision = expectedRevision ?? match.revision;
-    const [updated] = await this.repository.getDb()
+    const [updated] = await this.repository
+      .getDb()
       .update(schema.clubStandaloneMatches)
       .set({
         status: 'ONGOING',
@@ -1476,9 +1517,17 @@ export class ClubMatchSessionsService {
         ),
       )
       .returning();
-    if (!updated) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
+    if (!updated)
+      apiError(ConflictException, 'STALE_MATCH_REVISION', {
+        currentRevision: match.revision,
+      });
     const projected = await this.repository.projectStandaloneMatch(matchId);
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'match:status', community.id);
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
+      matchId,
+      projected ?? updated,
+      'match:status',
+      community.id,
+    );
     return projected;
   }
 
@@ -1487,19 +1536,25 @@ export class ClubMatchSessionsService {
     actor: Actor,
     dto: UpdateMatchScoreDto,
   ) {
-    const { match, community } = await this.requireStandaloneMatchEditor(matchId, actor);
+    const { match, community } = await this.requireStandaloneMatchEditor(
+      matchId,
+      actor,
+    );
     this.validateMaxSets(dto);
     if (!['SCHEDULED', 'ONGOING'].includes(match.status))
       apiError(ConflictException, 'MATCH_SCORE_LOCKED');
     const revision = dto.expectedRevision ?? match.revision;
-    const [updated] = await this.repository.getDb()
+    const [updated] = await this.repository
+      .getDb()
       .update(schema.clubStandaloneMatches)
       .set({
         status: 'ONGOING',
         startedAt: match.startedAt ?? new Date(),
         p1SetsWon: dto.p1SetsWon,
         p2SetsWon: dto.p2SetsWon,
-        ...(dto.scoreDetails !== undefined ? { scoreDetails: dto.scoreDetails } : {}),
+        ...(dto.scoreDetails !== undefined
+          ? { scoreDetails: dto.scoreDetails }
+          : {}),
         updatedAt: new Date(),
         revision: sql`${schema.clubStandaloneMatches.revision} + 1`,
       })
@@ -1507,13 +1562,24 @@ export class ClubMatchSessionsService {
         and(
           eq(schema.clubStandaloneMatches.id, matchId),
           eq(schema.clubStandaloneMatches.revision, revision),
-          inArray(schema.clubStandaloneMatches.status, ['SCHEDULED', 'ONGOING']),
+          inArray(schema.clubStandaloneMatches.status, [
+            'SCHEDULED',
+            'ONGOING',
+          ]),
         ),
       )
       .returning();
-    if (!updated) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
+    if (!updated)
+      apiError(ConflictException, 'STALE_MATCH_REVISION', {
+        currentRevision: match.revision,
+      });
     const projected = await this.repository.projectStandaloneMatch(matchId);
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'score:update', community.id);
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
+      matchId,
+      projected ?? updated,
+      'score:update',
+      community.id,
+    );
     return projected;
   }
 
@@ -1524,7 +1590,8 @@ export class ClubMatchSessionsService {
   ) {
     const { match } = await this.requireStandaloneMatchEditor(matchId, actor);
     this.validateMaxSets(dto);
-    if (match.status === 'COMPLETED') return this.repository.projectStandaloneMatch(matchId);
+    if (match.status === 'COMPLETED')
+      return this.repository.projectStandaloneMatch(matchId);
     if (!['SCHEDULED', 'ONGOING'].includes(match.status))
       apiError(ConflictException, 'MATCH_CANNOT_COMPLETE');
     if (dto.p1SetsWon === dto.p2SetsWon)
@@ -1549,7 +1616,9 @@ export class ClubMatchSessionsService {
           status: 'COMPLETED',
           p1SetsWon: dto.p1SetsWon,
           p2SetsWon: dto.p2SetsWon,
-          ...(dto.scoreDetails !== undefined ? { scoreDetails: dto.scoreDetails } : {}),
+          ...(dto.scoreDetails !== undefined
+            ? { scoreDetails: dto.scoreDetails }
+            : {}),
           winnerSide,
           completedAt: new Date(),
           scoreConfirmedBy: actor.id,
@@ -1561,11 +1630,17 @@ export class ClubMatchSessionsService {
           and(
             eq(schema.clubStandaloneMatches.id, matchId),
             eq(schema.clubStandaloneMatches.revision, revision),
-            inArray(schema.clubStandaloneMatches.status, ['SCHEDULED', 'ONGOING']),
+            inArray(schema.clubStandaloneMatches.status, [
+              'SCHEDULED',
+              'ONGOING',
+            ]),
           ),
         )
         .returning();
-      if (!row) apiError(ConflictException, 'STALE_MATCH_REVISION', { currentRevision: match.revision });
+      if (!row)
+        apiError(ConflictException, 'STALE_MATCH_REVISION', {
+          currentRevision: match.revision,
+        });
       if (eloStatus === 'PENDING') {
         await tx.insert(schema.matchEloOutbox).values({
           matchId: null,
@@ -1586,8 +1661,18 @@ export class ClubMatchSessionsService {
       return row;
     });
     const projected = await this.repository.projectStandaloneMatch(matchId);
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'match:status', match.communityId);
-    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(matchId, projected ?? updated, 'score:update', match.communityId);
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
+      matchId,
+      projected ?? updated,
+      'match:status',
+      match.communityId,
+    );
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
+      matchId,
+      projected ?? updated,
+      'score:update',
+      match.communityId,
+    );
     void this.eloOutboxProcessor.dispatchNow();
     return projected;
   }
