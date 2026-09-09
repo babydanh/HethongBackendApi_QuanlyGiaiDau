@@ -45,6 +45,8 @@ const ELO_DECAY_FLOOR = 1000;
 
 @Injectable()
 export class RankingsService {
+  private static readonly LEADERBOARD_CACHE_TIMEOUT_MS = 750;
+
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly rankingsRepository: RankingsRepository,
@@ -117,10 +119,47 @@ export class RankingsService {
     return this.rankingsRepository.insertEloHistory(tx, [log]);
   }
 
+  /**
+   * Redis is optional for serving a leaderboard. The shared Redis client uses
+   * BullMQ's no-retry setting, so a cache command can otherwise wait forever
+   * when Redis is unavailable. Bound only these read/write operations and let
+   * the repository remain the source of truth.
+   */
+  private async withLeaderboardCacheTimeout<T>(
+    operation: Promise<T>,
+  ): Promise<T | undefined> {
+    return new Promise<T | undefined>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(undefined);
+        }
+      }, RankingsService.LEADERBOARD_CACHE_TIMEOUT_MS);
+
+      operation.then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        },
+        () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(undefined);
+        },
+      );
+    });
+  }
+
   async getLeaderboard(query: QueryRankingDto) {
     const cacheKey = `leaderboard:cat:${query.categoryId}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:comm:${query.communityId || 'ALL'}:cursor:${query.cursor || 'FIRST'}:limit:${query.limit || 20}`;
     try {
-      const cached = await this.redisService.get(cacheKey);
+      const cached = await this.withLeaderboardCacheTimeout(
+        this.redisService.get(cacheKey),
+      );
       if (cached) {
         return JSON.parse(cached);
       }
@@ -146,7 +185,9 @@ export class RankingsService {
     }
 
     try {
-      await this.redisService.set(cacheKey, JSON.stringify(data), 300); // 5 mins TTL
+      await this.withLeaderboardCacheTimeout(
+        this.redisService.set(cacheKey, JSON.stringify(data), 300),
+      ); // 5 mins TTL
     } catch (err) {
       console.error('Failed to set leaderboard cache:', err);
     }
