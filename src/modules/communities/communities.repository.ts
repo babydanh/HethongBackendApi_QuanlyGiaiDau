@@ -934,6 +934,7 @@ export class CommunitiesRepository {
     communityId: string,
     status?: string,
     includePrivate = false,
+    search?: string,
   ) {
     const visibilityCondition = includePrivate
       ? or(
@@ -959,6 +960,12 @@ export class CommunitiesRepository {
     ) as SQL;
     if (status && status !== 'ALL') {
       condition = and(condition, eq(schema.tournaments.status, status)) as SQL;
+    }
+    if (search?.trim()) {
+      condition = and(
+        condition,
+        ilike(schema.tournaments.name, `%${search.trim()}%`),
+      ) as SQL;
     }
     const rows = await this.db
       .select({
@@ -1012,6 +1019,115 @@ export class CommunitiesRepository {
       venue: venue?.id ? venue : null,
       parent: parent?.id ? parent : null,
     }));
+  }
+
+  async searchMatchSummaries(
+    communityId: string,
+    search: string,
+    limit: number,
+    includePrivate = false,
+  ) {
+    const pattern = `%${search.trim()}%`;
+    const tournamentMatches = await this.db
+      .select({
+        id: schema.matches.id,
+        source: sql<string>`'TOURNAMENT'`,
+        tournamentId: schema.matches.tournamentId,
+        sessionId: sql<string | null>`NULL`,
+        title: sql<string>`concat(
+          coalesce((select team_name from tournament_participants where id = ${schema.matches.participant1Id}), 'TBD'),
+          ' vs ',
+          coalesce((select team_name from tournament_participants where id = ${schema.matches.participant2Id}), 'TBD')
+        )`,
+        tournamentName: schema.tournaments.name,
+        status: schema.matches.status,
+        scheduledAt: schema.matches.scheduledAt,
+      })
+      .from(schema.matches)
+      .innerJoin(schema.tournaments, eq(schema.matches.tournamentId, schema.tournaments.id))
+      .leftJoin(schema.tournamentParticipants, eq(schema.matches.participant1Id, schema.tournamentParticipants.id))
+      .where(and(
+        eq(schema.tournaments.communityId, communityId),
+        isNull(schema.matches.deletedAt),
+        sql`${schema.matches.status} <> 'CANCELLED'`,
+        ...(includePrivate
+          ? []
+          : [
+              eq(schema.tournaments.visibility, 'PUBLIC'),
+              sql`COALESCE((${schema.tournaments.tournamentConfig}->>'isLite')::boolean, false) = false`,
+            ]),
+        sql`${schema.tournaments.status} NOT IN ('DRAFT', 'PENDING_APPROVAL', 'PENDING_DELETE', 'SUSPENDED', 'CANCELLED')`,
+        or(
+          ilike(schema.tournaments.name, pattern),
+          sql`EXISTS (
+            SELECT 1 FROM ${schema.tournamentParticipants} p
+            WHERE p.id IN (${schema.matches.participant1Id}, ${schema.matches.participant2Id})
+              AND p.team_name ILIKE ${pattern}
+          )`,
+        ),
+      ))
+      .orderBy(desc(schema.matches.updatedAt), desc(schema.matches.id))
+      .limit(limit);
+
+    const sessionMatches = await this.db
+      .select({
+        id: schema.clubMatchSessionMatches.id,
+        source: sql<string>`'SESSION'`,
+        tournamentId: sql<string | null>`NULL`,
+        sessionId: schema.clubMatchSessionMatches.sessionId,
+        title: schema.clubMatchSessions.name,
+        tournamentName: schema.clubMatchSessions.name,
+        status: schema.clubMatchSessionMatches.status,
+        scheduledAt: schema.clubMatchSessionMatches.scheduledAt,
+      })
+      .from(schema.clubMatchSessionMatches)
+      .innerJoin(schema.clubMatchSessions, eq(schema.clubMatchSessionMatches.sessionId, schema.clubMatchSessions.id))
+      .where(and(
+        eq(schema.clubMatchSessions.communityId, communityId),
+        isNull(schema.clubMatchSessionMatches.deletedAt),
+        sql`${schema.clubMatchSessionMatches.status} <> 'CANCELLED'`,
+        or(
+          ilike(schema.clubMatchSessions.name, pattern),
+          sql`EXISTS (
+            SELECT 1 FROM ${schema.profiles}
+            WHERE ${schema.profiles.userId} = ANY(
+              ${schema.clubMatchSessionMatches.sideAUserIds} || ${schema.clubMatchSessionMatches.sideBUserIds}
+            ) AND ${schema.profiles.fullName} ILIKE ${pattern}
+          )`,
+        ),
+      ))
+      .orderBy(desc(schema.clubMatchSessionMatches.updatedAt), desc(schema.clubMatchSessionMatches.id))
+      .limit(limit);
+
+    const standaloneMatches = await this.db
+      .select({
+        id: schema.clubStandaloneMatches.id,
+        source: sql<string>`'STANDALONE'`,
+        tournamentId: sql<string | null>`NULL`,
+        sessionId: sql<string | null>`NULL`,
+        title: sql<string>`'Trận riêng'`,
+        tournamentName: sql<string | null>`NULL`,
+        status: schema.clubStandaloneMatches.status,
+        scheduledAt: schema.clubStandaloneMatches.scheduledAt,
+      })
+      .from(schema.clubStandaloneMatches)
+      .where(and(
+        eq(schema.clubStandaloneMatches.communityId, communityId),
+        isNull(schema.clubStandaloneMatches.deletedAt),
+        sql`${schema.clubStandaloneMatches.status} <> 'CANCELLED'`,
+        sql`EXISTS (
+          SELECT 1 FROM ${schema.profiles}
+          WHERE ${schema.profiles.userId} = ANY(
+            ${schema.clubStandaloneMatches.sideAUserIds} || ${schema.clubStandaloneMatches.sideBUserIds}
+          ) AND ${schema.profiles.fullName} ILIKE ${pattern}
+        )`,
+      ))
+      .orderBy(desc(schema.clubStandaloneMatches.updatedAt), desc(schema.clubStandaloneMatches.id))
+      .limit(limit);
+
+    return [...tournamentMatches, ...sessionMatches, ...standaloneMatches]
+      .sort((a, b) => (b.scheduledAt?.getTime() ?? 0) - (a.scheduledAt?.getTime() ?? 0))
+      .slice(0, limit);
   }
 
   // --- RANKINGS ---

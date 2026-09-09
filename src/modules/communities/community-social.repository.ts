@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
@@ -84,7 +84,7 @@ export class CommunitySocialRepository {
     };
   }
 
-  async listPosts(communityId: string, limit: number, cursor?: string, viewerId?: string) {
+  async listPosts(communityId: string, limit: number, cursor?: string, viewerId?: string, search?: string) {
     const conditions: SQL[] = [
       eq(schema.communityPosts.communityId, communityId),
       viewerId
@@ -98,6 +98,17 @@ export class CommunitySocialRepository {
         : eq(schema.communityPosts.status, 'PUBLISHED'),
       isNull(schema.communityPosts.deletedAt),
     ];
+    if (search?.trim()) {
+      const pattern = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(schema.communityPosts.body, pattern),
+        sql`EXISTS (
+          SELECT 1 FROM ${schema.profiles}
+          WHERE ${schema.profiles.userId} = ${schema.communityPosts.authorId}
+            AND ${schema.profiles.fullName} ILIKE ${pattern}
+        )`,
+      ) as SQL);
+    }
     const decoded = cursor
       ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor)
       : null;

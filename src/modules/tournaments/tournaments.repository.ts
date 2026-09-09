@@ -32,6 +32,7 @@ import { AuditService, Transaction } from '../audit/audit.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
+import { QueryMyManagementTournamentsDto } from './dto/query-my-management-tournaments.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -4784,6 +4785,196 @@ export class TournamentsRepository {
         };
       }),
     );
+  }
+
+  async findMyManagementTournaments(
+    userId: string,
+    query: QueryMyManagementTournamentsDto,
+  ) {
+    const limit = Math.min(Math.max(Number(query.limit ?? 12), 1), 50);
+    const decodedCursor = query.cursor
+      ? CursorPaginationHelper.decodeCursor<{ id?: string; createdAt?: string }>(
+          query.cursor,
+        )
+      : null;
+    const cursorDate = decodedCursor?.createdAt
+      ? new Date(decodedCursor.createdAt)
+      : null;
+    const hasValidCursor = Boolean(
+      decodedCursor?.id && cursorDate && !Number.isNaN(cursorDate.getTime()),
+    );
+
+    const parentBaseConditions: SQL[] = [
+      eq(schema.parentTournaments.createdBy, userId),
+      isNull(schema.parentTournaments.deletedAt),
+    ];
+    const standaloneAccessCondition = or(
+      eq(schema.tournaments.createdBy, userId),
+      sql`exists (
+        select 1
+        from ${schema.tournamentParticipants} tp
+        inner join ${schema.tournamentRosters} tr
+          on tr.participant_id = tp.id
+        where tp.tournament_id = ${schema.tournaments.id}
+          and tr.user_id = ${userId}
+      )`,
+      sql`exists (
+        select 1
+        from ${schema.tournamentStaff} ts
+        where ts.tournament_id = ${schema.tournaments.id}
+          and ts.user_id = ${userId}
+          and ts.role = 'CO_ORGANIZER'
+      )`,
+    ) as SQL;
+    const standaloneBaseConditions: SQL[] = [
+      isNull(schema.tournaments.parentId),
+      isNull(schema.tournaments.deletedAt),
+      standaloneAccessCondition,
+    ];
+
+    if (hasValidCursor && cursorDate && decodedCursor?.id) {
+      parentBaseConditions.push(
+        or(
+          lt(schema.parentTournaments.createdAt, cursorDate),
+          and(
+            eq(schema.parentTournaments.createdAt, cursorDate),
+            lt(schema.parentTournaments.id, decodedCursor.id),
+          ),
+        ) as SQL,
+      );
+      standaloneBaseConditions.push(
+        or(
+          lt(schema.tournaments.createdAt, cursorDate),
+          and(
+            eq(schema.tournaments.createdAt, cursorDate),
+            lt(schema.tournaments.id, decodedCursor.id),
+          ),
+        ) as SQL,
+      );
+    }
+
+    const parentCountConditions: SQL[] = [
+      eq(schema.parentTournaments.createdBy, userId),
+      isNull(schema.parentTournaments.deletedAt),
+    ];
+    const standaloneCountConditions: SQL[] = [
+      isNull(schema.tournaments.parentId),
+      isNull(schema.tournaments.deletedAt),
+      standaloneAccessCondition,
+    ];
+
+    const [parentRows, standaloneRows, parentTotal, standaloneTotal] =
+      await Promise.all([
+        this.db
+          .select()
+          .from(schema.parentTournaments)
+          .where(and(...parentBaseConditions))
+          .orderBy(
+            desc(schema.parentTournaments.createdAt),
+            desc(schema.parentTournaments.id),
+          )
+          .limit(limit + 1),
+        this.db
+          .select({
+            tournament: schema.tournaments,
+            category: {
+              id: schema.categories.id,
+              name: schema.categories.name,
+            },
+            community: {
+              id: schema.communities.id,
+              name: schema.communities.name,
+              logoUrl: schema.communities.logoUrl,
+            },
+          })
+          .from(schema.tournaments)
+          .leftJoin(
+            schema.categories,
+            eq(schema.tournaments.categoryId, schema.categories.id),
+          )
+          .leftJoin(
+            schema.communities,
+            eq(schema.tournaments.communityId, schema.communities.id),
+          )
+          .where(and(...standaloneBaseConditions))
+          .orderBy(
+            desc(schema.tournaments.createdAt),
+            desc(schema.tournaments.id),
+          )
+          .limit(limit + 1),
+        this.db
+          .select({ count: count() })
+          .from(schema.parentTournaments)
+          .where(and(...parentCountConditions)),
+        this.db
+          .select({ count: count() })
+          .from(schema.tournaments)
+          .where(and(...standaloneCountConditions)),
+      ]);
+
+    const parentItems = parentRows.map((parent) => ({
+      itemType: 'PARENT' as const,
+      ...parent,
+    }));
+    const standaloneItems = await Promise.all(
+      standaloneRows.map(async (row) => {
+        const [participantCount] = await this.db
+          .select({ count: count() })
+          .from(schema.tournamentParticipants)
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, row.tournament.id),
+              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+              ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
+            ),
+          );
+        const pCount = Number(participantCount?.count ?? 0);
+
+        return {
+          itemType: 'STANDALONE' as const,
+          ...row.tournament,
+          category: row.category?.id ? row.category : null,
+          community: row.community?.id ? row.community : null,
+          participantCount: pCount,
+          _count: { participants: pCount },
+          _summary: { participantCount: pCount },
+        };
+      }),
+    );
+
+    const candidates = [...parentItems, ...standaloneItems].sort((a, b) => {
+      const aTime = new Date(a.createdAt).getTime();
+      const bTime = new Date(b.createdAt).getTime();
+      if (bTime !== aTime) return bTime - aTime;
+      return b.id === a.id ? 0 : b.id > a.id ? 1 : -1;
+    });
+    const hasMore = candidates.length > limit;
+    const data = hasMore ? candidates.slice(0, limit) : candidates;
+    const lastItem = data[data.length - 1];
+    const total =
+      Number(parentTotal?.[0]?.count ?? 0) +
+      Number(standaloneTotal?.[0]?.count ?? 0);
+
+    return {
+      data,
+      meta: {
+        total,
+        page: 1,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        nextCursor:
+          hasMore && lastItem
+            ? CursorPaginationHelper.encodeCursor({
+                id: lastItem.id,
+                createdAt: lastItem.createdAt,
+              })
+            : null,
+        hasMore,
+      },
+    };
   }
 
   async findMyWorkspace(userId: string) {

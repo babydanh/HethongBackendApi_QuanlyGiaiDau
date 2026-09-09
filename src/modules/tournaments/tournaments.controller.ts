@@ -24,6 +24,7 @@ import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
+import { QueryMyManagementTournamentsDto } from './dto/query-my-management-tournaments.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { AddLiteClubMemberDto } from './dto/add-lite-club-member.dto';
 import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
@@ -98,6 +99,18 @@ export class TournamentsController {
   })
   async findMy(@CurrentUser() user: JwtPayload) {
     return this.tournamentsService.findMy(user.sub);
+  }
+
+  @Get('my/management')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Lấy danh sách card giải đấu của tôi theo cursor',
+  })
+  async findMyManagement(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryMyManagementTournamentsDto,
+  ) {
+    return this.tournamentsService.findMyManagement(user.sub, query);
   }
 
   @Get('workspace/me')

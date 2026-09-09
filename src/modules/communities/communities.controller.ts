@@ -40,11 +40,16 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
 import { Throttle } from '@nestjs/throttler';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
+import { CommunitySocialService } from './community-social.service';
+import { SearchCommunityDto } from './dto/search-community.dto';
 
 @ApiTags('communities')
 @Controller('communities')
 export class CommunitiesController {
-  constructor(private readonly communitiesService: CommunitiesService) {}
+  constructor(
+    private readonly communitiesService: CommunitiesService,
+    private readonly communitySocialService: CommunitySocialService,
+  ) {}
 
   // --- COMMUNITIES ---
 
@@ -86,6 +91,50 @@ export class CommunitiesController {
   async findPending(@Query() query: QueryCommunityDto) {
     query.status = 'PENDING';
     return await this.communitiesService.findAll(query);
+  }
+
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 120, ttl: 60000 } })
+  @Get(':id/search')
+  @ApiOperation({ summary: 'Tìm kiếm nội dung trong cộng đồng' })
+  async search(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: SearchCommunityDto,
+    @CurrentUser() user?: { id: string; roles?: string[] },
+  ) {
+    const type = query.type ?? 'ALL';
+    const include = (candidate: string) => type === 'ALL' || type === candidate;
+    const [posts, members, matches, tournaments] = await Promise.all([
+      include('POSTS')
+        ? this.communitySocialService.listPosts(id, query.limit, undefined, user, query.q)
+        : Promise.resolve({ data: [] }),
+      include('MEMBERS')
+        ? this.communitiesService.getMembers(
+            id,
+            { status: 'JOINED', limit: query.limit, search: query.q },
+            user,
+          )
+        : Promise.resolve({ data: [] }),
+      include('MATCHES')
+        ? this.communitiesService.searchMatchSummaries(id, query.q, query.limit, user)
+        : Promise.resolve([]),
+      include('TOURNAMENTS')
+        ? this.communitiesService.getTournaments(id, undefined, user, query.q)
+            .then((items) => items.slice(0, query.limit))
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      data: {
+        query: query.q,
+        posts: posts.data,
+        members: members.data,
+        matches,
+        tournaments,
+      },
+      meta: { limit: query.limit },
+    };
   }
 
   @Get('admin')

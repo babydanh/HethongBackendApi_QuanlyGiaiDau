@@ -13,6 +13,7 @@ import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
+import { QueryMyManagementTournamentsDto } from './dto/query-my-management-tournaments.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
@@ -851,6 +852,25 @@ export class TournamentsService {
   async findMy(userId: string) {
     const result = await this.tournamentsRepository.findMyTournaments(userId);
     return result.map((t) => this.mapTournamentFormat(t));
+  }
+
+  async findMyManagement(
+    userId: string,
+    query: QueryMyManagementTournamentsDto,
+  ) {
+    const result = await this.tournamentsRepository.findMyManagementTournaments(
+      userId,
+      query,
+    );
+
+    return {
+      ...result,
+      data: result.data.map((item) =>
+        item.itemType === 'STANDALONE'
+          ? this.mapTournamentFormat(item)
+          : item,
+      ),
+    };
   }
 
   async getMyWorkspace(userId: string) {

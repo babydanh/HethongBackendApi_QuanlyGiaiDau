@@ -30,7 +30,7 @@ export class CommunitySocialService {
     return this.socialRepository.getSettings(communityId);
   }
 
-  async listPosts(communityId: string, limit: number, cursor?: string, viewer?: SocialUser) {
+  async listPosts(communityId: string, limit: number, cursor?: string, viewer?: SocialUser, search?: string) {
     const community = await this.ensureCommunity(communityId);
     const settings = await this.socialRepository.getSettings(communityId);
     if (!settings.publicFeed) {
@@ -39,7 +39,7 @@ export class CommunitySocialService {
     if (community.visibility !== 'PUBLIC') {
       await this.requireJoined(communityId, viewer?.id);
     }
-    return this.socialRepository.listPosts(communityId, limit, cursor, viewer?.id);
+    return this.socialRepository.listPosts(communityId, limit, cursor, viewer?.id, search);
   }
 
   async createPost(

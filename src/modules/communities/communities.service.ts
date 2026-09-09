@@ -1052,7 +1052,12 @@ export class CommunitiesService {
   }
 
   // --- TOURNAMENTS ---
-  async getTournaments(id: string, status?: string, viewer?: CommunityViewer) {
+  async getTournaments(
+    id: string,
+    status?: string,
+    viewer?: CommunityViewer,
+    search?: string,
+  ) {
     const community = await this.findById(id);
     const access = await this.resolveAccess(community, viewer);
     if (!access.isMember && !access.isAdmin && community.visibility !== 'PUBLIC') {
@@ -1063,6 +1068,26 @@ export class CommunitiesService {
       id,
       status,
       isMemberOrAdmin,
+      search,
+    );
+  }
+
+  async searchMatchSummaries(
+    id: string,
+    query: string,
+    limit: number,
+    viewer?: CommunityViewer,
+  ) {
+    const community = await this.findById(id, viewer);
+    const access = await this.resolveAccess(community, viewer);
+    if (!access.canViewContent) {
+      throw new ForbiddenException('Nội dung CLB chỉ dành cho thành viên.');
+    }
+    return this.communitiesRepository.searchMatchSummaries(
+      id,
+      query,
+      limit,
+      access.isMember || access.isAdmin,
     );
   }
 
