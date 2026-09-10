@@ -4808,9 +4808,10 @@ export class TournamentsRepository {
   ) {
     const limit = Math.min(Math.max(Number(query.limit ?? 12), 1), 50);
     const decodedCursor = query.cursor
-      ? CursorPaginationHelper.decodeCursor<{ id?: string; createdAt?: string }>(
-          query.cursor,
-        )
+      ? CursorPaginationHelper.decodeCursor<{
+          id?: string;
+          createdAt?: string;
+        }>(query.cursor)
       : null;
     const cursorDate = decodedCursor?.createdAt
       ? new Date(decodedCursor.createdAt)
@@ -4818,6 +4819,8 @@ export class TournamentsRepository {
     const hasValidCursor = Boolean(
       decodedCursor?.id && cursorDate && !Number.isNaN(cursorDate.getTime()),
     );
+    const completedOnly =
+      String(query.status ?? '').toUpperCase() === 'COMPLETED';
 
     const parentBaseConditions: SQL[] = [
       eq(schema.parentTournaments.createdBy, userId),
@@ -4846,6 +4849,28 @@ export class TournamentsRepository {
       isNull(schema.tournaments.deletedAt),
       standaloneAccessCondition,
     ];
+
+    // Parent tournaments do not store a lifecycle status. They are completed
+    // only when they have active child tournaments and every child is complete.
+    // Keep this predicate in both page and count queries so cursor metadata
+    // describes the same filtered collection that is returned.
+    const completedParentCondition = sql`exists (
+      select 1
+      from "tournaments" child_tournament
+      where child_tournament.parent_id = ${schema.parentTournaments.id}
+        and child_tournament.deleted_at is null
+    ) and not exists (
+      select 1
+      from "tournaments" child_tournament
+      where child_tournament.parent_id = ${schema.parentTournaments.id}
+        and child_tournament.deleted_at is null
+        and child_tournament.status <> 'COMPLETED'
+    )`;
+
+    if (completedOnly) {
+      parentBaseConditions.push(completedParentCondition);
+      standaloneBaseConditions.push(eq(schema.tournaments.status, 'COMPLETED'));
+    }
 
     if (hasValidCursor && cursorDate && decodedCursor?.id) {
       parentBaseConditions.push(
@@ -4877,6 +4902,13 @@ export class TournamentsRepository {
       isNull(schema.tournaments.deletedAt),
       standaloneAccessCondition,
     ];
+
+    if (completedOnly) {
+      parentCountConditions.push(completedParentCondition);
+      standaloneCountConditions.push(
+        eq(schema.tournaments.status, 'COMPLETED'),
+      );
+    }
 
     const [parentRows, standaloneRows, parentTotal, standaloneTotal] =
       await Promise.all([

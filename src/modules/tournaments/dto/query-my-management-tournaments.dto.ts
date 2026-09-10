@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
@@ -14,4 +14,12 @@ export class QueryMyManagementTournamentsDto extends CursorPaginationDto {
   @Min(1)
   @Max(50)
   limit?: number = 12;
+
+  @ApiPropertyOptional({
+    enum: ['COMPLETED'],
+    description: 'Chỉ lọc các giải đã kết thúc',
+  })
+  @IsOptional()
+  @IsIn(['COMPLETED'])
+  status?: 'COMPLETED';
 }
