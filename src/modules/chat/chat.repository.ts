@@ -767,6 +767,53 @@ export class ChatRepository {
     return result;
   }
 
+  private async loadReactionDetails(messageIds: string[], viewerId?: string) {
+    const detailsByMessage = new Map<string, Array<{
+      emoji: string;
+      count: number;
+      isReacted: boolean;
+      userIds: string[];
+      users: Array<{ id: string; fullName: string; avatarUrl: string | null }>;
+    }>>();
+    if (messageIds.length === 0) return detailsByMessage;
+
+    const rows = await this.db
+      .select({
+        messageId: schema.chatMessageReactions.messageId,
+        emoji: schema.chatMessageReactions.emoji,
+        userId: schema.chatMessageReactions.userId,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.chatMessageReactions)
+      .innerJoin(schema.users, eq(schema.chatMessageReactions.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.chatMessageReactions.userId, schema.profiles.userId))
+      .where(inArray(schema.chatMessageReactions.messageId, messageIds));
+
+    for (const row of rows) {
+      const groups = detailsByMessage.get(row.messageId) ?? [];
+      let group = groups.find((item) => item.emoji === row.emoji);
+      if (!group) {
+        group = { emoji: row.emoji, count: 0, isReacted: false, userIds: [], users: [] };
+        groups.push(group);
+      }
+      group.count += 1;
+      group.isReacted ||= row.userId === viewerId;
+      group.userIds.push(row.userId);
+      group.users.push({
+        id: row.userId,
+        fullName: row.fullName?.trim() || 'Thành viên',
+        avatarUrl: row.avatarUrl,
+      });
+      detailsByMessage.set(row.messageId, groups);
+    }
+    return detailsByMessage;
+  }
+
+  async getMessageReactionDetails(messageId: string, viewerId?: string) {
+    return (await this.loadReactionDetails([messageId], viewerId)).get(messageId) ?? [];
+  }
+
   async getMessagesPage(roomId: string, limit: number, cursor?: string, userId?: string) {
     const conditions: SQL[] = [eq(schema.chatMessages.roomId, roomId)];
     if (userId) {
@@ -803,22 +850,12 @@ export class ChatRepository {
     const data = hasMore ? rows.slice(0, limit) : rows;
     const messageIds = data.map((m) => m.id);
 
-    // Batch load reactions for all messages in page
+    // Batch load reaction users once for the whole page. Keep the legacy
+    // emoji array alongside the richer projection for old clients.
+    const reactionDetailsMap = await this.loadReactionDetails(messageIds, userId);
     const reactionsMap = new Map<string, string[]>();
-    if (messageIds.length > 0) {
-      const rxRows = await this.db
-        .select({
-          messageId: schema.chatMessageReactions.messageId,
-          emoji: schema.chatMessageReactions.emoji,
-        })
-        .from(schema.chatMessageReactions)
-        .where(inArray(schema.chatMessageReactions.messageId, messageIds));
-
-      for (const rx of rxRows) {
-        const arr = reactionsMap.get(rx.messageId) || [];
-        arr.push(rx.emoji);
-        reactionsMap.set(rx.messageId, arr);
-      }
+    for (const [messageId, details] of reactionDetailsMap.entries()) {
+      reactionsMap.set(messageId, details.flatMap((detail) => Array(detail.count).fill(detail.emoji)));
     }
 
     // Batch load replyTo metadata
@@ -848,6 +885,7 @@ export class ChatRepository {
     const populated = data.map((msg) => ({
       ...msg,
       reactions: reactionsMap.get(msg.id) || [],
+      reactionDetails: reactionDetailsMap.get(msg.id) || [],
       replyTo: msg.replyToId ? replyMap.get(msg.replyToId) || null : null,
     }));
 

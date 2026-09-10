@@ -184,6 +184,36 @@ export const communityPostComments = pgTable(
   }),
 );
 
+/** One persisted reaction per member and comment. Viewer details are joined
+ * from users/profiles at query time so this table never duplicates profile
+ * data and is removed with the parent comment. */
+export const communityCommentReactions = pgTable(
+  'community_comment_reactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    commentId: uuid('comment_id')
+      .references(() => communityPostComments.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    reactionType: varchar('reaction_type', { length: 24 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    uniqueCommentReaction: uniqueIndex('uq_community_comment_reactions_user').on(
+      table.commentId,
+      table.userId,
+    ),
+    commentIndex: index('idx_community_comment_reactions_comment').on(
+      table.commentId,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const communityPostReactions = pgTable(
   'community_post_reactions',
   {

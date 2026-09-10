@@ -331,19 +331,113 @@ export class CommunitySocialRepository {
     return rows.map((row) => ({ ...row.post, author: row.author?.id ? row.author : null }));
   }
 
-  async listComments(postId: string, limit: number, cursor?: string) {
+  async listComments(postId: string, limit: number, cursor?: string, viewerId?: string) {
     const conditions: SQL[] = [eq(schema.communityPostComments.postId, postId), eq(schema.communityPostComments.status, 'PUBLISHED'), isNull(schema.communityPostComments.deletedAt)];
     const decoded = cursor ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(cursor) : null;
     if (decoded?.createdAt && decoded.id) {
       conditions.push(or(lt(schema.communityPostComments.createdAt, new Date(decoded.createdAt)), and(eq(schema.communityPostComments.createdAt, new Date(decoded.createdAt)), lt(schema.communityPostComments.id, decoded.id))) as SQL);
     }
-    const rows = await this.db.select({ comment: schema.communityPostComments, author: { id: schema.users.id, fullName: schema.profiles.fullName, avatarUrl: schema.profiles.avatarUrl } })
+    const rows = await this.db.select({
+      comment: schema.communityPostComments,
+      author: { id: schema.users.id, fullName: schema.profiles.fullName, avatarUrl: schema.profiles.avatarUrl },
+      reactionCount: sql<number>`(
+        SELECT count(*)::int
+        FROM ${schema.communityCommentReactions}
+        WHERE ${schema.communityCommentReactions.commentId} = ${schema.communityPostComments.id}
+      )`,
+      viewerReaction: viewerId
+        ? sql<string | null>`(
+            SELECT ${schema.communityCommentReactions.reactionType}
+            FROM ${schema.communityCommentReactions}
+            WHERE ${schema.communityCommentReactions.commentId} = ${schema.communityPostComments.id}
+              AND ${schema.communityCommentReactions.userId} = ${viewerId}
+            LIMIT 1
+          )`
+        : sql<string | null>`NULL`,
+    })
       .from(schema.communityPostComments).leftJoin(schema.users, eq(schema.communityPostComments.authorId, schema.users.id)).leftJoin(schema.profiles, eq(schema.communityPostComments.authorId, schema.profiles.userId))
       .where(and(...conditions)).orderBy(desc(schema.communityPostComments.createdAt), desc(schema.communityPostComments.id)).limit(limit + 1);
     const hasMore = rows.length > limit;
-    const data = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({ ...row.comment, author: row.author?.id ? row.author : null }));
+    const data = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+      ...row.comment,
+      author: row.author?.id ? row.author : null,
+      reactionCount: Number(row.reactionCount ?? 0),
+      viewerReaction: row.viewerReaction,
+    }));
     const last = data[data.length - 1];
     return { data, meta: { limit, hasMore, nextCursor: hasMore && last ? CursorPaginationHelper.encodeCursor({ id: last.id, createdAt: last.createdAt }) : null } };
+  }
+
+  private groupReactionRows(rows: Array<{ reactionType: string; userId: string; fullName: string | null; avatarUrl: string | null }>, viewerId?: string) {
+    const groups = new Map<string, { reactionType: string; count: number; isReacted: boolean; users: Array<{ id: string; fullName: string; avatarUrl: string | null }> }>();
+    for (const row of rows) {
+      const group = groups.get(row.reactionType) ?? {
+        reactionType: row.reactionType,
+        count: 0,
+        isReacted: false,
+        users: [],
+      };
+      group.count += 1;
+      group.isReacted ||= row.userId === viewerId;
+      group.users.push({
+        id: row.userId,
+        fullName: row.fullName?.trim() || 'Thành viên',
+        avatarUrl: row.avatarUrl,
+      });
+      groups.set(row.reactionType, group);
+    }
+    return Array.from(groups.values());
+  }
+
+  async listPostReactions(postId: string, viewerId?: string) {
+    const rows = await this.db.select({
+      reactionType: schema.communityPostReactions.reactionType,
+      userId: schema.communityPostReactions.userId,
+      fullName: schema.profiles.fullName,
+      avatarUrl: schema.profiles.avatarUrl,
+    })
+      .from(schema.communityPostReactions)
+      .innerJoin(schema.users, eq(schema.communityPostReactions.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.communityPostReactions.userId, schema.profiles.userId))
+      .where(eq(schema.communityPostReactions.postId, postId));
+    return this.groupReactionRows(rows, viewerId);
+  }
+
+  async listCommentReactions(commentId: string, viewerId?: string) {
+    const rows = await this.db.select({
+      reactionType: schema.communityCommentReactions.reactionType,
+      userId: schema.communityCommentReactions.userId,
+      fullName: schema.profiles.fullName,
+      avatarUrl: schema.profiles.avatarUrl,
+    })
+      .from(schema.communityCommentReactions)
+      .innerJoin(schema.users, eq(schema.communityCommentReactions.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.communityCommentReactions.userId, schema.profiles.userId))
+      .where(eq(schema.communityCommentReactions.commentId, commentId));
+    return this.groupReactionRows(rows, viewerId);
+  }
+
+  async setCommentReaction(commentId: string, userId: string, reactionType: string) {
+    const [existing] = await this.db.select().from(schema.communityCommentReactions)
+      .where(and(
+        eq(schema.communityCommentReactions.commentId, commentId),
+        eq(schema.communityCommentReactions.userId, userId),
+      )).limit(1);
+    if (existing?.reactionType === reactionType) {
+      await this.db.delete(schema.communityCommentReactions).where(eq(schema.communityCommentReactions.id, existing.id));
+    } else if (existing) {
+      await this.db.update(schema.communityCommentReactions)
+        .set({ reactionType })
+        .where(eq(schema.communityCommentReactions.id, existing.id));
+    } else {
+      await this.db.insert(schema.communityCommentReactions).values({ commentId, userId, reactionType });
+    }
+    const groups = await this.listCommentReactions(commentId, userId);
+    return {
+      reactionType: existing?.reactionType === reactionType ? null : reactionType,
+      count: groups.reduce((sum, group) => sum + group.count, 0),
+      reactionDetails: groups,
+    };
   }
 
   async setReaction(postId: string, userId: string, reactionType: string) {

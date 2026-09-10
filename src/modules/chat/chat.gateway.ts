@@ -373,8 +373,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`chat:${roomId}`).emit('chat:message:unpinned', { roomId, messageId, unpinnedBy });
   }
 
-  broadcastMessageReaction(roomId: string, messageId: string, userId: string, emoji: string, reactions: string[]) {
-    this.server.to(`chat:${roomId}`).emit('chat:message:reaction', { roomId, messageId, userId, emoji, reactions });
+  broadcastMessageReaction(roomId: string, messageId: string, userId: string, emoji: string, reactions: string[], reactionDetails: unknown[] = []) {
+    this.server.to(`chat:${roomId}`).emit('chat:message:reaction', { roomId, messageId, userId, emoji, reactions, reactionDetails });
   }
 
   broadcastRoomUpdated(roomId: string, room: unknown) {

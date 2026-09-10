@@ -511,8 +511,9 @@ export class ChatService {
     }
 
     const reactions = await this.chatRepository.toggleReaction(messageId, userId, emoji);
-    this.chatGateway.broadcastMessageReaction(message.roomId, messageId, userId, emoji, reactions);
-    return { reactions };
+    const reactionDetails = await this.chatRepository.getMessageReactionDetails(messageId, userId);
+    this.chatGateway.broadcastMessageReaction(message.roomId, messageId, userId, emoji, reactions, reactionDetails);
+    return { reactions, reactionDetails };
   }
 
   async updateClubRoomSettings(userId: string, roomId: string, data: { name?: string; clubAvatar?: string; isAnnouncementOnly?: boolean; slowModeSeconds?: number }) {

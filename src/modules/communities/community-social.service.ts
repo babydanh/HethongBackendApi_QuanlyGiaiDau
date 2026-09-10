@@ -158,7 +158,7 @@ export class CommunitySocialService {
     if (!post || post.communityId !== communityId || post.status !== 'PUBLISHED') {
       throw new NotFoundException('Không tìm thấy bài viết.');
     }
-    return this.socialRepository.listComments(postId, limit, cursor);
+    return this.socialRepository.listComments(postId, limit, cursor, viewer?.id);
   }
 
   async createComment(communityId: string, postId: string, user: SocialUser, dto: CreateCommunityCommentDto) {
@@ -233,6 +233,45 @@ export class CommunitySocialService {
     const post = await this.socialRepository.findPost(postId);
     if (!post || post.communityId !== communityId || post.status !== 'PUBLISHED') throw new NotFoundException('Không tìm thấy bài viết.');
     return this.socialRepository.setReaction(postId, user.id, reactionType);
+  }
+
+  async getPostReactions(communityId: string, postId: string, viewer?: SocialUser) {
+    const community = await this.ensureCommunity(communityId);
+    const settings = await this.socialRepository.getSettings(communityId);
+    if (!settings.publicFeed || community.visibility !== 'PUBLIC') {
+      await this.requireJoined(communityId, viewer?.id);
+    }
+    const post = await this.socialRepository.findPost(postId);
+    if (!post || post.communityId !== communityId || post.status !== 'PUBLISHED') {
+      throw new NotFoundException('Không tìm thấy bài viết.');
+    }
+    return this.socialRepository.listPostReactions(postId, viewer?.id);
+  }
+
+  async reactToComment(communityId: string, commentId: string, user: SocialUser, reactionType: string) {
+    await this.requireJoined(communityId, user.id);
+    const comment = await this.socialRepository.findComment(commentId);
+    if (!comment) throw new NotFoundException('Không tìm thấy bình luận.');
+    const post = await this.socialRepository.findPost(comment.postId);
+    if (!post || post.communityId !== communityId || post.status !== 'PUBLISHED') {
+      throw new NotFoundException('Không tìm thấy bình luận.');
+    }
+    return this.socialRepository.setCommentReaction(commentId, user.id, reactionType);
+  }
+
+  async getCommentReactions(communityId: string, commentId: string, viewer?: SocialUser) {
+    const community = await this.ensureCommunity(communityId);
+    const settings = await this.socialRepository.getSettings(communityId);
+    if (!settings.publicFeed || community.visibility !== 'PUBLIC') {
+      await this.requireJoined(communityId, viewer?.id);
+    }
+    const comment = await this.socialRepository.findComment(commentId);
+    if (!comment) throw new NotFoundException('Không tìm thấy bình luận.');
+    const post = await this.socialRepository.findPost(comment.postId);
+    if (!post || post.communityId !== communityId || post.status !== 'PUBLISHED') {
+      throw new NotFoundException('Không tìm thấy bình luận.');
+    }
+    return this.socialRepository.listCommentReactions(commentId, viewer?.id);
   }
 
   async report(communityId: string, postId: string, user: SocialUser, dto: ReportCommunityContentDto) {

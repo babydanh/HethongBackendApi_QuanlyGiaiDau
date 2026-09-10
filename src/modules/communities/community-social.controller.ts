@@ -113,6 +113,42 @@ export class CommunitySocialController {
     return this.socialService.react(communityId, postId, user, dto.reactionType);
   }
 
+  @Get('posts/:postId/reactions')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Xem người đã thả cảm xúc cho bài viết' })
+  getPostReactions(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('postId', ParseUUIDPipe) postId: string,
+    @CurrentUser() user?: { id: string; roles?: string[] },
+  ) {
+    return this.socialService.getPostReactions(communityId, postId, user);
+  }
+
+  @Post('comments/:commentId/reaction')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Thả hoặc bỏ cảm xúc cho bình luận' })
+  reactToComment(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('commentId', ParseUUIDPipe) commentId: string,
+    @CurrentUser() user: { id: string; roles?: string[] },
+    @Body() dto: ReactCommunityPostDto,
+  ) {
+    return this.socialService.reactToComment(communityId, commentId, user, dto.reactionType);
+  }
+
+  @Get('comments/:commentId/reactions')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Xem người đã thả cảm xúc cho bình luận' })
+  getCommentReactions(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Param('commentId', ParseUUIDPipe) commentId: string,
+    @CurrentUser() user?: { id: string; roles?: string[] },
+  ) {
+    return this.socialService.getCommentReactions(communityId, commentId, user);
+  }
+
   @Post('posts/:postId/report')
   @ApiBearerAuth()
   report(@Param('communityId', ParseUUIDPipe) communityId: string, @Param('postId', ParseUUIDPipe) postId: string, @CurrentUser() user: { id: string; roles?: string[] }, @Body() dto: ReportCommunityContentDto) {
