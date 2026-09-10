@@ -1,3 +1,6 @@
+// Import telemetry before Nest and application modules so auto-instrumentation can patch them.
+import './instrument';
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
@@ -74,4 +77,4 @@ async function bootstrap() {
   Logger.log(`Application is running on: http://localhost:${port}/api/v1`);
   Logger.log(`Scalar API Reference is running on: http://localhost:${port}/api/docs`);
 }
-bootstrap();
+void bootstrap();

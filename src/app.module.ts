@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { SentryModule } from '@sentry/nestjs/setup';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { UserAwareThrottlerGuard } from './common/guards/user-aware-throttler.guard';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -49,6 +50,7 @@ import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-matc
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       load: [databaseConfig, authConfig, aiConfig],

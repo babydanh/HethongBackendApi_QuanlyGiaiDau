@@ -1,21 +1,22 @@
 import {
   ExceptionFilter,
   Catch,
-  ArgumentsHost,
   HttpException,
   HttpStatus,
-  Logger,
 } from '@nestjs/common';
+import type { ArgumentsHost } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { BaseException } from '../exceptions/base.exception';
+import { SentryExceptionCaptured } from '@sentry/nestjs';
 
 @Catch(Error)
 export class HttpExceptionFilter implements ExceptionFilter {
+  @SentryExceptionCaptured()
   catch(exception: Error, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    
+
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = exception.message || 'Internal Server Error';
     let code = 'INTERNAL_SERVER_ERROR';
@@ -36,13 +37,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
         if (Array.isArray(resObj.message)) {
           const translatedMessages = resObj.message.map((msg: string) => {
             let tMsg = msg;
-            
+
             // Dịch lỗi 'property X should not exist'
             if (tMsg.includes('property') && tMsg.includes('should not exist')) {
               const prop = tMsg.match(/property\s+(\w+)\s+should not exist/);
               tMsg = prop ? `Thuộc tính "${prop[1]}" không được phép tồn tại` : 'Thuộc tính không hợp lệ';
             }
-            
+
             // Dịch lỗi 'X must be one of the following values: Y'
             if (tMsg.includes('must be one of the following values:')) {
               tMsg = tMsg

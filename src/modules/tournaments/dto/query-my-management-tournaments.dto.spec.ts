@@ -8,19 +8,19 @@ describe('QueryMyManagementTournamentsDto', () => {
   it('accepts the completed filter and offset pagination', async () => {
     const dto = plainToInstance(QueryMyManagementTournamentsDto, {
       status: 'COMPLETED',
-      limit: '10',
+      limit: '9',
       offset: '20',
     });
 
     expect(await validate(dto)).toHaveLength(0);
-    expect(dto.limit).toBe(10);
+    expect(dto.limit).toBe(9);
     expect(dto.offset).toBe(20);
     expect(dto.status).toBe('COMPLETED');
   });
 
-  it('rejects a page size above the ten-card contract', async () => {
+  it('rejects a page size above the nine-card contract', async () => {
     const dto = plainToInstance(QueryMyManagementTournamentsDto, {
-      limit: '11',
+      limit: '10',
     });
 
     expect(await validate(dto)).not.toHaveLength(0);

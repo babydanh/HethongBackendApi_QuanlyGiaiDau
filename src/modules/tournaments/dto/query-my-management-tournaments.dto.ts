@@ -5,15 +5,15 @@ import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
 export class QueryMyManagementTournamentsDto extends CursorPaginationDto {
   @ApiPropertyOptional({
-    example: 10,
+    example: 9,
     description: 'Số card quản lý trả về trong một lần tải',
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(10)
-  limit?: number = 10;
+  @Max(9)
+  limit?: number = 9;
 
   @ApiPropertyOptional({
     example: 20,
