@@ -4806,7 +4806,10 @@ export class TournamentsRepository {
     userId: string,
     query: QueryMyManagementTournamentsDto,
   ) {
-    const limit = Math.min(Math.max(Number(query.limit ?? 12), 1), 50);
+    const limit = Math.min(Math.max(Number(query.limit ?? 10), 1), 10);
+    const offset = query.offset === undefined ? null : Math.max(Number(query.offset), 0);
+    const windowSize = offset === null ? limit + 1 : offset + limit + 1;
+    const useOffsetPagination = offset !== null;
     const decodedCursor = query.cursor
       ? CursorPaginationHelper.decodeCursor<{
           id?: string;
@@ -4816,7 +4819,7 @@ export class TournamentsRepository {
     const cursorDate = decodedCursor?.createdAt
       ? new Date(decodedCursor.createdAt)
       : null;
-    const hasValidCursor = Boolean(
+    const hasValidCursor = !useOffsetPagination && Boolean(
       decodedCursor?.id && cursorDate && !Number.isNaN(cursorDate.getTime()),
     );
     const completedOnly =
@@ -4920,7 +4923,7 @@ export class TournamentsRepository {
             desc(schema.parentTournaments.createdAt),
             desc(schema.parentTournaments.id),
           )
-          .limit(limit + 1),
+          .limit(windowSize),
         this.db
           .select({
             tournament: schema.tournaments,
@@ -4948,7 +4951,7 @@ export class TournamentsRepository {
             desc(schema.tournaments.createdAt),
             desc(schema.tournaments.id),
           )
-          .limit(limit + 1),
+          .limit(windowSize),
         this.db
           .select({ count: count() })
           .from(schema.parentTournaments)
@@ -4998,22 +5001,29 @@ export class TournamentsRepository {
       if (bTime !== aTime) return bTime - aTime;
       return b.id === a.id ? 0 : b.id > a.id ? 1 : -1;
     });
-    const hasMore = candidates.length > limit;
-    const data = hasMore ? candidates.slice(0, limit) : candidates;
-    const lastItem = data[data.length - 1];
     const total =
       Number(parentTotal?.[0]?.count ?? 0) +
       Number(standaloneTotal?.[0]?.count ?? 0);
+    const hasMore =
+      offset === null ? candidates.length > limit : offset + limit < total;
+    const data =
+      offset === null
+        ? hasMore
+          ? candidates.slice(0, limit)
+          : candidates
+        : candidates.slice(offset, offset + limit);
+    const lastItem = data[data.length - 1];
+    const page = offset === null ? 1 : Math.floor(offset / limit) + 1;
 
     return {
       data,
       meta: {
         total,
-        page: 1,
+        page,
         limit,
         totalPages: Math.ceil(total / limit),
         nextCursor:
-          hasMore && lastItem
+          offset === null && hasMore && lastItem
             ? CursorPaginationHelper.encodeCursor({
                 id: lastItem.id,
                 createdAt: lastItem.createdAt,

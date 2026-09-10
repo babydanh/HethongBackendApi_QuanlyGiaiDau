@@ -5,15 +5,25 @@ import { join } from 'node:path';
 import { QueryMyManagementTournamentsDto } from './query-my-management-tournaments.dto';
 
 describe('QueryMyManagementTournamentsDto', () => {
-  it('accepts the completed filter and keeps the bounded limit', async () => {
+  it('accepts the completed filter and offset pagination', async () => {
     const dto = plainToInstance(QueryMyManagementTournamentsDto, {
       status: 'COMPLETED',
-      limit: '12',
+      limit: '10',
+      offset: '20',
     });
 
     expect(await validate(dto)).toHaveLength(0);
-    expect(dto.limit).toBe(12);
+    expect(dto.limit).toBe(10);
+    expect(dto.offset).toBe(20);
     expect(dto.status).toBe('COMPLETED');
+  });
+
+  it('rejects a page size above the ten-card contract', async () => {
+    const dto = plainToInstance(QueryMyManagementTournamentsDto, {
+      limit: '11',
+    });
+
+    expect(await validate(dto)).not.toHaveLength(0);
   });
 
   it('rejects unsupported status values', async () => {

@@ -104,7 +104,7 @@ export class TournamentsController {
   @Get('my/management')
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Lấy danh sách card giải đấu của tôi theo cursor',
+    summary: 'Lấy danh sách card giải đấu của tôi theo offset hoặc cursor',
   })
   async findMyManagement(
     @CurrentUser() user: JwtPayload,
