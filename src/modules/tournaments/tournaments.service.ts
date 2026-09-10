@@ -1809,13 +1809,6 @@ export class TournamentsService {
         'Ngày bắt đầu giải phải ở tương lai khi tạo giải nhanh.',
       );
     }
-    const hasVenueName = Boolean(dto.venueName?.trim());
-    const hasLocationAddress = Boolean(dto.locationAddress?.trim());
-    if (hasVenueName !== hasLocationAddress) {
-      throw new BadRequestException(
-        'Nếu nhập địa điểm, cần điền cả tên sân và địa chỉ chi tiết.',
-      );
-    }
     if (dto.ward?.trim() && !dto.province?.trim()) {
       throw new BadRequestException('Phường/xã phải đi kèm tỉnh/thành phố.');
     }
