@@ -4806,8 +4806,9 @@ export class TournamentsRepository {
     userId: string,
     query: QueryMyManagementTournamentsDto,
   ) {
-    const limit = Math.min(Math.max(Number(query.limit ?? 10), 1), 10);
-    const offset = query.offset === undefined ? null : Math.max(Number(query.offset), 0);
+    const limit = Math.min(Math.max(Number(query.limit ?? 9), 1), 9);
+    const offset =
+      query.offset === undefined ? null : Math.max(Number(query.offset), 0);
     const windowSize = offset === null ? limit + 1 : offset + limit + 1;
     const useOffsetPagination = offset !== null;
     const decodedCursor = query.cursor
@@ -4819,9 +4820,11 @@ export class TournamentsRepository {
     const cursorDate = decodedCursor?.createdAt
       ? new Date(decodedCursor.createdAt)
       : null;
-    const hasValidCursor = !useOffsetPagination && Boolean(
-      decodedCursor?.id && cursorDate && !Number.isNaN(cursorDate.getTime()),
-    );
+    const hasValidCursor =
+      !useOffsetPagination &&
+      Boolean(
+        decodedCursor?.id && cursorDate && !Number.isNaN(cursorDate.getTime()),
+      );
     const completedOnly =
       String(query.status ?? '').toUpperCase() === 'COMPLETED';
 
@@ -4965,35 +4968,14 @@ export class TournamentsRepository {
     const parentItems = parentRows.map((parent) => ({
       itemType: 'PARENT' as const,
       ...parent,
+      divisions: [] as unknown[],
     }));
-    const standaloneItems = await Promise.all(
-      standaloneRows.map(async (row) => {
-        const [participantCount] = await this.db
-          .select({ count: count() })
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(schema.tournamentParticipants.tournamentId, row.tournament.id),
-              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
-              ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
-            ),
-          );
-        const pCount = Number(participantCount?.count ?? 0);
-
-        return {
-          itemType: 'STANDALONE' as const,
-          ...row.tournament,
-          category: row.category?.id ? row.category : null,
-          community: row.community?.id ? row.community : null,
-          participantCount: pCount,
-          _count: { participants: pCount },
-          _summary: { participantCount: pCount },
-        };
-      }),
-    );
+    const standaloneItems = standaloneRows.map((row) => ({
+      itemType: 'STANDALONE' as const,
+      ...row.tournament,
+      category: row.category?.id ? row.category : null,
+      community: row.community?.id ? row.community : null,
+    }));
 
     const candidates = [...parentItems, ...standaloneItems].sort((a, b) => {
       const aTime = new Date(a.createdAt).getTime();
@@ -5006,12 +4988,231 @@ export class TournamentsRepository {
       Number(standaloneTotal?.[0]?.count ?? 0);
     const hasMore =
       offset === null ? candidates.length > limit : offset + limit < total;
-    const data =
+    const pageItems =
       offset === null
         ? hasMore
           ? candidates.slice(0, limit)
           : candidates
         : candidates.slice(offset, offset + limit);
+
+    const visibleStandaloneIds = pageItems
+      .filter((item) => item.itemType === 'STANDALONE')
+      .map((item) => item.id);
+    const visibleParentIds = pageItems
+      .filter((item) => item.itemType === 'PARENT')
+      .map((item) => item.id);
+
+    // The organizer card needs a small division preview. Load all visible
+    // previews in batches so the web page does not fan out into one detail or
+    // division request per card.
+    const [
+      parentChildRows,
+      standaloneParticipantCounts,
+      standaloneDivisionRows,
+    ] = await Promise.all([
+      visibleParentIds.length
+        ? this.db
+            .select({
+              tournament: schema.tournaments,
+              category: {
+                id: schema.categories.id,
+                name: schema.categories.name,
+              },
+            })
+            .from(schema.tournaments)
+            .leftJoin(
+              schema.categories,
+              eq(schema.tournaments.categoryId, schema.categories.id),
+            )
+            .where(
+              and(
+                inArray(schema.tournaments.parentId, visibleParentIds),
+                isNull(schema.tournaments.deletedAt),
+                notInArray(schema.tournaments.status, [
+                  'PENDING_APPROVAL',
+                  'SUSPENDED',
+                  'CANCELLED',
+                  'PENDING_DELETE',
+                  'pending_delete',
+                ]),
+              ),
+            )
+            .orderBy(
+              asc(schema.tournaments.createdAt),
+              asc(schema.tournaments.id),
+            )
+        : Promise.resolve([]),
+      visibleStandaloneIds.length
+        ? this.db
+            .select({
+              tournamentId: schema.tournamentParticipants.tournamentId,
+              count: count(),
+            })
+            .from(schema.tournamentParticipants)
+            .where(
+              and(
+                inArray(
+                  schema.tournamentParticipants.tournamentId,
+                  visibleStandaloneIds,
+                ),
+                notInArray(schema.tournamentParticipants.teamStatus, [
+                  'REJECTED',
+                  'WITHDRAWN',
+                  'KICKED',
+                  'EXPIRED',
+                  'CANCELLED',
+                ]),
+              ),
+            )
+            .groupBy(schema.tournamentParticipants.tournamentId)
+        : Promise.resolve([]),
+      visibleStandaloneIds.length
+        ? this.db
+            .select({ division: schema.tournamentDivisions })
+            .from(schema.tournamentDivisions)
+            .where(
+              inArray(
+                schema.tournamentDivisions.tournamentId,
+                visibleStandaloneIds,
+              ),
+            )
+            .orderBy(
+              asc(schema.tournamentDivisions.createdAt),
+              asc(schema.tournamentDivisions.id),
+            )
+        : Promise.resolve([]),
+    ]);
+
+    const parentChildIds = parentChildRows.map((row) => row.tournament.id);
+    const standaloneDivisionIds = standaloneDivisionRows.map(
+      (row) => row.division.id,
+    );
+    const [parentParticipantCounts, divisionParticipantCounts] =
+      await Promise.all([
+        parentChildIds.length
+          ? this.db
+              .select({
+                tournamentId: schema.tournamentParticipants.tournamentId,
+                count: count(),
+              })
+              .from(schema.tournamentParticipants)
+              .where(
+                and(
+                  inArray(
+                    schema.tournamentParticipants.tournamentId,
+                    parentChildIds,
+                  ),
+                  notInArray(schema.tournamentParticipants.teamStatus, [
+                    'REJECTED',
+                    'WITHDRAWN',
+                    'KICKED',
+                  ]),
+                ),
+              )
+              .groupBy(schema.tournamentParticipants.tournamentId)
+          : Promise.resolve([]),
+        standaloneDivisionIds.length
+          ? this.db
+              .select({
+                divisionId: schema.tournamentParticipants.tournamentDivisionId,
+                count: count(),
+              })
+              .from(schema.tournamentParticipants)
+              .where(
+                and(
+                  inArray(
+                    schema.tournamentParticipants.tournamentDivisionId,
+                    standaloneDivisionIds,
+                  ),
+                  notInArray(schema.tournamentParticipants.teamStatus, [
+                    'REJECTED',
+                    'WITHDRAWN',
+                    'KICKED',
+                    'EXPIRED',
+                    'CANCELLED',
+                  ]),
+                ),
+              )
+              .groupBy(schema.tournamentParticipants.tournamentDivisionId)
+          : Promise.resolve([]),
+      ]);
+
+    const countByTournamentId = new Map<string, number>();
+    for (const row of [
+      ...standaloneParticipantCounts,
+      ...parentParticipantCounts,
+    ]) {
+      countByTournamentId.set(row.tournamentId, Number(row.count ?? 0));
+    }
+    const countByDivisionId = new Map<string, number>();
+    for (const row of divisionParticipantCounts) {
+      if (row.divisionId) {
+        countByDivisionId.set(row.divisionId, Number(row.count ?? 0));
+      }
+    }
+
+    const childrenByParentId = new Map<string, typeof parentChildRows>();
+    for (const row of parentChildRows) {
+      const parentId = row.tournament.parentId;
+      if (!parentId) continue;
+      const children = childrenByParentId.get(parentId) ?? [];
+      children.push(row);
+      childrenByParentId.set(parentId, children);
+    }
+    const divisionsByTournamentId = new Map<
+      string,
+      typeof standaloneDivisionRows
+    >();
+    for (const row of standaloneDivisionRows) {
+      const tournamentId = row.division.tournamentId;
+      const divisions = divisionsByTournamentId.get(tournamentId) ?? [];
+      divisions.push(row);
+      divisionsByTournamentId.set(tournamentId, divisions);
+    }
+
+    const data = pageItems.map((item) => {
+      if (item.itemType === 'PARENT') {
+        const divisions = (childrenByParentId.get(item.id) ?? []).map((row) => {
+          const participantCount =
+            countByTournamentId.get(row.tournament.id) ?? 0;
+          return {
+            ...row.tournament,
+            category: row.category?.id ? row.category : null,
+            participantCount,
+            _count: { participants: participantCount },
+            _summary: { participantCount },
+          };
+        });
+        return { ...item, divisions };
+      }
+
+      const participantCount = countByTournamentId.get(item.id) ?? 0;
+      const configuredDivisions = divisionsByTournamentId.get(item.id) ?? [];
+      const divisions = configuredDivisions.map((row) => {
+        const division = row.division;
+        const divisionParticipantCount =
+          countByDivisionId.get(division.id) ?? 0;
+        return {
+          ...division,
+          participantCount: divisionParticipantCount,
+          _count: { participants: divisionParticipantCount, matches: 0 },
+          _summary: { participantCount: divisionParticipantCount },
+        };
+      });
+
+      return {
+        ...item,
+        participantCount,
+        _count: { participants: participantCount },
+        _summary: { participantCount },
+        // A standalone tournament without configured sub-divisions is itself
+        // the card's only division. This preserves the old UI fallback without
+        // a follow-up GET /divisions request.
+        divisions: divisions.length
+          ? divisions
+          : [{ ...item, participantCount, _summary: { participantCount } }],
+      };
+    });
     const lastItem = data[data.length - 1];
     const page = offset === null ? 1 : Math.floor(offset / limit) + 1;
 
