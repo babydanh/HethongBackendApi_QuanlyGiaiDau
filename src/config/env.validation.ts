@@ -20,6 +20,24 @@ export const envValidationSchema = Joi.object({
 
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().default(6379),
+  SMTP_HOST: Joi.string().hostname().default('smtp.larksuite.com'),
+  SMTP_PORT: Joi.number().integer().valid(465, 587).default(465),
+  SMTP_SECURE: Joi.string().valid('true', 'false').default('true'),
+  SMTP_USER: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().email().required(),
+    otherwise: Joi.string().email().allow('').optional().default(''),
+  }),
+  SMTP_PASS: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().min(1).required(),
+    otherwise: Joi.string().allow('').optional().default(''),
+  }),
+  SMTP_FROM: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().min(3).required(),
+    otherwise: Joi.string().allow('').optional().default('"Noreply" <noreply@sporto.asia>'),
+  }),
   FRONTEND_URL: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string()
