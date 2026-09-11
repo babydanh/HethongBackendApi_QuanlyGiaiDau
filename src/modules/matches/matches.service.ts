@@ -2239,7 +2239,7 @@ export class MatchesService {
       courtAddress?: string;
       refereeId?: string;
       scheduledAt?: string;
-      matchConfig?: Record<string, unknown>;
+      matchConfig?: Record<string, unknown> | null;
     },
   ) {
     const existing = await this.matchesRepository.findById(id);

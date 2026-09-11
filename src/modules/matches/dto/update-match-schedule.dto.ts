@@ -49,7 +49,8 @@ export class UpdateMatchScheduleDto {
   scheduledAt?: string;
 
   @ApiPropertyOptional({
-    description: 'Cấu hình ghi đè cho trận đấu cụ thể',
+    description:
+      'Cấu hình ghi đè/patch cho trận đấu cụ thể. Chỉ gửi các trường cần đổi; gửi null để xóa cấu hình ghi đè.',
     example: {
       bestOf: 3,
       pointsPerSet: 21,
@@ -69,5 +70,5 @@ export class UpdateMatchScheduleDto {
     maxPoints?: number;
     durationMinutes?: number;
     estimatedMinutes?: number;
-  };
+  } | null;
 }

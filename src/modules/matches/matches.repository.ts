@@ -29,6 +29,7 @@ import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.h
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { AuditService } from '../audit/audit.service';
+import { mergeMatchConfig } from './utils/merge-match-config';
 import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
@@ -2382,7 +2383,10 @@ export class MatchesRepository {
               : existing.refereeId,
           scheduledAt: effectiveScheduledAt,
           ...(data.matchConfig !== undefined && {
-            matchConfig: data.matchConfig || {},
+            // A schedule update may carry a small config patch (currently the
+            // board sends durationMinutes). Preserve the existing scoring
+            // rules instead of replacing them with the partial payload.
+            matchConfig: mergeMatchConfig(existing.matchConfig, data.matchConfig),
           }),
           updatedAt: new Date(),
           revision: sql`${schema.matches.revision} + 1`,
