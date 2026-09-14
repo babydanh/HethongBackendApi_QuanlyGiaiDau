@@ -169,13 +169,14 @@ export class CommunitiesService {
     if (!community) {
       throw new NotFoundException('Community not found');
     }
-    // Nếu community bị khoá (REJECTED), chỉ ADMIN/MODERATOR mới xem được
-    if (community.status === 'REJECTED') {
-      const isAdmin =
+    // Hồ sơ chưa được duyệt chỉ hiển thị cho chủ hồ sơ hoặc người xét duyệt.
+    if (['PENDING', 'REJECTED'].includes(community.status)) {
+      const isReviewer =
         user?.roles?.includes(UserRole.ADMIN) ||
         user?.roles?.includes(UserRole.MODERATOR);
-      if (!isAdmin) {
-        throw new ForbiddenException('Cộng đồng này đã bị vô hiệu hoá.');
+      const isOwner = user?.id === community.creatorId;
+      if (!isReviewer && !isOwner) {
+        throw new NotFoundException('Community not found');
       }
     }
     return community;
@@ -222,7 +223,9 @@ export class CommunitiesService {
         ? { description: await this.sanitizeDescription(rest.description) }
         : {}),
       creatorId: userId,
-      status: 'ACTIVE',
+      // New clubs must enter moderation before becoming public. Existing
+      // ACTIVE rows are intentionally left untouched by this change.
+      status: 'PENDING',
     };
     const created = await this.communitiesRepository.create(data, lat, lng, categoryIds);
     await this.invalidatePublicListCache();
@@ -235,7 +238,7 @@ export class CommunitiesService {
     dto: UpdateCommunityDto,
     roles: string[],
   ) {
-    const community = await this.findById(id);
+    const community = await this.findById(id, { id: userId, roles });
     await this.checkPermissions(community.id, userId, roles, [
       'OWNER',
       'MODERATOR',
@@ -248,6 +251,47 @@ export class CommunitiesService {
     const updated = await this.communitiesRepository.update(
       id,
       rest,
+      lat,
+      lng,
+      categoryIds,
+    );
+    await this.invalidatePublicListCache();
+    return updated;
+  }
+
+  async resubmit(
+    userId: string,
+    id: string,
+    dto: UpdateCommunityDto,
+    roles: string[],
+  ) {
+    const community = await this.findById(id, { id: userId, roles });
+    await this.checkPermissions(community.id, userId, roles, ['OWNER']);
+    if (community.status !== 'REJECTED') {
+      throw new BadRequestException(
+        'Chỉ câu lạc bộ bị từ chối mới được gửi lại xét duyệt.',
+      );
+    }
+
+    const { lat, lng, categoryIds, ...rest } = dto;
+    if (categoryIds !== undefined && categoryIds.length !== 1) {
+      throw new BadRequestException(
+        'Mỗi câu lạc bộ chỉ được chọn đúng một môn thể thao.',
+      );
+    }
+    if (rest.description !== undefined) {
+      rest.description = await this.sanitizeDescription(rest.description);
+    }
+
+    const updated = await this.communitiesRepository.update(
+      id,
+      {
+        ...rest,
+        status: 'PENDING',
+        rejectedReason: null,
+        approvedBy: null,
+        reviewedAt: null,
+      },
       lat,
       lng,
       categoryIds,

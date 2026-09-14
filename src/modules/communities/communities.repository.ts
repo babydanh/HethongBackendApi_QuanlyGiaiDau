@@ -262,7 +262,7 @@ export class CommunitiesRepository {
       .where(
         and(
           eq(schema.communities.creatorId, userId),
-          eq(schema.communities.status, 'ACTIVE'),
+          inArray(schema.communities.status, ['ACTIVE', 'PENDING', 'REJECTED']),
           isNull(schema.communities.deletedAt),
         ),
       );
@@ -1643,6 +1643,7 @@ export class CommunitiesRepository {
       .where(
         and(
           eq(schema.communities.creatorId, creatorId),
+          inArray(schema.communities.status, ['ACTIVE', 'PENDING']),
           isNull(schema.communities.deletedAt),
         ),
       );

@@ -208,6 +208,22 @@ export class CommunitiesController {
     );
   }
 
+  @Patch(':id/resubmit')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Sửa và gửi lại cộng đồng bị từ chối' })
+  async resubmit(
+    @CurrentUser() user: { id: string; roles: string[] },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateCommunityDto: UpdateCommunityDto,
+  ) {
+    return await this.communitiesService.resubmit(
+      user.id,
+      id,
+      updateCommunityDto,
+      user.roles,
+    );
+  }
+
   @Patch(':id/review')
   @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiBearerAuth()
