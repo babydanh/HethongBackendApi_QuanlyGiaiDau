@@ -791,6 +791,36 @@ export class AdminService {
       '5000',
       'Phí nền tảng cố định cho lệ phí đăng ký dương nhưng thấp hơn ngưỡng của giải mới.',
     );
+    await this.getOrInitConfig(
+      'APP_ANDROID_LATEST_VERSION',
+      '1.0.26',
+      'Phiên bản ứng dụng Android mới nhất phát hành trên Google Play.',
+    );
+    await this.getOrInitConfig(
+      'APP_ANDROID_MINIMUM_VERSION',
+      '1.0.23',
+      'Phiên bản ứng dụng Android tối thiểu bắt buộc người dùng phải cập nhật.',
+    );
+    await this.getOrInitConfig(
+      'APP_ANDROID_STORE_URL',
+      'https://play.google.com/store/apps/details?id=vn.Sporto.quanlygiaidau',
+      'Đường dẫn tải ứng dụng Android trên Google Play Store.',
+    );
+    await this.getOrInitConfig(
+      'APP_IOS_LATEST_VERSION',
+      '1.0.6',
+      'Phiên bản ứng dụng iOS mới nhất phát hành trên Apple App Store.',
+    );
+    await this.getOrInitConfig(
+      'APP_IOS_MINIMUM_VERSION',
+      '1.0.0',
+      'Phiên bản ứng dụng iOS tối thiểu bắt buộc người dùng phải cập nhật.',
+    );
+    await this.getOrInitConfig(
+      'APP_IOS_STORE_URL',
+      'https://apps.apple.com/vn/app/Sporto/id6795829694',
+      'Đường dẫn tải ứng dụng iOS trên Apple App Store.',
+    );
     return this.db.select().from(schema.systemConfigs);
   }
 

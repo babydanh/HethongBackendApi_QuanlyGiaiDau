@@ -88,6 +88,70 @@ export class TournamentsRepository {
     return matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
   }
 
+  private async assertEntryFeeChangeAllowed(
+    tx: AppDbOrTx,
+    tournament: {
+      id: string;
+      status: string;
+      isRegistrationLocked: boolean | null;
+    },
+    currentEntryFee: string | number | null | undefined,
+    nextEntryFee: number | null | undefined,
+  ) {
+    if (nextEntryFee === undefined) return;
+
+    const currentFee = Number(currentEntryFee ?? 0);
+    const nextFee = Number(nextEntryFee ?? 0);
+    if (currentFee === nextFee) return;
+
+    const editableStatuses = new Set([
+      'DRAFT',
+      'PENDING_APPROVAL',
+      'UPCOMING',
+      'REGISTRATION_OPEN',
+    ]);
+    const lockedStatuses = new Set([
+      'REGISTRATION_CLOSED',
+      'IN_PROGRESS',
+      'ONGOING',
+      'COMPLETED',
+      'CANCELLED',
+      'PENDING_DELETE',
+    ]);
+
+    if (
+      tournament.isRegistrationLocked ||
+      lockedStatuses.has(tournament.status) ||
+      !editableStatuses.has(tournament.status)
+    ) {
+      throw new BadRequestException(
+        'Không thể thay đổi lệ phí khi giải đã khóa đăng ký, đang diễn ra hoặc đã kết thúc.',
+      );
+    }
+
+    const [activeParticipantResult] = await tx
+      .select({ value: count() })
+      .from(schema.tournamentParticipants)
+      .where(
+        and(
+          eq(schema.tournamentParticipants.tournamentId, tournament.id),
+          notInArray(schema.tournamentParticipants.teamStatus, [
+            'REJECTED',
+            'WITHDRAWN',
+            'KICKED',
+            'EXPIRED',
+            'CANCELLED',
+          ]),
+        ),
+      );
+
+    if (Number(activeParticipantResult?.value ?? 0) > 0) {
+      throw new BadRequestException(
+        'Không thể thay đổi lệ phí sau khi giải đã có người tham gia.',
+      );
+    }
+  }
+
   private getRequiredFootballMainRosterCount(config: unknown): number {
     const resolved = resolveFootballTeamConfig(config);
     return resolved.isTeamSport ? resolved.mainSize : 1;
@@ -944,7 +1008,23 @@ export class TournamentsRepository {
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, id))
+        .for('update')
         .limit(1);
+
+      if (!oldRecord) {
+        throw new NotFoundException('Giải đấu không tồn tại');
+      }
+
+      await this.assertEntryFeeChangeAllowed(
+        tx,
+        {
+          id: oldRecord.id,
+          status: data.status ?? oldRecord.status,
+          isRegistrationLocked: oldRecord.isRegistrationLocked,
+        },
+        oldRecord.entryFee,
+        data.entryFee,
+      );
 
       const [updated] = await tx
         .update(schema.tournaments)
@@ -8121,6 +8201,7 @@ export class TournamentsRepository {
 
         const [tournamentRecord] = await tx
           .select({
+            id: schema.tournaments.id,
             status: schema.tournaments.status,
             isRegistrationLocked: schema.tournaments.isRegistrationLocked,
             matchType: schema.tournaments.matchType,
@@ -8132,16 +8213,16 @@ export class TournamentsRepository {
           .for('update')
           .limit(1);
 
-        if (
-          dto.entryFee !== undefined &&
-          (!tournamentRecord ||
-            !['DRAFT', 'UPCOMING', 'REGISTRATION_OPEN'].includes(
-              tournamentRecord.status,
-            ) ||
-            tournamentRecord.isRegistrationLocked)
-        ) {
-          throw new BadRequestException(
-            'Chỉ được thay đổi lệ phí khi giải còn nháp hoặc đang trong thời gian đăng ký mở.',
+        if (dto.entryFee !== undefined) {
+          if (!tournamentRecord) {
+            throw new NotFoundException('Giải đấu không tồn tại');
+          }
+
+          await this.assertEntryFeeChangeAllowed(
+            tx,
+            tournamentRecord,
+            oldRecord.entryFee,
+            dto.entryFee,
           );
         }
 

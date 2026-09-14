@@ -2502,7 +2502,6 @@ export class TournamentsService {
       const lockedCoreFields: (keyof UpdateTournamentDto)[] = [
         'matchType',
         'categoryId',
-        'entryFee',
         'platformFeePercentage',
         'isRanked',
       ];
@@ -2544,7 +2543,6 @@ export class TournamentsService {
         'matchType',
         'maxParticipants',
         'categoryId',
-        'entryFee',
         'platformFeePercentage',
         'registrationStartDate',
         'registrationEndDate',
