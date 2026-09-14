@@ -266,12 +266,17 @@ export class CommunitiesService {
     roles: string[],
   ) {
     const community = await this.findById(id, { id: userId, roles });
-    await this.checkPermissions(community.id, userId, roles, ['OWNER']);
+    if (community.creatorId !== userId) {
+      throw new ForbiddenException(
+        'Chỉ chủ sở hữu mới được gửi lại câu lạc bộ bị từ chối.',
+      );
+    }
     if (community.status !== 'REJECTED') {
       throw new BadRequestException(
         'Chỉ câu lạc bộ bị từ chối mới được gửi lại xét duyệt.',
       );
     }
+    await this.checkPermissions(community.id, userId, roles, ['OWNER']);
 
     const { lat, lng, categoryIds, ...rest } = dto;
     if (categoryIds !== undefined && categoryIds.length !== 1) {
