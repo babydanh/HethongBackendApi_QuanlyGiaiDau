@@ -621,7 +621,8 @@ async function createTournament(params: {
     genderRestriction,
     bracketType: bracketType.toUpperCase(),
     status: 'ACTIVE',
-    entryFee,
+    entryFee: Number(entryFee) > 0 ? entryFee : null,
+    entryFeeOverrideEnabled: Number(entryFee) > 0,
   });
 
   const isDoubles = matchType === 'DOUBLES';

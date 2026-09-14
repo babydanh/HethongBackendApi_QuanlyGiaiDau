@@ -141,7 +141,8 @@ async function createTournament(params: {
     matchType: 'SINGLES',
     bracketType,
     status: 'ACTIVE',
-    entryFee: '0',
+    entryFee: null,
+    entryFeeOverrideEnabled: false,
   });
 
   // Create teams

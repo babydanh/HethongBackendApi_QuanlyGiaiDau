@@ -8,6 +8,7 @@ import {
   boolean,
   jsonb,
   text,
+  check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tournaments } from './tournaments.schema';
@@ -24,8 +25,11 @@ export const tournamentDivisions = pgTable(
     matchType: varchar('match_type', { length: 50 }).notNull(),
     genderRestriction: varchar('gender_restriction', { length: 20 }),
     maxParticipants: integer('max_participants'),
-    entryFee: numeric('entry_fee', { precision: 12, scale: 2 })
-      .default('0')
+    // NULL means "inherit the tournament fee". A zero value is a deliberate
+    // per-division free override and is therefore kept distinct from NULL.
+    entryFee: numeric('entry_fee', { precision: 12, scale: 2 }),
+    entryFeeOverrideEnabled: boolean('entry_fee_override_enabled')
+      .default(false)
       .notNull(),
     isConfigOverride: boolean('is_config_override').default(false).notNull(),
     venueId: uuid('venue_id').references(() => tournamentVenues.id, {
@@ -45,4 +49,10 @@ export const tournamentDivisions = pgTable(
       .defaultNow()
       .notNull(),
   },
+  (table) => ({
+    entryFeeOverrideConsistent: check(
+      'entry_fee_override_consistent',
+      sql`(${table.entryFeeOverrideEnabled} = false AND ${table.entryFee} IS NULL) OR (${table.entryFeeOverrideEnabled} = true AND ${table.entryFee} IS NOT NULL AND ${table.entryFee} >= 0)`,
+    ),
+  }),
 );

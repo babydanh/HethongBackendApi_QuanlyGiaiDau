@@ -142,7 +142,8 @@ async function createTournament(params: {
     matchType: matchType,
     bracketType: bracketType,
     status: 'ACTIVE',
-    entryFee: '0',
+    entryFee: null,
+    entryFeeOverrideEnabled: false,
     roundConfig: groupConfig ? groupConfig : undefined,
   });
 

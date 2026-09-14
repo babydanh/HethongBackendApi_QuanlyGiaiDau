@@ -56,11 +56,20 @@ export class CreateDivisionDto {
   @Min(1)
   maxParticipants?: number;
 
-  @ApiPropertyOptional({ example: 150000, minimum: 0 })
+  @ApiPropertyOptional({ example: 150000, minimum: 0, nullable: true })
   @IsNumber()
   @IsOptional()
   @Min(0)
-  entryFee?: number;
+  entryFee?: number | null;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'TRUE nếu nội dung dùng lệ phí riêng; FALSE hoặc bỏ qua để dùng phí chung của giải',
+  })
+  @IsBoolean()
+  @IsOptional()
+  entryFeeOverrideEnabled?: boolean;
 
   @ApiPropertyOptional({ example: false, description: 'TRUE nếu division dùng cấu hình riêng' })
   @IsBoolean()

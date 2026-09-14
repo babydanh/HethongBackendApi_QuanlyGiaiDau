@@ -605,6 +605,32 @@ export class TournamentsService {
     }
   }
 
+  private resolveDivisionEntryFeeMutation(dto: {
+    entryFee?: number | null;
+    entryFeeOverrideEnabled?: boolean;
+  }) {
+    const hasMutation =
+      dto.entryFeeOverrideEnabled !== undefined ||
+      dto.entryFee !== undefined;
+    if (!hasMutation) {
+      return { hasMutation: false, enabled: false, fee: null } as const;
+    }
+
+    const enabled =
+      dto.entryFeeOverrideEnabled ??
+      (dto.entryFee !== undefined &&
+        dto.entryFee !== null &&
+        dto.entryFee > 0);
+    const fee = enabled ? dto.entryFee : null;
+    if (enabled && fee == null) {
+      throw new BadRequestException(
+        'Vui lòng nhập lệ phí riêng hoặc tắt tùy chọn lệ phí riêng.',
+      );
+    }
+
+    return { hasMutation: true, enabled, fee } as const;
+  }
+
   private async cleanupTournamentImages(tournament: {
     galleryImages?: string[] | null;
     bannerUrl?: string | null;
@@ -1166,15 +1192,6 @@ export class TournamentsService {
       }
     } else {
       // PUBLIC tournament
-      if (
-        createTournamentDto.entryFee &&
-        createTournamentDto.entryFee > 0 &&
-        createTournamentDto.entryFee < 100000
-      ) {
-        throw new BadRequestException(
-          'Minimum entry fee for paid public tournaments is 100,000đ',
-        );
-      }
       // Public tournaments, including child tournaments, still require organizer-level permission.
       if (!isSystemAuthorized) {
         throw new ForbiddenException(
@@ -1981,7 +1998,8 @@ export class TournamentsService {
               | GenderRestriction
               | undefined,
             maxParticipants: divInfo.maxParticipants ?? maxTeams,
-            entryFee: 0,
+            entryFee: null,
+            entryFeeOverrideEnabled: false,
             bracketType: (divInfo.bracketType ??
               finalBracketType) as DivisionBracketType,
             startDate: divInfo.startDate
@@ -2643,17 +2661,6 @@ export class TournamentsService {
     ) {
       throw new BadRequestException(
         'Giải đấu của câu lạc bộ phải luôn miễn phí',
-      );
-    }
-
-    if (
-      updateTournamentDto.entryFee &&
-      existing.tournamentType === 'PUBLIC' &&
-      updateTournamentDto.entryFee > 0 &&
-      updateTournamentDto.entryFee < 100000
-    ) {
-      throw new BadRequestException(
-        'Minimum entry fee for paid public tournaments is 100,000đ',
       );
     }
 
@@ -5793,12 +5800,12 @@ export class TournamentsService {
             participant.tournamentDivisionId,
           )
         : null;
-      const entryFeeAmount = Number(
-        participant.entryFeeAtRegistration ??
-          division?.entryFee ??
-          tournament.entryFee ??
-          '0',
-      );
+      const entryFeeAmount =
+        participant.entryFeeAtRegistration != null
+          ? Number(participant.entryFeeAtRegistration)
+          : division?.entryFeeOverrideEnabled === true && division.entryFee != null
+            ? Number(division.entryFee)
+            : Number(tournament.entryFee ?? 0);
 
       if (entryFeeAmount > 0 && !participant.isPaid) {
         throw new BadRequestException(
@@ -6669,9 +6676,16 @@ export class TournamentsService {
         );
       }
 
-      const divisionEntryFee =
-        createDivisionDto.entryFee ??
-        (tournament.entryFee ? Number(tournament.entryFee) : 0);
+      // Fee semantics are explicit at the division boundary:
+      // - unchecked/omitted => inherit the tournament fee (persist NULL)
+      // - checked => persist the supplied amount, including 0 for free
+      // Positive legacy payloads without the new flag remain overrides for
+      // backwards compatibility; legacy 0 was the old inherit default.
+      const feeMutation = this.resolveDivisionEntryFeeMutation(
+        createDivisionDto,
+      );
+      const entryFeeOverrideEnabled = feeMutation.enabled;
+      const divisionEntryFee = feeMutation.fee;
       await this.assertEntryFeeAllowed(divisionEntryFee);
 
       const category = await this.tournamentsRepository.findCategory(
@@ -6741,6 +6755,7 @@ export class TournamentsService {
             tournament.maxParticipants ??
             undefined,
           entryFee: divisionEntryFee,
+          entryFeeOverrideEnabled,
           isConfigOverride: createDivisionDto.isConfigOverride,
           venueId: createDivisionDto.venueId,
           bracketType: createDivisionDto.bracketType,
@@ -6823,7 +6838,12 @@ export class TournamentsService {
       );
     }
 
-    await this.assertEntryFeeAllowed(updateDivisionDto.entryFee);
+    const feeMutation = this.resolveDivisionEntryFeeMutation(
+      updateDivisionDto,
+    );
+    if (feeMutation.hasMutation) {
+      await this.assertEntryFeeAllowed(feeMutation.fee);
+    }
 
     const category = await this.tournamentsRepository.findCategory(
       tournament.categoryId,
@@ -6927,7 +6947,12 @@ export class TournamentsService {
       );
     }
 
-    await this.assertEntryFeeAllowed(updateDivisionDto.entryFee);
+    const feeMutation = this.resolveDivisionEntryFeeMutation(
+      updateDivisionDto,
+    );
+    if (feeMutation.hasMutation) {
+      await this.assertEntryFeeAllowed(feeMutation.fee);
+    }
 
     const currentDivision =
       await this.tournamentsRepository.findDivisionById(divisionId);

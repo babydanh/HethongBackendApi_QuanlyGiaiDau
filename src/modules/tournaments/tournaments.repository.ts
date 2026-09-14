@@ -97,12 +97,18 @@ export class TournamentsRepository {
     },
     currentEntryFee: string | number | null | undefined,
     nextEntryFee: number | null | undefined,
+    currentOverrideEnabled?: boolean | null,
+    nextOverrideEnabled?: boolean | null,
   ) {
-    if (nextEntryFee === undefined) return;
+    if (nextEntryFee === undefined && nextOverrideEnabled === undefined) {
+      return;
+    }
 
-    const currentFee = Number(currentEntryFee ?? 0);
-    const nextFee = Number(nextEntryFee ?? 0);
-    if (currentFee === nextFee) return;
+    const currentEnabled = currentOverrideEnabled ?? currentEntryFee != null;
+    const nextEnabled = nextOverrideEnabled ?? nextEntryFee != null;
+    const currentFee = currentEnabled ? Number(currentEntryFee ?? 0) : 0;
+    const nextFee = nextEnabled ? Number(nextEntryFee ?? 0) : 0;
+    if (currentEnabled === nextEnabled && currentFee === nextFee) return;
 
     const editableStatuses = new Set([
       'DRAFT',
@@ -202,17 +208,32 @@ export class TournamentsRepository {
 
   private async resolveDivisionEntryFee(
     tx: Transaction | AppDbOrTx,
-    tournament: { entryFee: string | null },
+    tournament: { id?: string; entryFee: string | null },
     divisionId?: string | null,
   ) {
     if (divisionId) {
       const [division] = await tx
-        .select({ entryFee: schema.tournamentDivisions.entryFee })
+        .select({
+          entryFee: schema.tournamentDivisions.entryFee,
+          entryFeeOverrideEnabled:
+            schema.tournamentDivisions.entryFeeOverrideEnabled,
+        })
         .from(schema.tournamentDivisions)
-        .where(eq(schema.tournamentDivisions.id, divisionId))
+        .where(
+          tournament.id
+            ? and(
+                eq(schema.tournamentDivisions.id, divisionId),
+                eq(schema.tournamentDivisions.tournamentId, tournament.id),
+              )
+            : eq(schema.tournamentDivisions.id, divisionId),
+        )
         .limit(1);
 
-      if (division?.entryFee !== undefined && division.entryFee !== null) {
+      if (
+        division?.entryFeeOverrideEnabled === true &&
+        division.entryFee !== undefined &&
+        division.entryFee !== null
+      ) {
         return parseFloat(division.entryFee);
       }
     }
@@ -536,6 +557,10 @@ export class TournamentsRepository {
           status: string;
           categoryId: string;
           maxParticipants: number | null;
+          entryFee: string | null;
+          entryFeeOverride: string | null;
+          entryFeeOverrideEnabled: boolean;
+          effectiveEntryFee: string | null;
           inviteCode: string | null;
           _count: { participants: number };
         };
@@ -547,6 +572,9 @@ export class TournamentsRepository {
             genderRestriction: schema.tournamentDivisions.genderRestriction,
             status: schema.tournamentDivisions.status,
             maxParticipants: schema.tournamentDivisions.maxParticipants,
+            entryFee: schema.tournamentDivisions.entryFee,
+            entryFeeOverrideEnabled:
+              schema.tournamentDivisions.entryFeeOverrideEnabled,
           })
           .from(schema.tournamentDivisions)
           .where(
@@ -571,6 +599,15 @@ export class TournamentsRepository {
             const division = {
               ...d,
               categoryId: row.tournament.categoryId,
+              entryFee: d.entryFeeOverrideEnabled
+                ? d.entryFee
+                : row.tournament.entryFee,
+              entryFeeOverride: d.entryFeeOverrideEnabled
+                ? d.entryFee
+                : null,
+              effectiveEntryFee: d.entryFeeOverrideEnabled
+                ? d.entryFee
+                : row.tournament.entryFee,
               _count: {
                 participants: dCount.count,
               },
@@ -801,6 +838,10 @@ export class TournamentsRepository {
       status: string;
       categoryId: string;
       maxParticipants: number | null;
+      entryFee: string | null;
+      entryFeeOverride: string | null;
+      entryFeeOverrideEnabled: boolean;
+      effectiveEntryFee: string | null;
       inviteCode: string | null;
       _count?: {
         participants: number;
@@ -825,6 +866,9 @@ export class TournamentsRepository {
         genderRestriction: schema.tournamentDivisions.genderRestriction,
         status: schema.tournamentDivisions.status,
         maxParticipants: schema.tournamentDivisions.maxParticipants,
+        entryFee: schema.tournamentDivisions.entryFee,
+        entryFeeOverrideEnabled:
+          schema.tournamentDivisions.entryFeeOverrideEnabled,
       })
       .from(schema.tournamentDivisions)
       .where(eq(schema.tournamentDivisions.tournamentId, id));
@@ -856,6 +900,15 @@ export class TournamentsRepository {
         const divisionWithCounts = {
           ...division,
           categoryId: row.tournament.categoryId,
+          entryFee: division.entryFeeOverrideEnabled
+            ? division.entryFee
+            : row.tournament.entryFee,
+          entryFeeOverride: division.entryFeeOverrideEnabled
+            ? division.entryFee
+            : null,
+          effectiveEntryFee: division.entryFeeOverrideEnabled
+            ? division.entryFee
+            : row.tournament.entryFee,
           _count: {
             participants: participantCountByDivision.count,
             matches: matchCountByDivision.count,
@@ -2040,8 +2093,10 @@ export class TournamentsRepository {
         unknown
       >;
       const isTeamSport = resolveFootballTeamConfig(tConfigForTeam).isTeamSport;
-      const payableEntryFeeAmount = parseFloat(
-        selectedDivision?.entryFee ?? tournament.entryFee ?? '0',
+      const payableEntryFeeAmount = await this.resolveDivisionEntryFee(
+        tx,
+        tournament,
+        selectedDivision?.id,
       );
 
       const registrationDeadlines = [
@@ -3109,9 +3164,11 @@ export class TournamentsRepository {
         participant.entryFeeAtRegistration !== null &&
         participant.entryFeeAtRegistration !== undefined
           ? Number(participant.entryFeeAtRegistration)
-          : division?.entryFee
-            ? parseFloat(division.entryFee)
-            : parseFloat(tournament.entryFee || '0');
+          : await this.resolveDivisionEntryFee(
+              tx,
+              tournament,
+              participant.tournamentDivisionId,
+            );
       const isPaid = entryFeeAmount === 0;
 
       const tCfg = (tournament.tournamentConfig || {}) as Record<
@@ -3553,11 +3610,20 @@ export class TournamentsRepository {
     let divisionMatchType: string | null = null;
     if (!hasRegistrationFeeSnapshot) {
       const [tournamentFeeRow] = await this.db
-        .select({ entryFee: schema.tournaments.entryFee })
+        .select({
+          id: schema.tournaments.id,
+          entryFee: schema.tournaments.entryFee,
+        })
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
-      payableEntryFeeAmount = Number(tournamentFeeRow?.entryFee ?? 0);
+      payableEntryFeeAmount = tournamentFeeRow
+        ? await this.resolveDivisionEntryFee(
+            this.db,
+            tournamentFeeRow,
+            participant.tournamentDivisionId,
+          )
+        : 0;
       if (participant.tournamentDivisionId) {
         const [divisionFeeRow] = await this.db
           .select({
@@ -3570,9 +3636,8 @@ export class TournamentsRepository {
           )
           .limit(1);
         divisionMatchType = divisionFeeRow?.matchType ?? null;
-        payableEntryFeeAmount = Number(
-          divisionFeeRow?.entryFee ?? payableEntryFeeAmount,
-        );
+        // Keep the division lookup for match type, while the fee resolver
+        // above applies the explicit override/inherit semantics.
       }
     } else if (participant.tournamentDivisionId) {
       const [divisionRow] = await this.db
@@ -7796,6 +7861,7 @@ export class TournamentsRepository {
     if (nextWaitlisted) {
       const [tournament] = await tx
         .select({
+          id: schema.tournaments.id,
           matchType: schema.tournaments.matchType,
           entryFee: schema.tournaments.entryFee,
           tournamentConfig: schema.tournaments.tournamentConfig,
@@ -7830,7 +7896,7 @@ export class TournamentsRepository {
           ? Number(nextWaitlisted.entryFeeAtRegistration)
           : await this.resolveDivisionEntryFee(
               tx,
-              { entryFee: tournament?.entryFee ?? null },
+              tournament ?? { entryFee: null },
               nextWaitlisted.tournamentDivisionId,
             );
 
@@ -8040,6 +8106,13 @@ export class TournamentsRepository {
   // Division-related methods
   async getDivisionsByTournament(tournamentId: string) {
     try {
+      const [tournament] = await this.db
+        .select({ entryFee: schema.tournaments.entryFee })
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1);
+      const tournamentEntryFee = tournament?.entryFee ?? '0';
+
       const divisions = await this.db
         .select()
         .from(schema.tournamentDivisions)
@@ -8067,6 +8140,17 @@ export class TournamentsRepository {
 
           return {
             ...division,
+            // API consumers receive the effective fee. The nullable raw fee
+            // remains available as entryFeeOverride for organizer controls.
+            entryFee: division.entryFeeOverrideEnabled
+              ? division.entryFee
+              : tournamentEntryFee,
+            entryFeeOverride: division.entryFeeOverrideEnabled
+              ? division.entryFee
+              : null,
+            effectiveEntryFee: division.entryFeeOverrideEnabled
+              ? division.entryFee
+              : tournamentEntryFee,
             _count: {
               participants: participantCountByDivision.count,
             },
@@ -8139,7 +8223,12 @@ export class TournamentsRepository {
               matchType: division.matchType,
               genderRestriction: division.genderRestriction || null,
               maxParticipants: division.maxParticipants || null,
-              entryFee: (division.entryFee ?? 0).toString(),
+              entryFee:
+                division.entryFee != null
+                  ? division.entryFee.toString()
+                  : null,
+              entryFeeOverrideEnabled:
+                division.entryFeeOverrideEnabled ?? false,
               isConfigOverride: division.isConfigOverride ?? false,
               venueId: division.venueId ?? null,
               bracketType: division.bracketType ?? null,
@@ -8213,16 +8302,38 @@ export class TournamentsRepository {
           .for('update')
           .limit(1);
 
-        if (dto.entryFee !== undefined) {
+        const hasEntryFeeMutation =
+          dto.entryFeeOverrideEnabled !== undefined ||
+          dto.entryFee !== undefined;
+        const nextEntryFeeOverrideEnabled = hasEntryFeeMutation
+          ? dto.entryFeeOverrideEnabled ??
+            (dto.entryFee !== undefined &&
+              dto.entryFee !== null &&
+              dto.entryFee > 0)
+          : undefined;
+        const nextEntryFee = hasEntryFeeMutation
+          ? nextEntryFeeOverrideEnabled
+            ? dto.entryFee
+            : null
+          : undefined;
+
+        if (hasEntryFeeMutation) {
           if (!tournamentRecord) {
             throw new NotFoundException('Giải đấu không tồn tại');
+          }
+          if (nextEntryFeeOverrideEnabled && nextEntryFee == null) {
+            throw new BadRequestException(
+              'Vui lòng nhập lệ phí riêng hoặc tắt tùy chọn lệ phí riêng.',
+            );
           }
 
           await this.assertEntryFeeChangeAllowed(
             tx,
             tournamentRecord,
             oldRecord.entryFee,
-            dto.entryFee,
+            nextEntryFee,
+            oldRecord.entryFeeOverrideEnabled,
+            nextEntryFeeOverrideEnabled,
           );
         }
 
@@ -8252,8 +8363,9 @@ export class TournamentsRepository {
             ...(dto.maxParticipants !== undefined && {
               maxParticipants: dto.maxParticipants,
             }),
-            ...(dto.entryFee !== undefined && {
-              entryFee: dto.entryFee != null ? dto.entryFee.toString() : '0',
+            ...(hasEntryFeeMutation && {
+              entryFee: nextEntryFee != null ? nextEntryFee.toString() : null,
+              entryFeeOverrideEnabled: nextEntryFeeOverrideEnabled,
             }),
             ...(dto.status && { status: dto.status }),
             ...(dto.isConfigOverride !== undefined && {

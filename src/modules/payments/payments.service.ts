@@ -629,7 +629,11 @@ export class PaymentsService {
       let amount = hasRegistrationFeeSnapshot
         ? Number(participant.entryFeeAtRegistration)
         : Number(tournament.entryFee);
-      if (!hasRegistrationFeeSnapshot && division) {
+      if (
+        !hasRegistrationFeeSnapshot &&
+        division?.entryFeeOverrideEnabled === true &&
+        division.entryFee != null
+      ) {
         amount = Number(division.entryFee);
       }
       // isPaid=true from a paid registration is only trusted together with the

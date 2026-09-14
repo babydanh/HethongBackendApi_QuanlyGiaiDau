@@ -45,6 +45,15 @@ export class UpdateDivisionDto {
   @Min(0)
   entryFee?: number | null;
 
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'TRUE để dùng lệ phí riêng của nội dung; FALSE để quay về phí chung của giải',
+  })
+  @IsBoolean()
+  @IsOptional()
+  entryFeeOverrideEnabled?: boolean;
+
   @ApiPropertyOptional({ example: 'ACTIVE' })
   @IsString()
   @IsOptional()

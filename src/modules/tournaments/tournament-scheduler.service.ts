@@ -335,6 +335,7 @@ export class TournamentSchedulerService {
                 genderRestriction: division.genderRestriction,
                 maxParticipants: division.maxParticipants,
                 entryFee: division.entryFee,
+                entryFeeOverrideEnabled: division.entryFeeOverrideEnabled,
                 isConfigOverride: division.isConfigOverride,
                 venueId: division.venueId,
                 bracketType: division.bracketType,

@@ -57,8 +57,11 @@ export class CommunitiesService {
 
   // --- COMMUNITIES ---
 
-  async findAll(query: QueryCommunityDto) {
-    const cacheKey = `communities:list:${JSON.stringify(query)}`;
+  async findAll(query: QueryCommunityDto, viewerId?: string) {
+    // The public list is viewer-aware: never share an ordered response between
+    // two viewers because ownership/membership changes the first page.
+    const viewerScope = viewerId ?? 'anonymous';
+    const cacheKey = `communities:list:${viewerScope}:${JSON.stringify(query)}`;
     try {
       const cached = await this.redisService?.get(cacheKey);
       if (cached) return JSON.parse(cached);
@@ -66,7 +69,7 @@ export class CommunitiesService {
       this.logger.debug(`Community list cache read skipped: ${String(error)}`);
     }
 
-    const result = await this.communitiesRepository.findAll(query);
+    const result = await this.communitiesRepository.findAll(query, viewerId);
     try {
       await this.redisService?.set(cacheKey, JSON.stringify(result), 30);
     } catch (error) {

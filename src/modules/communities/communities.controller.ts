@@ -54,13 +54,17 @@ export class CommunitiesController {
   // --- COMMUNITIES ---
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách các cộng đồng' })
   @ApiResponse({ status: 200, description: 'Danh sách cộng đồng' })
-  async findAll(@Query() query: QueryCommunityDto) {
+  async findAll(
+    @Query() query: QueryCommunityDto,
+    @CurrentUser() user?: { id?: string; sub?: string; roles?: string[] },
+  ) {
     // Public endpoint: luôn chỉ trả ACTIVE, bỏ qua status client gửi để tránh lộ PENDING
     query.status = 'ACTIVE';
-    return await this.communitiesService.findAll(query);
+    return await this.communitiesService.findAll(query, user?.sub ?? user?.id);
   }
 
   @Get('my')

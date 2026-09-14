@@ -91,6 +91,7 @@ async function main() {
       matchType: 'MIXED_DOUBLES',
       genderRestriction: 'MIXED',
       entryFee: '150000.00',
+      entryFeeOverrideEnabled: true,
       maxParticipants: 16,
       registrationEndDate: regEnd,
     });
@@ -127,6 +128,7 @@ async function main() {
       matchType: 'SINGLES',
       genderRestriction: 'MALE',
       entryFee: '200000.00',
+      entryFeeOverrideEnabled: true,
       maxParticipants: 32,
       registrationEndDate: regEnd,
     });
@@ -166,6 +168,7 @@ async function main() {
       matchType: 'SINGLES',
       genderRestriction: 'MALE',
       entryFee: '150000.00',
+      entryFeeOverrideEnabled: true,
       maxParticipants: 16,
       registrationEndDate: regEnd,
     });
@@ -202,6 +205,7 @@ async function main() {
       matchType: 'MIXED_DOUBLES',
       genderRestriction: 'MIXED',
       entryFee: '200000.00',
+      entryFeeOverrideEnabled: true,
       maxParticipants: 32,
       registrationEndDate: regEnd,
     });

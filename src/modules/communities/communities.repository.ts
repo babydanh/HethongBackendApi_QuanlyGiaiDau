@@ -9,6 +9,7 @@ import {
   isNull,
   count,
   desc,
+  asc,
   lt,
   or,
   inArray,
@@ -48,8 +49,9 @@ export class CommunitiesRepository {
 
   // --- COMMUNITIES ---
 
-  async findAll(query: QueryCommunityDto) {
+  async findAll(query: QueryCommunityDto, viewerId?: string) {
     const conditions: SQL[] = [isNull(schema.communities.deletedAt)];
+    const viewerScope = viewerId ?? 'anonymous';
 
     if (query.status) {
       conditions.push(eq(schema.communities.status, query.status));
@@ -97,18 +99,61 @@ export class CommunitiesRepository {
 
     const baseWhereClause =
       conditions.length > 0 ? and(...conditions) : undefined;
-    const decodedCursor = query.cursor
-      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(
-          query.cursor,
-        )
+    // Keep the priority in the cursor because priority is part of the sort
+    // order. Without it, moving from an owner page to a joined/other page can
+    // skip or repeat communities.
+    const viewerPriority = viewerId
+      ? sql<number>`CASE
+          WHEN ${schema.communities.creatorId} = ${viewerId} THEN 0
+          WHEN EXISTS (
+            SELECT 1
+            FROM ${schema.communityMembers}
+            WHERE ${schema.communityMembers.communityId} = ${schema.communities.id}
+              AND ${schema.communityMembers.userId} = ${viewerId}
+              AND ${schema.communityMembers.status} = 'JOINED'
+          ) THEN 1
+          ELSE 2
+        END`
+      : sql<number>`2`;
+    const decodedCursorRaw = query.cursor
+      ? CursorPaginationHelper.decodeCursor<{
+          id: string;
+          createdAt: string;
+          priority?: number;
+          scope?: string;
+        }>(query.cursor)
       : null;
+    // Do not continue a cursor created for another viewer (or before the
+    // viewer-aware order existed); restart from page one for that request.
+    const decodedCursor =
+      decodedCursorRaw &&
+      (decodedCursorRaw.scope
+        ? decodedCursorRaw.scope === viewerScope
+        : viewerScope === 'anonymous')
+        ? decodedCursorRaw
+        : null;
     if (decodedCursor) {
+      const cursorPriority = Number.isInteger(decodedCursor.priority)
+        ? Math.max(0, Math.min(2, decodedCursor.priority as number))
+        : 2;
       conditions.push(
         or(
-          lt(schema.communities.createdAt, new Date(decodedCursor.createdAt)),
+          sql`${viewerPriority} > ${cursorPriority}`,
           and(
-            eq(schema.communities.createdAt, new Date(decodedCursor.createdAt)),
-            lt(schema.communities.id, decodedCursor.id),
+            sql`${viewerPriority} = ${cursorPriority}`,
+            or(
+              lt(
+                schema.communities.createdAt,
+                new Date(decodedCursor.createdAt),
+              ),
+              and(
+                eq(
+                  schema.communities.createdAt,
+                  new Date(decodedCursor.createdAt),
+                ),
+                lt(schema.communities.id, decodedCursor.id),
+              ),
+            ),
           ),
         ) as SQL,
       );
@@ -121,21 +166,24 @@ export class CommunitiesRepository {
       .where(baseWhereClause);
 
     let dbQuery = this.db
-      .select()
+      .select({ community: schema.communities, viewerPriority })
       .from(schema.communities)
       .where(whereClause)
       .$dynamic();
 
     const limit = query.limit ?? 10;
     dbQuery = dbQuery
-      .orderBy(desc(schema.communities.createdAt), desc(schema.communities.id))
+      .orderBy(
+        asc(viewerPriority),
+        desc(schema.communities.createdAt),
+        desc(schema.communities.id),
+      )
       .limit(limit + 1);
 
     const rawCommunities = await dbQuery;
     const hasMore = rawCommunities.length > limit;
-    const communitiesList = hasMore
-      ? rawCommunities.slice(0, limit)
-      : rawCommunities;
+    const pageRows = hasMore ? rawCommunities.slice(0, limit) : rawCommunities;
+    const communitiesList = pageRows.map((row) => row.community);
 
     if (communitiesList.length === 0) {
       return {
@@ -227,6 +275,9 @@ export class CommunitiesRepository {
       },
     }));
     const lastCommunity = communitiesList[communitiesList.length - 1];
+    const lastPriority = Number(
+      pageRows[pageRows.length - 1].viewerPriority,
+    );
     return {
       data,
       meta: {
@@ -238,6 +289,8 @@ export class CommunitiesRepository {
           ? CursorPaginationHelper.encodeCursor({
               id: lastCommunity.id,
               createdAt: lastCommunity.createdAt,
+              priority: Number.isInteger(lastPriority) ? lastPriority : 2,
+              scope: viewerScope,
             })
           : null,
         hasMore,
