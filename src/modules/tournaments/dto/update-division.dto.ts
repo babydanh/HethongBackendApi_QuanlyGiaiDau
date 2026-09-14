@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
@@ -38,9 +39,15 @@ export class UpdateDivisionDto {
   @Min(1)
   maxParticipants?: number | null;
 
-  @ApiPropertyOptional({ example: 150000, minimum: 0, nullable: true })
+  @ApiPropertyOptional({
+    example: 20000,
+    minimum: 0,
+    nullable: true,
+    description: 'Phí riêng bằng VND; mọi số nguyên không âm đều hợp lệ, không có mức tối thiểu',
+  })
   @Type(() => Number)
   @IsNumber()
+  @IsInt()
   @IsOptional()
   @Min(0)
   entryFee?: number | null;

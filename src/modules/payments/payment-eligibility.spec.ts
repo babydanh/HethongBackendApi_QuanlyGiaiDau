@@ -1,11 +1,14 @@
 import { PaymentsService } from './payments.service';
 import { PaymentPurpose } from './dto/create-payment.dto';
 
-const makeService = (participant: Record<string, unknown>) => {
+const makeService = (
+  participant: Record<string, unknown>,
+  division: Record<string, unknown> | null = null,
+) => {
   const repository = {
     findParticipantById: jest.fn().mockResolvedValue(participant),
     findCompletedParticipantPayment: jest.fn().mockResolvedValue(null),
-    findDivisionById: jest.fn().mockResolvedValue(null),
+    findDivisionById: jest.fn().mockResolvedValue(division),
     getConfigValue: jest.fn().mockResolvedValue('0'),
     countParticipantPlayers: jest.fn().mockResolvedValue(1),
     countParticipantMainPlayers: jest.fn().mockResolvedValue(1),
@@ -144,6 +147,33 @@ describe('registration payment eligibility', () => {
         { ...tournament, entryFee: '200000' } as never,
       ),
     ).resolves.toMatchObject({ amount: 200000 });
+  });
+
+  it('uses an explicit division fee override for a new registration', async () => {
+    const service = makeService(
+      {
+        id: 'participant-1',
+        tournamentId: 'tournament-1',
+        registeredBy: 'user-1',
+        isPaid: false,
+        teamStatus: 'COMPLETE',
+        tournamentDivisionId: 'division-1',
+      },
+      {
+        id: 'division-1',
+        tournamentId: 'tournament-1',
+        entryFee: '20000',
+        entryFeeOverrideEnabled: true,
+      },
+    );
+
+    await expect(
+      service.calculatePayment(
+        'user-1',
+        paymentData as never,
+        { ...tournament, entryFee: '100000' } as never,
+      ),
+    ).resolves.toMatchObject({ amount: 20000 });
   });
 
   it('rejects a participant with a completed payment even when isPaid is stale false', async () => {

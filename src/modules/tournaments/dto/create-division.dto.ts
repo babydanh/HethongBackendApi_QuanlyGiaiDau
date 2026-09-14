@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsObject,
@@ -56,8 +57,14 @@ export class CreateDivisionDto {
   @Min(1)
   maxParticipants?: number;
 
-  @ApiPropertyOptional({ example: 150000, minimum: 0, nullable: true })
+  @ApiPropertyOptional({
+    example: 20000,
+    minimum: 0,
+    nullable: true,
+    description: 'Phí riêng bằng VND; mọi số nguyên không âm đều hợp lệ, không có mức tối thiểu',
+  })
   @IsNumber()
+  @IsInt()
   @IsOptional()
   @Min(0)
   entryFee?: number | null;

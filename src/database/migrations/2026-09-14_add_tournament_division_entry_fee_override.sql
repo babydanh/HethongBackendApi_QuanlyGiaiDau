@@ -4,6 +4,14 @@ ALTER TABLE "tournament_divisions"
   ADD COLUMN IF NOT EXISTS "entry_fee_override_enabled" boolean DEFAULT false NOT NULL;
 --> statement-breakpoint
 
+ALTER TABLE "tournament_divisions"
+  ALTER COLUMN "entry_fee" DROP DEFAULT;
+--> statement-breakpoint
+
+ALTER TABLE "tournament_divisions"
+  ALTER COLUMN "entry_fee" DROP NOT NULL;
+--> statement-breakpoint
+
 -- Legacy division rows stored the tournament/default fee in entry_fee. Keep
 -- positive legacy values as explicit overrides and convert legacy zero values
 -- to the new inherit representation.
@@ -17,14 +25,6 @@ SET
     WHEN "entry_fee" IS NULL OR "entry_fee" = 0 THEN NULL
     ELSE "entry_fee"
   END;
---> statement-breakpoint
-
-ALTER TABLE "tournament_divisions"
-  ALTER COLUMN "entry_fee" DROP DEFAULT;
---> statement-breakpoint
-
-ALTER TABLE "tournament_divisions"
-  ALTER COLUMN "entry_fee" DROP NOT NULL;
 --> statement-breakpoint
 
 DO $$

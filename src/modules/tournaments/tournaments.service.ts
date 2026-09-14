@@ -593,8 +593,16 @@ export class TournamentsService {
   }
 
   private async assertEntryFeeAllowed(entryFee: number | null | undefined) {
-    if (!entryFee || entryFee <= 0) {
+    if (entryFee === null || entryFee === undefined || entryFee === 0) {
       return;
+    }
+
+    // PUBLIC tournaments may use any valid non-negative VND integer. The
+    // 100,000 VND value belongs to platform-fee calculation, not this guard.
+    if (!Number.isSafeInteger(entryFee) || entryFee < 0) {
+      throw new BadRequestException(
+        'Lệ phí tham gia phải là số nguyên VND không âm.',
+      );
     }
 
     const feesConfig = await this.tournamentsRepository.getFeesConfig();

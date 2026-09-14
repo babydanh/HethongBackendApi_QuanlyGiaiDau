@@ -10,6 +10,7 @@ import {
   Max,
   IsObject,
   IsIn,
+  IsInt,
   IsArray,
   IsBoolean,
 } from 'class-validator';
@@ -147,8 +148,12 @@ export class CreateTournamentDto {
   @IsObject()
   tournamentConfig: Record<string, unknown>;
 
-  @ApiPropertyOptional({ example: 500000, description: 'Phí tham gia' })
+  @ApiPropertyOptional({
+    example: 20000,
+    description: 'Phí tham gia bằng VND; mọi số nguyên không âm đều hợp lệ, không có mức tối thiểu',
+  })
   @IsNumber()
+  @IsInt()
   @IsOptional()
   @Min(0)
   entryFee?: number;
