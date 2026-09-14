@@ -87,6 +87,7 @@ import {
   assertValidFootballTeamConfig,
   resolveFootballTeamConfig,
 } from './utils/football-team-config';
+import { selectTopTournamentStandings } from './utils/tournament-results';
 import { LiveScoreGateway } from '../matches/live-score.gateway';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { VenuesService } from '../venues/venues.service';
@@ -7364,17 +7365,13 @@ export class TournamentsService {
         }
       }
     } else if (standingRows.length) {
-      const groups = new Map<string, typeof standingRows>();
-      for (const row of standingRows)
-        groups.set(row.groupId, [...(groups.get(row.groupId) ?? []), row]);
-      for (const rows of groups.values())
-        rows.slice(0, 3).forEach((row, index) =>
-          awards.push({
-            rank: index + 1,
-            shared: false,
-            participant: participant(row.participantId, row.teamName),
-          }),
-        );
+      selectTopTournamentStandings(standingRows).forEach((row, index) =>
+        awards.push({
+          rank: index + 1,
+          shared: false,
+          participant: participant(row.participantId, row.teamName),
+        }),
+      );
     }
 
     return {
