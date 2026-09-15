@@ -222,7 +222,7 @@ Hướng dẫn người dùng điền:
   - Phong trào: không tính ELO.
 - **Hiển thị:**
   - Công khai: có thể xuất hiện trong danh sách tìm kiếm.
-  - Không niêm yết: chủ yếu truy cập bằng link/mã mời.
+  - Riêng tư: chủ yếu truy cập bằng link/mã mời.
 - **Chế độ nhận đăng ký:** Tự do, Xét duyệt hoặc Chỉ mã mời.
 - **Ràng buộc ELO:** chỉ bật khi giải có xếp hạng và cần giới hạn trình độ.
 - **Mô tả:** nêu đối tượng, quy mô, thể thức và lưu ý quan trọng.
@@ -379,7 +379,7 @@ Nếu còn Bản nháp:
 
 #### Cấu hình nhận đăng ký
 
-- Hiển thị: Công khai hoặc Không niêm yết.
+- Hiển thị: Công khai hoặc Riêng tư.
 - Chế độ: Tự do, Xét duyệt hoặc Chỉ mã mời.
 - Thời gian mở/đóng.
 - Ràng buộc ELO theo division.
@@ -643,7 +643,7 @@ ELO chỉ được cập nhật cho giải/trận đủ điều kiện; không t
 - Đăng nhập.
 - Hoàn thiện họ tên, số điện thoại, giới tính.
 - Giải đang mở đăng ký.
-- Có mã mời nếu giải không niêm yết/chỉ mã mời.
+- Có mã mời nếu giải riêng tư/chỉ mã mời.
 - Giới tính và ELO phù hợp division.
 
 ### 10.2. Đăng ký đơn

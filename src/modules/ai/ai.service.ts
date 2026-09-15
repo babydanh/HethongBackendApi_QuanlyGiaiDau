@@ -260,7 +260,7 @@ ${userContext || '--- AUTHENTICATED_USER_CONTEXT ---\n- Người dùng chưa đ�
             `- Loại giải: ${tournament.tournamentType === 'CLUB' ? 'Giải nội bộ CLB' : 'Giải công khai'}`,
             `- Thể loại chính: ${tournament.matchType === 'SINGLES' ? 'Đánh đơn' : tournament.matchType === 'DOUBLES' ? 'Đánh đôi' : 'Đôi nam nữ'}`,
             tournament.isRanked === false ? `- Tính điểm: Giải phong trào (Không ELO)` : `- Tính điểm: Có xếp hạng (Tính ELO)`,
-            `- Hiển thị: ${tournament.visibility === 'PUBLIC' ? 'Công khai' : 'Không niêm yết'}`,
+            `- Hiển thị: ${tournament.visibility === 'PUBLIC' ? 'Công khai' : 'Riêng tư'}`,
             `- Số đội tối đa: ${tournament.maxParticipants || 'Không giới hạn'}`,
             `- Lệ phí: ${Number(tournament.entryFee || 0) > 0 ? Number(tournament.entryFee).toLocaleString('vi-VN') + 'đ' : 'Miễn phí'}`,
             tournament.registrationStartDate ? `- Mở đăng ký: ${new Date(tournament.registrationStartDate).toLocaleDateString('vi-VN')}` : '',
