@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, lte, gt, ne, isNull, sql } from 'drizzle-orm';
+import { eq, and, lte, ne, isNull, sql } from 'drizzle-orm';
 import {
   evaluateTournamentCleanup,
   TOURNAMENT_CLEANUP_GRACE_DAYS,
@@ -91,29 +91,10 @@ export class TournamentSchedulerService {
     this.logger.log('Running auto-open registration cron job...');
     try {
       const now = new Date();
-      // Repair records created by older flows that opened registration
-      // immediately even though their configured opening time was later.
-      // The configured window is authoritative for every creation path.
-      const prematurelyOpenTournaments = await this.db
-        .select()
-        .from(schema.tournaments)
-        .where(
-          and(
-            eq(schema.tournaments.status, 'REGISTRATION_OPEN'),
-            gt(schema.tournaments.registrationStartDate, now),
-          ),
-        );
-
-      for (const tournament of prematurelyOpenTournaments) {
-        await this.db
-          .update(schema.tournaments)
-          .set({ status: 'UPCOMING', updatedAt: now })
-          .where(eq(schema.tournaments.id, tournament.id));
-        this.logger.warn(
-          `Tournament ${tournament.id} was open before its registration start; moved back to UPCOMING.`,
-        );
-      }
-
+      // REGISTRATION_OPEN is an explicit organizer decision. Never downgrade
+      // it because a stale/future registrationStartDate is still stored: the
+      // "open now" action intentionally overrides that date. New scheduled
+      // tournaments are created as UPCOMING and are handled below.
       const openingTournaments = await this.db
         .select()
         .from(schema.tournaments)

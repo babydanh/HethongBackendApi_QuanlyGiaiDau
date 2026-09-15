@@ -66,6 +66,7 @@ import { validateFootballRosterSelection } from './utils/football-roster-validat
 import { assertFootballRosterLockable } from './utils/football-roster-lock';
 import { resolveFootballTeamConfig } from './utils/football-team-config';
 import { isRegistrationRosterCompleteForPayment } from './utils/registration-payment-eligibility';
+import { isRegistrationOpenStatus } from './utils/registration-lifecycle';
 
 @Injectable()
 export class TournamentsRepository {
@@ -1482,12 +1483,13 @@ export class TournamentsRepository {
       .returning();
   }
 
-  async reopenRegistration(id: string) {
+  async reopenRegistration(id: string, registrationStartDate?: Date) {
     const [updated] = await this.db
       .update(schema.tournaments)
       .set({
         status: 'REGISTRATION_OPEN',
         isRegistrationLocked: false,
+        ...(registrationStartDate ? { registrationStartDate } : {}),
         updatedAt: new Date(),
       })
       .where(eq(schema.tournaments.id, id))
@@ -1572,22 +1574,18 @@ export class TournamentsRepository {
         }
       }
 
-      // 2. Kiểm tra trạng thái - chỉ mở đăng ký khi REGISTRATION_OPEN hoặc UPCOMING (DRAFT không cho đăng ký dù có mã mời)
+      // The lifecycle status is the registration gate. UPCOMING is scheduled,
+      // not open; the organizer action moves it to REGISTRATION_OPEN.
       if (
-        tournament.status !== 'REGISTRATION_OPEN' &&
-        tournament.status !== 'UPCOMING'
+        !isRegistrationOpenStatus(tournament.status) ||
+        tournament.isRegistrationLocked
       ) {
         throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký.');
       }
 
-      // 3. Kiểm tra thời hạn đăng ký
+      // 3. Kiểm tra thời hạn đăng ký; the status gate above has already
+      // rejected UPCOMING, so the configured start date cannot override it.
       const now = new Date();
-      if (
-        tournament.registrationStartDate &&
-        now < tournament.registrationStartDate
-      ) {
-        throw new BadRequestException('Thời gian đăng ký chưa bắt đầu.');
-      }
       if (
         tournament.registrationEndDate &&
         now > tournament.registrationEndDate

@@ -41,6 +41,10 @@ import {
 } from '../notifications/notification-builder';
 import { RedisService } from '../../providers/redis/redis.service';
 import { resolveEffectiveSportRules } from '../tournaments/utils/sport-rules/resolve-effective-sport-rules';
+import {
+  isSuperLiteTournamentProduct,
+  normalizeTournamentProductConfig,
+} from '../tournaments/utils/tournament-product';
 import { validateSportRuleConfig } from '../tournaments/utils/sport-rules/validate-sport-rules-config';
 import { validateScoreDetails } from './utils/score-validation/validate-score-details';
 import { aggregateFootballTwoLegs } from './utils/football-two-leg-aggregate';
@@ -214,22 +218,10 @@ export class MatchesService {
     match: Awaited<ReturnType<MatchesRepository['findById']>>,
   ) {
     if (!match) return false;
-    const rawConfig = match.tournament?.tournamentConfig;
-    const config = (
-      typeof rawConfig === 'string'
-        ? (() => {
-            try {
-              return JSON.parse(rawConfig);
-            } catch {
-              return {};
-            }
-          })()
-        : rawConfig ?? {}
-    ) as Record<string, unknown>;
-    const isSuperLite =
-      config?.isLite === true ||
-      (String(config?.mode || '').toUpperCase() === 'LITE' &&
-        config?.hideAdvancedSettings === true);
+    const config = normalizeTournamentProductConfig(
+      match.tournament?.tournamentConfig,
+    );
+    const isSuperLite = isSuperLiteTournamentProduct(config);
     const stageType = String(match.stage?.type || '').toUpperCase();
     if (!isSuperLite || stageType === 'ROUND_ROBIN') return false;
 
@@ -1333,11 +1325,10 @@ export class MatchesService {
       user.sub,
     );
     const canAccessSuperLiteMatch = isLiteTournament
-      ? await this.matchesRepository.canAccessLiveMatch(
-          id,
-          user.sub,
-          [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
-        )
+      ? await this.matchesRepository.canAccessLiveMatch(id, user.sub, [
+          ...(user.roles ?? []),
+          ...(user.role ? [user.role] : []),
+        ])
       : false;
     // Super Lite deliberately exposes the shared score board to any
     // authenticated user who can access the match. Management, bracket and
@@ -1741,11 +1732,10 @@ export class MatchesService {
       user.sub,
     );
     const canAccessSuperLiteMatch = isLiteTournament
-      ? await this.matchesRepository.canAccessLiveMatch(
-          id,
-          user.sub,
-          [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
-        )
+      ? await this.matchesRepository.canAccessLiveMatch(id, user.sub, [
+          ...(user.roles ?? []),
+          ...(user.role ? [user.role] : []),
+        ])
       : false;
     // Super Lite deliberately exposes the shared score board to any
     // authenticated user who can access the match. Management, bracket and

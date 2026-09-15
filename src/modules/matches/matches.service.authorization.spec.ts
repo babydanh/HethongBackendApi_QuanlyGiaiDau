@@ -129,7 +129,11 @@ describe('MatchesService object-level football authority', () => {
       status: 'SCHEDULED',
       tournament: {
         ...baseMatch.tournament,
-        tournamentConfig: { isLite: true, mode: 'LITE' },
+        tournamentConfig: {
+          isLite: true,
+          mode: 'LITE',
+          hideAdvancedSettings: true,
+        },
       },
     });
     repository.updateStatus.mockResolvedValue({
@@ -152,7 +156,11 @@ describe('MatchesService object-level football authority', () => {
       ...baseMatch,
       tournament: {
         ...baseMatch.tournament,
-        tournamentConfig: { isLite: true, mode: 'LITE' },
+        tournamentConfig: {
+          isLite: true,
+          mode: 'LITE',
+          hideAdvancedSettings: true,
+        },
       },
     });
     await expect(
@@ -170,7 +178,11 @@ describe('MatchesService object-level football authority', () => {
       ...baseMatch,
       tournament: {
         ...baseMatch.tournament,
-        tournamentConfig: { isLite: true, mode: 'LITE' },
+        tournamentConfig: {
+          isLite: true,
+          mode: 'LITE',
+          hideAdvancedSettings: true,
+        },
       },
     });
 
@@ -190,7 +202,11 @@ describe('MatchesService object-level football authority', () => {
       tournament: {
         ...baseMatch.tournament,
         visibility: 'PRIVATE',
-        tournamentConfig: { isLite: true, mode: 'LITE' },
+        tournamentConfig: {
+          isLite: true,
+          mode: 'LITE',
+          hideAdvancedSettings: true,
+        },
       },
     });
     repository.canAccessLiveMatch.mockResolvedValue(false);

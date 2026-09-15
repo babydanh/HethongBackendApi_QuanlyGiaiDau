@@ -81,7 +81,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         bracketBranch: 'MAIN',
         tournament: {
           ...existingMatch.tournament,
-          tournamentConfig: { isLite: true, mode: 'LITE' },
+          tournamentConfig: {
+            isLite: true,
+            mode: 'LITE',
+            hideAdvancedSettings: true,
+          },
         },
       };
       mockRepo.completeMatch = jest
@@ -110,7 +114,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         bracketBranch: 'THIRD_PLACE',
         tournament: {
           ...existingMatch.tournament,
-          tournamentConfig: { isLite: true, mode: 'LITE' },
+          tournamentConfig: {
+            isLite: true,
+            mode: 'LITE',
+            hideAdvancedSettings: true,
+          },
         },
       };
       mockRepo.completeMatch = jest
@@ -133,7 +141,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         bracketBranch: 'PLAYOFF',
         tournament: {
           ...existingMatch.tournament,
-          tournamentConfig: { isLite: true, mode: 'LITE' },
+          tournamentConfig: {
+            isLite: true,
+            mode: 'LITE',
+            hideAdvancedSettings: true,
+          },
         },
       };
       mockRepo.completeMatch = jest
@@ -284,7 +296,11 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         p2SetsWon: 0,
         tournament: {
           ...existingMatch.tournament,
-          tournamentConfig: { isLite: true, mode: 'LITE' },
+          tournamentConfig: {
+            isLite: true,
+            mode: 'LITE',
+            hideAdvancedSettings: true,
+          },
         },
       };
       mockRepo.findById = jest.fn().mockResolvedValue(liteMatch);
@@ -360,6 +376,33 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
 
       expect(mockRepo.updateScore).toHaveBeenCalled();
       expect(mockRepo.completeMatch).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-complete configured Lite/Quick from its terminal final', async () => {
+      const configuredLiteFinal = {
+        ...existingMatch,
+        bracketBranch: 'MAIN',
+        tournament: {
+          ...existingMatch.tournament,
+          tournamentConfig: {
+            isLite: true,
+            mode: 'LITE',
+            hideAdvancedSettings: false,
+          },
+        },
+      };
+      mockRepo.completeMatch = jest
+        .fn()
+        .mockResolvedValue({ ...configuredLiteFinal, status: 'COMPLETED' });
+
+      await service['finalizeCompletedMatch'](
+        configuredLiteFinal as never,
+        'match-1',
+        'p1',
+        'referee-1',
+      );
+
+      expect(mockRepo.updateTournamentStatus).not.toHaveBeenCalled();
     });
 
     it('rejects a football score update without the canonical football payload', async () => {

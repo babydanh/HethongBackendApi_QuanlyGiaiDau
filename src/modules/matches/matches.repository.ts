@@ -230,16 +230,12 @@ export class MatchesRepository {
     const take = limit + 1; // Fetch 1 extra to determine hasMore
     const tId = query.tournamentId || query.tournament_id;
     const divisionId = query.divisionId || query.division_id;
-    const requestedStatuses = status
-      ?.split(',')
-      .map((value: string) => value.trim().toUpperCase())
-      .filter(Boolean) ?? [];
-    const liveStatuses = new Set([
-      'ONGOING',
-      'IN_PROGRESS',
-      'LIVE',
-      'PLAYING',
-    ]);
+    const requestedStatuses =
+      status
+        ?.split(',')
+        .map((value: string) => value.trim().toUpperCase())
+        .filter(Boolean) ?? [];
+    const liveStatuses = new Set(['ONGOING', 'IN_PROGRESS', 'LIVE', 'PLAYING']);
     // An empty status filter is also allowed to return live rows (for example
     // the public all-matches feed), so it must use the same stale-live guard.
     const liveStatusRequested =
@@ -308,9 +304,18 @@ export class MatchesRepository {
             select 1 from ${schema.tournaments} t
             where t.id = ${schema.matches.tournamentId}
             and t.deleted_at is null
-            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
-              and not (t.tournament_config @> '{"isLite": true}'::jsonb
-                or t.tournament_config @> '{"mode": "LITE"}'::jsonb)` : sql``}
+            ${
+              publicOnly
+                ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
+              and not (
+                (
+                  coalesce((t.tournament_config->>'isLite')::boolean, false) = true
+                  or coalesce(t.tournament_config->>'mode', '') = 'LITE'
+                )
+                and coalesce((t.tournament_config->>'hideAdvancedSettings')::boolean, false) = true
+              )`
+                : sql``
+            }
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
           or exists (
@@ -319,9 +324,18 @@ export class MatchesRepository {
             join ${schema.tournaments} t on s.tournament_id = t.id
             where g.id = ${schema.matches.groupId}
             and t.deleted_at is null
-            ${publicOnly ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
-              and not (t.tournament_config @> '{"isLite": true}'::jsonb
-                or t.tournament_config @> '{"mode": "LITE"}'::jsonb)` : sql``}
+            ${
+              publicOnly
+                ? sql`and (t.visibility = 'PUBLIC' or t.visibility is null)
+              and not (
+                (
+                  coalesce((t.tournament_config->>'isLite')::boolean, false) = true
+                  or coalesce(t.tournament_config->>'mode', '') = 'LITE'
+                )
+                and coalesce((t.tournament_config->>'hideAdvancedSettings')::boolean, false) = true
+              )`
+                : sql``
+            }
             and t.status not in ('DRAFT', 'PENDING_APPROVAL', 'SUSPENDED', 'CANCELLED', 'PENDING_DELETE', 'pending_delete')
           )
         )`,
@@ -2196,7 +2210,9 @@ export class MatchesRepository {
         const divisionVenues = await tx
           .select({ venueId: schema.tournamentDivisions.venueId })
           .from(schema.tournamentDivisions)
-          .where(eq(schema.tournamentDivisions.tournamentId, existing.tournamentId));
+          .where(
+            eq(schema.tournamentDivisions.tournamentId, existing.tournamentId),
+          );
 
         const venueIds = [
           tournament?.venueId,
@@ -2262,9 +2278,11 @@ export class MatchesRepository {
       if (effectiveScheduledAt) {
         const scheduledDate = effectiveScheduledAt;
         const currentDurationMin =
-          (data.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
-          ?? (existing.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
-          ?? 30;
+          ((data.matchConfig as Record<string, unknown> | undefined)
+            ?.durationMinutes as number | undefined) ??
+          ((existing.matchConfig as Record<string, unknown> | undefined)
+            ?.durationMinutes as number | undefined) ??
+          30;
         const currentDurationMs = Math.max(15, currentDurationMin) * 60 * 1000;
         const currentStartMs = scheduledDate.getTime();
         const currentEndMs = currentStartMs + currentDurationMs;
@@ -2302,9 +2320,10 @@ export class MatchesRepository {
             if (!m.scheduledAt) return false;
             const otherStartMs = new Date(m.scheduledAt).getTime();
             const otherDurationMin =
-              (m.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
-              ?? 30;
-            const otherEndMs = otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
+              ((m.matchConfig as Record<string, unknown> | undefined)
+                ?.durationMinutes as number | undefined) ?? 30;
+            const otherEndMs =
+              otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
             return currentStartMs < otherEndMs && currentEndMs > otherStartMs;
           });
 
@@ -2350,9 +2369,10 @@ export class MatchesRepository {
             if (!m.scheduledAt) return false;
             const otherStartMs = new Date(m.scheduledAt).getTime();
             const otherDurationMin =
-              (m.matchConfig as Record<string, unknown> | undefined)?.durationMinutes as number | undefined
-              ?? 30;
-            const otherEndMs = otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
+              ((m.matchConfig as Record<string, unknown> | undefined)
+                ?.durationMinutes as number | undefined) ?? 30;
+            const otherEndMs =
+              otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
             return currentStartMs < otherEndMs && currentEndMs > otherStartMs;
           });
 
@@ -2386,7 +2406,10 @@ export class MatchesRepository {
             // A schedule update may carry a small config patch (currently the
             // board sends durationMinutes). Preserve the existing scoring
             // rules instead of replacing them with the partial payload.
-            matchConfig: mergeMatchConfig(existing.matchConfig, data.matchConfig),
+            matchConfig: mergeMatchConfig(
+              existing.matchConfig,
+              data.matchConfig,
+            ),
           }),
           updatedAt: new Date(),
           revision: sql`${schema.matches.revision} + 1`,

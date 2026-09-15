@@ -44,9 +44,10 @@ describe('Tournament security hardening — structural contracts', () => {
   });
 
   it('requires authentication for comments and limits public cheers', () => {
-    expect(matchesControllerSource).toContain("@UseGuards(new RateLimitGuard(10, 60_000))\n  @Post(':id/comments')");
-    expect(matchesControllerSource).not.toContain("@Public()\n  @SkipThrottle()\n  @Post(':id/comments')");
-    expect(matchesControllerSource).toContain("@UseGuards(new RateLimitGuard(20, 60_000))\n  @Post(':id/cheer')");
+    const normalizedControllerSource = matchesControllerSource.replace(/\s+/g, ' ');
+    expect(normalizedControllerSource).toContain("@UseGuards(new RateLimitGuard(10, 60_000)) @Post(':id/comments')");
+    expect(normalizedControllerSource).not.toContain("@Public() @SkipThrottle() @Post(':id/comments')");
+    expect(normalizedControllerSource).toContain("@UseGuards(new RateLimitGuard(20, 60_000)) @Post(':id/cheer')");
     expect(matchesServiceSource).toContain("throw new UnauthorizedException('Bạn cần đăng nhập để bình luận')");
   });
 

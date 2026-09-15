@@ -45,6 +45,15 @@ import { UpdateDivisionDto } from './dto/update-division.dto';
 import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
 import { resolveEffectiveSportRules } from './utils/sport-rules/resolve-effective-sport-rules';
 import {
+  isSuperLiteTournamentProduct,
+  normalizeTournamentProductConfig,
+} from './utils/tournament-product';
+import {
+  canOpenRegistrationImmediately,
+  isRegistrationDeadlineExpired,
+  isRegistrationOpenStatus,
+} from './utils/registration-lifecycle';
+import {
   inferAllowedSportRuleKinds,
   inferExpectedSportRuleKind,
   validateSportRuleConfig,
@@ -619,17 +628,14 @@ export class TournamentsService {
     entryFeeOverrideEnabled?: boolean;
   }) {
     const hasMutation =
-      dto.entryFeeOverrideEnabled !== undefined ||
-      dto.entryFee !== undefined;
+      dto.entryFeeOverrideEnabled !== undefined || dto.entryFee !== undefined;
     if (!hasMutation) {
       return { hasMutation: false, enabled: false, fee: null } as const;
     }
 
     const enabled =
       dto.entryFeeOverrideEnabled ??
-      (dto.entryFee !== undefined &&
-        dto.entryFee !== null &&
-        dto.entryFee > 0);
+      (dto.entryFee !== undefined && dto.entryFee !== null && dto.entryFee > 0);
     const fee = enabled ? dto.entryFee : null;
     if (enabled && fee == null) {
       throw new BadRequestException(
@@ -802,21 +808,13 @@ export class TournamentsService {
           return false;
         }
         // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
-        const cfg = (
-          typeof t.tournamentConfig === 'string'
-            ? (() => {
-                try {
-                  return JSON.parse(t.tournamentConfig);
-                } catch {
-                  return {};
-                }
-              })()
-            : t.tournamentConfig
-        ) as Record<string, unknown> | null | undefined;
-        const isClubLite = Boolean(
-          t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'),
+        const isClubSuperLite = Boolean(
+          t.communityId &&
+          isSuperLiteTournamentProduct(
+            normalizeTournamentProductConfig(t.tournamentConfig),
+          ),
         );
-        if (isClubLite) {
+        if (isClubSuperLite) {
           return false;
         }
         return true;
@@ -861,21 +859,13 @@ export class TournamentsService {
           return false;
         }
         // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
-        const cfg = (
-          typeof t.tournamentConfig === 'string'
-            ? (() => {
-                try {
-                  return JSON.parse(t.tournamentConfig);
-                } catch {
-                  return {};
-                }
-              })()
-            : t.tournamentConfig
-        ) as Record<string, unknown> | null | undefined;
-        const isClubLite = Boolean(
-          t.communityId && (cfg?.isLite || cfg?.mode === 'LITE'),
+        const isClubSuperLite = Boolean(
+          t.communityId &&
+          isSuperLiteTournamentProduct(
+            normalizeTournamentProductConfig(t.tournamentConfig),
+          ),
         );
-        if (isClubLite) {
+        if (isClubSuperLite) {
           return false;
         }
         return true;
@@ -901,9 +891,7 @@ export class TournamentsService {
     return {
       ...result,
       data: result.data.map((item) =>
-        item.itemType === 'STANDALONE'
-          ? this.mapTournamentFormat(item)
-          : item,
+        item.itemType === 'STANDALONE' ? this.mapTournamentFormat(item) : item,
       ),
     };
   }
@@ -2239,6 +2227,7 @@ export class TournamentsService {
     // Registration date check
     const now = new Date();
     if (
+      tournament.status !== 'REGISTRATION_OPEN' &&
       tournament.registrationStartDate &&
       now < tournament.registrationStartDate
     ) {
@@ -2336,14 +2325,8 @@ export class TournamentsService {
     if (tournament.status !== 'REGISTRATION_OPEN')
       throw new BadRequestException('Giải không đang mở đăng ký');
 
-    // Registration date check
+    // Registration date check: status is the authoritative access gate.
     const now = new Date();
-    if (
-      tournament.registrationStartDate &&
-      now < tournament.registrationStartDate
-    ) {
-      throw new BadRequestException('Thời gian đăng ký chưa bắt đầu.');
-    }
     if (
       tournament.registrationEndDate &&
       now > tournament.registrationEndDate
@@ -3958,6 +3941,7 @@ export class TournamentsService {
     tournament: {
       status?: string | null;
       inviteCode?: string | null;
+      registrationStartDate?: Date | string | null;
       registrationEndDate?: Date | string | null;
       isRegistrationLocked?: boolean | null;
     },
@@ -3969,12 +3953,16 @@ export class TournamentsService {
     const status = tournament.status || '';
     const allowDraft = options?.allowDraft === true;
 
-    if (
-      status !== 'REGISTRATION_OPEN' &&
-      status !== 'UPCOMING' &&
-      !allowDraft
-    ) {
+    if (!isRegistrationOpenStatus(status) && !(allowDraft && status === 'DRAFT')) {
       throw new BadRequestException('Giải đấu chưa hoặc đã đóng đăng ký');
+    }
+
+    if (
+      !isRegistrationOpenStatus(status) &&
+      tournament.registrationStartDate &&
+      new Date() < new Date(tournament.registrationStartDate)
+    ) {
+      throw new BadRequestException('Thời gian đăng ký chưa bắt đầu');
     }
 
     if (
@@ -4835,14 +4823,22 @@ export class TournamentsService {
       throw new ForbiddenException('Bạn không có quyền mở lại đăng ký');
     }
 
-    if (tournament.status !== 'REGISTRATION_CLOSED') {
+    if (
+      !canOpenRegistrationImmediately(tournament.status)
+    ) {
       throw new BadRequestException(
-        'Chỉ có thể mở lại đăng ký từ trạng thái Đã khóa đăng ký.',
+        'Chỉ có thể mở đăng ký ngay từ trạng thái Sắp diễn ra hoặc Đã khóa đăng ký.',
       );
     }
-    if (tournament.startDate && new Date(tournament.startDate) <= new Date()) {
+    const now = new Date();
+    if (tournament.startDate && new Date(tournament.startDate) <= now) {
       throw new BadRequestException(
         'Không thể mở lại đăng ký sau thời điểm giải bắt đầu.',
+      );
+    }
+    if (isRegistrationDeadlineExpired(tournament.registrationEndDate, now)) {
+      throw new BadRequestException(
+        'Hạn đăng ký đã kết thúc. Hãy cập nhật hạn đăng ký trước khi mở lại.',
       );
     }
 
@@ -4853,7 +4849,10 @@ export class TournamentsService {
       );
     }
 
-    const updated = await this.tournamentsRepository.reopenRegistration(id);
+    const updated = await this.tournamentsRepository.reopenRegistration(
+      id,
+      now,
+    );
     if (!updated) {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
@@ -5812,7 +5811,8 @@ export class TournamentsService {
       const entryFeeAmount =
         participant.entryFeeAtRegistration != null
           ? Number(participant.entryFeeAtRegistration)
-          : division?.entryFeeOverrideEnabled === true && division.entryFee != null
+          : division?.entryFeeOverrideEnabled === true &&
+              division.entryFee != null
             ? Number(division.entryFee)
             : Number(tournament.entryFee ?? 0);
 
@@ -6690,9 +6690,8 @@ export class TournamentsService {
       // - checked => persist the supplied amount, including 0 for free
       // Positive legacy payloads without the new flag remain overrides for
       // backwards compatibility; legacy 0 was the old inherit default.
-      const feeMutation = this.resolveDivisionEntryFeeMutation(
-        createDivisionDto,
-      );
+      const feeMutation =
+        this.resolveDivisionEntryFeeMutation(createDivisionDto);
       const entryFeeOverrideEnabled = feeMutation.enabled;
       const divisionEntryFee = feeMutation.fee;
       await this.assertEntryFeeAllowed(divisionEntryFee);
@@ -6847,9 +6846,7 @@ export class TournamentsService {
       );
     }
 
-    const feeMutation = this.resolveDivisionEntryFeeMutation(
-      updateDivisionDto,
-    );
+    const feeMutation = this.resolveDivisionEntryFeeMutation(updateDivisionDto);
     if (feeMutation.hasMutation) {
       await this.assertEntryFeeAllowed(feeMutation.fee);
     }
@@ -6956,9 +6953,7 @@ export class TournamentsService {
       );
     }
 
-    const feeMutation = this.resolveDivisionEntryFeeMutation(
-      updateDivisionDto,
-    );
+    const feeMutation = this.resolveDivisionEntryFeeMutation(updateDivisionDto);
     if (feeMutation.hasMutation) {
       await this.assertEntryFeeAllowed(feeMutation.fee);
     }

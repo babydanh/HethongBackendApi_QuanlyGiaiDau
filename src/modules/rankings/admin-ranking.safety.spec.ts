@@ -13,7 +13,7 @@ describe('admin Elo safety guardrails', () => {
   const controllerSource = readFileSync(
     join(__dirname, 'rankings.controller.ts'),
     'utf8',
-  );
+  ).replace(/\r\n/g, '\n');
   const repositorySource = readFileSync(
     join(__dirname, 'rankings.repository.ts'),
     'utf8',
