@@ -3801,7 +3801,10 @@ export class TournamentsService {
           knownGenderCount++;
         }
       }
+      // Chỉ kiểm tra đủ 1 Nam + 1 Nữ khi cả 2 người trong cặp đã được xác định (knownUsers.length >= 2).
+      // Khi leader khởi tạo đội và mời đồng đội sau (knownUsers chỉ có 1 người), không chặn ở bước này!
       if (
+        knownUsers.length >= 2 &&
         knownGenderCount === knownUsers.length &&
         (male === 0 || female === 0)
       ) {

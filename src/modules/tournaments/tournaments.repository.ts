@@ -4203,10 +4203,15 @@ export class TournamentsRepository {
       false,
       false,
     );
-    // Public roster must contain only approved/active registrations. Pending
-    // approval and pending partner records are workflow state, not members.
+    // Public roster contains approved/active registrations and active pending registrations (e.g. pending partner/approval)
+    // so that the public capacity count matches the listed entries.
     return participants
-      .filter((p) => p.teamStatus === 'COMPLETE')
+      .filter(
+        (p) =>
+          p.teamStatus === 'COMPLETE' ||
+          p.teamStatus === 'PENDING_PARTNER' ||
+          p.teamStatus === 'PENDING_APPROVAL',
+      )
       .map((p) => ({
         ...p,
         customResponses: null,
@@ -4224,11 +4229,14 @@ export class TournamentsRepository {
           userId: m.userId,
           fullName: m.fullName,
           avatarUrl: m.avatarUrl,
+          role: m.role,
           teamRole: m.teamRole,
           isTemporary: m.isTemporary,
           confirmedAt: m.confirmedAt,
           invitationToken: m.invitationToken,
           createdAt: m.createdAt,
+          isMock: m.isMock,
+          elo: m.elo,
         })),
       }));
   }
