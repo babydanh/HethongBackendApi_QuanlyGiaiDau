@@ -107,10 +107,7 @@ export class RankingsRepository {
       }
       if (genderRestriction) {
         conditions.push(
-          or(
-            eq(schema.pairRanks.genderRestriction, genderRestriction),
-            isNull(schema.pairRanks.genderRestriction),
-          ) as SQL,
+          eq(schema.pairRanks.genderRestriction, genderRestriction),
         );
       }
       if (communityId && scope === 'COMMUNITY') {
