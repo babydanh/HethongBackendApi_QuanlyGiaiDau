@@ -106,13 +106,17 @@ export class RankingsRepository {
         conditions.push(eq(schema.pairRanks.matchType, matchType));
       }
       if (genderRestriction) {
+        const maleValues = ['MALE', 'Nam', 'nam', 'NAM'];
+        const femaleValues = ['FEMALE', 'Nữ', 'nữ', 'NU', 'nu', 'Nu'];
+        const validValues = genderRestriction === 'MALE' ? maleValues : genderRestriction === 'FEMALE' ? femaleValues : [genderRestriction];
+
         conditions.push(
           or(
             eq(schema.pairRanks.genderRestriction, genderRestriction),
             and(
               isNull(schema.pairRanks.genderRestriction),
-              eq(profile1.gender, genderRestriction),
-              eq(profile2.gender, genderRestriction),
+              inArray(profile1.gender, validValues),
+              inArray(profile2.gender, validValues),
             ),
           ) as SQL,
         );
@@ -259,12 +263,16 @@ export class RankingsRepository {
         conditions.push(eq(schema.communityRankings.matchType, matchType));
       }
       if (genderRestriction) {
+        const maleValues = ['MALE', 'Nam', 'nam', 'NAM'];
+        const femaleValues = ['FEMALE', 'Nữ', 'nữ', 'NU', 'nu', 'Nu'];
+        const validValues = genderRestriction === 'MALE' ? maleValues : genderRestriction === 'FEMALE' ? femaleValues : [genderRestriction];
+
         conditions.push(
           or(
             eq(schema.communityRankings.genderRestriction, genderRestriction),
             and(
               isNull(schema.communityRankings.genderRestriction),
-              eq(schema.profiles.gender, genderRestriction),
+              inArray(schema.profiles.gender, validValues),
             ),
           ) as SQL,
         );
@@ -404,12 +412,16 @@ export class RankingsRepository {
         conditions.push(eq(schema.userRanks.matchType, matchType));
       }
       if (genderRestriction) {
+        const maleValues = ['MALE', 'Nam', 'nam', 'NAM'];
+        const femaleValues = ['FEMALE', 'Nữ', 'nữ', 'NU', 'nu', 'Nu'];
+        const validValues = genderRestriction === 'MALE' ? maleValues : genderRestriction === 'FEMALE' ? femaleValues : [genderRestriction];
+
         conditions.push(
           or(
             eq(schema.userRanks.genderRestriction, genderRestriction),
             and(
               isNull(schema.userRanks.genderRestriction),
-              eq(schema.profiles.gender, genderRestriction),
+              inArray(schema.profiles.gender, validValues),
             ),
           ) as SQL,
         );
