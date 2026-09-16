@@ -27,6 +27,8 @@ import { RedisService } from '../../providers/redis/redis.service';
 import { PG_CONNECTION } from '../../database/database.module';
 import { FootballTeamEloService } from './football-team-elo.service';
 
+const LEADERBOARD_CACHE_VERSION = 'v2';
+
 type Transaction = AppTx;
 
 // ELO Shield: ngưỡng kích hoạt bảo vệ khi user vượt qua mốc ELO nhất định
@@ -59,7 +61,9 @@ export class RankingsService {
   private async invalidateLeaderboardCache(categoryId: string) {
     try {
       const client = this.redisService.getClient();
-      const keys = await client.keys(`leaderboard:cat:${categoryId}:*`);
+      const keys = await client.keys(
+        `leaderboard:${LEADERBOARD_CACHE_VERSION}:cat:${categoryId}:*`,
+      );
       if (keys.length > 0) {
         await client.del(...keys);
       }
@@ -158,7 +162,7 @@ export class RankingsService {
     const categoryCacheKey = query.categoryId
       ? `id:${query.categoryId}`
       : `slug:${query.categorySlug || 'MISSING'}`;
-    const cacheKey = `leaderboard:cat:${categoryCacheKey}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:comm:${query.communityId || 'ALL'}:cursor:${query.cursor || 'FIRST'}:limit:${query.limit || 20}`;
+    const cacheKey = `leaderboard:${LEADERBOARD_CACHE_VERSION}:cat:${categoryCacheKey}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:comm:${query.communityId || 'ALL'}:cursor:${query.cursor || 'FIRST'}:limit:${query.limit || 20}`;
     try {
       const cached = await this.withLeaderboardCacheTimeout(
         this.redisService.get(cacheKey),
