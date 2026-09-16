@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { ClubMatchSessionsService } from './club-match-sessions.service';
 
 describe('ClubMatchSessionsService', () => {
@@ -17,11 +21,11 @@ describe('ClubMatchSessionsService', () => {
     setClubMatchUpdatePublisher: jest.fn(),
   };
   const rankingsService = {};
-  const tournamentsService = { createLite: jest.fn() };
+  const tournamentsService = { createLite: jest.fn(), remove: jest.fn() };
   let service: ClubMatchSessionsService;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     service = new ClubMatchSessionsService(
       repository as never,
       gateway as never,
@@ -225,6 +229,163 @@ describe('ClubMatchSessionsService', () => {
         bracketTournamentId: 'tournament-1',
       },
     });
+  });
+
+  it('replays a bracket creation request without creating a second tournament', async () => {
+    repository.findCommunityContext.mockResolvedValue({
+      id: 'community-1',
+      name: 'Riverside Club',
+      status: 'ACTIVE',
+      categoryId: 'category-1',
+      categorySlug: 'pickleball',
+      memberRole: 'ADMIN',
+      memberStatus: 'JOINED',
+    });
+    repository.findSessionByCreationKey.mockResolvedValue({
+      id: 'session-existing',
+      communityId: 'community-1',
+      creationFingerprint: null,
+    });
+    repository.findSession.mockResolvedValue({
+      session: {
+        id: 'session-existing',
+        communityId: 'community-1',
+        categoryId: 'category-1',
+        name: 'Giải giao lưu CLB',
+        pairingMode: 'BRACKET',
+        bracketTournamentId: 'tournament-existing',
+        status: 'OPEN',
+        startAt: null,
+        endAt: null,
+        registrationOpenAt: new Date(),
+        registrationClosedAt: null,
+        endedAt: null,
+        isRanked: true,
+      },
+      communityName: 'Riverside Club',
+      categoryName: 'Pickleball',
+      categorySlug: 'pickleball',
+      categoryConfig: {},
+      bracketTournament: null,
+    });
+    repository.findMembership.mockResolvedValue({
+      role: 'ADMIN',
+      status: 'JOINED',
+    });
+    repository.findParticipant.mockResolvedValue(null);
+    repository.findPreference.mockResolvedValue(null);
+
+    const result = await service.create(
+      { id: 'admin-1', roles: [] },
+      {
+        communityId: 'community-1',
+        name: 'Giải giao lưu CLB',
+        pairingMode: 'BRACKET',
+        startAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+      },
+      'vi',
+      'create-key-1',
+    );
+
+    expect(result.id).toBe('session-existing');
+    expect(tournamentsService.createLite).not.toHaveBeenCalled();
+    expect(repository.createSession).not.toHaveBeenCalled();
+  });
+
+  it('projects bracket lifecycle from the linked tournament', async () => {
+    repository.findCommunityContext.mockResolvedValue({
+      id: 'community-1',
+      status: 'ACTIVE',
+      memberRole: 'MEMBER',
+      memberStatus: 'JOINED',
+    });
+    repository.findSession.mockResolvedValue({
+      session: {
+        id: 'session-bracket',
+        communityId: 'community-1',
+        categoryId: 'category-1',
+        name: 'Giải giao lưu CLB',
+        pairingMode: 'BRACKET',
+        bracketTournamentId: 'tournament-1',
+        status: 'OPEN',
+        startAt: new Date(Date.now() + 60 * 60 * 1000),
+        endAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        registrationOpenAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+        registrationClosedAt: null,
+        endedAt: null,
+        isRanked: true,
+      },
+      communityName: 'Riverside Club',
+      categoryName: 'Pickleball',
+      categorySlug: 'pickleball',
+      categoryConfig: {},
+      bracketTournament: {
+        id: 'tournament-1',
+        status: 'COMPLETED',
+        registrationStartDate: new Date(Date.now() - 4 * 60 * 60 * 1000),
+        registrationEndDate: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        startDate: new Date(Date.now() - 90 * 60 * 1000),
+        endDate: new Date(Date.now() - 30 * 60 * 1000),
+        isRegistrationLocked: true,
+      },
+    });
+    repository.findMembership.mockResolvedValue({ role: 'MEMBER', status: 'JOINED' });
+    repository.findParticipant.mockResolvedValue(null);
+    repository.findPreference.mockResolvedValue(null);
+
+    const result = await service.get('session-bracket', {
+      id: 'member-1',
+      roles: [],
+    });
+
+    expect(result).toMatchObject({
+      status: 'ENDED',
+      startAt: expect.any(Date),
+      endAt: expect.any(Date),
+      capabilities: {
+        bracket: true,
+        canJoin: false,
+        canWithdraw: false,
+        canCreateMatch: false,
+      },
+    });
+  });
+
+  it('rejects a raced idempotency key when the winning request has another payload', async () => {
+    repository.findCommunityContext.mockResolvedValue({
+      id: 'community-1',
+      name: 'Riverside Club',
+      status: 'ACTIVE',
+      categoryId: 'category-1',
+      categorySlug: 'pickleball',
+      memberRole: 'ADMIN',
+      memberStatus: 'JOINED',
+    });
+    tournamentsService.createLite.mockResolvedValue({ id: 'duplicate-tournament' });
+    repository.createSession.mockResolvedValue({
+      id: 'session-existing',
+      bracketTournamentId: null,
+      creationFingerprint: 'fingerprint-from-another-request',
+    });
+
+    await expect(
+      service.create(
+        { id: 'admin-1', roles: [] },
+        {
+          communityId: 'community-1',
+          pairingMode: 'BRACKET',
+          startAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+        },
+        'vi',
+        'raced-key-1',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(tournamentsService.remove).toHaveBeenCalledWith(
+      'duplicate-tournament',
+      'admin-1',
+      [],
+    );
   });
 
   it('rejects a joined non-manager creating a session', async () => {

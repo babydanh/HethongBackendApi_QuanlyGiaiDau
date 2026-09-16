@@ -504,29 +504,30 @@ export class ClubMatchSessionsService {
       }
       throw error;
     }
-    if (
-      creationIdempotencyKey &&
-      pairingMode === 'BRACKET' &&
-      bracketTournamentId &&
-      created.bracketTournamentId !== bracketTournamentId
-    ) {
-      try {
-        await this.tournamentsService?.remove?.(
-          bracketTournamentId,
-          actor.id,
-          actor.roles ?? [],
-        );
-      } catch (cleanupError) {
-        console.error(
-          'Failed to clean up duplicate linked Lite tournament:',
-          cleanupError,
-        );
-      }
+    if (creationIdempotencyKey) {
       if (
-        creationIdempotencyKey &&
-        created.creationFingerprint &&
-        created.creationFingerprint !== creationFingerprint
+        pairingMode === 'BRACKET' &&
+        bracketTournamentId &&
+        created.bracketTournamentId !== bracketTournamentId
       ) {
+        try {
+          await this.tournamentsService?.remove?.(
+            bracketTournamentId,
+            actor.id,
+            actor.roles ?? [],
+          );
+        } catch (cleanupError) {
+          console.error(
+            'Failed to clean up duplicate linked Lite tournament:',
+            cleanupError,
+          );
+        }
+      }
+      // A conflict resolved at the database insert can race the initial
+      // lookup. Verify the payload fingerprint after that race as well, so a
+      // reused key can never return a session created with different mode or
+      // schedule data.
+      if (created.creationFingerprint !== creationFingerprint) {
         apiError(ConflictException, 'CREATE_IDEMPOTENCY_KEY_REUSED');
       }
     }

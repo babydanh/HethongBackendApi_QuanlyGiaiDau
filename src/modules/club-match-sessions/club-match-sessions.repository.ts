@@ -342,7 +342,28 @@ export class ClubMatchSessionsRepository {
       isNull(schema.clubMatchSessions.deletedAt),
     ];
     if (input.status) {
-      conditions.push(eq(schema.clubMatchSessions.status, input.status));
+      const linkedTournamentStatus = sql<string>`CASE
+        WHEN ${schema.tournaments.status} IN ('CANCELLED', 'PENDING_DELETE') THEN 'CANCELLED'
+        WHEN ${schema.tournaments.status} IN ('COMPLETED', 'FINISHED', 'DONE', 'ENDED') THEN 'ENDED'
+        WHEN ${schema.tournaments.status} IN ('IN_PROGRESS', 'ONGOING', 'LIVE') THEN 'LIVE'
+        WHEN ${schema.tournaments.status} = 'REGISTRATION_CLOSED'
+          OR ${schema.tournaments.isRegistrationLocked} = true
+          OR (${schema.tournaments.registrationEndDate} IS NOT NULL AND ${schema.tournaments.registrationEndDate} <= now())
+          THEN 'CLOSED'
+        ELSE 'OPEN'
+      END`;
+      conditions.push(
+        or(
+          and(
+            eq(schema.clubMatchSessions.pairingMode, 'FREE'),
+            eq(schema.clubMatchSessions.status, input.status),
+          ),
+          and(
+            eq(schema.clubMatchSessions.pairingMode, 'BRACKET'),
+            sql`${schema.tournaments.id} IS NOT NULL AND ${linkedTournamentStatus} = ${input.status}`,
+          ),
+        )!,
+      );
     }
     if (input.cursor) {
       if (!cursor) return { invalidCursor: true as const };
