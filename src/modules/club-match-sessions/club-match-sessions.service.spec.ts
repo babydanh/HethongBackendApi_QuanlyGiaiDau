@@ -16,6 +16,7 @@ describe('ClubMatchSessionsService', () => {
     setClubMatchUpdatePublisher: jest.fn(),
   };
   const rankingsService = {};
+  const tournamentsService = { createLite: jest.fn() };
   let service: ClubMatchSessionsService;
 
   beforeEach(() => {
@@ -25,6 +26,7 @@ describe('ClubMatchSessionsService', () => {
       gateway as never,
       processor as never,
       rankingsService as never,
+      tournamentsService as never,
     );
   });
 
@@ -144,6 +146,84 @@ describe('ClubMatchSessionsService', () => {
         endAt: expect.any(Date),
       }),
     );
+  });
+
+  it('creates one linked Lite tournament for bracket mode', async () => {
+    repository.findCommunityContext.mockResolvedValue({
+      id: 'community-1',
+      name: 'Riverside Club',
+      status: 'ACTIVE',
+      categoryId: 'category-1',
+      categorySlug: 'pickleball',
+      memberRole: 'ADMIN',
+      memberStatus: 'JOINED',
+    });
+    tournamentsService.createLite.mockResolvedValue({ id: 'tournament-1' });
+    repository.createSession.mockResolvedValue({ id: 'session-bracket-1' });
+    repository.findSession.mockResolvedValue({
+      session: {
+        id: 'session-bracket-1',
+        communityId: 'community-1',
+        categoryId: 'category-1',
+        name: 'Giải giao lưu CLB',
+        pairingMode: 'BRACKET',
+        bracketTournamentId: 'tournament-1',
+        isRanked: true,
+      },
+      communityName: 'Riverside Club',
+      categoryName: 'Pickleball',
+      categorySlug: 'pickleball',
+      categoryConfig: {},
+    });
+    repository.findMembership.mockResolvedValue({
+      role: 'ADMIN',
+      status: 'JOINED',
+    });
+    repository.findParticipant.mockResolvedValue(null);
+    repository.findPreference.mockResolvedValue(null);
+
+    const startAt = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    const result = await service.create(
+      { id: 'admin-1', roles: [] },
+      {
+        communityId: 'community-1',
+        name: 'Giải giao lưu CLB',
+        pairingMode: 'BRACKET',
+        format: 'doubles',
+        bracketType: 'group_stage_knockout',
+        startAt: startAt.toISOString(),
+      },
+      'vi',
+    );
+
+    expect(tournamentsService.createLite).toHaveBeenCalledWith(
+      'admin-1',
+      expect.objectContaining({
+        communityId: 'community-1',
+        tournamentType: 'CLUB',
+        visibility: 'PRIVATE',
+        sport: 'pickleball',
+        format: 'doubles',
+        bracketType: 'group_stage_knockout',
+        maxTeams: 16,
+        registrationMode: 'OPEN',
+      }),
+      [],
+    );
+    expect(repository.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pairingMode: 'BRACKET',
+        bracketTournamentId: 'tournament-1',
+        publishAnnouncement: false,
+      }),
+    );
+    expect(result).toMatchObject({
+      capabilities: {
+        bracket: true,
+        pairingMode: 'BRACKET',
+        bracketTournamentId: 'tournament-1',
+      },
+    });
   });
 
   it('rejects a joined non-manager creating a session', async () => {

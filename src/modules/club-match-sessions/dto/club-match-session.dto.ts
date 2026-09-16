@@ -91,6 +91,27 @@ export class CreateClubMatchSessionDto {
   @IsIn(['SELF', 'MANAGER_ASSIGN', 'MIXED'])
   @IsOptional()
   registrationMode?: 'SELF' | 'MANAGER_ASSIGN' | 'MIXED';
+
+  @IsIn(['FREE', 'BRACKET'])
+  @IsOptional()
+  pairingMode?: 'FREE' | 'BRACKET';
+
+  @IsIn(['singles', 'doubles', 'mixed_doubles'])
+  @IsOptional()
+  format?: 'singles' | 'doubles' | 'mixed_doubles';
+
+  @IsIn([
+    'single_elimination',
+    'double_elimination',
+    'round_robin',
+    'group_stage_knockout',
+  ])
+  @IsOptional()
+  bracketType?:
+    | 'single_elimination'
+    | 'double_elimination'
+    | 'round_robin'
+    | 'group_stage_knockout';
 }
 
 export class UpdateClubMatchSessionDto {
@@ -165,6 +186,10 @@ export class UpdateClubMatchSessionDto {
   @IsIn(['SELF', 'MANAGER_ASSIGN', 'MIXED'])
   @IsOptional()
   registrationMode?: 'SELF' | 'MANAGER_ASSIGN' | 'MIXED';
+
+  @IsIn(['FREE', 'BRACKET'])
+  @IsOptional()
+  pairingMode?: 'FREE' | 'BRACKET';
 }
 
 export class TransitionClubMatchSessionDto {

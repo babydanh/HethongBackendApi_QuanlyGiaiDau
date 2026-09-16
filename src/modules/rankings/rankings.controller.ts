@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   ParseUUIDPipe,
+  Header,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { RankingsService } from './rankings.service';
@@ -37,6 +38,11 @@ export class RankingsController {
   ) {}
 
   @Public()
+  @Header(
+    'Cache-Control',
+    'public, max-age=0, s-maxage=300, stale-while-revalidate=60',
+  )
+  @Header('Vary', 'Accept-Encoding')
   @Get('football-teams')
   @ApiOperation({ summary: 'Bảng xếp hạng ELO bóng đá theo đội' })
   async getFootballTeamLeaderboard(@Query() query: QueryRankingDto) {
@@ -56,6 +62,11 @@ export class RankingsController {
   @Public()
   @ApiBearerAuth()
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header(
+    'Cache-Control',
+    'public, max-age=0, s-maxage=300, stale-while-revalidate=60',
+  )
+  @Header('Vary', 'Accept-Encoding')
   @Get()
   @ApiOperation({ summary: 'Lấy bảng xếp hạng theo môn thể thao' })
   async getLeaderboard(@Query() query: QueryRankingDto) {

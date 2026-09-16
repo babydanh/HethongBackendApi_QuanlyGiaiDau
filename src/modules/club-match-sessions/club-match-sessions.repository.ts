@@ -201,6 +201,9 @@ export class ClubMatchSessionsRepository {
     name: string | null;
     description: string | null;
     registrationMode: 'SELF' | 'MANAGER_ASSIGN' | 'MIXED';
+    pairingMode: 'FREE' | 'BRACKET';
+    bracketTournamentId?: string | null;
+    publishAnnouncement?: boolean;
     isRanked: boolean;
     maxParticipants: number;
     sessionConfig: Record<string, unknown>;
@@ -208,21 +211,30 @@ export class ClubMatchSessionsRepository {
     endAt: Date | null;
   }) {
     return this.db.transaction(async (tx) => {
+      const {
+        publishAnnouncement: _publishAnnouncement,
+        ...sessionInput
+      } = input;
       const [created] = await tx
         .insert(schema.clubMatchSessions)
-        .values({ ...input, status: 'OPEN', pairingMode: 'FREE' })
+        .values({
+          ...sessionInput,
+          status: 'OPEN',
+        })
         .returning();
       const displayName = input.name?.trim() || 'Buổi giao lưu CLB';
-      await tx.insert(schema.communityPosts).values({
-        communityId: created.communityId,
-        authorId: created.createdBy,
-        clubMatchSessionId: created.id,
-        type: 'CLUB_SESSION_ANNOUNCEMENT',
-        body: `🏸 ${displayName} đã mở đăng ký.`,
-        mediaUrls: [],
-        status: 'PUBLISHED',
-        idempotencyKey: `club-match-session:${created.id}:created`,
-      });
+      if (input.publishAnnouncement !== false) {
+        await tx.insert(schema.communityPosts).values({
+          communityId: created.communityId,
+          authorId: created.createdBy,
+          clubMatchSessionId: created.id,
+          type: 'CLUB_SESSION_ANNOUNCEMENT',
+          body: `🏸 ${displayName} đã mở đăng ký.`,
+          mediaUrls: [],
+          status: 'PUBLISHED',
+          idempotencyKey: `club-match-session:${created.id}:created`,
+        });
+      }
       await this.auditService.logCreate(
         tx,
         input.createdBy,
@@ -272,14 +284,23 @@ export class ClubMatchSessionsRepository {
       .select({
         session: schema.clubMatchSessions,
         communityName: schema.communities.name,
-        participantCount: sql<number>`(
+        participantCount: sql<number>`case when ${schema.clubMatchSessions.pairingMode} = 'BRACKET' then (
+          select count(*)::int from tournament_participants p
+          where p.tournament_id = ${schema.clubMatchSessions.bracketTournamentId}
+            and p.team_status in ('COMPLETE', 'APPROVED')
+        ) else (
           select count(*)::int from club_match_session_participants p
           where p.session_id = ${schema.clubMatchSessions.id} and p.status = 'ACTIVE'
-        )`,
-        matchCount: sql<number>`(
+        ) end`,
+        matchCount: sql<number>`case when ${schema.clubMatchSessions.pairingMode} = 'BRACKET' then (
+          select count(*)::int from matches m
+          where m.tournament_id = ${schema.clubMatchSessions.bracketTournamentId}
+            and m.is_bye = false
+            and m.status <> 'CANCELLED'
+        ) else (
           select count(*)::int from club_match_session_matches m
           where m.session_id = ${schema.clubMatchSessions.id} and m.deleted_at is null
-        )`,
+        ) end`,
       })
       .from(schema.clubMatchSessions)
       .innerJoin(

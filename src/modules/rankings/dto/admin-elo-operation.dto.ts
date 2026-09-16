@@ -11,8 +11,9 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
+import { normalizeGenderRestriction } from '../../../common/helpers/gender.helper';
 
 export const ADMIN_ELO_OPERATIONS = [
   'ADD',
@@ -62,8 +63,13 @@ export class AdminEloOperationDto {
   matchType: string;
 
   @ApiPropertyOptional({ nullable: true })
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return value;
+    return normalizeGenderRestriction(String(value)) ?? value;
+  })
   @IsOptional()
   @IsString()
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
   @MaxLength(20)
   genderRestriction?: string;
 
@@ -130,8 +136,13 @@ export class AdminEloQueryDto extends CursorPaginationDto {
   matchType?: string;
 
   @ApiPropertyOptional({ maxLength: 20 })
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return value;
+    return normalizeGenderRestriction(String(value)) ?? value;
+  })
   @IsOptional()
   @IsString()
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
   @MaxLength(20)
   genderRestriction?: string;
 

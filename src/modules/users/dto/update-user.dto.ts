@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsDateString, IsEmail, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { normalizeProfileGender } from '../../../common/helpers/gender.helper';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'user@example.com', description: 'Địa chỉ email mới. Chỉ được đổi khi email hiện tại chưa xác minh.' })
@@ -39,6 +41,11 @@ export class UpdateUserDto {
 
   @ApiPropertyOptional({ example: 'Nam' })
   @IsString()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return value;
+    return normalizeProfileGender(String(value)) ?? value;
+  })
+  @IsIn(['MALE', 'FEMALE', 'OTHER'])
   @IsOptional()
   gender?: string;
 

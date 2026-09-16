@@ -2,8 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
@@ -28,6 +31,7 @@ import {
 } from './dto/club-match-session.dto';
 import { ClubMatchSessionsRepository } from './club-match-sessions.repository';
 import { selectScoringPreset } from './scoring-preset';
+import { TournamentsService } from '../tournaments/tournaments.service';
 
 type Actor = { id: string; roles?: string[] };
 
@@ -93,6 +97,9 @@ export class ClubMatchSessionsService {
     private readonly liveScoreGateway: LiveScoreGateway,
     private readonly eloOutboxProcessor: EloOutboxProcessor,
     private readonly rankingsService: RankingsService,
+    @Optional()
+    @Inject(forwardRef(() => TournamentsService))
+    private readonly tournamentsService?: TournamentsService,
   ) {
     this.eloOutboxProcessor.setClubMatchUpdatePublisher?.(async (matchId) => {
       const match = await this.repository.findMatch(matchId);
@@ -180,8 +187,16 @@ export class ClubMatchSessionsService {
   ): string {
     if (name?.trim()) return name.trim();
     return locale?.toLowerCase().startsWith('en')
-      ? `Club social match session ${communityName}`
-      : `Buổi giao lưu CLB ${communityName}`;
+      ? `Social match session ${communityName}`
+      : `Buổi giao lưu ${communityName}`;
+  }
+
+  private assertFreeSession(
+    row: Awaited<ReturnType<ClubMatchSessionsRepository['findSession']>>,
+  ) {
+    if (row?.session.pairingMode === 'BRACKET') {
+      apiError(ConflictException, 'BRACKET_SESSION_MANAGED_BY_TOURNAMENT');
+    }
   }
 
   private projectSession(
@@ -205,9 +220,10 @@ export class ClubMatchSessionsService {
         config: row.categoryConfig,
       },
       capabilities: {
-        pairingMode: 'FREE',
-        bracket: false,
-        registrationOpenImmediately: true,
+        pairingMode: row.session.pairingMode === 'BRACKET' ? 'BRACKET' : 'FREE',
+        bracket: row.session.pairingMode === 'BRACKET',
+        bracketTournamentId: row.session.bracketTournamentId ?? null,
+        registrationOpenImmediately: row.session.pairingMode !== 'BRACKET',
         canManage,
       },
     };
@@ -220,6 +236,10 @@ export class ClubMatchSessionsService {
     }
     if (dto.categoryId && dto.categoryId !== community.categoryId) {
       apiError(BadRequestException, 'CATEGORY_NOT_ALLOWED_FOR_CLUB');
+    }
+    const pairingMode = dto.pairingMode ?? 'FREE';
+    if (pairingMode === 'BRACKET' && dto.isRecurring) {
+      apiError(BadRequestException, 'BRACKET_RECURRING_UNSUPPORTED');
     }
     let startAt = dto.startAt ? new Date(dto.startAt) : null;
     let endAt = dto.endAt ? new Date(dto.endAt) : null;
@@ -268,19 +288,86 @@ export class ClubMatchSessionsService {
         },
       };
     }
-    const created = await this.repository.createSession({
-      communityId: dto.communityId,
-      categoryId: community.categoryId,
-      createdBy: actor.id,
-      name: dto.name?.trim() || null,
-      description: dto.description?.trim() || null,
-      registrationMode: 'MIXED',
-      isRanked: dto.isRanked ?? true,
-      maxParticipants: dto.maxParticipants ?? 16,
-      sessionConfig,
-      startAt,
-      endAt,
-    });
+    let bracketTournamentId: string | null = null;
+    if (pairingMode === 'BRACKET') {
+      if (!this.tournamentsService) {
+        apiError(ConflictException, 'BRACKET_ENGINE_UNAVAILABLE');
+      }
+      if (!community.categorySlug) {
+        apiError(BadRequestException, 'CLUB_SPORT_REQUIRED');
+      }
+      if (!startAt || Number.isNaN(startAt.getTime()) || startAt <= new Date()) {
+        apiError(BadRequestException, 'BRACKET_START_REQUIRED_FUTURE');
+      }
+      const registrationEndDate = new Date(
+        Math.max(Date.now() + 60_000, startAt.getTime() - 60 * 60 * 1000),
+      );
+      if (registrationEndDate >= startAt) {
+        apiError(BadRequestException, 'BRACKET_START_TOO_SOON');
+      }
+      const bracket = await this.tournamentsService.createLite(
+        actor.id,
+        {
+          name: dto.name?.trim() || `Buổi giao lưu CLB ${community.name}`,
+          communityId: dto.communityId,
+          tournamentType: 'CLUB',
+          visibility: 'PRIVATE',
+          sport: community.categorySlug,
+          format: dto.format ?? 'doubles',
+          bracketType: dto.bracketType ?? 'group_stage_knockout',
+          maxTeams: dto.maxParticipants ?? 16,
+          description: dto.description?.trim(),
+          registrationMode: 'OPEN',
+          isRanked: dto.isRanked ?? true,
+          startDate: startAt.toISOString(),
+          endDate: endAt?.toISOString(),
+          registrationStartDate: new Date().toISOString(),
+          registrationEndDate: registrationEndDate.toISOString(),
+        },
+        actor.roles ?? [],
+      );
+      bracketTournamentId = bracket.id;
+      if (!endAt) {
+        endAt = new Date(startAt.getTime() + 90 * 60 * 1000);
+      }
+    }
+    let created: Awaited<
+      ReturnType<ClubMatchSessionsRepository['createSession']>
+    >;
+    try {
+      created = await this.repository.createSession({
+        communityId: dto.communityId,
+        categoryId: community.categoryId,
+        createdBy: actor.id,
+        name: dto.name?.trim() || null,
+        description: dto.description?.trim() || null,
+        registrationMode: 'MIXED',
+        pairingMode,
+        bracketTournamentId,
+        publishAnnouncement: pairingMode !== 'BRACKET',
+        isRanked: dto.isRanked ?? true,
+        maxParticipants: dto.maxParticipants ?? 16,
+        sessionConfig,
+        startAt,
+        endAt,
+      });
+    } catch (error) {
+      if (bracketTournamentId && this.tournamentsService) {
+        try {
+          await this.tournamentsService.remove(
+            bracketTournamentId,
+            actor.id,
+            actor.roles ?? [],
+          );
+        } catch (cleanupError) {
+          console.error(
+            'Failed to clean up linked Lite tournament after session creation failure:',
+            cleanupError,
+          );
+        }
+      }
+      throw error;
+    }
     return this.get(created.id, actor, locale);
   }
 
@@ -308,7 +395,12 @@ export class ClubMatchSessionsService {
         ),
         participantCount: item.participantCount,
         matchCount: item.matchCount,
-        capabilities: { canManage },
+        capabilities: {
+          canManage,
+          pairingMode: item.session.pairingMode === 'BRACKET' ? 'BRACKET' : 'FREE',
+          bracket: item.session.pairingMode === 'BRACKET',
+          bracketTournamentId: item.session.bracketTournamentId ?? null,
+        },
       })),
       meta: result.meta,
     };
@@ -333,13 +425,16 @@ export class ClubMatchSessionsService {
           capabilities: {
             ...projected.capabilities,
             canJoin:
+              row.session.pairingMode !== 'BRACKET' &&
               row.session.status === 'OPEN' &&
               viewerParticipant?.status !== 'ACTIVE',
             canWithdraw:
+              row.session.pairingMode !== 'BRACKET' &&
               !TERMINAL_SESSION_STATUSES.has(row.session.status) &&
               viewerParticipant?.status === 'ACTIVE' &&
               viewerParticipant.source === 'SELF',
             canCreateMatch:
+              row.session.pairingMode !== 'BRACKET' &&
               ['OPEN', 'LIVE'].includes(row.session.status) &&
               (canManage || viewerParticipant?.status === 'ACTIVE'),
           },
@@ -367,6 +462,13 @@ export class ClubMatchSessionsService {
   ) {
     const current = await this.requireSession(sessionId, actor);
     await this.requireManager(current.session.communityId, actor);
+    if (
+      dto.pairingMode !== undefined &&
+      dto.pairingMode !== current.session.pairingMode
+    ) {
+      apiError(ConflictException, 'PAIRING_MODE_LOCKED');
+    }
+    this.assertFreeSession(current);
     if (TERMINAL_SESSION_STATUSES.has(current.session.status)) {
       apiError(ConflictException, 'SESSION_IS_TERMINAL');
     }
@@ -437,6 +539,7 @@ export class ClubMatchSessionsService {
   ) {
     const current = await this.requireSession(sessionId, actor);
     await this.requireManager(current.session.communityId, actor);
+    this.assertFreeSession(current);
     const nextStatus =
       dto.action === 'CLOSE'
         ? 'CLOSED'
@@ -512,7 +615,10 @@ export class ClubMatchSessionsService {
     actor: Actor,
     query: QueryClubMatchChildrenDto,
   ) {
-    await this.requireSession(sessionId, actor);
+    const current = await this.requireSession(sessionId, actor);
+    if (current.session.pairingMode === 'BRACKET') {
+      return { data: [], meta: { hasMore: false, nextCursor: null } };
+    }
     const result = await this.repository.listParticipants(sessionId, {
       // The participant tab and match builder are active-roster surfaces.
       // Keep withdrawn/kicked rows queryable explicitly for audit/history,
@@ -527,6 +633,7 @@ export class ClubMatchSessionsService {
 
   async selfJoin(sessionId: string, actor: Actor) {
     const current = await this.requireSession(sessionId, actor);
+    this.assertFreeSession(current);
     if (current.session.status !== 'OPEN') {
       apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
     }
@@ -592,6 +699,7 @@ export class ClubMatchSessionsService {
 
   async withdraw(sessionId: string, actor: Actor) {
     const current = await this.requireSession(sessionId, actor);
+    this.assertFreeSession(current);
     if (TERMINAL_SESSION_STATUSES.has(current.session.status)) {
       apiError(ConflictException, 'SESSION_IS_TERMINAL');
     }
@@ -678,6 +786,7 @@ export class ClubMatchSessionsService {
     }
     const current = await this.requireSession(sessionId, actor);
     await this.requireManager(current.session.communityId, actor);
+    this.assertFreeSession(current);
     if (current.session.status !== 'OPEN') {
       apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
     }
@@ -806,6 +915,7 @@ export class ClubMatchSessionsService {
   ) {
     const current = await this.requireSession(sessionId, actor);
     await this.requireManager(current.session.communityId, actor);
+    this.assertFreeSession(current);
     if (current.session.status !== 'OPEN') {
       apiError(ConflictException, 'SESSION_REGISTRATION_CLOSED');
     }
@@ -882,6 +992,7 @@ export class ClubMatchSessionsService {
     dto: RemoveClubMatchParticipantDto,
   ) {
     const current = await this.requireSession(sessionId, actor);
+    this.assertFreeSession(current);
     await this.requireManager(current.session.communityId, actor);
     const participant = await this.repository.findParticipant(
       sessionId,
@@ -924,6 +1035,7 @@ export class ClubMatchSessionsService {
     dto: UpdateClubMatchPreferencesDto,
   ) {
     const current = await this.requireSession(sessionId, actor);
+    this.assertFreeSession(current);
     const participant = await this.repository.findParticipant(
       sessionId,
       actor.id,
@@ -1032,6 +1144,7 @@ export class ClubMatchSessionsService {
     if (!idempotencyKey?.trim())
       apiError(BadRequestException, 'IDEMPOTENCY_KEY_REQUIRED');
     const current = await this.requireSession(sessionId, actor);
+    this.assertFreeSession(current);
     const membership = await this.repository.findMembership(
       current.session.communityId,
       actor.id,
@@ -1433,7 +1546,10 @@ export class ClubMatchSessionsService {
     actor: Actor,
     query: QueryClubMatchChildrenDto,
   ) {
-    await this.requireSession(sessionId, actor);
+    const current = await this.requireSession(sessionId, actor);
+    if (current.session.pairingMode === 'BRACKET') {
+      return { data: [], meta: { hasMore: false, nextCursor: null } };
+    }
     const result = await this.repository.listMatches(sessionId, {
       status: query.status,
       cursor: query.cursor,

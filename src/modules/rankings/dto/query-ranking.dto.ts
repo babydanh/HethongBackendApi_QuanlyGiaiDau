@@ -7,8 +7,9 @@ import {
   IsString,
   IsIn,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
+import { normalizeGenderRestriction } from '../../../common/helpers/gender.helper';
 
 export class QueryRankingDto extends CursorPaginationDto {
   @ApiPropertyOptional({ example: 1, description: 'Trang hiện tại' })
@@ -64,6 +65,10 @@ export class QueryRankingDto extends CursorPaginationDto {
   provinceCode?: string;
 
   @ApiPropertyOptional({ example: 'MALE', description: 'Lọc theo giới tính (MALE/FEMALE/MIXED)', enum: ['MALE', 'FEMALE', 'MIXED'] })
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return value;
+    return normalizeGenderRestriction(String(value)) ?? value;
+  })
   @IsOptional()
   @IsIn(['MALE', 'FEMALE', 'MIXED'])
   genderRestriction?: string;

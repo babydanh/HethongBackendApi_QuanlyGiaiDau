@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TournamentsService } from './tournaments.service';
 import { TournamentsController } from './tournaments.controller';
 import { TournamentsRepository } from './tournaments.repository';
@@ -23,7 +23,7 @@ import { VenuesModule } from '../venues/venues.module';
     StorageModule,
     AuthModule,
     CommunitiesModule,
-    MatchesModule,
+    forwardRef(() => MatchesModule),
     MailModule,
     VenuesModule,
   ],

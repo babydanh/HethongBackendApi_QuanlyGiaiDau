@@ -22,10 +22,15 @@ import {
   inArray,
 } from 'drizzle-orm';
 import type { AppTx, AppDb } from '../../database/db.types';
+import type { AnyColumn } from 'drizzle-orm';
 import * as schema from '../../database/schema';
 import { RedisService } from '../../providers/redis/redis.service';
 import { PG_CONNECTION } from '../../database/database.module';
 import { FootballTeamEloService } from './football-team-elo.service';
+import {
+  normalizeGenderRestriction,
+  type GenderRestriction,
+} from '../../common/helpers/gender.helper';
 
 const LEADERBOARD_CACHE_VERSION = 'v2';
 
@@ -45,6 +50,22 @@ const ELO_DECAY_RATES = [
 ] as const;
 const ELO_DECAY_FLOOR = 1000;
 
+const normalizedRankingGenderCondition = (
+  column: AnyColumn,
+  gender: GenderRestriction,
+) => sql`case upper(trim(coalesce(${column}, '')))
+  when 'MEN' then 'MALE'
+  when 'NAM' then 'MALE'
+  when 'M' then 'MALE'
+  when 'WOMEN' then 'FEMALE'
+  when 'NU' then 'FEMALE'
+  when 'NỮ' then 'FEMALE'
+  when 'F' then 'FEMALE'
+  when 'MIXED_DOUBLES' then 'MIXED'
+  when 'MIX' then 'MIXED'
+  else upper(trim(coalesce(${column}, '')))
+end = ${gender}`;
+
 @Injectable()
 export class RankingsService {
   private static readonly LEADERBOARD_CACHE_TIMEOUT_MS = 750;
@@ -60,13 +81,9 @@ export class RankingsService {
 
   private async invalidateLeaderboardCache(categoryId: string) {
     try {
-      const client = this.redisService.getClient();
-      const keys = await client.keys(
+      await this.redisService.delByPattern(
         `leaderboard:${LEADERBOARD_CACHE_VERSION}:cat:${categoryId}:*`,
       );
-      if (keys.length > 0) {
-        await client.del(...keys);
-      }
     } catch (err) {
       console.error('Failed to invalidate ELO cache:', err);
     }
@@ -159,10 +176,19 @@ export class RankingsService {
   }
 
   async getLeaderboard(query: QueryRankingDto) {
-    const categoryCacheKey = query.categoryId
-      ? `id:${query.categoryId}`
-      : `slug:${query.categorySlug || 'MISSING'}`;
-    const cacheKey = `leaderboard:${LEADERBOARD_CACHE_VERSION}:cat:${categoryCacheKey}:type:${query.matchType || 'ALL'}:scope:${query.scope || 'PUBLIC'}:prov:${query.provinceCode || 'ALL'}:gender:${query.genderRestriction || 'ALL'}:comm:${query.communityId || 'ALL'}:cursor:${query.cursor || 'FIRST'}:limit:${query.limit || 20}`;
+    const normalizedGenderRestriction = query.genderRestriction
+      ? normalizeGenderRestriction(query.genderRestriction)
+      : null;
+    if (query.genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('Invalid gender restriction');
+    }
+    const normalizedQuery = normalizedGenderRestriction
+      ? { ...query, genderRestriction: normalizedGenderRestriction }
+      : query;
+    const categoryCacheKey = normalizedQuery.categoryId
+      ? `id:${normalizedQuery.categoryId}`
+      : `slug:${normalizedQuery.categorySlug || 'MISSING'}`;
+    const cacheKey = `leaderboard:${LEADERBOARD_CACHE_VERSION}:cat:${categoryCacheKey}:type:${normalizedQuery.matchType || 'ALL'}:scope:${normalizedQuery.scope || 'PUBLIC'}:prov:${normalizedQuery.provinceCode || 'ALL'}:gender:${normalizedQuery.genderRestriction || 'ALL'}:comm:${normalizedQuery.communityId || 'ALL'}:cursor:${normalizedQuery.cursor || 'FIRST'}:limit:${normalizedQuery.limit || 20}`;
     try {
       const cached = await this.withLeaderboardCacheTimeout(
         this.redisService.get(cacheKey),
@@ -176,9 +202,9 @@ export class RankingsService {
 
     let data;
     try {
-      data = await this.rankingsRepository.getLeaderboard(query);
+      data = await this.rankingsRepository.getLeaderboard(normalizedQuery);
     } catch (error) {
-      if (query.scope === 'COMMUNITY' && query.communityId) {
+      if (normalizedQuery.scope === 'COMMUNITY' && normalizedQuery.communityId) {
         // Keep the club page usable while a stale/missing ranking projection is
         // being repaired. The clients will hydrate joined members at base ELO.
         console.error('Community leaderboard unavailable:', error);
@@ -220,6 +246,18 @@ export class RankingsService {
       cursor?: string;
     },
   ) {
+    if (query.genderRestriction && query.genderRestriction !== '__NONE__') {
+      const normalizedGenderRestriction = normalizeGenderRestriction(
+        query.genderRestriction,
+      );
+      if (!normalizedGenderRestriction) {
+        throw new BadRequestException('Invalid gender restriction');
+      }
+      return this.rankingsRepository.getEloHistory(userId, {
+        ...query,
+        genderRestriction: normalizedGenderRestriction,
+      });
+    }
     return this.rankingsRepository.getEloHistory(userId, query);
   }
 
@@ -269,8 +307,20 @@ export class RankingsService {
 
     const effectiveMatchType =
       matchContext.divisionMatchType ?? matchContext.matchType;
-    const effectiveGenderRestriction =
+    const rawEffectiveGenderRestriction =
       matchContext.divisionGenderRestriction ?? matchContext.genderRestriction;
+    const effectiveGenderRestriction = rawEffectiveGenderRestriction
+      ? normalizeGenderRestriction(rawEffectiveGenderRestriction)
+      : null;
+    if (rawEffectiveGenderRestriction && !effectiveGenderRestriction) {
+      throw new BadRequestException('Cấu hình giới tính của trận đấu không hợp lệ.');
+    }
+    const requestedGenderRestriction = dto.genderRestriction
+      ? normalizeGenderRestriction(dto.genderRestriction)
+      : null;
+    if (dto.genderRestriction && !requestedGenderRestriction) {
+      throw new BadRequestException('Cấu hình giới tính không hợp lệ.');
+    }
     if (
       effectiveMatchType === 'DOUBLES' ||
       effectiveMatchType === 'MIXED_DOUBLES'
@@ -290,7 +340,7 @@ export class RankingsService {
       dto.categoryId !== matchContext.categoryId ||
       dto.matchType !== effectiveMatchType ||
       (dto.communityId ?? null) !== effectiveCommunityId ||
-      (dto.genderRestriction ?? null) !== (effectiveGenderRestriction ?? null)
+      (requestedGenderRestriction ?? null) !== (effectiveGenderRestriction ?? null)
     ) {
       throw new BadRequestException(
         'Thông tin tính ELO không khớp cấu hình của trận đấu.',
@@ -357,7 +407,7 @@ export class RankingsService {
         scope,
         dto.communityId,
         true,
-        dto.genderRestriction,
+        requestedGenderRestriction ?? undefined,
       );
       const loserRank = await this.rankingsRepository.getOrCreateUserRank(
         tx,
@@ -367,7 +417,7 @@ export class RankingsService {
         scope,
         dto.communityId,
         true,
-        dto.genderRestriction,
+        requestedGenderRestriction ?? undefined,
       );
 
       // 2. Calculate ELO
@@ -529,6 +579,13 @@ export class RankingsService {
     },
   ) {
     const db = this.rankingsRepository.getDbInstance();
+    const normalizedGenderRestriction = genderRestriction
+      ? normalizeGenderRestriction(genderRestriction)
+      : null;
+    if (genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('Cấu hình giới tính không hợp lệ.');
+    }
+    genderRestriction = normalizedGenderRestriction ?? undefined;
 
     // 1. Fetch rosters
     const winnerRosters = directRoster
@@ -742,7 +799,10 @@ export class RankingsService {
               eq(schema.pairRanks.matchType, matchType),
               eq(schema.pairRanks.scope, scope),
               genderRestriction
-                ? eq(schema.pairRanks.genderRestriction, genderRestriction)
+                ? normalizedRankingGenderCondition(
+                    schema.pairRanks.genderRestriction,
+                    genderRestriction as GenderRestriction,
+                  )
                 : isNull(schema.pairRanks.genderRestriction),
               communityId
                 ? eq(schema.pairRanks.communityId, communityId)
@@ -782,7 +842,10 @@ export class RankingsService {
               eq(schema.pairRanks.matchType, matchType),
               eq(schema.pairRanks.scope, scope),
               genderRestriction
-                ? eq(schema.pairRanks.genderRestriction, genderRestriction)
+                ? normalizedRankingGenderCondition(
+                    schema.pairRanks.genderRestriction,
+                    genderRestriction as GenderRestriction,
+                  )
                 : isNull(schema.pairRanks.genderRestriction),
               communityId
                 ? eq(schema.pairRanks.communityId, communityId)
@@ -1048,7 +1111,10 @@ export class RankingsService {
                   eq(schema.userRanks.categoryId, categoryId),
                   eq(schema.userRanks.matchType, matchType),
                   genderRestriction
-                    ? eq(schema.userRanks.genderRestriction, genderRestriction)
+                    ? normalizedRankingGenderCondition(
+                        schema.userRanks.genderRestriction,
+                        genderRestriction as GenderRestriction,
+                      )
                     : isNull(schema.userRanks.genderRestriction),
                   isNull(schema.userRanks.communityId),
                 ),
@@ -1309,7 +1375,10 @@ export class RankingsService {
                 eq(schema.userRanks.categoryId, categoryId),
                 eq(schema.userRanks.matchType, matchType),
                 genderRestriction
-                  ? eq(schema.userRanks.genderRestriction, genderRestriction)
+                  ? normalizedRankingGenderCondition(
+                      schema.userRanks.genderRestriction,
+                      genderRestriction as GenderRestriction,
+                    )
                   : isNull(schema.userRanks.genderRestriction),
                 isNull(schema.userRanks.communityId),
               ),
@@ -1335,11 +1404,21 @@ export class RankingsService {
     matchType: string,
     genderRestriction?: string,
   ) {
+    const normalizedGenderRestriction = genderRestriction
+      ? normalizeGenderRestriction(genderRestriction)
+      : null;
+    if (genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('Cấu hình giới tính không hợp lệ.');
+    }
+    genderRestriction = normalizedGenderRestriction ?? undefined;
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${`elo-tier:${categoryId}:${matchType}:${genderRestriction ?? ''}`}))`,
     );
     const genderCondition = genderRestriction
-      ? eq(schema.userRanks.genderRestriction, genderRestriction)
+      ? normalizedRankingGenderCondition(
+          schema.userRanks.genderRestriction,
+          genderRestriction as GenderRestriction,
+        )
       : isNull(schema.userRanks.genderRestriction);
     const tiers = await tx
       .select()
@@ -1632,6 +1711,13 @@ export class RankingsService {
     communityId?: string,
     genderRestriction?: string,
   ) {
+    const normalizedGenderRestriction = genderRestriction
+      ? normalizeGenderRestriction(genderRestriction)
+      : null;
+    if (genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('Cấu hình giới tính không hợp lệ.');
+    }
+    genderRestriction = normalizedGenderRestriction ?? undefined;
     const tiers = await tx
       .select()
       .from(schema.eloTiers)
@@ -1640,7 +1726,10 @@ export class RankingsService {
     if (tiers.length === 0) return;
 
     const genderCondition = genderRestriction
-      ? eq(schema.communityRankings.genderRestriction, genderRestriction)
+      ? normalizedRankingGenderCondition(
+          schema.communityRankings.genderRestriction,
+          genderRestriction as GenderRestriction,
+        )
       : isNull(schema.communityRankings.genderRestriction);
 
     const [rank] = await tx

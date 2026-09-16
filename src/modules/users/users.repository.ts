@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, gte, lt, notExists, sql, type SQL } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, gte, lt, notExists, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { AdminUserStatusFilter, QueryUserDto } from './dto/query-user.dto';
@@ -13,6 +13,27 @@ import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.h
 import { AuditService } from '../audit/audit.service';
 import { UserRole } from '../../common/constants/enums';
 import { ChatGateway } from '../chat/chat.gateway';
+import {
+  normalizeGenderRestriction,
+  normalizeProfileGender,
+} from '../../common/helpers/gender.helper';
+
+const normalizedGenderRestriction = (column: AnyColumn) => sql`
+  case upper(trim(coalesce(${column}, '')))
+    when 'MEN' then 'MALE'
+    when 'NAM' then 'MALE'
+    when 'M' then 'MALE'
+    when 'WOMEN' then 'FEMALE'
+    when 'NU' then 'FEMALE'
+    when 'NỮ' then 'FEMALE'
+    when 'F' then 'FEMALE'
+    when 'MIXED_DOUBLES' then 'MIXED'
+    when 'MIX' then 'MIXED'
+    else upper(trim(coalesce(${column}, '')))
+  end`;
+
+const canonicalStoredGenderRestriction = (value: string | null) =>
+  value === null ? null : normalizeGenderRestriction(value) ?? value;
 
 @Injectable()
 export class UsersRepository {
@@ -535,7 +556,7 @@ export class UsersRepository {
                   eq(schema.rankingContextStatuses.scope, 'PUBLIC'),
                   isNull(schema.rankingContextStatuses.communityId),
                   eq(schema.rankingContextStatuses.matchType, schema.userRanks.matchType),
-                  sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                  sql`${normalizedGenderRestriction(schema.rankingContextStatuses.genderRestriction)} = ${normalizedGenderRestriction(schema.userRanks.genderRestriction)}`,
                   inArray(schema.rankingContextStatuses.status, ['HIDDEN', 'BANNED']),
                   or(
                     isNull(schema.rankingContextStatuses.expiresAt),
@@ -670,14 +691,18 @@ export class UsersRepository {
         event.categoryId === rank.categoryId &&
         event.matchType === rank.matchType &&
         ('genderRestriction' in rank
-          ? (rank.genderRestriction ?? null) === (event.genderRestriction ?? null)
+          ? canonicalStoredGenderRestriction(rank.genderRestriction) ===
+            canonicalStoredGenderRestriction(event.genderRestriction)
           : true) &&
         (!partnerId || (event.matchId && usersByStreakMatch.get(event.matchId)?.has(partnerId))),
       );
       return { ...rank, ...getStreak(events) };
     };
 
-    const ranksWithStreak = activeRanks.map(withStreak);
+    const ranksWithStreak = activeRanks.map((rank) => ({
+      ...withStreak(rank),
+      genderRestriction: canonicalStoredGenderRestriction(rank.genderRestriction),
+    }));
     const pairRanksWithStreak = activePairRanks.map(withStreak);
     const highlightRank = [...ranksWithStreak.map((rank) => ({ ...rank, source: 'SINGLES' as const })), ...pairRanksWithStreak.map((rank) => ({ ...rank, source: 'DOUBLES' as const }))]
       .sort((a, b) => b.eloPoints - a.eloPoints || b.matchesPlayed - a.matchesPlayed)[0] ?? null;
@@ -696,6 +721,7 @@ export class UsersRepository {
 
     return {
       ...user,
+      gender: normalizeProfileGender(user.gender) ?? user.gender,
       role: rolesList[0] || 'PLAYER',
       roles: rolesList,
       ranks: user.isMock ? [] : ranksWithStreak,
@@ -1153,15 +1179,20 @@ export class UsersRepository {
         if (!profile) {
           throw new Error('CHANGE_REQUEST_PROFILE_NOT_FOUND');
         }
+        const currentGender = normalizeProfileGender(profile.gender);
+        const requestedOldGender = normalizeProfileGender(request.oldValue);
         if (
-          String(profile.gender ?? '').trim().toLowerCase() !==
-          request.oldValue.trim().toLowerCase()
+          currentGender !== requestedOldGender ||
+          (currentGender === null &&
+            String(profile.gender ?? '').trim() !== request.oldValue.trim())
         ) {
           throw new Error('CHANGE_REQUEST_STALE');
         }
+        const nextGender = normalizeProfileGender(request.newValue);
+        if (!nextGender) throw new Error('CHANGE_REQUEST_INVALID_GENDER');
         await tx
           .update(schema.profiles)
-          .set({ gender: request.newValue, updatedAt: new Date() })
+          .set({ gender: nextGender, updatedAt: new Date() })
           .where(eq(schema.profiles.userId, request.userId));
         await this.auditService.logUpdate(
           tx,
@@ -1169,7 +1200,7 @@ export class UsersRepository {
           'profiles',
           request.userId,
           { gender: profile.gender },
-          { gender: request.newValue },
+          { gender: nextGender },
         );
       } else if (request.requestType === 'EMAIL') {
         if (targetUser.isEmailVerified === true) {

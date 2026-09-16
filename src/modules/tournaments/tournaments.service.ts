@@ -105,6 +105,16 @@ import { CreateVenueDto } from '../venues/dto/create-venue.dto';
 import { UpdateVenueDto } from '../venues/dto/update-venue.dto';
 import { CreateBatchCourtsDto } from '../venues/dto/create-batch-courts.dto';
 
+const PUBLIC_TOURNAMENT_CACHE_VERSION = 'v1';
+
+function serializeTournamentQuery(query: Record<string, unknown>): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(query).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  );
+}
+
 @Injectable()
 export class TournamentsService {
   private readonly logger = new Logger(TournamentsService.name);
@@ -775,103 +785,101 @@ export class TournamentsService {
   }
 
   async findAll(query: QueryTournamentDto) {
-    const cacheKey = `tournaments:list:${JSON.stringify(query)}`;
-    try {
-      const cached = await this.redisService.get(cacheKey);
-      if (cached) return JSON.parse(cached);
-    } catch {
-      // Redis down — ignore cache, fall through to DB
-    }
+    const cacheQuery = {
+      ...query,
+      visibility: 'PUBLIC' as const,
+      createdBy: undefined,
+    };
+    const cacheKey = `tournaments:list:${serializeTournamentQuery(cacheQuery)}`;
+    return this.redisService.getOrSetJson(cacheKey, 60, async () => {
+      const result = await this.tournamentsRepository.findAll(
+        {
+          ...cacheQuery,
+        },
+        {
+          defaultTournamentType: null,
+          defaultVisibility: 'PUBLIC',
+        },
+      );
+      result.data = result.data
+        .filter((t) => {
+          if (
+            [
+              'DRAFT',
+              'PENDING_APPROVAL',
+              'SUSPENDED',
+              'CANCELLED',
+              'PENDING_DELETE',
+            ].includes(t.status)
+          ) {
+            return false;
+          }
+          // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
+          const isClubSuperLite = Boolean(
+            t.communityId &&
+            isSuperLiteTournamentProduct(
+              normalizeTournamentProductConfig(t.tournamentConfig),
+            ),
+          );
+          if (isClubSuperLite) {
+            return false;
+          }
+          return true;
+        })
+        .map((t) => this.mapTournamentFormat(t));
 
-    const result = await this.tournamentsRepository.findAll(
-      {
-        ...query,
-        visibility: 'PUBLIC',
-        createdBy: undefined,
-      },
-      {
-        defaultTournamentType: null,
-        defaultVisibility: 'PUBLIC',
-      },
-    );
-    result.data = result.data
-      .filter((t) => {
-        if (
-          [
-            'DRAFT',
-            'PENDING_APPROVAL',
-            'SUSPENDED',
-            'CANCELLED',
-            'PENDING_DELETE',
-          ].includes(t.status)
-        ) {
-          return false;
-        }
-        // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
-        const isClubSuperLite = Boolean(
-          t.communityId &&
-          isSuperLiteTournamentProduct(
-            normalizeTournamentProductConfig(t.tournamentConfig),
-          ),
-        );
-        if (isClubSuperLite) {
-          return false;
-        }
-        return true;
-      })
-      .map((t) => this.mapTournamentFormat(t));
-
-    try {
-      await this.redisService.set(cacheKey, JSON.stringify(result), 60);
-    } catch {
-      // Redis down — ignore
-    }
-
-    return result;
+      return result;
+    });
   }
 
   async findPublic(query: QueryTournamentDto) {
+    const cacheQuery = {
+      ...query,
+      tournamentType: 'PUBLIC' as const,
+      visibility: 'PUBLIC' as const,
+      createdBy: undefined,
+    };
+    const cacheKey = `tournaments:list:public:${PUBLIC_TOURNAMENT_CACHE_VERSION}:${serializeTournamentQuery(cacheQuery)}`;
     // Lấy tất cả tournament hiển thị công khai trên app/web:
-    // Mặc định lọc các giải đấu PUBLIC để ẩn giải đấu PRIVATE khỏi trang chủ
-    const result = await this.tournamentsRepository.findAll(
-      {
-        ...query,
-        tournamentType: 'PUBLIC',
-        visibility: 'PUBLIC',
-        createdBy: undefined,
-      },
-      {
-        defaultTournamentType: 'PUBLIC',
-        defaultVisibility: 'PUBLIC',
-      },
-    );
-    result.data = result.data
-      .filter((t) => {
-        if (
-          [
-            'DRAFT',
-            'PENDING_APPROVAL',
-            'SUSPENDED',
-            'CANCELLED',
-            'PENDING_DELETE',
-          ].includes(t.status)
-        ) {
-          return false;
-        }
-        // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
-        const isClubSuperLite = Boolean(
-          t.communityId &&
-          isSuperLiteTournamentProduct(
-            normalizeTournamentProductConfig(t.tournamentConfig),
-          ),
-        );
-        if (isClubSuperLite) {
-          return false;
-        }
-        return true;
-      })
-      .map((t) => this.mapPublicTournament(this.mapTournamentFormat(t)));
-    return result;
+    // Mặc định lọc các giải đấu PUBLIC để ẩn giải đấu PRIVATE khỏi trang chủ.
+    return this.redisService.getOrSetJson(cacheKey, 60, async () => {
+      const result = await this.tournamentsRepository.findAll(
+        {
+          ...cacheQuery,
+        },
+        {
+          defaultTournamentType: 'PUBLIC',
+          defaultVisibility: 'PUBLIC',
+        },
+      );
+      result.data = result.data
+        .filter((t) => {
+          if (
+            [
+              'DRAFT',
+              'PENDING_APPROVAL',
+              'SUSPENDED',
+              'CANCELLED',
+              'PENDING_DELETE',
+            ].includes(t.status)
+          ) {
+            return false;
+          }
+          // Super Lite tournaments in clubs are strictly internal to the club and must never appear in public tournament listings
+          const isClubSuperLite = Boolean(
+            t.communityId &&
+            isSuperLiteTournamentProduct(
+              normalizeTournamentProductConfig(t.tournamentConfig),
+            ),
+          );
+          if (isClubSuperLite) {
+            return false;
+          }
+          return true;
+        })
+        .map((t) => this.mapPublicTournament(this.mapTournamentFormat(t)));
+      return result;
+    });
   }
 
   async findMy(userId: string) {
@@ -1702,7 +1710,7 @@ export class TournamentsService {
       if (
         !member ||
         member.status !== 'JOINED' ||
-        !['OWNER', 'MODERATOR'].includes(member.role)
+        !['OWNER', 'ADMIN', 'MODERATOR'].includes(member.role)
       ) {
         throw new ForbiddenException(
           'Bạn phải là thành viên của câu lạc bộ để tạo giải đấu.',

@@ -19,6 +19,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import type { AnyColumn } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { PG_CONNECTION } from '../../database/database.module';
@@ -40,6 +41,38 @@ import {
   AdminEloPlayerDetailQueryDto,
   RankingVisibilityStatus,
 } from './dto/admin-elo-operation.dto';
+import {
+  getProfileGenderAliases,
+  normalizeGenderRestriction,
+  type GenderRestriction,
+} from '../../common/helpers/gender.helper';
+
+const normalizedGenderColumn = (column: AnyColumn) => sql`
+  case upper(trim(coalesce(${column}, '')))
+    when 'MEN' then 'MALE'
+    when 'NAM' then 'MALE'
+    when 'M' then 'MALE'
+    when 'WOMEN' then 'FEMALE'
+    when 'NU' then 'FEMALE'
+    when 'NỮ' then 'FEMALE'
+    when 'F' then 'FEMALE'
+    when 'MIXED_DOUBLES' then 'MIXED'
+    when 'MIX' then 'MIXED'
+    else upper(trim(coalesce(${column}, '')))
+  end`;
+
+const normalizedRankingGenderCondition = (
+  column: AnyColumn,
+  gender: GenderRestriction,
+) => sql`${normalizedGenderColumn(column)} = ${gender}`;
+
+const normalizedProfileGenderCondition = (
+  column: AnyColumn,
+  gender: Exclude<GenderRestriction, 'MIXED'>,
+) => inArray(normalizedGenderColumn(column), getProfileGenderAliases(gender));
+
+const sameGenderRestriction = (left: AnyColumn, right: AnyColumn) =>
+  sql`${normalizedGenderColumn(left)} = ${normalizedGenderColumn(right)}`;
 
 type RankingScope = 'PUBLIC';
 type OperationResult = {
@@ -227,6 +260,12 @@ export class AdminRankingService {
   async listPairs(query: AdminEloQueryDto) {
     this.assertPublicAdminQuery(query.scope, query.communityId);
     if (!query.categoryId) throw new BadRequestException('ELO_CATEGORY_REQUIRED');
+    const normalizedGenderRestriction = query.genderRestriction
+      ? normalizeGenderRestriction(query.genderRestriction)
+      : null;
+    if (query.genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('ELO_GENDER_RESTRICTION_INVALID');
+    }
     const limit = Math.min(query.limit ?? 50, 100);
     const cursor = this.decodePairCursor(query.cursor);
     const user1 = aliasedTable(schema.users, 'admin_pair_user1');
@@ -243,7 +282,14 @@ export class AdminRankingService {
       isNull(user2.deletedAt),
     ];
     if (query.matchType) conditions.push(eq(schema.pairRanks.matchType, query.matchType));
-    if (query.genderRestriction) conditions.push(eq(schema.pairRanks.genderRestriction, query.genderRestriction));
+    if (normalizedGenderRestriction) {
+      conditions.push(
+        normalizedRankingGenderCondition(
+          schema.pairRanks.genderRestriction,
+          normalizedGenderRestriction,
+        ),
+      );
+    }
     if (query.search?.trim()) {
       const search = `%${query.search.trim()}%`;
       conditions.push(sql`(
@@ -287,7 +333,11 @@ export class AdminRankingService {
       .orderBy(desc(schema.pairRanks.eloPoints), desc(schema.pairRanks.id))
       .limit(limit + 1);
     const hasMore = rows.length > limit;
-    const data = rows.slice(0, limit);
+    const data = rows.slice(0, limit).map((row) => ({
+      ...row,
+      genderRestriction:
+        normalizeGenderRestriction(row.genderRestriction) ?? row.genderRestriction,
+    }));
     const last = data.at(-1);
     return {
       data,
@@ -758,9 +808,9 @@ export class AdminRankingService {
             : isNull(schema.adminEloOperations.communityId),
           eq(schema.adminEloOperations.matchType, context.matchType),
           context.genderRestriction
-            ? eq(
+            ? normalizedRankingGenderCondition(
                 schema.adminEloOperations.genderRestriction,
-                context.genderRestriction,
+                normalizeGenderRestriction(context.genderRestriction) as GenderRestriction,
               )
             : isNull(schema.adminEloOperations.genderRestriction),
           cursor
@@ -798,8 +848,28 @@ export class AdminRankingService {
     limit: number,
     cursor?: AdminContextCursor,
   ): Promise<AdminContextRow[]> {
-    const genderCondition = query.genderRestriction
-      ? eq(schema.userRanks.genderRestriction, query.genderRestriction)
+    const normalizedGenderRestriction = query.genderRestriction
+      ? normalizeGenderRestriction(query.genderRestriction)
+      : null;
+    if (query.genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('ELO_GENDER_RESTRICTION_INVALID');
+    }
+    const genderCondition = normalizedGenderRestriction
+      ? or(
+          normalizedRankingGenderCondition(
+            schema.userRanks.genderRestriction,
+            normalizedGenderRestriction,
+          ),
+          normalizedGenderRestriction === 'MIXED'
+            ? sql`false`
+            : and(
+                isNull(schema.userRanks.genderRestriction),
+                normalizedProfileGenderCondition(
+                  schema.profiles.gender,
+                  normalizedGenderRestriction,
+                ),
+              ),
+        )
       : query.genderRestriction === undefined
         ? undefined
         : isNull(schema.userRanks.genderRestriction);
@@ -855,7 +925,10 @@ export class AdminRankingService {
                       schema.rankingContextStatuses.matchType,
                       schema.userRanks.matchType,
                     ),
-                    sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                    sameGenderRestriction(
+                      schema.rankingContextStatuses.genderRestriction,
+                      schema.userRanks.genderRestriction,
+                    ),
                     inArray(schema.rankingContextStatuses.status, [
                       'HIDDEN',
                       'BANNED',
@@ -887,7 +960,10 @@ export class AdminRankingService {
                       schema.rankingContextStatuses.matchType,
                       schema.userRanks.matchType,
                     ),
-                    sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                    sameGenderRestriction(
+                      schema.rankingContextStatuses.genderRestriction,
+                      schema.userRanks.genderRestriction,
+                    ),
                     eq(schema.rankingContextStatuses.status, query.status),
                     or(
                       isNull(schema.rankingContextStatuses.expiresAt),
@@ -936,13 +1012,20 @@ export class AdminRankingService {
             schema.rankingContextStatuses.matchType,
             schema.userRanks.matchType,
           ),
-          sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+          sameGenderRestriction(
+            schema.rankingContextStatuses.genderRestriction,
+            schema.userRanks.genderRestriction,
+          ),
         ),
       )
       .where(and(...conditions))
       .orderBy(desc(schema.userRanks.updatedAt), desc(schema.userRanks.id))
       .limit(limit);
-    return rows;
+    return rows.map((row) => ({
+      ...row,
+      genderRestriction:
+        normalizeGenderRestriction(row.genderRestriction) ?? row.genderRestriction,
+    }));
   }
 
   private async findContextById(contextId: string) {
@@ -959,7 +1042,14 @@ export class AdminRankingService {
       .from(schema.userRanks)
       .where(eq(schema.userRanks.id, contextId))
       .limit(1);
-    if (publicContext) return publicContext;
+    if (publicContext) {
+      return {
+        ...publicContext,
+        genderRestriction:
+          normalizeGenderRestriction(publicContext.genderRestriction) ??
+          publicContext.genderRestriction,
+      };
+    }
     return undefined;
   }
 
@@ -993,7 +1083,10 @@ export class AdminRankingService {
     dto: AdminEloOperationDto,
   ): Promise<RankSnapshot | null> {
     const genderCondition = dto.genderRestriction
-      ? eq(schema.userRanks.genderRestriction, dto.genderRestriction)
+      ? normalizedRankingGenderCondition(
+          schema.userRanks.genderRestriction,
+          dto.genderRestriction as GenderRestriction,
+        )
       : isNull(schema.userRanks.genderRestriction);
     const rankSelection = {
       id: schema.userRanks.id,
@@ -1065,9 +1158,9 @@ export class AdminRankingService {
           isNull(schema.rankingContextStatuses.communityId),
           eq(schema.rankingContextStatuses.matchType, dto.matchType),
           dto.genderRestriction
-            ? eq(
+            ? normalizedRankingGenderCondition(
                 schema.rankingContextStatuses.genderRestriction,
-                dto.genderRestriction,
+                dto.genderRestriction as GenderRestriction,
               )
             : isNull(schema.rankingContextStatuses.genderRestriction),
         ),
@@ -1137,11 +1230,18 @@ export class AdminRankingService {
     const operation = dto.operation;
     if (!ADMIN_ELO_OPERATIONS.includes(operation))
       throw new BadRequestException('ELO_OPERATION_INVALID');
+    const rawGenderRestriction = dto.genderRestriction?.trim() || undefined;
+    const normalizedGenderRestriction = rawGenderRestriction
+      ? normalizeGenderRestriction(rawGenderRestriction)
+      : undefined;
+    if (rawGenderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('ELO_GENDER_RESTRICTION_INVALID');
+    }
     const normalized = {
       ...dto,
       operationKey: dto.operationKey.trim(),
       matchType: dto.matchType.trim(),
-      genderRestriction: dto.genderRestriction?.trim() || undefined,
+      genderRestriction: normalizedGenderRestriction ?? undefined,
       reason: dto.reason.trim(),
     };
     if (

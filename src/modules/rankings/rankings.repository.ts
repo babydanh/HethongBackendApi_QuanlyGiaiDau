@@ -22,6 +22,42 @@ import {
   AnyColumn,
 } from 'drizzle-orm';
 import { QueryRankingDto } from './dto/query-ranking.dto';
+import {
+  getProfileGenderAliases,
+  normalizeGenderRestriction,
+  type GenderRestriction,
+} from '../../common/helpers/gender.helper';
+
+const normalizedProfileGender = (column: AnyColumn) =>
+  sql`upper(trim(${column}))`;
+
+const normalizedGenderRestriction = (column: AnyColumn | SQL) => sql`
+  case upper(trim(coalesce(${column}, '')))
+    when 'MEN' then 'MALE'
+    when 'NAM' then 'MALE'
+    when 'M' then 'MALE'
+    when 'WOMEN' then 'FEMALE'
+    when 'NU' then 'FEMALE'
+    when 'NỮ' then 'FEMALE'
+    when 'F' then 'FEMALE'
+    when 'MIXED_DOUBLES' then 'MIXED'
+    when 'MIX' then 'MIXED'
+    else upper(trim(coalesce(${column}, '')))
+  end`;
+
+const profileGenderCondition = (
+  column: AnyColumn,
+  gender: Exclude<GenderRestriction, 'MIXED'>,
+) => inArray(normalizedProfileGender(column), getProfileGenderAliases(gender));
+
+const rankingGenderCondition = (column: AnyColumn, gender: GenderRestriction) =>
+  sql`${normalizedGenderRestriction(column)} = ${gender}`;
+
+const sameGenderRestriction = (left: AnyColumn, right: AnyColumn) =>
+  sql`${normalizedGenderRestriction(left)} = ${normalizedGenderRestriction(right)}`;
+
+const canonicalStoredGenderRestriction = (value: string | null) =>
+  value === null ? null : normalizeGenderRestriction(value) ?? value;
 
 @Injectable()
 export class RankingsRepository {
@@ -45,6 +81,12 @@ export class RankingsRepository {
       provinceCode,
       genderRestriction,
     } = query;
+    const normalizedGenderRestriction = genderRestriction
+      ? normalizeGenderRestriction(genderRestriction)
+      : null;
+    if (genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('Invalid gender restriction');
+    }
 
     const categoryConditions: SQL[] = [];
     if (categoryId) {
@@ -105,18 +147,38 @@ export class RankingsRepository {
       if (matchType) {
         conditions.push(eq(schema.pairRanks.matchType, matchType));
       }
-      if (genderRestriction) {
-        const maleValues = ['MALE', 'Nam', 'nam', 'NAM'];
-        const femaleValues = ['FEMALE', 'Nữ', 'nữ', 'NU', 'nu', 'Nu'];
-        const validValues = genderRestriction === 'MALE' ? maleValues : genderRestriction === 'FEMALE' ? femaleValues : [genderRestriction];
-
+      if (normalizedGenderRestriction) {
+        const legacyPairGender =
+          normalizedGenderRestriction === 'MIXED'
+            ? or(
+                and(
+                  profileGenderCondition(profile1.gender, 'MALE'),
+                  profileGenderCondition(profile2.gender, 'FEMALE'),
+                ),
+                and(
+                  profileGenderCondition(profile1.gender, 'FEMALE'),
+                  profileGenderCondition(profile2.gender, 'MALE'),
+                ),
+              )
+            : and(
+                profileGenderCondition(
+                  profile1.gender,
+                  normalizedGenderRestriction,
+                ),
+                profileGenderCondition(
+                  profile2.gender,
+                  normalizedGenderRestriction,
+                ),
+              );
         conditions.push(
           or(
-            eq(schema.pairRanks.genderRestriction, genderRestriction),
+            rankingGenderCondition(
+              schema.pairRanks.genderRestriction,
+              normalizedGenderRestriction,
+            ),
             and(
               isNull(schema.pairRanks.genderRestriction),
-              inArray(profile1.gender, validValues),
-              inArray(profile2.gender, validValues),
+              legacyPairGender,
             ),
           ) as SQL,
         );
@@ -166,7 +228,10 @@ export class RankingsRepository {
                   schema.rankingContextStatuses.matchType,
                   schema.pairRanks.matchType,
                 ),
-                sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.pairRanks.genderRestriction}, '')`,
+                sameGenderRestriction(
+                  schema.rankingContextStatuses.genderRestriction,
+                  schema.pairRanks.genderRestriction,
+                ),
                 inArray(schema.rankingContextStatuses.status, [
                   'HIDDEN',
                   'BANNED',
@@ -221,7 +286,14 @@ export class RankingsRepository {
         .$dynamic();
       const pairData = await data;
       const pairHasMore = pairData.length > limit;
-      const pairItems = pairHasMore ? pairData.slice(0, limit) : pairData;
+      const pairItems = (pairHasMore ? pairData.slice(0, limit) : pairData).map(
+        (item) => ({
+          ...item,
+          genderRestriction: canonicalStoredGenderRestriction(
+            item.genderRestriction,
+          ),
+        }),
+      );
       const pairLast = pairItems.at(-1);
 
       return {
@@ -262,17 +334,21 @@ export class RankingsRepository {
       if (matchType) {
         conditions.push(eq(schema.communityRankings.matchType, matchType));
       }
-      if (genderRestriction) {
-        const maleValues = ['MALE', 'Nam', 'nam', 'NAM'];
-        const femaleValues = ['FEMALE', 'Nữ', 'nữ', 'NU', 'nu', 'Nu'];
-        const validValues = genderRestriction === 'MALE' ? maleValues : genderRestriction === 'FEMALE' ? femaleValues : [genderRestriction];
-
+      if (normalizedGenderRestriction) {
         conditions.push(
           or(
-            eq(schema.communityRankings.genderRestriction, genderRestriction),
+            rankingGenderCondition(
+              schema.communityRankings.genderRestriction,
+              normalizedGenderRestriction,
+            ),
             and(
               isNull(schema.communityRankings.genderRestriction),
-              inArray(schema.profiles.gender, validValues),
+              normalizedGenderRestriction !== 'MIXED'
+                ? profileGenderCondition(
+                    schema.profiles.gender,
+                    normalizedGenderRestriction,
+                  )
+                : sql`false`,
             ),
           ) as SQL,
         );
@@ -306,7 +382,10 @@ export class RankingsRepository {
                   schema.rankingContextStatuses.matchType,
                   schema.communityRankings.matchType,
                 ),
-                sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.communityRankings.genderRestriction}, '')`,
+                sameGenderRestriction(
+                  schema.rankingContextStatuses.genderRestriction,
+                  schema.communityRankings.genderRestriction,
+                ),
                 inArray(schema.rankingContextStatuses.status, [
                   'HIDDEN',
                   'BANNED',
@@ -375,9 +454,14 @@ export class RankingsRepository {
         .$dynamic();
       const communityData = await data;
       const communityHasMore = communityData.length > limit;
-      const communityItems = communityHasMore
-        ? communityData.slice(0, limit)
-        : communityData;
+      const communityItems = (
+        communityHasMore ? communityData.slice(0, limit) : communityData
+      ).map((item) => ({
+        ...item,
+        genderRestriction: canonicalStoredGenderRestriction(
+          item.genderRestriction,
+        ),
+      }));
       const communityLast = communityItems.at(-1);
 
       return {
@@ -411,17 +495,21 @@ export class RankingsRepository {
       if (matchType) {
         conditions.push(eq(schema.userRanks.matchType, matchType));
       }
-      if (genderRestriction) {
-        const maleValues = ['MALE', 'Nam', 'nam', 'NAM'];
-        const femaleValues = ['FEMALE', 'Nữ', 'nữ', 'NU', 'nu', 'Nu'];
-        const validValues = genderRestriction === 'MALE' ? maleValues : genderRestriction === 'FEMALE' ? femaleValues : [genderRestriction];
-
+      if (normalizedGenderRestriction) {
         conditions.push(
           or(
-            eq(schema.userRanks.genderRestriction, genderRestriction),
+            rankingGenderCondition(
+              schema.userRanks.genderRestriction,
+              normalizedGenderRestriction,
+            ),
             and(
               isNull(schema.userRanks.genderRestriction),
-              inArray(schema.profiles.gender, validValues),
+              normalizedGenderRestriction !== 'MIXED'
+                ? profileGenderCondition(
+                    schema.profiles.gender,
+                    normalizedGenderRestriction,
+                  )
+                : sql`false`,
             ),
           ) as SQL,
         );
@@ -451,7 +539,10 @@ export class RankingsRepository {
                   schema.rankingContextStatuses.matchType,
                   schema.userRanks.matchType,
                 ),
-                sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                sameGenderRestriction(
+                  schema.rankingContextStatuses.genderRestriction,
+                  schema.userRanks.genderRestriction,
+                ),
                 inArray(schema.rankingContextStatuses.status, [
                   'HIDDEN',
                   'BANNED',
@@ -508,9 +599,14 @@ export class RankingsRepository {
         .$dynamic();
       const publicData = await data;
       const publicHasMore = publicData.length > limit;
-      const publicItems = publicHasMore
-        ? publicData.slice(0, limit)
-        : publicData;
+      const publicItems = (
+        publicHasMore ? publicData.slice(0, limit) : publicData
+      ).map((item) => ({
+        ...item,
+        genderRestriction: canonicalStoredGenderRestriction(
+          item.genderRestriction,
+        ),
+      }));
       const publicLast = publicItems.at(-1);
 
       return {
@@ -599,7 +695,10 @@ export class RankingsRepository {
                     schema.rankingContextStatuses.matchType,
                     schema.userRanks.matchType,
                   ),
-                  sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.userRanks.genderRestriction}, '')`,
+                  sameGenderRestriction(
+                    schema.rankingContextStatuses.genderRestriction,
+                    schema.userRanks.genderRestriction,
+                  ),
                   inArray(schema.rankingContextStatuses.status, [
                     'HIDDEN',
                     'BANNED',
@@ -671,7 +770,10 @@ export class RankingsRepository {
                     schema.rankingContextStatuses.matchType,
                     schema.communityRankings.matchType,
                   ),
-                  sql`coalesce(${schema.rankingContextStatuses.genderRestriction}, '') = coalesce(${schema.communityRankings.genderRestriction}, '')`,
+                  sameGenderRestriction(
+                    schema.rankingContextStatuses.genderRestriction,
+                    schema.communityRankings.genderRestriction,
+                  ),
                   inArray(schema.rankingContextStatuses.status, [
                     'HIDDEN',
                     'BANNED',
@@ -687,8 +789,18 @@ export class RankingsRepository {
       );
 
     return {
-      publicRanks,
-      communityRanks,
+      publicRanks: publicRanks.map((rank) => ({
+        ...rank,
+        genderRestriction: canonicalStoredGenderRestriction(
+          rank.genderRestriction,
+        ),
+      })),
+      communityRanks: communityRanks.map((rank) => ({
+        ...rank,
+        genderRestriction: canonicalStoredGenderRestriction(
+          rank.genderRestriction,
+        ),
+      })),
     };
   }
 
@@ -717,6 +829,17 @@ export class RankingsRepository {
       limit = 20,
       cursor,
     } = query;
+    const normalizedGenderFilter =
+      genderRestriction && genderRestriction !== '__NONE__'
+        ? normalizeGenderRestriction(genderRestriction)
+        : null;
+    if (
+      genderRestriction &&
+      genderRestriction !== '__NONE__' &&
+      !normalizedGenderFilter
+    ) {
+      throw new BadRequestException('Invalid gender restriction');
+    }
 
     const conditions: SQL[] = [eq(schema.eloHistoryLogs.userId, userId)];
 
@@ -760,9 +883,11 @@ export class RankingsRepository {
       conditions.push(
         sql`COALESCE(${schema.tournamentDivisions.genderRestriction}, ${schema.tournaments.genderRestriction}) IS NULL`,
       );
-    } else if (genderRestriction) {
+    } else if (normalizedGenderFilter) {
       conditions.push(
-        sql`COALESCE(${schema.tournamentDivisions.genderRestriction}, ${schema.tournaments.genderRestriction}) = ${genderRestriction}`,
+        sql`${normalizedGenderRestriction(
+          sql`coalesce(${schema.tournamentDivisions.genderRestriction}, ${schema.tournaments.genderRestriction})`,
+        )} = ${normalizedGenderFilter}`,
       );
     }
     if (partnerId) {
@@ -993,6 +1118,12 @@ export class RankingsRepository {
     forUpdate: boolean = false,
     genderRestriction?: string,
   ) {
+    const normalizedGenderRestriction = genderRestriction
+      ? normalizeGenderRestriction(genderRestriction)
+      : null;
+    if (genderRestriction && !normalizedGenderRestriction) {
+      throw new BadRequestException('Invalid gender restriction');
+    }
     if (scope === 'COMMUNITY') {
       if (!communityId)
         throw new BadRequestException(
@@ -1003,8 +1134,11 @@ export class RankingsRepository {
         eq(schema.communityRankings.categoryId, categoryId),
         eq(schema.communityRankings.communityId, communityId),
         eq(schema.communityRankings.matchType, matchType),
-        genderRestriction
-          ? eq(schema.communityRankings.genderRestriction, genderRestriction)
+        normalizedGenderRestriction
+          ? rankingGenderCondition(
+              schema.communityRankings.genderRestriction,
+              normalizedGenderRestriction,
+            )
           : isNull(schema.communityRankings.genderRestriction),
       ];
 
@@ -1030,7 +1164,7 @@ export class RankingsRepository {
           categoryId,
           communityId,
           matchType,
-          genderRestriction: genderRestriction || null,
+          genderRestriction: normalizedGenderRestriction,
           eloPoints: 1000,
           matchesPlayed: 0,
           matchesWon: 0,
@@ -1045,8 +1179,11 @@ export class RankingsRepository {
         eq(schema.userRanks.categoryId, categoryId),
         eq(schema.userRanks.matchType, matchType),
         isNull(schema.userRanks.communityId),
-        genderRestriction
-          ? eq(schema.userRanks.genderRestriction, genderRestriction)
+        normalizedGenderRestriction
+          ? rankingGenderCondition(
+              schema.userRanks.genderRestriction,
+              normalizedGenderRestriction,
+            )
           : isNull(schema.userRanks.genderRestriction),
       ];
 
@@ -1071,7 +1208,7 @@ export class RankingsRepository {
           userId,
           categoryId,
           matchType,
-          genderRestriction: genderRestriction || null,
+          genderRestriction: normalizedGenderRestriction,
           eloPoints: 1000,
           matchesPlayed: 0,
           matchesWon: 0,

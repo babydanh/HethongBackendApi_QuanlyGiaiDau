@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  Header,
   UseGuards,
 } from '@nestjs/common';
 import { MatchesService } from './matches.service';
@@ -36,6 +37,11 @@ export class MatchesController {
 
   @Public()
   @SkipThrottle()
+  @Header(
+    'Cache-Control',
+    'public, max-age=0, s-maxage=30, stale-while-revalidate=15',
+  )
+  @Header('Vary', 'Accept-Encoding')
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách trận đấu' })
   async findAll(@Query() query: QueryMatchDto) {
@@ -45,6 +51,7 @@ export class MatchesController {
   @Public()
   @SkipThrottle()
   @UseGuards(OptionalJwtAuthGuard)
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết trận đấu' })
   async findOne(

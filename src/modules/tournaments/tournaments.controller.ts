@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Post,
   Body,
   Patch,
@@ -86,6 +87,11 @@ export class TournamentsController {
   }
 
   @Public()
+  @Header(
+    'Cache-Control',
+    'public, max-age=0, s-maxage=60, stale-while-revalidate=30',
+  )
+  @Header('Vary', 'Accept-Encoding')
   @Get('public')
   @ApiOperation({ summary: 'Chỉ lấy danh sách giải đấu PUBLIC công khai' })
   async findPublic(@Query() query: QueryTournamentDto) {
@@ -124,6 +130,7 @@ export class TournamentsController {
   }
 
   @Public()
+  @Header('Cache-Control', 'private, no-store')
   @Get('join/:inviteCode')
   @ApiOperation({ summary: 'Xem thông tin giải đấu qua mã mời' })
   async findByInviteCode(@Param('inviteCode') inviteCode: string) {
@@ -147,6 +154,11 @@ export class TournamentsController {
 
   @Public()
   @SkipThrottle()
+  @Header(
+    'Cache-Control',
+    'public, max-age=0, s-maxage=60, stale-while-revalidate=30',
+  )
+  @Header('Vary', 'Accept-Encoding')
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách giải đấu' })
   async findAll(@Query() query: QueryTournamentDto) {
@@ -574,6 +586,7 @@ export class TournamentsController {
 
   @Public()
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết giải đấu' })
   async findOne(

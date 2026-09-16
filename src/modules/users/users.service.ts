@@ -19,6 +19,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { QueryMyReportsDto } from './dto/query-my-reports.dto';
 import { isStoredImageUrl, extractStoredImagePublicId } from '../../common/helpers/cloudinary.helper';
 import { UserRole } from '../../common/constants/enums';
+import { normalizeProfileGender } from '../../common/helpers/gender.helper';
 
 @Injectable()
 export class UsersService {
@@ -28,18 +29,6 @@ export class UsersService {
     private readonly rankingsService: RankingsService,
     private readonly notificationsService: NotificationsService,
   ) {}
-
-  private normalizeGenderValue(value?: string | null): 'MALE' | 'FEMALE' | 'OTHER' | null {
-    const normalized = String(value ?? '')
-      .trim()
-      .toUpperCase()
-      .replace(/[-–\s]/g, '_');
-
-    if (['MALE', 'MEN', 'NAM'].includes(normalized)) return 'MALE';
-    if (['FEMALE', 'WOMEN', 'NU', 'NỮ'].includes(normalized)) return 'FEMALE';
-    if (['OTHER', 'KHAC', 'KHÁC'].includes(normalized)) return 'OTHER';
-    return null;
-  }
 
   async findAll(query: QueryUserDto) {
     return await this.usersRepository.findAll(query);
@@ -129,15 +118,24 @@ export class UsersService {
     if (
       profileDto.gender !== undefined &&
       currentUser.profile?.isGenderLocked &&
-      this.normalizeGenderValue(profileDto.gender) !==
-        this.normalizeGenderValue(currentUser.profile.gender)
+      normalizeProfileGender(profileDto.gender) !==
+        normalizeProfileGender(currentUser.profile.gender)
     ) {
       throw new BadRequestException(
         'Giới tính của bạn đã bị khóa. Vui lòng gửi yêu cầu hỗ trợ tới Admin để được cập nhật.',
       );
     }
 
-    const updateData = { ...profileDto } as Partial<
+    const normalizedGender = profileDto.gender === undefined
+      ? undefined
+      : normalizeProfileGender(profileDto.gender);
+    if (profileDto.gender !== undefined && !normalizedGender) {
+      throw new BadRequestException('Giới tính không hợp lệ.');
+    }
+    const updateData = {
+      ...profileDto,
+      ...(profileDto.gender !== undefined && { gender: normalizedGender }),
+    } as Partial<
       typeof schema.profiles.$inferInsert
     >;
 
@@ -343,12 +341,12 @@ export class UsersService {
 
     const oldValue = requestType === 'GENDER' ? (user.profile?.gender || '') : user.email;
     const normalizedGender = requestType === 'GENDER'
-      ? this.normalizeGenderValue(trimmedValue)
+      ? normalizeProfileGender(trimmedValue)
       : null;
     if (requestType === 'GENDER' && !normalizedGender) {
       throw new BadRequestException('Giới tính mới không hợp lệ.');
     }
-    const isSameValue = this.normalizeGenderValue(oldValue) === normalizedGender;
+    const isSameValue = normalizeProfileGender(oldValue) === normalizedGender;
     if (isSameValue) {
       throw new BadRequestException('Thông tin mới giống thông tin hiện tại.');
     }
@@ -358,12 +356,15 @@ export class UsersService {
         userId,
         requestType,
         oldValue,
-        trimmedValue,
+        requestType === 'GENDER' ? normalizedGender! : trimmedValue,
       );
       return request;
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'PENDING_CHANGE_REQUEST_EXISTS') {
         throw new ConflictException('Bạn đã có một yêu cầu cùng loại đang chờ xử lý.');
+      }
+      if (error instanceof Error && error.message === 'CHANGE_REQUEST_INVALID_GENDER') {
+        throw new BadRequestException('Giới tính mới không hợp lệ.');
       }
       throw error;
     }

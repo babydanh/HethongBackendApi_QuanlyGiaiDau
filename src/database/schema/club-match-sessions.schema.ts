@@ -14,6 +14,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { categories } from './categories.schema';
 import { communities } from './communities.schema';
+import { tournaments } from './tournaments.schema';
 import { users } from './users.schema';
 
 export const clubMatchSessions = pgTable(
@@ -38,6 +39,10 @@ export const clubMatchSessions = pgTable(
     pairingMode: varchar('pairing_mode', { length: 20 })
       .default('FREE')
       .notNull(),
+    bracketTournamentId: uuid('bracket_tournament_id').references(
+      () => tournaments.id,
+      { onDelete: 'set null' },
+    ),
     isRanked: boolean('is_ranked').default(true).notNull(),
     maxParticipants: integer('max_participants').default(16).notNull(),
     sessionConfig: jsonb('session_config').default('{}').notNull(),
@@ -72,7 +77,7 @@ export const clubMatchSessions = pgTable(
     ),
     pairingModeCheck: check(
       'club_match_sessions_pairing_mode_check',
-      sql`${table.pairingMode} = 'FREE'`,
+      sql`${table.pairingMode} IN ('FREE', 'BRACKET')`,
     ),
     maxParticipantsCheck: check(
       'club_match_sessions_max_participants_check',
@@ -87,6 +92,9 @@ export const clubMatchSessions = pgTable(
       table.status,
       table.createdAt,
     ),
+    bracketTournamentUnique: uniqueIndex(
+      'club_match_sessions_bracket_tournament_unique',
+    ).on(table.bracketTournamentId),
   }),
 );
 

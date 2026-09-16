@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsUUID, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsUUID, IsNumber, IsOptional, IsString, IsIn } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { normalizeGenderRestriction } from '../../../common/helpers/gender.helper';
 
 export class UpdateEloDto {
   @ApiProperty({
@@ -41,7 +43,12 @@ export class UpdateEloDto {
   communityId?: string;
 
   @ApiPropertyOptional({ example: 'MALE', description: 'Gender restriction (MALE/FEMALE/MIXED)' })
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return value;
+    return normalizeGenderRestriction(String(value)) ?? value;
+  })
   @IsOptional()
   @IsString()
+  @IsIn(['MALE', 'FEMALE', 'MIXED'])
   genderRestriction?: string;
 }

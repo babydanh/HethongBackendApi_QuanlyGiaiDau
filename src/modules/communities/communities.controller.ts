@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   UseGuards,
   Put,
+  Header,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -55,6 +56,7 @@ export class CommunitiesController {
 
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
+  @Header('Cache-Control', 'private, no-store')
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách các cộng đồng' })
   @ApiResponse({ status: 200, description: 'Danh sách cộng đồng' })
@@ -100,6 +102,7 @@ export class CommunitiesController {
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 120, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id/search')
   @ApiOperation({ summary: 'Tìm kiếm nội dung trong cộng đồng' })
   async search(
@@ -152,6 +155,7 @@ export class CommunitiesController {
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id/dashboard')
   @ApiOperation({ summary: 'Lấy dữ liệu tổng quan (dashboard) của cộng đồng' })
   @ApiResponse({ status: 200, description: 'Dashboard tổng quan cộng đồng' })
@@ -177,6 +181,7 @@ export class CommunitiesController {
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết 1 cộng đồng' })
   async findOne(
@@ -255,6 +260,7 @@ export class CommunitiesController {
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id/members')
   @ApiOperation({ summary: 'Lấy danh sách thành viên cộng đồng' })
   async getMembers(
@@ -537,6 +543,7 @@ export class CommunitiesController {
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id/tournaments')
   @ApiOperation({ summary: 'Lấy giải đấu trong cộng đồng' })
   async getTournaments(
@@ -550,6 +557,7 @@ export class CommunitiesController {
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
   @Get(':id/rankings')
   @ApiOperation({ summary: 'Lấy bảng xếp hạng trong cộng đồng' })
   async getRankings(
