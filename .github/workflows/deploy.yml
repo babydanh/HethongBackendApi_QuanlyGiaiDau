@@ -122,9 +122,10 @@ jobs:
               echo \"APP_API_KEY is missing from the VPS .env\"
               exit 1
             fi
-            curl --fail --silent --show-error --max-time 15 \
+            # Health check trước deploy: nếu backend đang tắt do lần deploy trước bị lỗi thì bỏ qua, không chặn deploy
+            curl --silent --show-error --max-time 15 \
               -H \"x-app-key: \${app_api_key}\" \
-              \"https://sporto.asia/api/v1/categories\" > /dev/null
+              \"https://sporto.asia/api/v1/categories\" > /dev/null || echo \"Notice: Backend is currently down, deploying fresh container to restore service...\"
 
             echo \"$GITHUB_TOKEN\" | docker login ghcr.io -u $ACTOR --password-stdin
             docker pull ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest
