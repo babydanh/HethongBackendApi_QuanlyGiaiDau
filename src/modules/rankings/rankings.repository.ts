@@ -1,4 +1,9 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -33,12 +38,38 @@ export class RankingsRepository {
       limit = 50,
       cursor,
       categoryId,
+      categorySlug,
       matchType,
       communityId,
       scope = 'PUBLIC',
       provinceCode,
       genderRestriction,
     } = query;
+
+    const categoryConditions: SQL[] = [];
+    if (categoryId) {
+      categoryConditions.push(eq(schema.categories.id, categoryId));
+    }
+    if (categorySlug) {
+      categoryConditions.push(eq(schema.categories.slug, categorySlug));
+    }
+    if (categoryConditions.length === 0) {
+      throw new BadRequestException('categoryId or categorySlug is required');
+    }
+
+    // Resolve the sport before querying rankings. This makes a sport filter
+    // explicit (GET /rankings?categorySlug=pickleball) and prevents an unknown
+    // category from being indistinguishable from a valid category with no ELO.
+    const [category] = await this.db
+      .select({ id: schema.categories.id })
+      .from(schema.categories)
+      .where(and(...categoryConditions))
+      .limit(1);
+    if (!category) {
+      throw new NotFoundException('Sport category not found');
+    }
+    const resolvedCategoryId = category.id;
+
     let cursorValue: { eloPoints: number; id: string } | null = null;
     if (cursor) {
       try {
@@ -64,7 +95,7 @@ export class RankingsRepository {
       const profile2 = aliasedTable(schema.profiles, 'profile2');
 
       const conditions: SQL[] = [
-        eq(schema.pairRanks.categoryId, categoryId),
+        eq(schema.pairRanks.categoryId, resolvedCategoryId),
         eq(schema.pairRanks.scope, scope),
         gt(schema.pairRanks.matchesPlayed, 0),
         eq(user1.isMock, false),
@@ -208,7 +239,7 @@ export class RankingsRepository {
         );
       }
       const conditions: SQL[] = [
-        eq(schema.communityRankings.categoryId, categoryId),
+        eq(schema.communityRankings.categoryId, resolvedCategoryId),
         eq(schema.communityRankings.communityId, communityId),
         eq(schema.users.isMock, false),
         or(
@@ -351,7 +382,7 @@ export class RankingsRepository {
     } else {
       // PUBLIC scope
       const conditions: SQL[] = [
-        eq(schema.userRanks.categoryId, categoryId),
+        eq(schema.userRanks.categoryId, resolvedCategoryId),
         isNull(schema.userRanks.communityId),
         eq(schema.users.isMock, false),
         or(

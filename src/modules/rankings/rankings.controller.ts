@@ -40,6 +40,11 @@ export class RankingsController {
   @Get('football-teams')
   @ApiOperation({ summary: 'Bảng xếp hạng ELO bóng đá theo đội' })
   async getFootballTeamLeaderboard(@Query() query: QueryRankingDto) {
+    if (!query.categoryId) {
+      throw new BadRequestException(
+        'categoryId is required for the football team leaderboard',
+      );
+    }
     return this.footballTeamEloService.getLeaderboard(
       query.categoryId,
       query.limit,

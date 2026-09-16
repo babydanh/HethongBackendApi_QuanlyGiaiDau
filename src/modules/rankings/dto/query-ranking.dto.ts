@@ -1,5 +1,12 @@
-import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsInt, Min, IsUUID, IsString, IsIn } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsOptional,
+  IsInt,
+  Min,
+  IsUUID,
+  IsString,
+  IsIn,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
@@ -18,12 +25,22 @@ export class QueryRankingDto extends CursorPaginationDto {
   @Min(1)
   limit?: number = 50;
 
-  @ApiProperty({
-    example: 'uuid-category',
-    description: 'Bắt buộc lọc theo Category',
+  @ApiPropertyOptional({
+    example: 'ae6ebd64-15a5-45c6-b79d-bb10154c6226',
+    description: 'ID bộ môn. Bắt buộc nếu không truyền categorySlug.',
   })
+  @IsOptional()
   @IsUUID()
-  categoryId: string;
+  categoryId?: string;
+
+  @ApiPropertyOptional({
+    example: 'pickleball',
+    description:
+      'Slug bộ môn, ví dụ pickleball. Có thể dùng thay cho categoryId.',
+  })
+  @IsOptional()
+  @IsString()
+  categorySlug?: string;
 
   @ApiPropertyOptional({ example: 'SINGLES', description: 'Thể loại thi đấu (SINGLES/DOUBLES/MIXED_DOUBLES)' })
   @IsOptional()
