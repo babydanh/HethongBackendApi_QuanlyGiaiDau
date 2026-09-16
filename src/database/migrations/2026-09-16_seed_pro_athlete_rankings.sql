@@ -159,7 +159,7 @@ BEGIN
     (v_u_ngoc, v_category_id, 'SINGLES', 'FEMALE', NULL, 1390, 1390, 12, 6, 1, true, v_tier_hc),
     (v_u_khang, v_category_id, 'SINGLES', 'MALE', NULL, 1320, 1320, 10, 5, 0, true, v_tier_hc),
     (v_u_linh, v_category_id, 'SINGLES', 'FEMALE', NULL, 1250, 1250, 8, 4, 0, true, v_tier_lc)
-  ON CONFLICT ("user_id", "category_id", "match_type", "gender_restriction", "community_id") DO UPDATE SET
+  ON CONFLICT ("user_id", "category_id", "match_type", "gender_restriction", "community_id") WHERE "gender_restriction" IS NOT NULL DO UPDATE SET
     "elo_points" = EXCLUDED.elo_points,
     "peak_elo" = EXCLUDED.peak_elo,
     "matches_played" = EXCLUDED.matches_played,
