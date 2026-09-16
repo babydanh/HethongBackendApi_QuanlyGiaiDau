@@ -1,4 +1,4 @@
-﻿import {
+import {
   boolean,
   check,
   date,
@@ -20,8 +20,7 @@ import { tournamentVenues, venueCourts, courtBookings } from './venues.schema';
 
 /**
  * Social Pickup Session (Kèo giao lưu thể thao)
- * - Nếu communityId != null: Kèo của Câu Lạc Bộ (Club Hosted)
- * - Nếu communityId == null: Kèo tự do của Cá Nhân (Personal Hosted)
+ * - BẮT BUỘC có Câu Lạc Bộ (communityId notNull): Mọi kèo giao lưu đều trực thuộc 1 CLB
  */
 export const socialPickupSessions = pgTable(
   'social_pickup_sessions',
@@ -30,9 +29,9 @@ export const socialPickupSessions = pgTable(
     hostUserId: uuid('host_user_id')
       .references(() => users.id, { onDelete: 'restrict' })
       .notNull(),
-    communityId: uuid('community_id').references(() => communities.id, {
-      onDelete: 'cascade',
-    }),
+    communityId: uuid('community_id')
+      .references(() => communities.id, { onDelete: 'cascade' })
+      .notNull(),
     categoryId: uuid('category_id')
       .references(() => categories.id, { onDelete: 'restrict' })
       .notNull(),
