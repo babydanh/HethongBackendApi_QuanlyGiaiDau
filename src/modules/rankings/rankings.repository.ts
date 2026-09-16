@@ -107,7 +107,14 @@ export class RankingsRepository {
       }
       if (genderRestriction) {
         conditions.push(
-          eq(schema.pairRanks.genderRestriction, genderRestriction),
+          or(
+            eq(schema.pairRanks.genderRestriction, genderRestriction),
+            and(
+              isNull(schema.pairRanks.genderRestriction),
+              eq(profile1.gender, genderRestriction),
+              eq(profile2.gender, genderRestriction),
+            ),
+          ) as SQL,
         );
       }
       if (communityId && scope === 'COMMUNITY') {
@@ -253,7 +260,13 @@ export class RankingsRepository {
       }
       if (genderRestriction) {
         conditions.push(
-          eq(schema.communityRankings.genderRestriction, genderRestriction),
+          or(
+            eq(schema.communityRankings.genderRestriction, genderRestriction),
+            and(
+              isNull(schema.communityRankings.genderRestriction),
+              eq(schema.profiles.gender, genderRestriction),
+            ),
+          ) as SQL,
         );
       }
 
@@ -392,7 +405,13 @@ export class RankingsRepository {
       }
       if (genderRestriction) {
         conditions.push(
-          eq(schema.userRanks.genderRestriction, genderRestriction),
+          or(
+            eq(schema.userRanks.genderRestriction, genderRestriction),
+            and(
+              isNull(schema.userRanks.genderRestriction),
+              eq(schema.profiles.gender, genderRestriction),
+            ),
+          ) as SQL,
         );
       }
       if (provinceCode) {
