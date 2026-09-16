@@ -130,7 +130,11 @@ jobs:
             docker pull ghcr.io/babydanh/hethongbackendapi_quanlygiaidau:latest
             docker compose run --rm migrate node run-prod-migration.js --dry-run
             docker compose run --rm migrate
-            docker compose up -d --force-recreate --no-deps backend
+            docker compose stop backend || true
+            docker compose rm -f backend || true
+            docker rm -f qlgiaidau-backend || true
+            docker ps -a --filter \"name=backend\" --format \"{{.ID}}\" | xargs -r docker rm -f || true
+            docker compose up -d --no-deps backend
 
             for attempt in 1 2 3 4 5 6; do
               if curl --fail --silent --show-error --max-time 15 \
