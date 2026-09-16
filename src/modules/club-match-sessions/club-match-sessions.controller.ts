@@ -46,8 +46,9 @@ export class ClubMatchSessionsController {
     @CurrentUser() user: RequestUser,
     @Body() dto: CreateClubMatchSessionDto,
     @Headers('accept-language') locale?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.service.create(user, dto, locale);
+    return this.service.create(user, dto, locale, idempotencyKey);
   }
 
   @Get()

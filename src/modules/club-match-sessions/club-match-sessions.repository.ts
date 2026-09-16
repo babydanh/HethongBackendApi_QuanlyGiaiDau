@@ -145,6 +145,15 @@ export class ClubMatchSessionsRepository {
         categoryName: schema.categories.name,
         categorySlug: schema.categories.slug,
         categoryConfig: schema.categories.categoryConfig,
+        bracketTournament: {
+          id: schema.tournaments.id,
+          status: schema.tournaments.status,
+          registrationStartDate: schema.tournaments.registrationStartDate,
+          registrationEndDate: schema.tournaments.registrationEndDate,
+          startDate: schema.tournaments.startDate,
+          endDate: schema.tournaments.endDate,
+          isRegistrationLocked: schema.tournaments.isRegistrationLocked,
+        },
       })
       .from(schema.clubMatchSessions)
       .innerJoin(
@@ -155,11 +164,44 @@ export class ClubMatchSessionsRepository {
         schema.categories,
         eq(schema.categories.id, schema.clubMatchSessions.categoryId),
       )
+      .leftJoin(
+        schema.tournaments,
+        eq(
+          schema.tournaments.id,
+          schema.clubMatchSessions.bracketTournamentId,
+        ),
+      )
       .where(
         and(
           eq(schema.clubMatchSessions.id, id),
           isNull(schema.clubMatchSessions.deletedAt),
           isNull(schema.communities.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findSessionByCreationKey(
+    createdBy: string,
+    creationIdempotencyKey: string,
+    tx: AppDbOrTx = this.db,
+  ) {
+    const [row] = await tx
+      .select({
+        id: schema.clubMatchSessions.id,
+        communityId: schema.clubMatchSessions.communityId,
+        creationFingerprint: schema.clubMatchSessions.creationFingerprint,
+      })
+      .from(schema.clubMatchSessions)
+      .where(
+        and(
+          eq(schema.clubMatchSessions.createdBy, createdBy),
+          eq(
+            schema.clubMatchSessions.creationIdempotencyKey,
+            creationIdempotencyKey,
+          ),
+          isNull(schema.clubMatchSessions.deletedAt),
         ),
       )
       .limit(1);
@@ -203,25 +245,59 @@ export class ClubMatchSessionsRepository {
     registrationMode: 'SELF' | 'MANAGER_ASSIGN' | 'MIXED';
     pairingMode: 'FREE' | 'BRACKET';
     bracketTournamentId?: string | null;
+    creationIdempotencyKey?: string | null;
+    creationFingerprint?: string | null;
     publishAnnouncement?: boolean;
     isRanked: boolean;
     maxParticipants: number;
     sessionConfig: Record<string, unknown>;
     startAt: Date | null;
     endAt: Date | null;
+    registrationOpenAt?: Date | null;
+    registrationClosedAt?: Date | null;
   }) {
     return this.db.transaction(async (tx) => {
       const {
         publishAnnouncement: _publishAnnouncement,
+        registrationOpenAt,
+        registrationClosedAt,
         ...sessionInput
       } = input;
-      const [created] = await tx
-        .insert(schema.clubMatchSessions)
-        .values({
-          ...sessionInput,
-          status: 'OPEN',
-        })
-        .returning();
+      const insert = tx.insert(schema.clubMatchSessions).values({
+        ...sessionInput,
+        status: 'OPEN',
+        ...(registrationOpenAt ? { registrationOpenAt } : {}),
+        ...(registrationClosedAt ? { registrationClosedAt } : {}),
+      });
+      const [created] = input.creationIdempotencyKey
+        ? await insert
+            .onConflictDoNothing({
+              target: [
+                schema.clubMatchSessions.createdBy,
+                schema.clubMatchSessions.creationIdempotencyKey,
+              ],
+            })
+            .returning()
+        : await insert.returning();
+      if (!created) {
+        const existing = await this.findSessionByCreationKey(
+          input.createdBy,
+          input.creationIdempotencyKey!,
+          tx,
+        );
+        if (!existing) {
+          throw new Error('Club session creation conflict could not be resolved');
+        }
+        const existingFull = await tx
+          .select()
+          .from(schema.clubMatchSessions)
+          .where(eq(schema.clubMatchSessions.id, existing.id))
+          .limit(1);
+        if (!existingFull[0]) {
+          throw new Error('Club session creation conflict could not be resolved');
+        }
+        return existingFull[0];
+      }
       const displayName = input.name?.trim() || 'Buổi giao lưu CLB';
       if (input.publishAnnouncement !== false) {
         await tx.insert(schema.communityPosts).values({
@@ -284,10 +360,19 @@ export class ClubMatchSessionsRepository {
       .select({
         session: schema.clubMatchSessions,
         communityName: schema.communities.name,
+        bracketTournament: {
+          id: schema.tournaments.id,
+          status: schema.tournaments.status,
+          registrationStartDate: schema.tournaments.registrationStartDate,
+          registrationEndDate: schema.tournaments.registrationEndDate,
+          startDate: schema.tournaments.startDate,
+          endDate: schema.tournaments.endDate,
+          isRegistrationLocked: schema.tournaments.isRegistrationLocked,
+        },
         participantCount: sql<number>`case when ${schema.clubMatchSessions.pairingMode} = 'BRACKET' then (
           select count(*)::int from tournament_participants p
           where p.tournament_id = ${schema.clubMatchSessions.bracketTournamentId}
-            and p.team_status in ('COMPLETE', 'APPROVED')
+            and p.team_status not in ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
         ) else (
           select count(*)::int from club_match_session_participants p
           where p.session_id = ${schema.clubMatchSessions.id} and p.status = 'ACTIVE'
@@ -306,6 +391,13 @@ export class ClubMatchSessionsRepository {
       .innerJoin(
         schema.communities,
         eq(schema.communities.id, schema.clubMatchSessions.communityId),
+      )
+      .leftJoin(
+        schema.tournaments,
+        eq(
+          schema.tournaments.id,
+          schema.clubMatchSessions.bracketTournamentId,
+        ),
       )
       .where(and(...conditions))
       .orderBy(

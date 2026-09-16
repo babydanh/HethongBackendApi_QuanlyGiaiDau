@@ -41,8 +41,12 @@ export const clubMatchSessions = pgTable(
       .notNull(),
     bracketTournamentId: uuid('bracket_tournament_id').references(
       () => tournaments.id,
-      { onDelete: 'set null' },
+      { onDelete: 'restrict' },
     ),
+    creationIdempotencyKey: varchar('creation_idempotency_key', {
+      length: 128,
+    }),
+    creationFingerprint: varchar('creation_fingerprint', { length: 64 }),
     isRanked: boolean('is_ranked').default(true).notNull(),
     maxParticipants: integer('max_participants').default(16).notNull(),
     sessionConfig: jsonb('session_config').default('{}').notNull(),
@@ -79,6 +83,10 @@ export const clubMatchSessions = pgTable(
       'club_match_sessions_pairing_mode_check',
       sql`${table.pairingMode} IN ('FREE', 'BRACKET')`,
     ),
+    pairingModeTournamentConsistency: check(
+      'club_match_sessions_pairing_tournament_consistency_check',
+      sql`(${table.pairingMode} = 'FREE' AND ${table.bracketTournamentId} IS NULL) OR (${table.pairingMode} = 'BRACKET' AND ${table.bracketTournamentId} IS NOT NULL)`,
+    ),
     maxParticipantsCheck: check(
       'club_match_sessions_max_participants_check',
       sql`${table.maxParticipants} BETWEEN 2 AND 128`,
@@ -95,6 +103,11 @@ export const clubMatchSessions = pgTable(
     bracketTournamentUnique: uniqueIndex(
       'club_match_sessions_bracket_tournament_unique',
     ).on(table.bracketTournamentId),
+    creationIdempotencyUnique: uniqueIndex(
+      'club_match_sessions_creation_idempotency_unique',
+    )
+      .on(table.createdBy, table.creationIdempotencyKey)
+      .where(sql`${table.creationIdempotencyKey} IS NOT NULL`),
   }),
 );
 

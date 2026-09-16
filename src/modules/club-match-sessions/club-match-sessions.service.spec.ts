@@ -6,6 +6,7 @@ describe('ClubMatchSessionsService', () => {
     findCommunityContext: jest.fn(),
     createSession: jest.fn(),
     findSession: jest.fn(),
+    findSessionByCreationKey: jest.fn(),
     findMembership: jest.fn(),
     findParticipant: jest.fn(),
     findPreference: jest.fn(),
@@ -78,7 +79,7 @@ describe('ClubMatchSessionsService', () => {
       }),
     );
     expect(result).toMatchObject({
-      resolvedName: 'Club social match session Riverside Club',
+      resolvedName: 'Social match session Riverside Club',
       capabilities: { bracket: false, pairingMode: 'FREE' },
     });
   });

@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { Cron } from '@nestjs/schedule';
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import * as schema from '../../database/schema';
@@ -37,6 +38,46 @@ type Actor = { id: string; roles?: string[] };
 
 const MANAGER_ROLES = new Set(['OWNER', 'ADMIN', 'MODERATOR']);
 const TERMINAL_SESSION_STATUSES = new Set(['ENDED', 'CANCELLED']);
+type BracketTournamentState = {
+  status: string | null;
+  registrationStartDate: Date | null;
+  registrationEndDate: Date | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  isRegistrationLocked: boolean | null;
+} | null;
+
+function getCreationFingerprint(dto: CreateClubMatchSessionDto): string {
+  const payload = {
+    communityId: dto.communityId,
+    categoryId: dto.categoryId ?? null,
+    name: dto.name?.trim() ?? null,
+    description: dto.description?.trim() ?? null,
+    isRanked: dto.isRanked ?? true,
+    maxParticipants: dto.maxParticipants ?? 16,
+    isRecurring: dto.isRecurring ?? false,
+    recurringFrequency: dto.recurringFrequency ?? null,
+    recurringDayOfWeek: dto.recurringDayOfWeek ?? null,
+    recurringDaysOfWeek: dto.recurringDaysOfWeek ?? null,
+    recurringTimeOfDay: dto.recurringTimeOfDay ?? null,
+    recurringAdvanceDays: dto.recurringAdvanceDays ?? null,
+    startAt: dto.startAt ?? null,
+    endAt: dto.endAt ?? null,
+    registrationMode: dto.registrationMode ?? 'MIXED',
+    pairingMode: dto.pairingMode ?? 'FREE',
+    format: dto.format ?? null,
+    bracketType: dto.bracketType ?? null,
+  };
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function normalizeCreationKey(key?: string): string | null {
+  const normalized = key?.trim() || null;
+  if (normalized && normalized.length > 128) {
+    apiError(BadRequestException, 'CREATE_IDEMPOTENCY_KEY_TOO_LONG');
+  }
+  return normalized;
+}
 function calculateNextRecurringDate(
   frequency: string,
   daysOfWeek: number[] | number,
@@ -191,6 +232,67 @@ export class ClubMatchSessionsService {
       : `Buổi giao lưu ${communityName}`;
   }
 
+  private resolveSessionState(
+    session: {
+      pairingMode: string;
+      status: string;
+      startAt: Date | null;
+      endAt: Date | null;
+      registrationOpenAt: Date;
+      registrationClosedAt: Date | null;
+      endedAt: Date | null;
+    },
+    bracketTournament?: BracketTournamentState,
+  ) {
+    if (session.pairingMode !== 'BRACKET' || !bracketTournament) {
+      return {
+        status: session.status,
+        startAt: session.startAt,
+        endAt: session.endAt,
+        registrationOpenAt: session.registrationOpenAt,
+        registrationClosedAt: session.registrationClosedAt,
+        endedAt: session.endedAt,
+      };
+    }
+
+    const now = Date.now();
+    const registrationClosed =
+      bracketTournament.status === 'REGISTRATION_CLOSED' ||
+      bracketTournament.isRegistrationLocked === true ||
+      Boolean(
+        bracketTournament.registrationEndDate &&
+          bracketTournament.registrationEndDate.getTime() <= now,
+      );
+    let status = 'OPEN';
+    if (['CANCELLED', 'PENDING_DELETE'].includes(bracketTournament.status ?? '')) {
+      status = 'CANCELLED';
+    } else if (
+      ['COMPLETED', 'FINISHED', 'DONE', 'ENDED'].includes(
+        bracketTournament.status ?? '',
+      )
+    ) {
+      status = 'ENDED';
+    } else if (['IN_PROGRESS', 'ONGOING', 'LIVE'].includes(bracketTournament.status ?? '')) {
+      status = 'LIVE';
+    } else if (registrationClosed) {
+      status = 'CLOSED';
+    }
+
+    return {
+      status,
+      startAt: bracketTournament.startDate ?? session.startAt,
+      endAt: bracketTournament.endDate ?? session.endAt,
+      registrationOpenAt:
+        bracketTournament.registrationStartDate ?? session.registrationOpenAt,
+      registrationClosedAt:
+        bracketTournament.registrationEndDate ?? session.registrationClosedAt,
+      endedAt:
+        status === 'ENDED'
+          ? bracketTournament.endDate ?? session.endedAt
+          : session.endedAt,
+    };
+  }
+
   private assertFreeSession(
     row: Awaited<ReturnType<ClubMatchSessionsRepository['findSession']>>,
   ) {
@@ -205,8 +307,10 @@ export class ClubMatchSessionsService {
     canManage = false,
   ) {
     if (!row) return null;
+    const state = this.resolveSessionState(row.session, row.bracketTournament);
     return {
       ...row.session,
+      ...state,
       registrationMode: 'MIXED' as const,
       resolvedName: this.resolveName(
         row.session.name,
@@ -229,7 +333,12 @@ export class ClubMatchSessionsService {
     };
   }
 
-  async create(actor: Actor, dto: CreateClubMatchSessionDto, locale?: string) {
+  async create(
+    actor: Actor,
+    dto: CreateClubMatchSessionDto,
+    locale?: string,
+    idempotencyKey?: string,
+  ) {
     const community = await this.requireManager(dto.communityId, actor);
     if (!community.categoryId) {
       apiError(BadRequestException, 'CLUB_SPORT_REQUIRED');
@@ -238,6 +347,26 @@ export class ClubMatchSessionsService {
       apiError(BadRequestException, 'CATEGORY_NOT_ALLOWED_FOR_CLUB');
     }
     const pairingMode = dto.pairingMode ?? 'FREE';
+    const creationIdempotencyKey = normalizeCreationKey(idempotencyKey);
+    const creationFingerprint = getCreationFingerprint(dto);
+    if (creationIdempotencyKey) {
+      const existing = await this.repository.findSessionByCreationKey?.(
+        actor.id,
+        creationIdempotencyKey,
+      );
+      if (existing) {
+        if (
+          existing.creationFingerprint &&
+          existing.creationFingerprint !== creationFingerprint
+        ) {
+          apiError(ConflictException, 'CREATE_IDEMPOTENCY_KEY_REUSED');
+        }
+        if (existing.communityId !== dto.communityId) {
+          apiError(ConflictException, 'CREATE_IDEMPOTENCY_KEY_REUSED');
+        }
+        return this.get(existing.id, actor, locale);
+      }
+    }
     if (pairingMode === 'BRACKET' && dto.isRecurring) {
       apiError(BadRequestException, 'BRACKET_RECURRING_UNSUPPORTED');
     }
@@ -289,6 +418,8 @@ export class ClubMatchSessionsService {
       };
     }
     let bracketTournamentId: string | null = null;
+    let bracketRegistrationOpenAt: Date | null = null;
+    let bracketRegistrationClosedAt: Date | null = null;
     if (pairingMode === 'BRACKET') {
       if (!this.tournamentsService) {
         apiError(ConflictException, 'BRACKET_ENGINE_UNAVAILABLE');
@@ -299,10 +430,14 @@ export class ClubMatchSessionsService {
       if (!startAt || Number.isNaN(startAt.getTime()) || startAt <= new Date()) {
         apiError(BadRequestException, 'BRACKET_START_REQUIRED_FUTURE');
       }
-      const registrationEndDate = new Date(
+      if (!endAt) {
+        endAt = new Date(startAt.getTime() + 90 * 60 * 1000);
+      }
+      bracketRegistrationOpenAt = new Date();
+      bracketRegistrationClosedAt = new Date(
         Math.max(Date.now() + 60_000, startAt.getTime() - 60 * 60 * 1000),
       );
-      if (registrationEndDate >= startAt) {
+      if (bracketRegistrationClosedAt >= startAt) {
         apiError(BadRequestException, 'BRACKET_START_TOO_SOON');
       }
       const bracket = await this.tournamentsService.createLite(
@@ -321,15 +456,12 @@ export class ClubMatchSessionsService {
           isRanked: dto.isRanked ?? true,
           startDate: startAt.toISOString(),
           endDate: endAt?.toISOString(),
-          registrationStartDate: new Date().toISOString(),
-          registrationEndDate: registrationEndDate.toISOString(),
+          registrationStartDate: bracketRegistrationOpenAt.toISOString(),
+          registrationEndDate: bracketRegistrationClosedAt.toISOString(),
         },
         actor.roles ?? [],
       );
       bracketTournamentId = bracket.id;
-      if (!endAt) {
-        endAt = new Date(startAt.getTime() + 90 * 60 * 1000);
-      }
     }
     let created: Awaited<
       ReturnType<ClubMatchSessionsRepository['createSession']>
@@ -344,12 +476,16 @@ export class ClubMatchSessionsService {
         registrationMode: 'MIXED',
         pairingMode,
         bracketTournamentId,
+        creationIdempotencyKey,
+        creationFingerprint: creationIdempotencyKey ? creationFingerprint : null,
         publishAnnouncement: pairingMode !== 'BRACKET',
         isRanked: dto.isRanked ?? true,
         maxParticipants: dto.maxParticipants ?? 16,
         sessionConfig,
         startAt,
         endAt,
+        registrationOpenAt: bracketRegistrationOpenAt ?? undefined,
+        registrationClosedAt: bracketRegistrationClosedAt ?? undefined,
       });
     } catch (error) {
       if (bracketTournamentId && this.tournamentsService) {
@@ -368,6 +504,32 @@ export class ClubMatchSessionsService {
       }
       throw error;
     }
+    if (
+      creationIdempotencyKey &&
+      pairingMode === 'BRACKET' &&
+      bracketTournamentId &&
+      created.bracketTournamentId !== bracketTournamentId
+    ) {
+      try {
+        await this.tournamentsService?.remove?.(
+          bracketTournamentId,
+          actor.id,
+          actor.roles ?? [],
+        );
+      } catch (cleanupError) {
+        console.error(
+          'Failed to clean up duplicate linked Lite tournament:',
+          cleanupError,
+        );
+      }
+      if (
+        creationIdempotencyKey &&
+        created.creationFingerprint &&
+        created.creationFingerprint !== creationFingerprint
+      ) {
+        apiError(ConflictException, 'CREATE_IDEMPOTENCY_KEY_REUSED');
+      }
+    }
     return this.get(created.id, actor, locale);
   }
 
@@ -385,23 +547,31 @@ export class ClubMatchSessionsService {
       apiError(BadRequestException, 'INVALID_CURSOR');
     }
     return {
-      data: result.items.map((item) => ({
-        ...item.session,
-        registrationMode: 'MIXED' as const,
-        resolvedName: this.resolveName(
-          item.session.name,
-          item.communityName,
-          locale,
-        ),
-        participantCount: item.participantCount,
-        matchCount: item.matchCount,
-        capabilities: {
-          canManage,
-          pairingMode: item.session.pairingMode === 'BRACKET' ? 'BRACKET' : 'FREE',
-          bracket: item.session.pairingMode === 'BRACKET',
-          bracketTournamentId: item.session.bracketTournamentId ?? null,
-        },
-      })),
+      data: result.items.map((item) => {
+        const state = this.resolveSessionState(
+          item.session,
+          item.bracketTournament,
+        );
+        return {
+          ...item.session,
+          ...state,
+          registrationMode: 'MIXED' as const,
+          resolvedName: this.resolveName(
+            item.session.name,
+            item.communityName,
+            locale,
+          ),
+          participantCount: item.participantCount,
+          matchCount: item.matchCount,
+          capabilities: {
+            canManage,
+            pairingMode:
+              item.session.pairingMode === 'BRACKET' ? 'BRACKET' : 'FREE',
+            bracket: item.session.pairingMode === 'BRACKET',
+            bracketTournamentId: item.session.bracketTournamentId ?? null,
+          },
+        };
+      }),
       meta: result.meta,
     };
   }
@@ -426,16 +596,16 @@ export class ClubMatchSessionsService {
             ...projected.capabilities,
             canJoin:
               row.session.pairingMode !== 'BRACKET' &&
-              row.session.status === 'OPEN' &&
+              projected.status === 'OPEN' &&
               viewerParticipant?.status !== 'ACTIVE',
             canWithdraw:
               row.session.pairingMode !== 'BRACKET' &&
-              !TERMINAL_SESSION_STATUSES.has(row.session.status) &&
+              !TERMINAL_SESSION_STATUSES.has(projected.status) &&
               viewerParticipant?.status === 'ACTIVE' &&
               viewerParticipant.source === 'SELF',
             canCreateMatch:
               row.session.pairingMode !== 'BRACKET' &&
-              ['OPEN', 'LIVE'].includes(row.session.status) &&
+              ['OPEN', 'LIVE'].includes(projected.status) &&
               (canManage || viewerParticipant?.status === 'ACTIVE'),
           },
         }
@@ -1994,6 +2164,7 @@ export class ClubMatchSessionsService {
         version = version + 1,
         updated_at = now()
       WHERE deleted_at IS NULL
+        AND pairing_mode <> 'BRACKET'
         AND status IN ('OPEN', 'LIVE', 'CLOSED')
         AND ((start_at IS NOT NULL AND start_at <= now() AND status = 'OPEN') OR (end_at IS NOT NULL AND end_at <= now()))
     `);
