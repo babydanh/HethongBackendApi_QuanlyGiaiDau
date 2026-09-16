@@ -581,6 +581,7 @@ export class TournamentsController {
     @Query('invite') inviteCode?: string,
     @Query('pid') participantId?: string,
     @Query('token') teamInviteToken?: string,
+    @Query('manage') manage?: string,
     @Req() req?: Request,
   ) {
     const authInfo = this.getAuthInfoFromRequest(req);
@@ -591,6 +592,7 @@ export class TournamentsController {
       authInfo.roles,
       participantId,
       teamInviteToken,
+      manage === 'true',
     );
   }
 

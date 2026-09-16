@@ -4983,16 +4983,11 @@ export class TournamentsRepository {
       eq(schema.parentTournaments.createdBy, userId),
       isNull(schema.parentTournaments.deletedAt),
     ];
+    // This endpoint feeds the organizer management dashboard. Being listed
+    // in a roster is participation access, not management access; only the
+    // owner or an explicitly assigned co-organizer belongs in this scope.
     const standaloneAccessCondition = or(
       eq(schema.tournaments.createdBy, userId),
-      sql`exists (
-        select 1
-        from ${schema.tournamentParticipants} tp
-        inner join ${schema.tournamentRosters} tr
-          on tr.participant_id = tp.id
-        where tp.tournament_id = ${schema.tournaments.id}
-          and tr.user_id = ${userId}
-      )`,
       sql`exists (
         select 1
         from ${schema.tournamentStaff} ts

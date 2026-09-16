@@ -920,12 +920,24 @@ export class TournamentsService {
     systemRoles: string[] = [],
     participantId?: string,
     teamInviteToken?: string,
+    managementAccess = false,
   ) {
     const tournament = await this.tournamentsRepository.findById(id, {
       includeInviteCode: true,
     });
     if (!tournament) {
       throw new NotFoundException('Giải đấu không tồn tại');
+    }
+
+    if (managementAccess) {
+      const canManage = userId
+        ? await this.isManager(tournament, userId, systemRoles)
+        : false;
+      if (!canManage) {
+        throw new ForbiddenException(
+          'Bạn không có quyền quản lý giải đấu này.',
+        );
+      }
     }
 
     const isOwner = userId && tournament.createdBy === userId;

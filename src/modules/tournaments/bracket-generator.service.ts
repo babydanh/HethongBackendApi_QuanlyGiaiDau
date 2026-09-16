@@ -1818,8 +1818,16 @@ export class BracketGeneratorService {
         throw new BadRequestException('Không tìm thấy trận đấu loại trực tiếp ở vòng 2');
       }
 
-      // Cross-group seeding: A1 vs B2, B1 vs A2, etc.
-      const round1Matches = koMatches.filter((m) => m.roundNumber === 1);
+      // Cross-group seeding: pair adjacent groups so every group is consumed once.
+      // For two advancing teams per group: A1-B2, B1-A2, then C1-D2, D1-C2.
+      // Do not include losers-bracket round 1 matches in a double-elimination stage.
+      const round1Matches = koMatches
+        .filter((m) => {
+          if (m.roundNumber !== 1) return false;
+          const branch = String(m.bracketBranch ?? '').toUpperCase();
+          return branch !== 'LOSERS' && branch !== 'GRAND_FINALS';
+        })
+        .sort((a, b) => a.matchOrder - b.matchOrder);
       const advancingByGroup = new Map<number, typeof advancingParticipants>();
       for (const ap of advancingParticipants) {
         const list = advancingByGroup.get(ap.groupIndex) || [];
@@ -1827,27 +1835,59 @@ export class BracketGeneratorService {
         advancingByGroup.set(ap.groupIndex, list);
       }
 
-      const numAdvGroups = advancingByGroup.size;
-      let matchIdx = 0;
-      for (let gi = 0; gi < numAdvGroups; gi++) {
-        const groupAdv = advancingByGroup.get(gi) || [];
-        if (groupAdv.length < 1) continue;
+      const orderedGroupIndexes = [...advancingByGroup.keys()]
+        .filter((groupIndex) => groupIndex >= 0)
+        .sort((a, b) => a - b);
+      const slotParticipantIds: Array<string | null> = [];
 
-        // A1 vs B2, B1 vs A2 pattern
-        const nextGi = (gi + 1) % numAdvGroups;
-        const nextGroupAdv = advancingByGroup.get(nextGi) || [];
+      if (teamsAdvancing === 1 || teamsAdvancing === 2) {
+        for (let index = 0; index < orderedGroupIndexes.length; index += 2) {
+          const groupIndex = orderedGroupIndexes[index];
+          const nextGroupIndex = orderedGroupIndexes[index + 1];
+          const groupAdv = advancingByGroup.get(groupIndex) || [];
+          const nextGroupAdv = nextGroupIndex === undefined
+            ? []
+            : advancingByGroup.get(nextGroupIndex) || [];
 
-        if (matchIdx < round1Matches.length) {
-          round1Matches[matchIdx].participant1Id = groupAdv[0]?.participantId || null;
-          round1Matches[matchIdx].participant2Id = nextGroupAdv[1]?.participantId || null;
-          matchIdx++;
+          if (nextGroupIndex === undefined) {
+            slotParticipantIds.push(...groupAdv.map((participant) => participant.participantId));
+            continue;
+          }
+
+          if (teamsAdvancing === 1) {
+            slotParticipantIds.push(
+              groupAdv[0]?.participantId || null,
+              nextGroupAdv[0]?.participantId || null,
+            );
+          } else {
+            slotParticipantIds.push(
+              groupAdv[0]?.participantId || null,
+              nextGroupAdv[1]?.participantId || null,
+              nextGroupAdv[0]?.participantId || null,
+              groupAdv[1]?.participantId || null,
+            );
+          }
         }
-        if (matchIdx < round1Matches.length && nextGroupAdv.length > 0) {
-          round1Matches[matchIdx].participant1Id = nextGroupAdv[0]?.participantId || null;
-          round1Matches[matchIdx].participant2Id = groupAdv[1]?.participantId || null;
-          matchIdx++;
+      } else {
+        // Keep unusual configurations deterministic without repeating a group.
+        for (const groupIndex of orderedGroupIndexes) {
+          const groupAdv = advancingByGroup.get(groupIndex) || [];
+          slotParticipantIds.push(...groupAdv.map((participant) => participant.participantId));
         }
       }
+
+      const wildcardParticipants = advancingByGroup.get(-1) || [];
+      slotParticipantIds.push(...wildcardParticipants.map((participant) => participant.participantId));
+
+      // Clear first-round assignments before re-applying the latest standings.
+      round1Matches.forEach((match) => {
+        match.participant1Id = null;
+        match.participant2Id = null;
+      });
+      round1Matches.forEach((match, index) => {
+        match.participant1Id = slotParticipantIds[index * 2] || null;
+        match.participant2Id = slotParticipantIds[index * 2 + 1] || null;
+      });
 
       // Update matches in DB
       for (const m of koMatches) {
