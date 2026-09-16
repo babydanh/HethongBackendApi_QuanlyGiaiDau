@@ -253,10 +253,7 @@ export class RankingsRepository {
       }
       if (genderRestriction) {
         conditions.push(
-          or(
-            eq(schema.communityRankings.genderRestriction, genderRestriction),
-            isNull(schema.communityRankings.genderRestriction),
-          ) as SQL,
+          eq(schema.communityRankings.genderRestriction, genderRestriction),
         );
       }
 
@@ -395,10 +392,7 @@ export class RankingsRepository {
       }
       if (genderRestriction) {
         conditions.push(
-          or(
-            eq(schema.userRanks.genderRestriction, genderRestriction),
-            isNull(schema.userRanks.genderRestriction),
-          ) as SQL,
+          eq(schema.userRanks.genderRestriction, genderRestriction),
         );
       }
       if (provinceCode) {

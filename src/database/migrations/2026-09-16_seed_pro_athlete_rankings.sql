@@ -168,37 +168,7 @@ BEGIN
     "admin_leaderboard_eligible" = true,
     "updated_at" = now();
 
-  -- 7. User Ranks - Xếp hạng Đơn Mở Rộng / Toàn bộ (SINGLES Open - gender_restriction IS NULL)
-  INSERT INTO "user_ranks" ("user_id", "category_id", "match_type", "gender_restriction", "community_id", "elo_points", "peak_elo", "matches_played", "matches_won", "win_streak", "admin_leaderboard_eligible", "tier_id")
-  VALUES
-    (v_u_ben, v_category_id, 'SINGLES', NULL, NULL, 2380, 2380, 78, 72, 14, true, v_tier_s),
-    (v_u_annaleigh, v_category_id, 'SINGLES', NULL, NULL, 2340, 2340, 65, 61, 12, true, v_tier_s),
-    (v_u_federico, v_category_id, 'SINGLES', NULL, NULL, 2210, 2210, 54, 46, 8, true, v_tier_s),
-    (v_u_catherine, v_category_id, 'SINGLES', NULL, NULL, 2180, 2180, 49, 41, 6, true, v_tier_s),
-    (v_u_tyson, v_category_id, 'SINGLES', NULL, NULL, 2150, 2150, 62, 50, 5, true, v_tier_s),
-    (v_u_lea, v_category_id, 'SINGLES', NULL, NULL, 2090, 2090, 42, 34, 4, true, v_tier_s),
-    (v_u_hien, v_category_id, 'SINGLES', NULL, NULL, 1980, 1980, 38, 33, 7, true, v_tier_s),
-    (v_u_thang, v_category_id, 'SINGLES', NULL, NULL, 1920, 1920, 35, 29, 5, true, v_tier_s),
-    (v_u_quynh, v_category_id, 'SINGLES', NULL, NULL, 1890, 1890, 32, 27, 6, true, v_tier_s),
-    (v_u_thao, v_category_id, 'SINGLES', NULL, NULL, 1840, 1840, 28, 23, 4, true, v_tier_s),
-    (v_u_bao, v_category_id, 'SINGLES', NULL, NULL, 1780, 1780, 25, 19, 3, true, v_tier_ha),
-    (v_u_duc, v_category_id, 'SINGLES', NULL, NULL, 1720, 1720, 22, 16, 2, true, v_tier_ha),
-    (v_u_mai, v_category_id, 'SINGLES', NULL, NULL, 1680, 1680, 20, 14, 2, true, v_tier_la),
-    (v_u_anh, v_category_id, 'SINGLES', NULL, NULL, 1620, 1620, 18, 12, 1, true, v_tier_la),
-    (v_u_son, v_category_id, 'SINGLES', NULL, NULL, 1560, 1560, 15, 9, 2, true, v_tier_hb),
-    (v_u_trang, v_category_id, 'SINGLES', NULL, NULL, 1510, 1510, 16, 10, 1, true, v_tier_hb),
-    (v_u_long, v_category_id, 'SINGLES', NULL, NULL, 1450, 1450, 14, 8, 0, true, v_tier_lb),
-    (v_u_ngoc, v_category_id, 'SINGLES', NULL, NULL, 1390, 1390, 12, 6, 1, true, v_tier_hc),
-    (v_u_khang, v_category_id, 'SINGLES', NULL, NULL, 1320, 1320, 10, 5, 0, true, v_tier_hc),
-    (v_u_linh, v_category_id, 'SINGLES', NULL, NULL, 1250, 1250, 8, 4, 0, true, v_tier_lc)
-  ON CONFLICT ("user_id", "category_id", "match_type", "community_id") WHERE "gender_restriction" IS NULL DO UPDATE SET
-    "elo_points" = EXCLUDED.elo_points,
-    "peak_elo" = EXCLUDED.peak_elo,
-    "matches_played" = EXCLUDED.matches_played,
-    "matches_won" = EXCLUDED.matches_won,
-    "win_streak" = EXCLUDED.win_streak,
-    "admin_leaderboard_eligible" = true,
-    "updated_at" = now();
+  -- 7. (Obsolete block 7 removed: each player has their exact gender ranking in SINGLES)
 
   -- 8. Pair Ranks - Đôi Nam (DOUBLES - MALE)
   INSERT INTO "pair_ranks" ("user1_id", "user2_id", "category_id", "match_type", "gender_restriction", "scope", "elo_points", "peak_elo", "matches_played", "matches_won", "win_streak", "admin_leaderboard_eligible")
