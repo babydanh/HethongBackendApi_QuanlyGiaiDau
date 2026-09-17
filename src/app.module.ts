@@ -48,6 +48,7 @@ import { SponsorsModule } from './modules/sponsors/sponsors.module';
 import { AdvertisementsModule } from './modules/advertisements/advertisements.module';
 import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-match-sessions.module';
 import { ZaloModule } from './providers/zalo/zalo.module';
+import { SocialPickupsModule } from './modules/social-pickups/social-pickups.module';
 
 @Module({
   imports: [
@@ -107,6 +108,7 @@ import { ZaloModule } from './providers/zalo/zalo.module';
     AdvertisementsModule,
     ClubMatchSessionsModule,
     ZaloModule,
+    SocialPickupsModule,
   ],
   controllers: [AppController],
   providers: [

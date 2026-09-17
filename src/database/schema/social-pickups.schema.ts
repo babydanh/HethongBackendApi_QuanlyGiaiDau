@@ -20,7 +20,8 @@ import { tournamentVenues, venueCourts, courtBookings } from './venues.schema';
 
 /**
  * Social Pickup Session (Kèo giao lưu thể thao)
- * - BẮT BUỘC có Câu Lạc Bộ (communityId notNull): Mọi kèo giao lưu đều trực thuộc 1 CLB
+ * - communityId nullable: null là kèo cá nhân; có giá trị là kèo thuộc CLB.
+ * - Kèo cá nhân không được giả lập bằng một community rỗng.
  */
 export const socialPickupSessions = pgTable(
   'social_pickup_sessions',
@@ -30,8 +31,7 @@ export const socialPickupSessions = pgTable(
       .references(() => users.id, { onDelete: 'restrict' })
       .notNull(),
     communityId: uuid('community_id')
-      .references(() => communities.id, { onDelete: 'cascade' })
-      .notNull(),
+      .references(() => communities.id, { onDelete: 'cascade' }),
     categoryId: uuid('category_id')
       .references(() => categories.id, { onDelete: 'restrict' })
       .notNull(),
@@ -64,6 +64,9 @@ export const socialPickupSessions = pgTable(
     isRanked: boolean('is_ranked').default(false).notNull(),
     
     status: varchar('status', { length: 20 }).default('OPEN').notNull(),
+
+    creationIdempotencyKey: varchar('creation_idempotency_key', { length: 128 }),
+    creationFingerprint: varchar('creation_fingerprint', { length: 128 }),
     
     metadata: jsonb('metadata').default('{}').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -79,6 +82,14 @@ export const socialPickupSessions = pgTable(
       'social_pickup_status_check',
       sql`${table.status} IN ('OPEN', 'FULL', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')`,
     ),
+    capacityCheck: check(
+      'social_pickup_capacity_check',
+      sql`${table.maxSlots} BETWEEN 2 AND 128 AND ${table.currentSlots} BETWEEN 1 AND ${table.maxSlots}`,
+    ),
+    feeCheck: check(
+      'social_pickup_fee_check',
+      sql`${table.feePerSlot} >= 0`,
+    ),
     dateIdx: index('social_pickup_date_idx').on(
       table.playDate,
       table.status,
@@ -89,6 +100,9 @@ export const socialPickupSessions = pgTable(
       table.status,
     ),
     hostIdx: index('social_pickup_host_idx').on(table.hostUserId),
+    creationKeyUnique: uniqueIndex('social_pickup_creation_key_unique')
+      .on(table.hostUserId, table.creationIdempotencyKey)
+      .where(sql`${table.creationIdempotencyKey} IS NOT NULL`),
   }),
 );
 

@@ -14,6 +14,7 @@ describe('ClubMatchSessionsService', () => {
     findMembership: jest.fn(),
     findParticipant: jest.fn(),
     findPreference: jest.fn(),
+    findStandaloneMatch: jest.fn(),
   };
   const gateway = { broadcastClubSessionMatchUpdate: jest.fn() };
   const processor = {
@@ -416,6 +417,62 @@ describe('ClubMatchSessionsService', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(repository.findSession).not.toHaveBeenCalled();
+  });
+
+  it('uses the club score setting for standalone matches', async () => {
+    repository.findStandaloneMatch.mockResolvedValue({
+      id: 'match-1',
+      communityId: 'community-1',
+    });
+    repository.findCommunityContext.mockResolvedValue({
+      status: 'ACTIVE',
+      memberStatus: 'JOINED',
+      memberRole: 'MEMBER',
+      memberMatchScoringEnabled: false,
+    });
+    repository.findMembership.mockResolvedValue({
+      status: 'JOINED',
+      role: 'MEMBER',
+    });
+
+    await expect(
+      (service as any).requireStandaloneMatchEditor('match-1', {
+        id: 'member-1',
+        roles: [],
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'MATCH_SCORE_PERMISSION_REQUIRED',
+      }),
+    });
+
+    repository.findMembership.mockResolvedValue({
+      status: 'JOINED',
+      role: 'OWNER',
+    });
+    await expect(
+      (service as any).requireStandaloneMatchEditor('match-1', {
+        id: 'owner-1',
+        roles: [],
+      }),
+    ).resolves.toMatchObject({ match: { id: 'match-1' } });
+
+    repository.findMembership.mockResolvedValue({
+      status: 'JOINED',
+      role: 'MEMBER',
+    });
+    repository.findCommunityContext.mockResolvedValue({
+      status: 'ACTIVE',
+      memberStatus: 'JOINED',
+      memberRole: 'MEMBER',
+      memberMatchScoringEnabled: true,
+    });
+    await expect(
+      (service as any).requireStandaloneMatchEditor('match-1', {
+        id: 'member-1',
+        roles: [],
+      }),
+    ).resolves.toMatchObject({ match: { id: 'match-1' } });
   });
 
   it('rejects a session category that differs from the club sport', async () => {

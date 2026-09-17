@@ -38,6 +38,10 @@ export class CreateClubMatchSessionDto {
   @IsOptional()
   isRanked?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  memberScoringEnabled?: boolean;
+
   @Type(() => Number)
   @IsInt()
   @Min(2)
@@ -111,9 +115,9 @@ export class CreateClubMatchSessionDto {
   @IsOptional()
   feePerSlot?: number;
 
-  @IsIn(['singles', 'doubles', 'mixed_doubles'])
+  @IsIn(['singles', 'doubles'])
   @IsOptional()
-  format?: 'singles' | 'doubles' | 'mixed_doubles';
+  format?: 'singles' | 'doubles';
 
   @IsIn([
     'single_elimination',
@@ -147,6 +151,10 @@ export class UpdateClubMatchSessionDto {
   @IsBoolean()
   @IsOptional()
   isRanked?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  memberScoringEnabled?: boolean;
 
   @Type(() => Number)
   @IsInt()
@@ -329,9 +337,9 @@ export class CreateClubMatchDto {
   @IsUUID('4', { each: true })
   sideBUserIds: string[];
 
-  @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
+  @IsIn(['SINGLES', 'DOUBLES'])
   @IsOptional()
-  matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+  matchType?: 'SINGLES' | 'DOUBLES';
 
   @IsDateString()
   @IsOptional()
@@ -358,9 +366,9 @@ export class CreateClubStandaloneMatchDto {
   @IsUUID('4', { each: true })
   sideBUserIds: string[];
 
-  @IsIn(['SINGLES', 'DOUBLES', 'MIXED_DOUBLES'])
+  @IsIn(['SINGLES', 'DOUBLES'])
   @IsOptional()
-  matchType?: 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
+  matchType?: 'SINGLES' | 'DOUBLES';
 
   @IsBoolean()
   @IsOptional()

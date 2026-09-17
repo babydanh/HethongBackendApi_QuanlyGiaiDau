@@ -1,4 +1,25 @@
-import { selectTopTournamentStandings } from './tournament-results';
+import {
+  groupTournamentResultMembers,
+  selectTopTournamentStandings,
+} from './tournament-results';
+
+describe('groupTournamentResultMembers', () => {
+  it('keeps members grouped by their exact participant id', () => {
+    const grouped = groupTournamentResultMembers([
+      { participantId: 'third-a', userId: 'user-a1', fullName: 'A1', avatarUrl: null },
+      { participantId: 'third-a', userId: 'user-a2', fullName: 'A2', avatarUrl: 'a2.jpg' },
+      { participantId: 'third-b', userId: 'user-b1', fullName: 'B1', avatarUrl: null },
+    ]);
+
+    expect(grouped.get('third-a')).toEqual([
+      { userId: 'user-a1', fullName: 'A1', avatarUrl: null },
+      { userId: 'user-a2', fullName: 'A2', avatarUrl: 'a2.jpg' },
+    ]);
+    expect(grouped.get('third-b')).toEqual([
+      { userId: 'user-b1', fullName: 'B1', avatarUrl: null },
+    ]);
+  });
+});
 
 describe('selectTopTournamentStandings', () => {
   it('returns one deterministic tournament-wide top four instead of restarting ranks per group', () => {

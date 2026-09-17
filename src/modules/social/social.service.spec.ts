@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SocialService } from './social.service';
+import { FriendshipAction } from './dto/update-friendship.dto';
 
 type FriendshipRecord = {
   id: string;
@@ -113,7 +114,7 @@ describe('SocialService', () => {
     repository.findFriendshipById.mockResolvedValue(friendship());
 
     await expect(
-      service.respondToRequest('user-1', 'friendship-1', { action: 'ACCEPTED' }),
+      service.respondToRequest('user-1', 'friendship-1', { action: FriendshipAction.ACCEPT }),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(repository.updateFriendshipStatus).not.toHaveBeenCalled();
@@ -126,7 +127,7 @@ describe('SocialService', () => {
     repository.updateFriendshipStatus.mockResolvedValue(accepted);
 
     await expect(
-      service.respondToRequest('user-2', 'friendship-1', { action: 'ACCEPTED' }),
+      service.respondToRequest('user-2', 'friendship-1', { action: FriendshipAction.ACCEPT }),
     ).resolves.toMatchObject({ status: 'ACCEPTED', direction: 'INCOMING' });
 
     expect(repository.updateFriendshipStatus).toHaveBeenCalledWith(

@@ -494,6 +494,7 @@ export class ClubMatchSessionsService {
         creationFingerprint: creationIdempotencyKey ? creationFingerprint : null,
         publishAnnouncement: pairingMode !== 'BRACKET',
         isRanked: dto.isRanked ?? true,
+        memberScoringEnabled: dto.memberScoringEnabled !== false,
         maxParticipants: dto.maxParticipants ?? 16,
         sessionConfig,
         startAt,
@@ -630,13 +631,36 @@ export class ClubMatchSessionsService {
   async getLiveMatch(matchId: string, actor: Actor) {
     const match = await this.repository.findMatch(matchId);
     if (match) {
-      await this.requireSession(match.sessionId, actor);
-      return this.repository.projectMatch(matchId);
+      const session = await this.requireSession(match.sessionId, actor);
+      const membership = await this.repository.findMembership(
+        session.session.communityId,
+        actor.id,
+      );
+      const canEditScore =
+        this.isPlatformAdmin(actor) ||
+        MANAGER_ROLES.has(membership?.role ?? '') ||
+        (membership?.status === 'JOINED' &&
+          session.session.memberScoringEnabled !== false);
+      const projected = await this.repository.projectMatch(matchId);
+      return projected ? { ...projected, canEditScore } : projected;
     }
     const standalone = await this.repository.findStandaloneMatch(matchId);
     if (!standalone) return null;
-    await this.requireCommunityAccess(standalone.communityId, actor);
-    return this.repository.projectStandaloneMatch(matchId);
+    const community = await this.requireCommunityAccess(
+      standalone.communityId,
+      actor,
+    );
+    const membership = await this.repository.findMembership(
+      standalone.communityId,
+      actor.id,
+    );
+    const canEditScore =
+      this.isPlatformAdmin(actor) ||
+      MANAGER_ROLES.has(membership?.role ?? '') ||
+      (membership?.status === 'JOINED' &&
+        community.memberMatchScoringEnabled !== false);
+    const projected = await this.repository.projectStandaloneMatch(matchId);
+    return projected ? { ...projected, canEditScore } : projected;
   }
 
   async update(
@@ -687,6 +711,8 @@ export class ClubMatchSessionsService {
               : dto.description?.trim() || null,
           registrationMode: 'MIXED',
           isRanked: dto.isRanked ?? current.session.isRanked,
+          memberScoringEnabled:
+            dto.memberScoringEnabled ?? current.session.memberScoringEnabled,
           maxParticipants:
             dto.maxParticipants ?? current.session.maxParticipants,
           startAt,
@@ -1338,13 +1364,15 @@ export class ClubMatchSessionsService {
       current.session.communityId,
       actor.id,
     );
+    const isManager =
+      this.isPlatformAdmin(actor) ||
+      MANAGER_ROLES.has(membership?.role ?? '');
     const actorParticipant = await this.repository.findParticipant(
       sessionId,
       actor.id,
     );
     const canCreate =
-      this.isPlatformAdmin(actor) ||
-      MANAGER_ROLES.has(membership?.role ?? '') ||
+      isManager ||
       (community?.memberMatchCreationEnabled !== false &&
         (actorParticipant?.status === 'ACTIVE' ||
           membership?.status === 'JOINED'));
@@ -1466,7 +1494,11 @@ export class ClubMatchSessionsService {
         'club_match_session_matches',
         created.id,
         {},
-        { status: created.status, sideAUserIds: sideA, sideBUserIds: sideB },
+        {
+          status: created.status,
+          sideAUserIds: sideA,
+          sideBUserIds: sideB,
+        },
       );
       const commandResult = { matchId: created.id, warnings, replayed: false };
       await this.repository.saveCommand(tx, {
@@ -1752,15 +1784,11 @@ export class ClubMatchSessionsService {
       session.session.communityId,
       actor.id,
     );
-    const community = await this.repository.findCommunityContext(
-      session.session.communityId,
-      actor.id,
-    );
     const canEdit =
       this.isPlatformAdmin(actor) ||
       MANAGER_ROLES.has(membership?.role ?? '') ||
       (membership?.status === 'JOINED' &&
-        community?.memberMatchScoringEnabled !== false);
+        session.session.memberScoringEnabled !== false);
     if (!canEdit)
       apiError(ForbiddenException, 'MATCH_SCORE_PERMISSION_REQUIRED');
     return { match, session };

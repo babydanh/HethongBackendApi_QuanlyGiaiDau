@@ -142,6 +142,7 @@ export class ClubMatchSessionSchedulerService {
               registrationMode: 'MIXED',
               pairingMode: 'FREE',
               isRanked: template.isRanked,
+              memberScoringEnabled: template.memberScoringEnabled,
               maxParticipants: template.maxParticipants,
               sessionConfig: generatedConfig,
               startAt: eventAt,

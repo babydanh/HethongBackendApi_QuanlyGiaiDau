@@ -9767,6 +9767,33 @@ export class TournamentsRepository {
       .orderBy(schema.matches.roundNumber, schema.matches.matchOrder);
   }
 
+  async findPublicTournamentResultMembers(participantIds: string[]) {
+    if (participantIds.length === 0) return [];
+
+    return this.db
+      .select({
+        participantId: schema.tournamentRosters.participantId,
+        userId: schema.users.id,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.tournamentRosters)
+      .innerJoin(
+        schema.users,
+        eq(schema.tournamentRosters.userId, schema.users.id),
+      )
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        and(
+          inArray(schema.tournamentRosters.participantId, participantIds),
+          eq(schema.tournamentRosters.status, 'ACTIVE'),
+          eq(schema.users.isMock, false),
+          isNull(schema.users.deletedAt),
+        ),
+      )
+      .orderBy(asc(schema.tournamentRosters.joinedAt));
+  }
+
   async importParticipants(
     tournamentId: string,
     managerUserId: string,

@@ -56,6 +56,9 @@ export const clubMatchSessions = pgTable(
     }),
     creationFingerprint: varchar('creation_fingerprint', { length: 64 }),
     isRanked: boolean('is_ranked').default(true).notNull(),
+    memberScoringEnabled: boolean('member_scoring_enabled')
+      .default(true)
+      .notNull(),
     maxParticipants: integer('max_participants').default(16).notNull(),
     sessionConfig: jsonb('session_config').default('{}').notNull(),
     startAt: timestamp('start_at', { withTimezone: true }),

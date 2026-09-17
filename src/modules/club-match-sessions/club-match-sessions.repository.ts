@@ -282,6 +282,7 @@ export class ClubMatchSessionsRepository {
     creationFingerprint?: string | null;
     publishAnnouncement?: boolean;
     isRanked: boolean;
+    memberScoringEnabled: boolean;
     maxParticipants: number;
     sessionConfig: Record<string, unknown>;
     startAt: Date | null;

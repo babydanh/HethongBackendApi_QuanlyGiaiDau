@@ -96,7 +96,10 @@ import {
   assertValidFootballTeamConfig,
   resolveFootballTeamConfig,
 } from './utils/football-team-config';
-import { selectTopTournamentStandings } from './utils/tournament-results';
+import {
+  groupTournamentResultMembers,
+  selectTopTournamentStandings,
+} from './utils/tournament-results';
 import { LiveScoreGateway } from '../matches/live-score.gateway';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { VenuesService } from '../venues/venues.service';
@@ -7393,14 +7396,44 @@ export class TournamentsService {
       );
     }
 
+    const awardParticipantIds = awards
+      .map((award) => award.participant?.participantId)
+      .filter((id): id is string => Boolean(id));
+    let membersByParticipant = new Map<
+      string,
+      Array<{ userId: string; fullName: string | null; avatarUrl: string | null }>
+    >();
+
+    if (awardParticipantIds.length > 0) {
+      try {
+        const memberRows =
+          await this.tournamentsRepository.findPublicTournamentResultMembers(
+            awardParticipantIds,
+          );
+        membersByParticipant = groupTournamentResultMembers(memberRows);
+      } catch (error) {
+        this.logger.warn(
+          `Unable to enrich public tournament result members: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
+    }
+
+    const awardsWithMembers = awards.map((award) => {
+      if (!award.participant) return award;
+      const members = membersByParticipant.get(award.participant.participantId);
+      return members?.length
+        ? { ...award, participant: { ...award.participant, members } }
+        : award;
+    });
+
     return {
       tournamentId,
       status: tournament.status,
       finalized:
         completed &&
-        awards.length > 0 &&
-        awards.every((award) => award.participant !== null),
-      awards,
+        awardsWithMembers.length > 0 &&
+        awardsWithMembers.every((award) => award.participant !== null),
+      awards: awardsWithMembers,
       standings: standingRows,
       matches: matches.map((match) => ({
         id: match.id,

@@ -6,6 +6,42 @@ export interface TournamentResultStandingRow {
   won: number | null;
 }
 
+export interface TournamentResultMemberRow {
+  participantId: string;
+  userId: string;
+  fullName: string | null;
+  avatarUrl: string | null;
+}
+
+export interface PublicTournamentResultMember {
+  userId: string;
+  fullName: string | null;
+  avatarUrl: string | null;
+}
+
+/**
+ * Group safe roster identities by their exact tournament participant id.
+ * The result page uses this map to keep two tied teams and their members
+ * separate without changing rank/shared-place calculation.
+ */
+export function groupTournamentResultMembers(
+  rows: readonly TournamentResultMemberRow[],
+): Map<string, PublicTournamentResultMember[]> {
+  const membersByParticipant = new Map<string, PublicTournamentResultMember[]>();
+
+  for (const row of rows) {
+    const members = membersByParticipant.get(row.participantId) ?? [];
+    members.push({
+      userId: row.userId,
+      fullName: row.fullName,
+      avatarUrl: row.avatarUrl,
+    });
+    membersByParticipant.set(row.participantId, members);
+  }
+
+  return membersByParticipant;
+}
+
 function numericValue(value: number | null): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
