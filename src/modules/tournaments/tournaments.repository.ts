@@ -2183,6 +2183,15 @@ export class TournamentsRepository {
               `Trường “${typeof field.label === 'string' ? field.label : fieldId}” phải là email hợp lệ.`,
             );
           }
+          if (
+            field.type === 'PHONE' &&
+            (typeof value !== 'string' ||
+              !/^(?:\+84|0[35789])\d{8}$/.test(value))
+          ) {
+            throw new BadRequestException(
+              `Trường “${typeof field.label === 'string' ? field.label : fieldId}” phải là số điện thoại Việt Nam hợp lệ.`,
+            );
+          }
           if (field.type === 'NUMBER') {
             const numberValue =
               typeof value === 'number' ? value : Number(value);
@@ -2220,7 +2229,7 @@ export class TournamentsRepository {
               `Lựa chọn của trường “${typeof field.label === 'string' ? field.label : fieldId}” không hợp lệ.`,
             );
           }
-          if (field.type === 'CHECKBOX' && value !== true) {
+          if (field.type === 'CHECKBOX' && field.required === true && value !== true) {
             throw new BadRequestException(
               `Bạn cần xác nhận “${typeof field.label === 'string' ? field.label : fieldId}”.`,
             );
