@@ -16,7 +16,7 @@ import { sql } from 'drizzle-orm';
 import { categories } from './categories.schema';
 import { communities } from './communities.schema';
 import { users } from './users.schema';
-import { tournamentVenues, venueCourts, courtBookings } from './venues.schema';
+import { tournamentVenues, venueCourts } from './venues.schema';
 
 /**
  * Social Pickup Session (Kèo giao lưu thể thao)
@@ -45,9 +45,6 @@ export const socialPickupSessions = pgTable(
       onDelete: 'set null',
     }),
     courtId: uuid('court_id').references(() => venueCourts.id, {
-      onDelete: 'set null',
-    }),
-    bookingId: uuid('booking_id').references(() => courtBookings.id, {
       onDelete: 'set null',
     }),
     courtLocation: varchar('court_location', { length: 255 }).notNull(),

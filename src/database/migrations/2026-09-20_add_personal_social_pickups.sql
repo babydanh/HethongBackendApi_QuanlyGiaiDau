@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS social_pickup_sessions (
   end_time VARCHAR(8) NOT NULL,
   venue_id UUID REFERENCES tournament_venues(id) ON DELETE SET NULL,
   court_id UUID REFERENCES venue_courts(id) ON DELETE SET NULL,
-  booking_id UUID REFERENCES court_bookings(id) ON DELETE SET NULL,
   court_location VARCHAR(255) NOT NULL,
   fee_per_slot INTEGER NOT NULL DEFAULT 0,
   max_slots INTEGER NOT NULL DEFAULT 4,
@@ -37,7 +36,6 @@ ALTER TABLE social_pickup_sessions
 ALTER TABLE social_pickup_sessions
   ADD COLUMN IF NOT EXISTS venue_id UUID REFERENCES tournament_venues(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS court_id UUID REFERENCES venue_courts(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS booking_id UUID REFERENCES court_bookings(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS match_type VARCHAR(30) NOT NULL DEFAULT 'DOUBLES',
   ADD COLUMN IF NOT EXISTS level_requirement VARCHAR(50) NOT NULL DEFAULT 'ALL',
   ADD COLUMN IF NOT EXISTS gender_requirement VARCHAR(20) NOT NULL DEFAULT 'ANY',
