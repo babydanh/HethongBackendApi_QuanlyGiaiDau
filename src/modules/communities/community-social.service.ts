@@ -1,9 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { CommunitiesRepository } from './communities.repository';
 import { CommunitySocialRepository } from './community-social.repository';
 import type { CreateCommunityPostDto } from './dto/create-community-post.dto';
 import type { CreateCommunityCommentDto } from './dto/create-community-comment.dto';
 import type { UpdateCommunitySocialSettingsDto } from './dto/update-community-social-settings.dto';
+import type { QueryCommunityActivityFeedDto } from './dto/query-community-activity-feed.dto';
+import type { ShareCommunityActivityDto } from './dto/share-community-activity.dto';
 import type { ReportCommunityContentDto } from './dto/report-community-content.dto';
 import type { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -40,6 +42,74 @@ export class CommunitySocialService {
       await this.requireJoined(communityId, viewer?.id);
     }
     return this.socialRepository.listPosts(communityId, limit, cursor, viewer?.id, search);
+  }
+
+  async listActivityFeed(query: QueryCommunityActivityFeedDto, viewer?: SocialUser) {
+    const result = await this.socialRepository.listActivityFeed({
+      limit: query.limit ?? 20,
+      cursor: query.cursor,
+      date: query.date,
+      type: query.type,
+      viewerId: viewer?.id,
+    });
+    if (result.invalidCursor) {
+      throw new BadRequestException({ code: 'INVALID_CURSOR' });
+    }
+    return { data: { items: result.data }, meta: result.meta };
+  }
+
+  async shareActivity(
+    communityId: string,
+    user: SocialUser,
+    dto: ShareCommunityActivityDto,
+    idempotencyKey?: string,
+  ) {
+    const hasSession = Boolean(dto.clubMatchSessionId);
+    const hasTournament = Boolean(dto.tournamentId);
+    if (hasSession === hasTournament) {
+      throw new BadRequestException({ code: 'INVALID_ACTIVITY_TARGET' });
+    }
+    const community = await this.ensureCommunity(communityId);
+    const member = await this.requireJoined(communityId, user.id);
+    const activity = await this.socialRepository.findLinkedActivity(communityId, {
+      clubMatchSessionId: dto.clubMatchSessionId,
+      tournamentId: dto.tournamentId,
+    });
+    if (!activity) throw new NotFoundException({ code: 'ACTIVITY_NOT_FOUND' });
+    const terminalStatuses = new Set(['ENDED', 'CANCELLED', 'COMPLETED', 'FINISHED', 'DONE', 'PENDING_DELETE']);
+    if (terminalStatuses.has(activity.resource.status)) {
+      throw new ConflictException({ code: 'ACTIVITY_TERMINAL' });
+    }
+    const settings = await this.socialRepository.getSettings(communityId);
+    const canManage = member.role === 'OWNER' || member.role === 'ADMIN' || member.role === 'MODERATOR' || user.roles?.includes('ADMIN');
+    const status = settings.postApprovalRequired && !canManage ? 'PENDING' : 'PUBLISHED';
+    const isSession = activity.kind === 'SESSION';
+    const resourceName = isSession
+      ? activity.resource.name?.trim() || `Buổi giao lưu CLB ${community.name}`
+      : activity.resource.name;
+    const body = dto.body?.trim() || (isSession
+      ? `🏸 ${resourceName} đang mở đăng ký.`
+      : `🏆 ${resourceName} đang mở đăng ký.`);
+    const result = await this.socialRepository.createLinkedActivityPost({
+      communityId,
+      authorId: user.id,
+      clubMatchSessionId: dto.clubMatchSessionId,
+      tournamentId: dto.tournamentId,
+      body,
+      status,
+      idempotencyKey: idempotencyKey?.trim() || undefined,
+    });
+    if (!result.post) throw new BadRequestException({ code: 'ACTIVITY_SHARE_FAILED' });
+    if (!result.reused && result.post.status === 'PUBLISHED') {
+      await this.sendNewPostNotifications({
+        communityId,
+        communityName: community.name,
+        senderId: user.id,
+        senderName: user.fullName?.trim() || 'Thành viên',
+        postId: result.post.id,
+      });
+    }
+    return { ...result.post, reused: result.reused };
   }
 
   async createPost(

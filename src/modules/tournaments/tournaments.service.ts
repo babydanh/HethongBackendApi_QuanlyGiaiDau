@@ -1915,6 +1915,7 @@ export class TournamentsService {
       ...(fallbackBannerUrl ? { bannerUrl: fallbackBannerUrl } : {}),
       ...(fallbackLogoUrl ? { logoUrl: fallbackLogoUrl } : {}),
       ...(dto.communityId ? { communityId: dto.communityId } : {}),
+      ...(dto.venueId ? { venueId: dto.venueId } : {}),
       categoryId: category.id,
       matchType,
       genderRestriction: dto.genderRestriction ?? null,

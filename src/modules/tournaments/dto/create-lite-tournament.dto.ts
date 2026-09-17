@@ -87,6 +87,11 @@ export class CreateLiteTournamentDto {
   @IsOptional()
   communityId?: string;
 
+  @ApiPropertyOptional({ description: 'Địa điểm đã tồn tại; dùng chung với buổi giao lưu CLB nếu có' })
+  @IsUUID()
+  @IsOptional()
+  venueId?: string;
+
   @ApiPropertyOptional({
     example: 'PUBLIC',
     description: 'Phạm vi giải: PUBLIC là giải mở rộng, CLUB là giải nội bộ câu lạc bộ',

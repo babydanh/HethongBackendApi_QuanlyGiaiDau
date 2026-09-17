@@ -137,6 +137,36 @@ export class ClubMatchSessionsRepository {
     return row ?? null;
   }
 
+  async findVenueCourt(
+    venueId: string,
+    courtId?: string,
+    tx: AppDbOrTx = this.db,
+  ) {
+    const [row] = await tx
+      .select({
+        venueId: schema.tournamentVenues.id,
+        ownerUserId: schema.tournamentVenues.ownerUserId,
+        venueName: schema.tournamentVenues.name,
+        venueAddress: schema.tournamentVenues.locationAddress,
+        courtId: schema.venueCourts.id,
+        courtName: schema.venueCourts.courtName,
+      })
+      .from(schema.tournamentVenues)
+      .leftJoin(
+        schema.venueCourts,
+        eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
+      )
+      .where(
+        and(
+          eq(schema.tournamentVenues.id, venueId),
+          isNull(schema.tournamentVenues.deletedAt),
+          courtId ? eq(schema.venueCourts.id, courtId) : sql`true`,
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
   async findSession(id: string, tx: AppDbOrTx = this.db) {
     const [row] = await tx
       .select({
@@ -245,6 +275,9 @@ export class ClubMatchSessionsRepository {
     registrationMode: 'SELF' | 'MANAGER_ASSIGN' | 'MIXED';
     pairingMode: 'FREE' | 'BRACKET';
     bracketTournamentId?: string | null;
+    venueId?: string | null;
+    courtId?: string | null;
+    feePerSlot?: number | null;
     creationIdempotencyKey?: string | null;
     creationFingerprint?: string | null;
     publishAnnouncement?: boolean;
@@ -310,6 +343,43 @@ export class ClubMatchSessionsRepository {
           status: 'PUBLISHED',
           idempotencyKey: `club-match-session:${created.id}:created`,
         });
+      }
+      if (created.venueId) {
+        const venue = await this.findVenueCourt(
+          created.venueId,
+          created.courtId ?? undefined,
+          tx,
+        );
+        if (venue?.ownerUserId && venue.ownerUserId !== created.createdBy) {
+          const [community] = await tx
+            .select({ name: schema.communities.name })
+            .from(schema.communities)
+            .where(eq(schema.communities.id, created.communityId))
+            .limit(1);
+          await tx
+            .insert(schema.zaloNotificationOutbox)
+            .values({
+              dedupeKey: `club-session:${created.id}:venue-owner`,
+              eventType: 'VENUE_ACTIVITY_CREATED',
+              recipientUserId: venue.ownerUserId,
+              aggregateType: 'CLUB_MATCH_SESSION',
+              aggregateId: created.id,
+              payload: {
+                sessionId: created.id,
+                venueId: venue.venueId,
+                venueName: venue.venueName,
+                courtName: venue.courtName,
+                communityName: community?.name ?? null,
+                activityName: created.name || 'Buổi giao lưu CLB',
+                scheduledAt: created.startAt?.toISOString() ?? null,
+                link: `/club-match-sessions/${created.id}`,
+              },
+              status: 'PENDING',
+            })
+            .onConflictDoNothing({
+              target: schema.zaloNotificationOutbox.dedupeKey,
+            });
+        }
       }
       await this.auditService.logCreate(
         tx,

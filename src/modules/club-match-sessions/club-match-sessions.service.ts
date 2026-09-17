@@ -65,6 +65,9 @@ function getCreationFingerprint(dto: CreateClubMatchSessionDto): string {
     endAt: dto.endAt ?? null,
     registrationMode: dto.registrationMode ?? 'MIXED',
     pairingMode: dto.pairingMode ?? 'FREE',
+    venueId: dto.venueId ?? null,
+    courtId: dto.courtId ?? null,
+    feePerSlot: dto.feePerSlot ?? null,
     format: dto.format ?? null,
     bracketType: dto.bracketType ?? null,
   };
@@ -346,6 +349,13 @@ export class ClubMatchSessionsService {
     if (dto.categoryId && dto.categoryId !== community.categoryId) {
       apiError(BadRequestException, 'CATEGORY_NOT_ALLOWED_FOR_CLUB');
     }
+    if (dto.courtId && !dto.venueId) {
+      apiError(BadRequestException, 'COURT_REQUIRES_VENUE');
+    }
+    if (dto.venueId) {
+      const venue = await this.repository.findVenueCourt?.(dto.venueId, dto.courtId);
+      if (!venue) apiError(BadRequestException, 'VENUE_OR_COURT_NOT_FOUND');
+    }
     const pairingMode = dto.pairingMode ?? 'FREE';
     const creationIdempotencyKey = normalizeCreationKey(idempotencyKey);
     const creationFingerprint = getCreationFingerprint(dto);
@@ -458,6 +468,7 @@ export class ClubMatchSessionsService {
           endDate: endAt?.toISOString(),
           registrationStartDate: bracketRegistrationOpenAt.toISOString(),
           registrationEndDate: bracketRegistrationClosedAt.toISOString(),
+          venueId: dto.venueId,
         },
         actor.roles ?? [],
       );
@@ -476,6 +487,9 @@ export class ClubMatchSessionsService {
         registrationMode: 'MIXED',
         pairingMode,
         bracketTournamentId,
+        venueId: dto.venueId ?? null,
+        courtId: dto.courtId ?? null,
+        feePerSlot: dto.feePerSlot ?? null,
         creationIdempotencyKey,
         creationFingerprint: creationIdempotencyKey ? creationFingerprint : null,
         publishAnnouncement: pairingMode !== 'BRACKET',

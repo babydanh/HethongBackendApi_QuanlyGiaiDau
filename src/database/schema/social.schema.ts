@@ -32,12 +32,25 @@ export const friendships = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     noSelfFriend: check(
       'no_self_friend',
       sql`${table.senderId} != ${table.receiverId}`,
     ),
+    activeUnorderedPairUnique: uniqueIndex('uq_friendships_active_unordered_pair')
+      .on(
+        sql`least(${table.senderId}, ${table.receiverId})`,
+        sql`greatest(${table.senderId}, ${table.receiverId})`,
+      )
+      .where(sql`${table.deletedAt} is null`),
+    activeSenderUpdatedIdx: index('idx_friendships_active_sender_updated')
+      .on(table.senderId, table.updatedAt)
+      .where(sql`${table.deletedAt} is null`),
+    activeReceiverUpdatedIdx: index('idx_friendships_active_receiver_updated')
+      .on(table.receiverId, table.updatedAt)
+      .where(sql`${table.deletedAt} is null`),
   }),
 );
 

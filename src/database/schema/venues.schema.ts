@@ -21,6 +21,9 @@ const geography = customType<{ data: string }>({
 
 export const tournamentVenues = pgTable('tournament_venues', {
   id: uuid('id').primaryKey().defaultRandom(),
+  ownerUserId: uuid('owner_user_id').references(() => users.id, {
+    onDelete: 'set null',
+  }),
   name: varchar('name', { length: 255 }).notNull(),
   locationAddress: text('location_address').notNull(),
   locationGeolocation: geography('location_geolocation'),
@@ -112,4 +115,3 @@ export const courtBookings = pgTable(
     ),
   }),
 );
-

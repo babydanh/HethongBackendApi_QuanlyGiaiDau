@@ -16,6 +16,7 @@ import { categories } from './categories.schema';
 import { communities } from './communities.schema';
 import { tournaments } from './tournaments.schema';
 import { users } from './users.schema';
+import { tournamentVenues, venueCourts } from './venues.schema';
 
 export const clubMatchSessions = pgTable(
   'club_match_sessions',
@@ -43,6 +44,13 @@ export const clubMatchSessions = pgTable(
       () => tournaments.id,
       { onDelete: 'restrict' },
     ),
+    venueId: uuid('venue_id').references(() => tournamentVenues.id, {
+      onDelete: 'set null',
+    }),
+    courtId: uuid('court_id').references(() => venueCourts.id, {
+      onDelete: 'set null',
+    }),
+    feePerSlot: integer('fee_per_slot'),
     creationIdempotencyKey: varchar('creation_idempotency_key', {
       length: 128,
     }),
@@ -95,10 +103,22 @@ export const clubMatchSessions = pgTable(
       'club_match_sessions_schedule_check',
       sql`${table.startAt} IS NULL OR ${table.endAt} IS NULL OR ${table.endAt} >= ${table.startAt}`,
     ),
+    venueCourtCheck: check(
+      'club_match_sessions_venue_court_check',
+      sql`${table.courtId} IS NULL OR ${table.venueId} IS NOT NULL`,
+    ),
+    feePerSlotCheck: check(
+      'club_match_sessions_fee_per_slot_check',
+      sql`${table.feePerSlot} IS NULL OR ${table.feePerSlot} >= 0`,
+    ),
     communityStatusIdx: index('club_match_sessions_community_status_idx').on(
       table.communityId,
       table.status,
       table.createdAt,
+    ),
+    venueScheduleIdx: index('club_match_sessions_venue_schedule_idx').on(
+      table.venueId,
+      table.startAt,
     ),
     bracketTournamentUnique: uniqueIndex(
       'club_match_sessions_bracket_tournament_unique',

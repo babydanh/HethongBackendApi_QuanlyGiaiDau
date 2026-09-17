@@ -43,6 +43,7 @@ import { Throttle } from '@nestjs/throttler';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { CommunitySocialService } from './community-social.service';
 import { SearchCommunityDto } from './dto/search-community.dto';
+import { QueryCommunityActivityFeedDto } from './dto/query-community-activity-feed.dto';
 
 @ApiTags('communities')
 @Controller('communities')
@@ -51,6 +52,19 @@ export class CommunitiesController {
     private readonly communitiesService: CommunitiesService,
     private readonly communitySocialService: CommunitySocialService,
   ) {}
+
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 1800, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
+  @Get('activity-feed')
+  @ApiOperation({ summary: 'Lấy bảng tin hoạt động từ các giải/buổi giao lưu CLB thật' })
+  async getActivityFeed(
+    @Query() query: QueryCommunityActivityFeedDto,
+    @CurrentUser() user?: { id: string; roles?: string[] },
+  ) {
+    return this.communitySocialService.listActivityFeed(query, user);
+  }
 
   // --- COMMUNITIES ---
 

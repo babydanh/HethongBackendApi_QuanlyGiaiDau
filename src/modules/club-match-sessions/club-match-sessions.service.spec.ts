@@ -287,7 +287,8 @@ describe('ClubMatchSessionsService', () => {
       'create-key-1',
     );
 
-    expect(result.id).toBe('session-existing');
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe('session-existing');
     expect(tournamentsService.createLite).not.toHaveBeenCalled();
     expect(repository.createSession).not.toHaveBeenCalled();
   });

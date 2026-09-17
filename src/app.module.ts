@@ -47,6 +47,7 @@ import { FirebaseModule } from './modules/firebase/firebase.module';
 import { SponsorsModule } from './modules/sponsors/sponsors.module';
 import { AdvertisementsModule } from './modules/advertisements/advertisements.module';
 import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-match-sessions.module';
+import { ZaloModule } from './providers/zalo/zalo.module';
 
 @Module({
   imports: [
@@ -105,6 +106,7 @@ import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-matc
     SponsorsModule,
     AdvertisementsModule,
     ClubMatchSessionsModule,
+    ZaloModule,
   ],
   controllers: [AppController],
   providers: [

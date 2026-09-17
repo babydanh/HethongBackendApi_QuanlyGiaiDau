@@ -99,6 +99,7 @@ export class VenuesRepository {
       const [record] = await tx
         .insert(schema.tournamentVenues)
         .values({
+          ownerUserId: userId,
           name: data.name,
           locationAddress: data.locationAddress,
           ...(geographyValue !== null && { locationGeolocation: geographyValue }),

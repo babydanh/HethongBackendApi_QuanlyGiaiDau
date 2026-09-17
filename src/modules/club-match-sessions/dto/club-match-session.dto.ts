@@ -96,6 +96,21 @@ export class CreateClubMatchSessionDto {
   @IsOptional()
   pairingMode?: 'FREE' | 'BRACKET';
 
+  @IsUUID()
+  @IsOptional()
+  venueId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  courtId?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100000000)
+  @IsOptional()
+  feePerSlot?: number;
+
   @IsIn(['singles', 'doubles', 'mixed_doubles'])
   @IsOptional()
   format?: 'singles' | 'doubles' | 'mixed_doubles';
@@ -190,6 +205,7 @@ export class UpdateClubMatchSessionDto {
   @IsIn(['FREE', 'BRACKET'])
   @IsOptional()
   pairingMode?: 'FREE' | 'BRACKET';
+
 }
 
 export class TransitionClubMatchSessionDto {

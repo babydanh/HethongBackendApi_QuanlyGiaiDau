@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
-import type { AppDb } from '../../database/db.types';
+import { aliasedTable, and, asc, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
@@ -242,6 +242,361 @@ export class CommunitySocialRepository {
           : null,
       },
     };
+  }
+
+  /**
+   * Product activity projection over the existing social graph. This is not a
+   * second event store: the linked session/tournament remains authoritative and
+   * community_posts only provides publication/order/idempotency.
+   */
+  async listActivityFeed(input: {
+    limit: number;
+    cursor?: string;
+    date?: string;
+    type?: 'CLUB_RECRUITING' | 'TOURNAMENT_OPENED';
+    viewerId?: string;
+  }) {
+    const decoded = input.cursor
+      ? CursorPaginationHelper.decodeCursor<{ id: string; createdAt: string }>(input.cursor)
+      : null;
+    if (input.cursor && (!decoded?.id || !decoded.createdAt || Number.isNaN(new Date(decoded.createdAt).getTime()))) {
+      return { invalidCursor: true as const };
+    }
+
+    const post = schema.communityPosts;
+    const session = schema.clubMatchSessions;
+    const tournament = schema.tournaments;
+    const sessionVenues = aliasedTable(schema.tournamentVenues, 'session_venues');
+    const eventAt = sql`COALESCE(${session.startAt}, ${tournament.registrationStartDate}, ${post.createdAt})`;
+    const targetIsCurrent = sql`
+      NOT EXISTS (
+        SELECT 1
+        FROM community_posts newer
+        WHERE newer.deleted_at IS NULL
+          AND newer.status = 'PUBLISHED'
+          AND newer.community_id = ${post.communityId}
+          AND (
+            (${post.clubMatchSessionId} IS NOT NULL AND newer.club_match_session_id = ${post.clubMatchSessionId})
+            OR (${post.tournamentId} IS NOT NULL AND newer.tournament_id = ${post.tournamentId})
+            OR (
+              ${session.pairingMode} = 'BRACKET'
+              AND newer.tournament_id = ${session.bracketTournamentId}
+            )
+          )
+          AND (
+            newer.created_at > ${post.createdAt}
+            OR (newer.created_at = ${post.createdAt} AND newer.id > ${post.id})
+          )
+      )`;
+    const activityIsVisible = input.viewerId
+      ? sql`(
+          (${schema.communities.visibility} = 'PUBLIC' AND
+            COALESCE(${schema.communitySocialSettings.publicFeed}, true) = true)
+          OR EXISTS (
+            SELECT 1 FROM community_members cm
+            WHERE cm.community_id = ${post.communityId}
+              AND cm.user_id = ${input.viewerId}
+              AND cm.status = 'JOINED'
+          )
+        )`
+      : sql`(${schema.communities.visibility} = 'PUBLIC' AND COALESCE(${schema.communitySocialSettings.publicFeed}, true) = true)`;
+
+    const conditions: SQL[] = [
+      eq(post.status, 'PUBLISHED'),
+      isNull(post.deletedAt),
+      eq(schema.communities.status, 'ACTIVE'),
+      activityIsVisible,
+      or(isNotNull(post.clubMatchSessionId), isNotNull(post.tournamentId)) as SQL,
+      sql`(
+        (
+          ${post.clubMatchSessionId} IS NOT NULL
+          AND ${session.id} IS NOT NULL
+          AND ${session.status} NOT IN ('ENDED', 'CANCELLED')
+          AND (
+            ${session.pairingMode} <> 'BRACKET'
+            OR (
+              ${tournament.id} IS NOT NULL
+              AND ${tournament.status} NOT IN ('COMPLETED', 'FINISHED', 'DONE', 'ENDED', 'CANCELLED', 'PENDING_DELETE')
+            )
+          )
+        )
+        OR (
+          ${post.tournamentId} IS NOT NULL
+          AND ${tournament.id} IS NOT NULL
+          AND ${tournament.status} NOT IN ('COMPLETED', 'FINISHED', 'DONE', 'ENDED', 'CANCELLED', 'PENDING_DELETE')
+        )
+      )`,
+      targetIsCurrent,
+    ];
+    if (input.type === 'CLUB_RECRUITING') {
+      conditions.push(sql`${post.clubMatchSessionId} IS NOT NULL AND ${session.pairingMode} = 'FREE'`);
+    }
+    if (input.type === 'TOURNAMENT_OPENED') {
+      conditions.push(sql`${post.tournamentId} IS NOT NULL`);
+    }
+    if (input.date) {
+      conditions.push(sql`(${eventAt} AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = ${input.date}`);
+    }
+    if (decoded) {
+      conditions.push(
+        or(
+          lt(post.createdAt, new Date(decoded.createdAt)),
+          and(eq(post.createdAt, new Date(decoded.createdAt)), lt(post.id, decoded.id)),
+        ) as SQL,
+      );
+    }
+
+    const rows = await this.db
+      .select({
+        post,
+        community: {
+          id: schema.communities.id,
+          name: schema.communities.name,
+          logoUrl: schema.communities.logoUrl,
+        },
+        session: {
+          id: session.id,
+          name: session.name,
+          description: session.description,
+          pairingMode: session.pairingMode,
+          maxParticipants: session.maxParticipants,
+          feePerSlot: session.feePerSlot,
+          startAt: session.startAt,
+          endAt: session.endAt,
+          sessionConfig: session.sessionConfig,
+        },
+        tournament: {
+          id: tournament.id,
+          name: tournament.name,
+          description: tournament.description,
+          status: tournament.status,
+          bannerUrl: tournament.bannerUrl,
+          maxParticipants: tournament.maxParticipants,
+          reservedSlotsCount: tournament.reservedSlotsCount,
+          registrationStartDate: tournament.registrationStartDate,
+          startDate: tournament.startDate,
+        },
+        category: {
+          name: schema.categories.name,
+          slug: schema.categories.slug,
+        },
+        venueName: sql<string | null>`COALESCE(${sessionVenues.name}, ${schema.tournamentVenues.name})`,
+        venueAddress: sql<string | null>`COALESCE(${sessionVenues.locationAddress}, ${schema.tournamentVenues.locationAddress}, ${schema.communities.locationAddress})`,
+        courtName: schema.venueCourts.courtName,
+        participantCount: sql<number>`CASE
+          WHEN ${session.id} IS NOT NULL AND ${session.pairingMode} = 'FREE' THEN (
+            SELECT count(*)::int FROM club_match_session_participants p
+            WHERE p.session_id = ${session.id} AND p.status = 'ACTIVE'
+          )
+          WHEN ${tournament.id} IS NOT NULL THEN (
+            SELECT count(*)::int FROM tournament_participants p
+            WHERE p.tournament_id = ${tournament.id}
+              AND p.team_status NOT IN ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
+          )
+          ELSE 0
+        END`,
+        cardType: sql<'CLUB_RECRUITING' | 'TOURNAMENT_OPENED'>`CASE
+          WHEN ${tournament.id} IS NOT NULL AND (${post.tournamentId} IS NOT NULL OR ${session.pairingMode} = 'BRACKET') THEN 'TOURNAMENT_OPENED'
+          ELSE 'CLUB_RECRUITING'
+        END`,
+      })
+      .from(post)
+      .innerJoin(schema.communities, eq(schema.communities.id, post.communityId))
+      .leftJoin(schema.communitySocialSettings, eq(schema.communitySocialSettings.communityId, post.communityId))
+      .leftJoin(session, eq(session.id, post.clubMatchSessionId))
+      .leftJoin(
+        tournament,
+        sql`${tournament.id} = COALESCE(${post.tournamentId}, ${session.bracketTournamentId})`,
+      )
+      .leftJoin(schema.categories, sql`${schema.categories.id} = COALESCE(${session.categoryId}, ${tournament.categoryId})`)
+      .leftJoin(sessionVenues, eq(sessionVenues.id, session.venueId))
+      .leftJoin(schema.tournamentVenues, eq(schema.tournamentVenues.id, tournament.venueId))
+      .leftJoin(schema.venueCourts, eq(schema.venueCourts.id, session.courtId))
+      .where(and(...conditions))
+      .orderBy(desc(post.createdAt), desc(post.id))
+      .limit(input.limit + 1);
+
+    const hasMore = rows.length > input.limit;
+    const items = hasMore ? rows.slice(0, input.limit) : rows;
+    const sessionIds = items
+      .map((row) => row.session?.id)
+      .filter((id): id is string => Boolean(id));
+    const participants = sessionIds.length
+      ? await this.db
+          .select({
+            sessionId: schema.clubMatchSessionParticipants.sessionId,
+            userId: schema.clubMatchSessionParticipants.userId,
+            fullName: schema.profiles.fullName,
+            avatarUrl: schema.profiles.avatarUrl,
+            createdAt: schema.clubMatchSessionParticipants.createdAt,
+          })
+          .from(schema.clubMatchSessionParticipants)
+          .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.clubMatchSessionParticipants.userId))
+          .where(and(
+            inArray(schema.clubMatchSessionParticipants.sessionId, sessionIds),
+            eq(schema.clubMatchSessionParticipants.status, 'ACTIVE'),
+          ))
+          .orderBy(asc(schema.clubMatchSessionParticipants.createdAt))
+      : [];
+    const participantsBySession = new Map<string, typeof participants>();
+    for (const participant of participants) {
+      const current = participantsBySession.get(participant.sessionId) ?? [];
+      if (current.length < 8) current.push(participant);
+      participantsBySession.set(participant.sessionId, current);
+    }
+
+    const data = items.map((row) => {
+      const sessionConfig = row.session?.sessionConfig;
+      const locationFromConfig = sessionConfig && typeof sessionConfig === 'object'
+        ? (sessionConfig as Record<string, unknown>).location
+        : null;
+      const locationDisplay = locationFromConfig && typeof locationFromConfig === 'object'
+        ? (locationFromConfig as Record<string, unknown>).display
+        : null;
+      const title = row.session?.name || row.tournament?.name || row.post.body || 'Hoạt động CLB';
+      const description = row.session?.description || row.tournament?.description || row.post.body || null;
+      const eventDate = row.session?.startAt ?? row.tournament?.registrationStartDate ?? row.tournament?.startDate ?? row.post.createdAt;
+      const max = row.cardType === 'TOURNAMENT_OPENED'
+        ? (row.tournament?.maxParticipants ?? 0)
+        : (row.session?.maxParticipants ?? 0);
+      const current = Number(row.participantCount ?? 0);
+      return {
+        id: row.post.id,
+        type: row.cardType,
+        community: row.community,
+        sport: row.category?.name ?? row.category?.slug ?? null,
+        sportTier: null,
+        title,
+        description,
+        playDate: eventDate?.toISOString() ?? null,
+        startTime: eventDate?.toISOString() ?? null,
+        endTime: row.session?.endAt?.toISOString() ?? null,
+        location: row.venueAddress || locationDisplay || row.venueName || null,
+        clubMatchSessionId: row.session?.id ?? null,
+        tournamentId: row.tournament?.id ?? null,
+        verified: false,
+        slots: row.cardType === 'CLUB_RECRUITING' && row.session
+          ? {
+              current,
+              max,
+              feePerSlot: row.session.feePerSlot,
+              joinedPlayers: (participantsBySession.get(row.session.id) ?? []).map((participant) => ({
+                userId: participant.userId,
+                name: participant.fullName ?? 'Thành viên CLB',
+                avatarUrl: participant.avatarUrl,
+              })),
+            }
+          : null,
+        tournament: row.cardType === 'TOURNAMENT_OPENED' && row.tournament
+          ? {
+              id: row.tournament.id,
+              remainingSlots: Math.max((row.tournament.maxParticipants ?? 0) - current - (row.tournament.reservedSlotsCount ?? 0), 0),
+              totalSlots: row.tournament.maxParticipants ?? 0,
+              bannerUrl: row.tournament.bannerUrl,
+            }
+          : null,
+        venue: row.venueName || row.venueAddress || row.courtName
+          ? { name: row.venueName, address: row.venueAddress, courtName: row.courtName }
+          : null,
+      };
+    });
+    const last = items.at(-1)?.post;
+    return {
+      invalidCursor: false as const,
+      data,
+      meta: {
+        limit: input.limit,
+        hasMore,
+        nextCursor: hasMore && last
+          ? CursorPaginationHelper.encodeCursor({ id: last.id, createdAt: last.createdAt })
+          : null,
+      },
+    };
+  }
+
+  async findLinkedActivity(communityId: string, target: { clubMatchSessionId?: string; tournamentId?: string }) {
+    if (target.clubMatchSessionId) {
+      const [row] = await this.db
+        .select({
+          session: schema.clubMatchSessions,
+          communityId: schema.clubMatchSessions.communityId,
+        })
+        .from(schema.clubMatchSessions)
+        .where(and(
+          eq(schema.clubMatchSessions.id, target.clubMatchSessionId),
+          eq(schema.clubMatchSessions.communityId, communityId),
+          isNull(schema.clubMatchSessions.deletedAt),
+        ))
+        .limit(1);
+      return row?.session ? { kind: 'SESSION' as const, resource: row.session } : null;
+    }
+    if (target.tournamentId) {
+      const [row] = await this.db
+        .select()
+        .from(schema.tournaments)
+        .where(and(
+          eq(schema.tournaments.id, target.tournamentId),
+          eq(schema.tournaments.communityId, communityId),
+          isNull(schema.tournaments.deletedAt),
+        ))
+        .limit(1);
+      return row ? { kind: 'TOURNAMENT' as const, resource: row } : null;
+    }
+    return null;
+  }
+
+  async findLatestLinkedActivityPost(
+    communityId: string,
+    target: { clubMatchSessionId?: string; tournamentId?: string },
+    tx: AppDbOrTx = this.db,
+  ) {
+    const targetCondition = target.clubMatchSessionId
+      ? eq(schema.communityPosts.clubMatchSessionId, target.clubMatchSessionId)
+      : eq(schema.communityPosts.tournamentId, target.tournamentId!);
+    const [post] = await tx
+      .select()
+      .from(schema.communityPosts)
+      .where(and(
+        eq(schema.communityPosts.communityId, communityId),
+        targetCondition,
+        isNull(schema.communityPosts.deletedAt),
+        sql`${schema.communityPosts.status} IN ('PUBLISHED', 'PENDING')`,
+      ))
+      .orderBy(desc(schema.communityPosts.createdAt), desc(schema.communityPosts.id))
+      .limit(1);
+    return post ?? null;
+  }
+
+  async createLinkedActivityPost(input: {
+    communityId: string;
+    authorId: string;
+    clubMatchSessionId?: string;
+    tournamentId?: string;
+    body: string;
+    status: 'PUBLISHED' | 'PENDING';
+    idempotencyKey?: string;
+  }) {
+    return this.db.transaction(async (tx) => {
+      const lockKey = `activity:${input.communityId}:${input.clubMatchSessionId ?? input.tournamentId}`;
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+      const existing = await this.findLatestLinkedActivityPost(input.communityId, input, tx);
+      if (existing) return { post: existing, reused: true };
+      const [post] = await tx
+        .insert(schema.communityPosts)
+        .values({
+          communityId: input.communityId,
+          authorId: input.authorId,
+          ...(input.clubMatchSessionId ? { clubMatchSessionId: input.clubMatchSessionId } : {}),
+          ...(input.tournamentId ? { tournamentId: input.tournamentId } : {}),
+          type: input.clubMatchSessionId ? 'CLUB_SESSION_ANNOUNCEMENT' : 'TOURNAMENT_ANNOUNCEMENT',
+          body: input.body,
+          mediaUrls: [],
+          status: input.status,
+          idempotencyKey: input.idempotencyKey ?? null,
+        })
+        .returning();
+      return { post: post ?? null, reused: false };
+    });
   }
 
   async updateSettings(communityId: string, values: Partial<typeof schema.communitySocialSettings.$inferInsert>) {

@@ -106,4 +106,11 @@ export const envValidationSchema = Joi.object({
     .min(60)
     .max(3600)
     .default(900),
+  ZALO_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  ZALO_BUSINESS_ACCESS_TOKEN: Joi.string().allow('').optional().default(''),
+  ZALO_BUSINESS_TEMPLATE_ID: Joi.string().allow('').optional().default(''),
+  ZALO_BUSINESS_API_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .default('https://business.openapi.zalo.me/message/template'),
+  ZALO_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).max(30000).default(10000),
 });

@@ -15,11 +15,24 @@ import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guar
 import { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
 import { ModerateCommunityCommentDto } from './dto/moderate-community-comment.dto';
 import { UpdateCommunityReportStatusDto } from './dto/update-community-report-status.dto';
+import { ShareCommunityActivityDto } from './dto/share-community-activity.dto';
 
 @ApiTags('community-social')
 @Controller('communities/:communityId')
 export class CommunitySocialController {
   constructor(private readonly socialService: CommunitySocialService) {}
+
+  @Post('activity-share')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Chia sẻ một buổi giao lưu hoặc giải CLB đã tồn tại' })
+  shareActivity(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @CurrentUser() user: { id: string; roles?: string[] },
+    @Body() dto: ShareCommunityActivityDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.socialService.shareActivity(communityId, user, dto, idempotencyKey);
+  }
 
   @Public()
   @Get('social-settings')
