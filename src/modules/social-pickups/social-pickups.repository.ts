@@ -145,6 +145,9 @@ export class SocialPickupsRepository {
             schema.socialPickupSessions.hostUserId,
             schema.socialPickupSessions.creationIdempotencyKey,
           ],
+          // creation_key_unique is a partial unique index. PostgreSQL needs
+          // the same predicate here or it cannot infer the conflict target.
+          where: sql`${schema.socialPickupSessions.creationIdempotencyKey} IS NOT NULL`,
         })
         .returning();
 

@@ -88,6 +88,38 @@ describe('SocialPickupsService', () => {
     expect(repository.createPickup).not.toHaveBeenCalled();
   });
 
+  it('allows a venue without selecting a court', async () => {
+    repository.findCategory.mockResolvedValue({ id: 'category-1', name: 'Pickleball', slug: 'pickleball' });
+    repository.findVenueCourt.mockResolvedValue({
+      venueId: 'venue-1',
+      venueName: 'D-Sport',
+      venueAddress: 'Quận 7',
+      courtId: null,
+      courtName: null,
+    });
+    repository.createPickup.mockResolvedValue({ id: 'pickup-1' } as never);
+    repository.getProjection.mockResolvedValue(projection as never);
+
+    await service.create(
+      { id: 'user-1' },
+      {
+        categoryId: 'category-1',
+        title: 'Tìm người chơi buổi tối',
+        playDate: '2099-01-01',
+        startTime: '19:30',
+        endTime: '21:30',
+        location: 'Địa điểm nhập tay',
+        venueId: 'venue-1',
+        maxSlots: 4,
+      },
+    );
+
+    expect(repository.createPickup).toHaveBeenCalledWith(expect.objectContaining({
+      venueId: 'venue-1',
+      courtId: null,
+    }));
+  });
+
   it('maps a full pickup to a stable conflict instead of overbooking', async () => {
     repository.joinPickup.mockResolvedValue({ kind: 'FULL' } as never);
 
