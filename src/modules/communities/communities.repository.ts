@@ -201,6 +201,48 @@ export class CommunitiesRepository {
 
     const communityIds = communitiesList.map((c) => c.id);
 
+    // The detail page can use the community gallery as a cover carousel. Keep
+    // the public list consistent without issuing one gallery request per card:
+    // select the newest gallery image for the communities on this page only.
+    const galleryPreviewRows = await this.db
+      .select({
+        communityId: schema.communityGallery.communityId,
+        imageUrl: schema.communityGallery.imageUrl,
+      })
+      .from(schema.communityGallery)
+      .innerJoin(
+        schema.communities,
+        eq(schema.communityGallery.communityId, schema.communities.id),
+      )
+      .where(
+        and(
+          sql`${schema.communityGallery.communityId} IN ${communityIds}`,
+          viewerId
+            ? or(
+                eq(schema.communities.visibility, 'PUBLIC'),
+                eq(schema.communities.creatorId, viewerId),
+                sql`EXISTS (
+                  SELECT 1
+                  FROM ${schema.communityMembers} AS gallery_member
+                  WHERE gallery_member.community_id = ${schema.communities.id}
+                    AND gallery_member.user_id = ${viewerId}
+                    AND gallery_member.status = 'JOINED'
+                )`,
+              )
+            : eq(schema.communities.visibility, 'PUBLIC'),
+        ),
+      )
+      .orderBy(
+        desc(schema.communityGallery.createdAt),
+        desc(schema.communityGallery.id),
+      );
+    const galleryPreviewMap = new Map<string, string>();
+    for (const row of galleryPreviewRows) {
+      if (!galleryPreviewMap.has(row.communityId)) {
+        galleryPreviewMap.set(row.communityId, row.imageUrl);
+      }
+    }
+
     // 1. Fetch categories for each community
     const sportsLinks = await this.db
       .select({
@@ -268,6 +310,7 @@ export class CommunitiesRepository {
     // Map them together
     const data = communitiesList.map((community) => ({
       ...community,
+      coverImageUrl: galleryPreviewMap.get(community.id) ?? null,
       categories: categoriesMap[community.id] || [],
       _count: {
         members: membersCountMap[community.id] || 0,
