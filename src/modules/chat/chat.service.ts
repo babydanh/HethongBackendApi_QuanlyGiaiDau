@@ -66,10 +66,10 @@ export class ChatService {
     if (fromUserId === toUserId) throw this.directPolicyDenied();
 
     try {
-      if (await this.chatRepository.shareCurrentJoinedCommunity(fromUserId, toUserId)) return;
+      if (await this.chatRepository.canDirectMessage(fromUserId, toUserId)) return;
     } catch (error) {
       this.logger.warn(
-        `Unable to verify shared current club for ${fromUserId} and ${toUserId}; denying direct messaging.`,
+        `Unable to verify direct messaging eligibility for ${fromUserId} and ${toUserId}; denying direct messaging.`,
         error instanceof Error ? error.message : String(error),
       );
     }

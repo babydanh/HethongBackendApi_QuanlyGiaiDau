@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException, ForbiddenException, BadR
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, sql, asc, desc, inArray, lt, or, type SQL } from 'drizzle-orm';
+import { eq, and, sql, asc, desc, inArray, lt, or, isNull, type SQL } from 'drizzle-orm';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
@@ -251,7 +251,7 @@ export class ChatRepository {
                 if (await this.isBlockedBetween(userId, otherParticipant.id)) {
                   canSendMessages = false;
                   messageRestriction = 'BLOCKED';
-                } else if (!(await this.shareCurrentJoinedCommunity(userId, otherParticipant.id))) {
+                } else if (!(await this.canDirectMessage(userId, otherParticipant.id))) {
                   canSendMessages = false;
                   messageRestriction = 'NO_SHARED_CURRENT_CLUB';
                 }
@@ -468,6 +468,29 @@ export class ChatRepository {
       ))
       .limit(1);
     return !!record;
+  }
+
+  async canDirectMessage(firstUserId: string, secondUserId: string): Promise<boolean> {
+    if (await this.shareCurrentJoinedCommunity(firstUserId, secondUserId)) {
+      return true;
+    }
+
+    const [friendship] = await this.db
+      .select({ id: schema.friendships.id })
+      .from(schema.friendships)
+      .where(
+        and(
+          isNull(schema.friendships.deletedAt),
+          eq(schema.friendships.status, 'ACCEPTED'),
+          or(
+            and(eq(schema.friendships.senderId, firstUserId), eq(schema.friendships.receiverId, secondUserId)),
+            and(eq(schema.friendships.senderId, secondUserId), eq(schema.friendships.receiverId, firstUserId)),
+          ),
+        ),
+      )
+      .limit(1);
+
+    return !!friendship;
   }
 
   /**

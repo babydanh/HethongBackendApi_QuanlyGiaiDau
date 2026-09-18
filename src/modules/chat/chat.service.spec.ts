@@ -4,6 +4,7 @@ import { RoomType } from './dto/create-room.dto';
 
 function createService(repository: Record<string, jest.Mock>) {
   const defaultRepo = {
+    canDirectMessage: jest.fn().mockResolvedValue(true),
     shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(true),
     ...repository,
   };
@@ -91,7 +92,7 @@ describe('ChatService authorization regressions', () => {
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(false),
+      canDirectMessage: jest.fn().mockResolvedValue(false),
       getOrCreateDirectRoom: jest.fn(),
     };
     const { service } = createService(repository);
@@ -110,7 +111,7 @@ describe('ChatService authorization regressions', () => {
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(false),
+      canDirectMessage: jest.fn().mockResolvedValue(false),
     };
     const { service } = createService(repository);
 
@@ -124,7 +125,7 @@ describe('ChatService authorization regressions', () => {
     const repository = {
       isActiveUser: jest.fn().mockResolvedValue(true),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      shareCurrentJoinedCommunity: jest.fn().mockRejectedValue(new Error('database unavailable')),
+      canDirectMessage: jest.fn().mockRejectedValue(new Error('database unavailable')),
     };
     const { service } = createService(repository);
 
@@ -140,7 +141,7 @@ describe('ChatService authorization regressions', () => {
       isMemberOfRoom: jest.fn().mockResolvedValue(true),
       getRoomMemberIds: jest.fn().mockResolvedValue(['user-a', 'user-b']),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(false),
+      canDirectMessage: jest.fn().mockResolvedValue(false),
       saveMessage: jest.fn(),
     };
     const { service } = createService(repository);

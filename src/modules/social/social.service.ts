@@ -60,7 +60,7 @@ export class SocialService {
       type: NOTIFICATION_TYPES.FRIEND_REQUEST_RECEIVED,
       title: 'Lời mời kết bạn mới',
       content: 'Bạn có một lời mời kết bạn mới.',
-      redirectUrl: '/notifications',
+      redirectUrl: '/profile?tab=friends',
     });
 
     return this.toStatusView(created, userId);
@@ -105,7 +105,7 @@ export class SocialService {
         status === 'ACCEPTED'
           ? 'Lời mời kết bạn của bạn đã được chấp nhận.'
           : 'Lời mời kết bạn của bạn đã bị từ chối.',
-      redirectUrl: '/notifications',
+      redirectUrl: '/profile?tab=friends',
     });
 
     return this.toStatusView(updated, userId);

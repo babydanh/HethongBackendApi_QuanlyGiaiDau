@@ -139,7 +139,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           .find((memberId) => memberId !== user.sub);
         isMember = !!otherUserId &&
           !(await this.chatRepository.isBlockedBetween(user.sub, otherUserId)) &&
-          await this.chatRepository.shareCurrentJoinedCommunity(user.sub, otherUserId);
+          await this.chatRepository.canDirectMessage(user.sub, otherUserId);
       }
     } catch {
       isMember = false;
@@ -228,7 +228,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return { event: 'chat:error', data: 'Blocked' };
       }
       try {
-        if (!(await this.chatRepository.shareCurrentJoinedCommunity(user.sub, otherUserId))) {
+        if (!(await this.chatRepository.canDirectMessage(user.sub, otherUserId))) {
           return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
         }
       } catch {
@@ -334,7 +334,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (
           !otherUserId ||
           await this.chatRepository.isBlockedBetween(user.sub, otherUserId) ||
-          !(await this.chatRepository.shareCurrentJoinedCommunity(user.sub, otherUserId))
+          !(await this.chatRepository.canDirectMessage(user.sub, otherUserId))
         ) {
           return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
         }
@@ -397,7 +397,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (!otherUserId || await this.chatRepository.isBlockedBetween(userId, otherUserId)) {
           return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
         }
-        if (!(await this.chatRepository.shareCurrentJoinedCommunity(userId, otherUserId))) {
+        if (!(await this.chatRepository.canDirectMessage(userId, otherUserId))) {
           return { event: 'chat:error', data: 'NO_SHARED_CURRENT_CLUB' };
         }
       }

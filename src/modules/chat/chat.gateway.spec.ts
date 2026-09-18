@@ -26,7 +26,7 @@ describe('ChatGateway direct authorization', () => {
       canAccessRoom: jest.fn().mockResolvedValue(true),
       getRoomMemberIds: jest.fn().mockResolvedValue(['user-a', 'user-b']),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      shareCurrentJoinedCommunity: jest.fn().mockRejectedValue(new Error('database unavailable')),
+      canDirectMessage: jest.fn().mockRejectedValue(new Error('database unavailable')),
       saveMessage: jest.fn(),
       markRead: jest.fn(),
     };
@@ -40,13 +40,13 @@ describe('ChatGateway direct authorization', () => {
     expect(repository.markRead).not.toHaveBeenCalled();
   });
 
-  it('allows DIRECT join only when both users currently share a JOINED club', async () => {
+  it('allows DIRECT join only when both users currently share a JOINED club or are friends', async () => {
     const repository = {
       findRoomById: jest.fn().mockResolvedValue({ id: 'room-1', type: RoomType.DIRECT }),
       canAccessRoom: jest.fn().mockResolvedValue(true),
       getRoomMemberIds: jest.fn().mockResolvedValue(['user-a', 'user-b']),
       isBlockedBetween: jest.fn().mockResolvedValue(false),
-      shareCurrentJoinedCommunity: jest.fn().mockResolvedValue(true),
+      canDirectMessage: jest.fn().mockResolvedValue(true),
     };
     const { gateway, client } = createGateway(repository);
 
