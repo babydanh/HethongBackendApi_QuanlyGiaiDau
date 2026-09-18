@@ -11,6 +11,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -30,7 +31,10 @@ import { OAuthProfileDto } from './dto/oauth-profile.dto';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Public()
   @UseGuards(new RateLimitGuard(15, 60000))
@@ -193,21 +197,41 @@ export class AuthController {
     @Req() req: Request & { user: OAuthProfileDto },
     @Res() res: Response,
   ) {
-    const userAgent = req.headers['user-agent'];
-    const ipAddress = req.ip;
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') ||
+      process.env.FRONTEND_URL ||
+      'http://localhost:3001';
 
-    const tokens = await this.authService.oauthLogin(
-      req.user,
-      userAgent,
-      ipAddress,
-    );
+    try {
+      if (!req.user) {
+        return res.redirect(
+          `${frontendUrl}/login?error=${encodeURIComponent('Không nhận được thông tin từ Google')}`,
+        );
+      }
 
-    // Redirect to frontend
-    // Set cookies before redirect
-    this.setTokensCookies(res, tokens.accessToken, tokens.refreshToken);
-    
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-    res.redirect(`${frontendUrl}/auth/callback`);
+      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.ip;
+
+      const tokens = await this.authService.oauthLogin(
+        req.user,
+        userAgent,
+        ipAddress,
+      );
+
+      // Redirect to frontend
+      // Set cookies before redirect
+      this.setTokensCookies(res, tokens.accessToken, tokens.refreshToken);
+
+      res.redirect(`${frontendUrl}/auth/callback`);
+    } catch (error: any) {
+      const errorMessage =
+        error?.response?.message ||
+        error?.message ||
+        'Đăng nhập Google không thành công. Vui lòng thử lại.';
+      res.redirect(
+        `${frontendUrl}/login?error=${encodeURIComponent(errorMessage)}`,
+      );
+    }
   }
 
 
