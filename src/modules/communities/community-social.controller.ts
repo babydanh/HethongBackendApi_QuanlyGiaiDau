@@ -10,7 +10,7 @@ import { ReactCommunityPostDto } from './dto/react-community-post.dto';
 import { UpdateCommunitySocialSettingsDto } from './dto/update-community-social-settings.dto';
 import { ReportCommunityContentDto } from './dto/report-community-content.dto';
 import { UpdateCommunityPreferencesDto } from './dto/update-community-preferences.dto';
-import { ModerateCommunityPostDto } from './dto/moderate-community-post.dto';
+import { ModerateCommunityPostDto, DeleteCommunityPostDto } from './dto/moderate-community-post.dto';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
 import { ModerateCommunityCommentDto } from './dto/moderate-community-comment.dto';
@@ -79,8 +79,9 @@ export class CommunitySocialController {
     @Param('communityId', ParseUUIDPipe) communityId: string,
     @Param('postId', ParseUUIDPipe) postId: string,
     @CurrentUser() user: { id: string; roles?: string[] },
+    @Body() dto?: DeleteCommunityPostDto,
   ) {
-    return this.socialService.deletePost(communityId, postId, user);
+    return this.socialService.deletePost(communityId, postId, user, dto);
   }
 
   @Get('posts/:postId/comments')

@@ -16,6 +16,9 @@ import {
   buildCommunityPostMentionedNotification,
   buildCommunityPostNewNotification,
 } from '../notifications/notification-builder';
+import { CommunityWhiteboxService } from './moderation/community-whitebox.service';
+import { CommunityBlackboxAiService } from './moderation/community-blackbox-ai.service';
+import type { DeleteCommunityPostDto } from './dto/moderate-community-post.dto';
 
 type SocialUser = { id: string; fullName?: string; roles?: string[] };
 
@@ -25,6 +28,8 @@ export class CommunitySocialService {
     private readonly socialRepository: CommunitySocialRepository,
     private readonly communitiesRepository: CommunitiesRepository,
     private readonly notificationsService: NotificationsService,
+    private readonly whiteboxService: CommunityWhiteboxService,
+    private readonly blackboxAiService: CommunityBlackboxAiService,
   ) {}
 
   async getSettings(communityId: string) {
@@ -144,9 +149,42 @@ export class CommunitySocialService {
     if (settings.postingPolicy === 'ADMINS' && !canManage) {
       throw new ForbiddenException('Chỉ ban quản trị được đăng bài.');
     }
-    const status = settings.postApprovalRequired && member.role !== 'OWNER' && member.role !== 'ADMIN' && member.role !== 'MODERATOR'
+
+    // ── LỚP 1: WHITEBOX GUARD ENGINE (Regex, Từ khóa cấm, Link spam) ──
+    const textToCheck = [body, dto.poll?.question, ...(dto.poll?.options || [])].filter(Boolean).join('\n');
+    const whiteboxResult = this.whiteboxService.checkContent(textToCheck);
+    if (whiteboxResult.rejected) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'CONTENT_MODERATION_REJECTED',
+        ruleCode: whiteboxResult.ruleCode,
+        message: whiteboxResult.reasonVi || 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
+      });
+    }
+
+    // ── LỚP 2: BLACKBOX AI GUARD (Semantic Analysis via LLM) ──
+    let aiFlagged = false;
+    let aiReason: string | undefined = undefined;
+    // Nếu Whitebox nghi vấn (FLAGGED / NEEDS_REVIEW) hoặc bài viết có độ dài đáng kể
+    if (whiteboxResult.flagged || (textToCheck.length > 15 && !canManage)) {
+      const aiResult = await this.blackboxAiService.evaluatePost(textToCheck, {
+        authorName: user.fullName || 'Thành viên',
+        communityName: community.name,
+      });
+      if (!aiResult.isSafe && aiResult.riskScore >= 0.7) {
+        aiFlagged = true;
+        aiReason = aiResult.reasonVi || 'Nội dung có nguy cơ vi phạm tiêu chuẩn cộng đồng.';
+      }
+    }
+
+    // Trạng thái bài viết:
+    // 1. Nếu AI phát hiện vi phạm nguy cơ cao -> Bắt buộc PENDING để BQT duyệt (hoặc từ chối nếu policy khắt khe)
+    // 2. Nếu CLB bật postApprovalRequired và người đăng không phải BQT -> PENDING
+    // 3. Ngược lại -> PUBLISHED
+    const status = (aiFlagged || (settings.postApprovalRequired && !canManage))
       ? 'PENDING'
       : 'PUBLISHED';
+
     const post = await this.socialRepository.createPost(communityId, user.id, { ...dto, mentions: validMentionIds }, status, idempotencyKey);
     if (!post) throw new BadRequestException('Không thể tạo bài viết.');
 
@@ -181,21 +219,24 @@ export class CommunitySocialService {
     return {
       ...post,
       poll: createdPoll,
+      moderationNotes: aiFlagged ? aiReason : undefined,
     };
   }
 
-  async deletePost(communityId: string, postId: string, user: SocialUser) {
+  async deletePost(communityId: string, postId: string, user: SocialUser, dto?: DeleteCommunityPostDto) {
     await this.ensureCommunity(communityId);
     const post = await this.socialRepository.findPost(postId);
     if (!post || post.communityId !== communityId) {
       throw new NotFoundException('Không tìm thấy bài viết.');
     }
     // Cho phép tác giả bài viết HOẶC ban quản trị (OWNER / MODERATOR / ADMIN) xóa
-    if (post.authorId !== user.id) {
+    const isAuthor = post.authorId === user.id;
+    if (!isAuthor) {
       await this.requireManager(communityId, user);
     } else {
       await this.requireJoined(communityId, user.id);
     }
+    void dto;
     return this.socialRepository.softDeletePost(postId);
   }
 

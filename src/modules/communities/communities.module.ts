@@ -8,10 +8,26 @@ import { CommunitySocialController } from './community-social.controller';
 import { CommunitySocialRepository } from './community-social.repository';
 import { CommunitySocialService } from './community-social.service';
 
+import { CommunityWhiteboxService } from './moderation/community-whitebox.service';
+import { CommunityBlackboxAiService } from './moderation/community-blackbox-ai.service';
+
 @Module({
   imports: [NotificationsModule, StorageModule],
   controllers: [CommunitiesController, CommunitySocialController],
-  providers: [CommunitiesService, CommunitiesRepository, CommunitySocialService, CommunitySocialRepository],
-  exports: [CommunitiesService, CommunitySocialRepository],
+  providers: [
+    CommunitiesService,
+    CommunitiesRepository,
+    CommunitySocialService,
+    CommunitySocialRepository,
+    CommunityWhiteboxService,
+    CommunityBlackboxAiService,
+  ],
+  exports: [
+    CommunitiesService,
+    CommunitySocialRepository,
+    CommunityWhiteboxService,
+    CommunityBlackboxAiService,
+  ],
 })
 export class CommunitiesModule {}
+

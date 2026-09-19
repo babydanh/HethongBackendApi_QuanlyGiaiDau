@@ -79,10 +79,18 @@ describe('CommunitySocialService @mention policy', () => {
     notificationsService = {
       sendNotification: jest.fn().mockResolvedValue(undefined),
     };
+    const whiteboxService = {
+      checkContent: jest.fn().mockReturnValue({ passed: true, flagged: false, rejected: false, severity: 'CLEAN' }),
+    };
+    const blackboxAiService = {
+      evaluatePost: jest.fn().mockResolvedValue({ isSafe: true, riskScore: 0.0, flaggedCategory: 'NONE', isFallback: true }),
+    };
     service = new CommunitySocialService(
       socialRepository as unknown as CommunitySocialRepository,
       communitiesRepository as unknown as CommunitiesRepository,
       notificationsService as unknown as NotificationsService,
+      whiteboxService as any,
+      blackboxAiService as any,
     );
   });
 
