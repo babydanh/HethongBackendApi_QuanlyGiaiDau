@@ -17,11 +17,26 @@ export class GoogleAuthGuard extends AuthGuard('google') {
     const response = http.getResponse<Response>();
 
     if (err || !user) {
+      const query = request.query as Record<string, unknown>;
+      const errorMessage = err?.message || err?.name || 'unknown';
+      const infoMessage =
+        typeof info === 'string'
+          ? info
+          : info && typeof info.message === 'string'
+            ? info.message
+            : undefined;
+
       this.logger.error('Google OAuth error in guard:', {
-        err: err?.message || err,
-        info: info?.message || info,
-        query: request.query,
-        url: request.url,
+        err: errorMessage,
+        info: infoMessage,
+        hasCode: typeof query.code === 'string' && query.code.length > 0,
+        providerError:
+          typeof query.error === 'string' ? query.error : undefined,
+        providerErrorDescription:
+          typeof query.error_description === 'string'
+            ? query.error_description
+            : undefined,
+        path: request.path,
       });
 
       if (!response.headersSent) {
@@ -55,4 +70,3 @@ export class GoogleAuthGuard extends AuthGuard('google') {
     return user;
   }
 }
-
