@@ -17,6 +17,7 @@ import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guar
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { CreateSocialPickupDto } from './dto/create-social-pickup.dto';
 import { QuerySocialPickupsDto } from './dto/query-social-pickups.dto';
+import { RequestSocialPickupDto } from './dto/request-social-pickup.dto';
 import { SocialPickupsService } from './social-pickups.service';
 
 type RequestUser = { id: string; roles?: string[] };
@@ -76,6 +77,53 @@ export class SocialPickupsController {
     return this.service.join(id, user);
   }
 
+  @Post(':id/requests')
+  @UseGuards(new RateLimitGuard(30, 60_000))
+  requestJoin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+    @Body() dto: RequestSocialPickupDto,
+  ) {
+    return this.service.requestToJoin(id, user, dto.note);
+  }
+
+  @Get(':id/requests')
+  listRequests(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.listPendingRequests(id, user);
+  }
+
+  @Post(':id/requests/:participantId/approve')
+  @UseGuards(new RateLimitGuard(30, 60_000))
+  approveRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.approveRequest(id, participantId, user);
+  }
+
+  @Post(':id/requests/:participantId/reject')
+  @UseGuards(new RateLimitGuard(30, 60_000))
+  rejectRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.rejectRequest(id, participantId, user);
+  }
+
+  @Delete(':id/requests/self')
+  @UseGuards(new RateLimitGuard(30, 60_000))
+  withdrawRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.withdrawRequest(id, user);
+  }
+
   @Delete(':id/participants/self')
   @UseGuards(new RateLimitGuard(30, 60_000))
   withdraw(
@@ -88,6 +136,15 @@ export class SocialPickupsController {
   @Post(':id/cancel')
   @UseGuards(new RateLimitGuard(20, 60_000))
   cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.cancel(id, user);
+  }
+
+  @Delete(':id')
+  @UseGuards(new RateLimitGuard(20, 60_000))
+  deletePickup(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: RequestUser,
   ) {

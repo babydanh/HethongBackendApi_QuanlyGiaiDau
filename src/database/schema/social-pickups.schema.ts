@@ -115,6 +115,7 @@ export const socialPickupParticipants = pgTable(
       .notNull(),
     role: varchar('role', { length: 20 }).default('PLAYER').notNull(),
     status: varchar('status', { length: 20 }).default('JOINED').notNull(),
+    note: text('note'),
     paymentStatus: varchar('payment_status', { length: 20 })
       .default('UNPAID')
       .notNull(),

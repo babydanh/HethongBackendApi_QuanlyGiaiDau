@@ -12,6 +12,15 @@ export type SocialPickupProjection = {
   participantCount: number;
   participants: Array<{ userId: string; name: string | null; avatarUrl: string | null }>;
   isJoined: boolean;
+  myStatus?: 'JOINED' | 'PENDING' | 'REJECTED' | 'WITHDRAWN' | null;
+  pendingRequests?: Array<{
+    id: string;
+    userId: string;
+    name: string | null;
+    avatarUrl: string | null;
+    note: string | null;
+    createdAt: Date;
+  }>;
 };
 
 type CursorValue = { id: string; createdAt: string };
@@ -273,10 +282,181 @@ export class SocialPickupsRepository {
     });
   }
 
+  async listPendingRequests(pickupId: string) {
+    return this.db
+      .select({
+        id: schema.socialPickupParticipants.id,
+        userId: schema.socialPickupParticipants.userId,
+        name: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+        note: schema.socialPickupParticipants.note,
+        createdAt: schema.socialPickupParticipants.joinedAt,
+      })
+      .from(schema.socialPickupParticipants)
+      .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.socialPickupParticipants.userId))
+      .where(
+        and(
+          eq(schema.socialPickupParticipants.pickupId, pickupId),
+          eq(schema.socialPickupParticipants.status, 'PENDING'),
+        ),
+      )
+      .orderBy(asc(schema.socialPickupParticipants.joinedAt));
+  }
+
+  async requestToJoinPickup(id: string, userId: string, note?: string) {
+    return this.db.transaction(async (tx) => {
+      const pickup = await this.findPickupForUpdate(id, tx);
+      if (!pickup) return { kind: 'NOT_FOUND' as const };
+      if (pickup.status === 'CANCELLED' || pickup.status === 'COMPLETED' || pickup.status === 'IN_PROGRESS') {
+        return { kind: 'TERMINAL' as const, pickup };
+      }
+      if (pickup.hostUserId === userId) {
+        return { kind: 'HOST_CANNOT_REQUEST' as const, pickup };
+      }
+
+      const existing = await this.findParticipant(id, userId, tx);
+      if (existing?.status === 'JOINED') {
+        return { kind: 'ALREADY_JOINED' as const, pickup, participant: existing };
+      }
+
+      const count = await this.countJoinedParticipants(id, tx);
+      if (count >= pickup.maxSlots) {
+        return { kind: 'FULL' as const, pickup };
+      }
+
+      const participant = existing
+        ? (await tx
+            .update(schema.socialPickupParticipants)
+            .set({ status: 'PENDING', note: note?.trim() || null, joinedAt: new Date() })
+            .where(eq(schema.socialPickupParticipants.id, existing.id))
+            .returning())[0]
+        : (await tx
+            .insert(schema.socialPickupParticipants)
+            .values({ pickupId: id, userId, role: 'PLAYER', status: 'PENDING', note: note?.trim() || null })
+            .returning())[0];
+
+      return { kind: 'REQUESTED' as const, pickup, participant };
+    });
+  }
+
+  async approveParticipant(pickupId: string, participantId: string, hostUserId: string) {
+    return this.db.transaction(async (tx) => {
+      const pickup = await this.findPickupForUpdate(pickupId, tx);
+      if (!pickup) return { kind: 'NOT_FOUND' as const };
+      if (pickup.hostUserId !== hostUserId) return { kind: 'FORBIDDEN' as const };
+      if (pickup.status === 'CANCELLED' || pickup.status === 'COMPLETED' || pickup.status === 'IN_PROGRESS') {
+        return { kind: 'TERMINAL' as const, pickup };
+      }
+
+      const [participant] = await tx
+        .select()
+        .from(schema.socialPickupParticipants)
+        .where(
+          and(
+            eq(schema.socialPickupParticipants.id, participantId),
+            eq(schema.socialPickupParticipants.pickupId, pickupId),
+          ),
+        )
+        .limit(1);
+
+      if (!participant) return { kind: 'PARTICIPANT_NOT_FOUND' as const };
+      if (participant.status === 'JOINED') return { kind: 'ALREADY_JOINED' as const };
+
+      const count = await this.countJoinedParticipants(pickupId, tx);
+      if (count >= pickup.maxSlots) {
+        if (pickup.status !== 'FULL') {
+          await tx
+            .update(schema.socialPickupSessions)
+            .set({ status: 'FULL', currentSlots: count, updatedAt: new Date() })
+            .where(eq(schema.socialPickupSessions.id, pickupId));
+        }
+        return { kind: 'FULL' as const, pickup };
+      }
+
+      const [updatedParticipant] = await tx
+        .update(schema.socialPickupParticipants)
+        .set({ status: 'JOINED', joinedAt: new Date() })
+        .where(eq(schema.socialPickupParticipants.id, participantId))
+        .returning();
+
+      const nextCount = count + 1;
+      const [updatedPickup] = await tx
+        .update(schema.socialPickupSessions)
+        .set({
+          currentSlots: nextCount,
+          status: nextCount >= pickup.maxSlots ? 'FULL' : 'OPEN',
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.socialPickupSessions.id, pickupId))
+        .returning();
+
+      return { kind: 'APPROVED' as const, pickup: updatedPickup ?? pickup, participant: updatedParticipant };
+    });
+  }
+
+  async rejectParticipant(pickupId: string, participantId: string, hostUserId: string) {
+    return this.db.transaction(async (tx) => {
+      const pickup = await this.findPickupForUpdate(pickupId, tx);
+      if (!pickup) return { kind: 'NOT_FOUND' as const };
+      if (pickup.hostUserId !== hostUserId) return { kind: 'FORBIDDEN' as const };
+
+      const [participant] = await tx
+        .select()
+        .from(schema.socialPickupParticipants)
+        .where(
+          and(
+            eq(schema.socialPickupParticipants.id, participantId),
+            eq(schema.socialPickupParticipants.pickupId, pickupId),
+          ),
+        )
+        .limit(1);
+
+      if (!participant) return { kind: 'PARTICIPANT_NOT_FOUND' as const };
+
+      const [updatedParticipant] = await tx
+        .update(schema.socialPickupParticipants)
+        .set({ status: 'REJECTED' })
+        .where(eq(schema.socialPickupParticipants.id, participantId))
+        .returning();
+
+      return { kind: 'REJECTED' as const, pickup, participant: updatedParticipant };
+    });
+  }
+
+  async withdrawRequest(pickupId: string, userId: string) {
+    return this.db.transaction(async (tx) => {
+      const pickup = await this.findPickupForUpdate(pickupId, tx);
+      if (!pickup) return { kind: 'NOT_FOUND' as const };
+
+      const existing = await this.findParticipant(pickupId, userId, tx);
+      if (!existing || (existing.status !== 'PENDING' && existing.status !== 'JOINED')) {
+        return { kind: 'NOT_REQUESTED' as const, pickup };
+      }
+
+      const wasJoined = existing.status === 'JOINED';
+      await tx
+        .update(schema.socialPickupParticipants)
+        .set({ status: 'WITHDRAWN' })
+        .where(eq(schema.socialPickupParticipants.id, existing.id));
+
+      if (wasJoined) {
+        const count = Math.max(await this.countJoinedParticipants(pickupId, tx), 1);
+        const [updated] = await tx
+          .update(schema.socialPickupSessions)
+          .set({ currentSlots: count, status: 'OPEN', updatedAt: new Date() })
+          .where(eq(schema.socialPickupSessions.id, pickupId))
+          .returning();
+        return { kind: 'WITHDRAWN' as const, pickup: updated ?? pickup };
+      }
+
+      return { kind: 'WITHDRAWN' as const, pickup };
+    });
+  }
+
   async cancelPickup(id: string, hostUserId: string) {
     const [updated] = await this.db
       .update(schema.socialPickupSessions)
-      .set({ status: 'CANCELLED', updatedAt: new Date() })
+      .set({ status: 'CANCELLED', deletedAt: new Date(), updatedAt: new Date() })
       .where(
         and(
           eq(schema.socialPickupSessions.id, id),
@@ -335,11 +515,41 @@ export class SocialPickupsRepository {
       )
       .orderBy(asc(schema.socialPickupParticipants.joinedAt));
 
+    let myStatus: 'JOINED' | 'PENDING' | 'REJECTED' | 'WITHDRAWN' | null = null;
+    if (viewerId) {
+      const [myPart] = await this.db
+        .select({ status: schema.socialPickupParticipants.status })
+        .from(schema.socialPickupParticipants)
+        .where(
+          and(
+            eq(schema.socialPickupParticipants.pickupId, id),
+            eq(schema.socialPickupParticipants.userId, viewerId),
+          ),
+        )
+        .limit(1);
+      myStatus = (myPart?.status as 'JOINED' | 'PENDING' | 'REJECTED' | 'WITHDRAWN') ?? null;
+    }
+
+    let pendingRequests: Array<{
+      id: string;
+      userId: string;
+      name: string | null;
+      avatarUrl: string | null;
+      note: string | null;
+      createdAt: Date;
+    }> = [];
+
+    if (viewerId && viewerId === row.host.id) {
+      pendingRequests = await this.listPendingRequests(id);
+    }
+
     return {
       ...row,
       participantCount: participants.length,
       participants,
-      isJoined: Boolean(viewerId && participants.some((item) => item.userId === viewerId)),
+      isJoined: myStatus === 'JOINED',
+      myStatus,
+      pendingRequests,
     };
   }
 

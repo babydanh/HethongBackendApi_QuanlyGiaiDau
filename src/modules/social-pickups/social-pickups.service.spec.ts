@@ -125,4 +125,62 @@ describe('SocialPickupsService', () => {
 
     await expect(service.join('pickup-1', { id: 'user-2' })).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('allows a user to request to join with a note', async () => {
+    (repository as any).requestToJoinPickup = jest.fn().mockResolvedValue({
+      kind: 'REQUESTED',
+      pickup: projection.pickup,
+      participant: { id: 'part-1', status: 'PENDING', note: 'Xin slot 3.0' },
+    });
+    repository.getProjection.mockResolvedValue({
+      ...projection,
+      myStatus: 'PENDING',
+    } as never);
+
+    const res = await service.requestToJoin('pickup-1', { id: 'user-2' }, 'Xin slot 3.0');
+    expect((repository as any).requestToJoinPickup).toHaveBeenCalledWith('pickup-1', 'user-2', 'Xin slot 3.0');
+    expect(res.data?.myStatus).toBe('PENDING');
+  });
+
+  it('allows host to list pending requests', async () => {
+    repository.getProjection.mockResolvedValue(projection as never);
+    (repository as any).listPendingRequests = jest.fn().mockResolvedValue([
+      { id: 'part-2', userId: 'user-2', name: 'Player 2', avatarUrl: null, note: 'Xin slot', createdAt: new Date() },
+    ]);
+
+    const res = await service.listPendingRequests('pickup-1', { id: 'user-1' });
+    expect((repository as any).listPendingRequests).toHaveBeenCalledWith('pickup-1');
+    expect(res.data).toHaveLength(1);
+    expect(res.data[0].note).toBe('Xin slot');
+  });
+
+  it('allows host to approve a pending request', async () => {
+    (repository as any).approveParticipant = jest.fn().mockResolvedValue({
+      kind: 'APPROVED',
+      pickup: { ...projection.pickup, currentSlots: 2 },
+      participant: { id: 'part-2', status: 'JOINED' },
+    });
+    repository.getProjection.mockResolvedValue({
+      ...projection,
+      participantCount: 2,
+      participants: [...projection.participants, { userId: 'user-2', name: 'Player 2', avatarUrl: null }],
+    } as never);
+
+    const res = await service.approveRequest('pickup-1', 'part-2', { id: 'user-1' });
+    expect((repository as any).approveParticipant).toHaveBeenCalledWith('pickup-1', 'part-2', 'user-1');
+    expect(res.data?.currentSlots).toBe(2);
+  });
+
+  it('allows host to reject a pending request', async () => {
+    (repository as any).rejectParticipant = jest.fn().mockResolvedValue({
+      kind: 'REJECTED',
+      pickup: projection.pickup,
+      participant: { id: 'part-2', status: 'REJECTED' },
+    });
+
+    const res = await service.rejectRequest('pickup-1', 'part-2', { id: 'user-1' });
+    expect((repository as any).rejectParticipant).toHaveBeenCalledWith('pickup-1', 'part-2', 'user-1');
+    expect(res.data?.success).toBe(true);
+  });
 });
+

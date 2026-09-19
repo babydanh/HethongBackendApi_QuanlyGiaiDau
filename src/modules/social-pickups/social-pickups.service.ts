@@ -148,7 +148,11 @@ export class SocialPickupsService {
     const item = await this.repository.getProjection(id, actor.id);
     if (!item) throw new NotFoundException({ code: 'PICKUP_NOT_FOUND' });
     return {
-      data: { isJoined: item.isJoined, isHost: item.pickup.hostUserId === actor.id },
+      data: {
+        isJoined: item.isJoined,
+        isHost: item.pickup.hostUserId === actor.id,
+        myStatus: item.myStatus ?? (item.isJoined ? 'JOINED' : null),
+      },
     };
   }
 
@@ -162,11 +166,69 @@ export class SocialPickupsService {
     return { data: this.toApi(item!) };
   }
 
+  async requestToJoin(id: string, actor: Actor, note?: string) {
+    const result = await this.repository.requestToJoinPickup(id, actor.id, note);
+    if (result.kind === 'NOT_FOUND') throw new NotFoundException({ code: 'PICKUP_NOT_FOUND' });
+    if (result.kind === 'TERMINAL') throw new ConflictException({ code: 'PICKUP_TERMINAL' });
+    if (result.kind === 'HOST_CANNOT_REQUEST') throw new ConflictException({ code: 'HOST_CANNOT_REQUEST' });
+    if (result.kind === 'FULL') throw new ConflictException({ code: 'PICKUP_FULL' });
+    if (result.kind === 'ALREADY_JOINED') throw new ConflictException({ code: 'PICKUP_ALREADY_JOINED' });
+    const item = await this.repository.getProjection(id, actor.id);
+    return { data: this.toApi(item!) };
+  }
+
+  async listPendingRequests(id: string, actor: Actor) {
+    const item = await this.repository.getProjection(id, actor.id);
+    if (!item) throw new NotFoundException({ code: 'PICKUP_NOT_FOUND' });
+    if (item.pickup.hostUserId !== actor.id && !actor.roles?.includes('ADMIN')) {
+      throw new ForbiddenException({ code: 'PICKUP_NOT_OWNER' });
+    }
+    const requests = await this.repository.listPendingRequests(id);
+    return {
+      data: requests.map((req) => ({
+        id: req.id,
+        userId: req.userId,
+        name: req.name ?? 'Người chơi',
+        avatarUrl: req.avatarUrl,
+        note: req.note,
+        createdAt: req.createdAt,
+      })),
+    };
+  }
+
+  async approveRequest(pickupId: string, participantId: string, actor: Actor) {
+    const result = await this.repository.approveParticipant(pickupId, participantId, actor.id);
+    if (result.kind === 'NOT_FOUND') throw new NotFoundException({ code: 'PICKUP_NOT_FOUND' });
+    if (result.kind === 'FORBIDDEN') throw new ForbiddenException({ code: 'PICKUP_NOT_OWNER' });
+    if (result.kind === 'TERMINAL') throw new ConflictException({ code: 'PICKUP_TERMINAL' });
+    if (result.kind === 'PARTICIPANT_NOT_FOUND') throw new NotFoundException({ code: 'PARTICIPANT_NOT_FOUND' });
+    if (result.kind === 'ALREADY_JOINED') throw new ConflictException({ code: 'PARTICIPANT_ALREADY_JOINED' });
+    if (result.kind === 'FULL') throw new ConflictException({ code: 'PICKUP_FULL' });
+    const item = await this.repository.getProjection(pickupId, actor.id);
+    return { data: this.toApi(item!) };
+  }
+
+  async rejectRequest(pickupId: string, participantId: string, actor: Actor) {
+    const result = await this.repository.rejectParticipant(pickupId, participantId, actor.id);
+    if (result.kind === 'NOT_FOUND') throw new NotFoundException({ code: 'PICKUP_NOT_FOUND' });
+    if (result.kind === 'FORBIDDEN') throw new ForbiddenException({ code: 'PICKUP_NOT_OWNER' });
+    if (result.kind === 'PARTICIPANT_NOT_FOUND') throw new NotFoundException({ code: 'PARTICIPANT_NOT_FOUND' });
+    return { data: { success: true } };
+  }
+
   async withdraw(id: string, actor: Actor) {
     const result = await this.repository.withdrawPickup(id, actor.id);
     if (result.kind === 'NOT_FOUND') throw new NotFoundException({ code: 'PICKUP_NOT_FOUND' });
     if (result.kind === 'HOST_CANNOT_WITHDRAW') throw new ConflictException({ code: 'PICKUP_HOST_MUST_CANCEL' });
     if (result.kind === 'NOT_JOINED') throw new ConflictException({ code: 'PICKUP_NOT_JOINED' });
+    const item = await this.repository.getProjection(id, actor.id);
+    return { data: this.toApi(item!) };
+  }
+
+  async withdrawRequest(id: string, actor: Actor) {
+    const result = await this.repository.withdrawRequest(id, actor.id);
+    if (result.kind === 'NOT_FOUND') throw new NotFoundException({ code: 'PICKUP_NOT_FOUND' });
+    if (result.kind === 'NOT_REQUESTED') throw new ConflictException({ code: 'PICKUP_NOT_JOINED' });
     const item = await this.repository.getProjection(id, actor.id);
     return { data: this.toApi(item!) };
   }
@@ -204,6 +266,15 @@ export class SocialPickupsService {
         name: item.host.name ?? 'Người chơi',
       },
       isJoined: item.isJoined,
+      myStatus: item.myStatus ?? (item.isJoined ? 'JOINED' : null),
+      pendingRequests: item.pendingRequests?.map((req) => ({
+        id: req.id,
+        userId: req.userId,
+        name: req.name ?? 'Người chơi',
+        avatarUrl: req.avatarUrl,
+        note: req.note,
+        createdAt: req.createdAt,
+      })) ?? [],
       joinedPlayers: item.participants.slice(0, 8).map((participant) => ({
         ...participant,
         name: participant.name ?? 'Người chơi',
