@@ -67,7 +67,7 @@ export class ClubMatchSessionSchedulerService {
             isNull(schema.clubMatchSessions.deletedAt),
             ne(schema.clubMatchSessions.status, 'CANCELLED'),
             sql`${schema.clubMatchSessions.sessionConfig}->'recurring'->>'enabled' = 'true'`,
-            sql`NULLIF(${schema.clubMatchSessions.sessionConfig}->'recurring'->>'nextRunAt', '')::timestamptz <= ${now}`,
+            sql`NULLIF(${schema.clubMatchSessions.sessionConfig}->'recurring'->>'nextRunAt', '') IS NOT NULL AND NULLIF(${schema.clubMatchSessions.sessionConfig}->'recurring'->>'nextRunAt', '') <= ${now.toISOString()}`,
           ),
         );
 
@@ -82,7 +82,7 @@ export class ClubMatchSessionSchedulerService {
                 isNull(schema.clubMatchSessions.deletedAt),
                 ne(schema.clubMatchSessions.status, 'CANCELLED'),
                 sql`${schema.clubMatchSessions.sessionConfig}->'recurring'->>'enabled' = 'true'`,
-                sql`NULLIF(${schema.clubMatchSessions.sessionConfig}->'recurring'->>'nextRunAt', '')::timestamptz <= ${now}`,
+                sql`NULLIF(${schema.clubMatchSessions.sessionConfig}->'recurring'->>'nextRunAt', '') IS NOT NULL AND NULLIF(${schema.clubMatchSessions.sessionConfig}->'recurring'->>'nextRunAt', '') <= ${now.toISOString()}`,
               ),
             )
             .for('update')

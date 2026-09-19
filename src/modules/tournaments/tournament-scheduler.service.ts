@@ -198,7 +198,8 @@ export class TournamentSchedulerService {
             isNull(schema.tournaments.deletedAt),
             ne(schema.tournaments.status, 'CANCELLED'),
             sql`${schema.tournaments.tournamentConfig} @> '{"recurring": {"enabled": true}}'::jsonb`,
-            sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '')::timestamptz <= ${now}`
+            sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '') IS NOT NULL`,
+            sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '') <= ${now.toISOString()}`
           )
         );
 
@@ -261,7 +262,8 @@ export class TournamentSchedulerService {
                 isNull(schema.tournaments.deletedAt),
                 ne(schema.tournaments.status, 'CANCELLED'),
                 sql`${schema.tournaments.tournamentConfig} @> '{"recurring": {"enabled": true}}'::jsonb`,
-                sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '')::timestamptz <= ${now}`,
+                sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '') IS NOT NULL`,
+                sql`NULLIF(${schema.tournaments.tournamentConfig}->'recurring'->>'nextRunAt', '') <= ${now.toISOString()}`,
               ),
             )
             .for('update');
