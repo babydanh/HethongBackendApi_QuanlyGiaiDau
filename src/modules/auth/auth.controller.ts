@@ -197,6 +197,10 @@ export class AuthController {
     @Req() req: Request & { user: OAuthProfileDto },
     @Res() res: Response,
   ) {
+    if (res.headersSent) {
+      return;
+    }
+
     const frontendUrl =
       this.configService.get<string>('FRONTEND_URL') ||
       process.env.FRONTEND_URL ||
@@ -204,9 +208,12 @@ export class AuthController {
 
     try {
       if (!req.user) {
-        return res.redirect(
-          `${frontendUrl}/login?error=${encodeURIComponent('Không nhận được thông tin từ Google')}`,
-        );
+        if (!res.headersSent) {
+          return res.redirect(
+            `${frontendUrl}/login?error=${encodeURIComponent('Không nhận được thông tin từ Google')}`,
+          );
+        }
+        return;
       }
 
       const userAgent = req.headers['user-agent'];

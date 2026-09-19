@@ -17,6 +17,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
+    // If headers were already sent (e.g. redirected by OAuth guard), do nothing
+    if (response?.headersSent) {
+      return;
+    }
+
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = exception.message || 'Internal Server Error';
     let code = 'INTERNAL_SERVER_ERROR';
