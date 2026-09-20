@@ -5391,7 +5391,7 @@ export class TournamentsRepository {
     };
   }
 
-  async findMyWorkspace(userId: string) {
+  async findMyWorkspace(userId: string, includeRefereeMatches = true) {
     const tournamentSummarySelect = {
       id: schema.tournaments.id,
       name: schema.tournaments.name,
@@ -5565,7 +5565,8 @@ export class TournamentsRepository {
           ),
         )
         .orderBy(desc(schema.tournamentReferees.createdAt)),
-      this.db
+      includeRefereeMatches
+        ? this.db
         .select({
           id: schema.matches.id,
           tournamentId: schema.tournaments.id,
@@ -5617,7 +5618,8 @@ export class TournamentsRepository {
           asc(schema.matches.scheduledAt),
           asc(schema.matches.roundNumber),
           asc(schema.matches.matchOrder),
-        ),
+        )
+        : Promise.resolve([]),
     ]);
 
     const organizedIds = new Set(
@@ -5633,15 +5635,17 @@ export class TournamentsRepository {
       return Array.from(map.values());
     };
 
-    const participantIds = Array.from(
-      new Set(
-        refereeMatchesRaw.flatMap((match) =>
-          [match.participant1Id, match.participant2Id].filter(
-            (id): id is string => Boolean(id),
+    const participantIds = includeRefereeMatches
+      ? Array.from(
+          new Set(
+            refereeMatchesRaw.flatMap((match) =>
+              [match.participant1Id, match.participant2Id].filter(
+                (id): id is string => Boolean(id),
+              ),
+            ),
           ),
-        ),
-      ),
-    );
+        )
+      : [];
 
     const participants =
       participantIds.length > 0

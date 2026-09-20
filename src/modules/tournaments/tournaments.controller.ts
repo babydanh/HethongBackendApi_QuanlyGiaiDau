@@ -26,6 +26,7 @@ import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
 import { QueryMyManagementTournamentsDto } from './dto/query-my-management-tournaments.dto';
+import { QueryMyWorkspaceDto } from './dto/query-my-workspace.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { AddLiteClubMemberDto } from './dto/add-lite-club-member.dto';
 import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
@@ -125,8 +126,14 @@ export class TournamentsController {
     summary:
       'Lấy workspace người dùng theo vai trò: tham gia, tổ chức, trọng tài',
   })
-  async findMyWorkspace(@CurrentUser() user: JwtPayload) {
-    return this.tournamentsService.getMyWorkspace(user.sub);
+  async findMyWorkspace(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: QueryMyWorkspaceDto,
+  ) {
+    return this.tournamentsService.getMyWorkspace(
+      user.sub,
+      query.includeRefereeMatches,
+    );
   }
 
   @Public()

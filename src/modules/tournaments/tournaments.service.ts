@@ -907,8 +907,11 @@ export class TournamentsService {
     };
   }
 
-  async getMyWorkspace(userId: string) {
-    const workspace = await this.tournamentsRepository.findMyWorkspace(userId);
+  async getMyWorkspace(userId: string, includeRefereeMatches = true) {
+    const workspace = await this.tournamentsRepository.findMyWorkspace(
+      userId,
+      includeRefereeMatches,
+    );
 
     return {
       ...workspace,
