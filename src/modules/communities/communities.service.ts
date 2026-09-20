@@ -220,8 +220,15 @@ export class CommunitiesService {
     if (categoryIds !== undefined && categoryIds.length !== 1) {
       throw new BadRequestException('Mỗi câu lạc bộ chỉ được chọn đúng một môn thể thao.');
     }
+    const profileProvinceCode =
+      typeof this.communitiesRepository.findCreatorProvinceCode === 'function'
+        ? await this.communitiesRepository.findCreatorProvinceCode(userId)
+        : null;
+    const effectiveProvinceCode =
+      rest.provinceCode?.trim() || profileProvinceCode || undefined;
     const data = {
       ...rest,
+      ...(effectiveProvinceCode ? { provinceCode: effectiveProvinceCode } : {}),
       ...(rest.description !== undefined
         ? { description: await this.sanitizeDescription(rest.description) }
         : {}),

@@ -10,6 +10,7 @@ import { CommunitySocialService } from './community-social.service';
 
 import { CommunityWhiteboxService } from './moderation/community-whitebox.service';
 import { CommunityBlackboxAiService } from './moderation/community-blackbox-ai.service';
+import { CommunityImageModerationService } from './moderation/community-image-moderation.service';
 
 @Module({
   imports: [NotificationsModule, StorageModule],
@@ -21,12 +22,14 @@ import { CommunityBlackboxAiService } from './moderation/community-blackbox-ai.s
     CommunitySocialRepository,
     CommunityWhiteboxService,
     CommunityBlackboxAiService,
+    CommunityImageModerationService,
   ],
   exports: [
     CommunitiesService,
     CommunitySocialRepository,
     CommunityWhiteboxService,
     CommunityBlackboxAiService,
+    CommunityImageModerationService,
   ],
 })
 export class CommunitiesModule {}

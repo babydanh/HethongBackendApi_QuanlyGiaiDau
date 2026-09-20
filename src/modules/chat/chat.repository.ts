@@ -800,18 +800,34 @@ export class ChatRepository {
     }>>();
     if (messageIds.length === 0) return detailsByMessage;
 
-    const rows = await this.db
-      .select({
-        messageId: schema.chatMessageReactions.messageId,
-        emoji: schema.chatMessageReactions.emoji,
-        userId: schema.chatMessageReactions.userId,
-        fullName: schema.profiles.fullName,
-        avatarUrl: schema.profiles.avatarUrl,
-      })
-      .from(schema.chatMessageReactions)
-      .innerJoin(schema.users, eq(schema.chatMessageReactions.userId, schema.users.id))
-      .leftJoin(schema.profiles, eq(schema.chatMessageReactions.userId, schema.profiles.userId))
-      .where(inArray(schema.chatMessageReactions.messageId, messageIds));
+    let rows: Array<{
+      messageId: string;
+      emoji: string;
+      userId: string;
+      fullName: string | null;
+      avatarUrl: string | null;
+    }> = [];
+    try {
+      rows = await this.db
+        .select({
+          messageId: schema.chatMessageReactions.messageId,
+          emoji: schema.chatMessageReactions.emoji,
+          userId: schema.chatMessageReactions.userId,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        })
+        .from(schema.chatMessageReactions)
+        .innerJoin(schema.users, eq(schema.chatMessageReactions.userId, schema.users.id))
+        .leftJoin(schema.profiles, eq(schema.chatMessageReactions.userId, schema.profiles.userId))
+        .where(inArray(schema.chatMessageReactions.messageId, messageIds));
+    } catch (error) {
+      // Reactions are optional enrichment. A legacy deployment without the
+      // reaction table must still be able to open the message timeline.
+      this.logger.debug(
+        'Unable to load chat reaction details; returning messages without reactions.',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
 
     for (const row of rows) {
       const groups = detailsByMessage.get(row.messageId) ?? [];
@@ -885,23 +901,30 @@ export class ChatRepository {
     const replyIds = data.map((m) => m.replyToId).filter(Boolean) as string[];
     const replyMap = new Map<string, { id: string; senderName: string; text: string }>();
     if (replyIds.length > 0) {
-      const replies = await this.db
-        .select({
-          id: schema.chatMessages.id,
-          messageText: schema.chatMessages.messageText,
-          senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Thành viên')`,
-        })
-        .from(schema.chatMessages)
-        .leftJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
-        .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
-        .where(inArray(schema.chatMessages.id, replyIds));
+      try {
+        const replies = await this.db
+          .select({
+            id: schema.chatMessages.id,
+            messageText: schema.chatMessages.messageText,
+            senderName: sql<string>`COALESCE(NULLIF(TRIM(${schema.profiles.fullName}), ''), SPLIT_PART(${schema.users.email}, '@', 1), 'Thành viên')`,
+          })
+          .from(schema.chatMessages)
+          .leftJoin(schema.users, eq(schema.chatMessages.senderId, schema.users.id))
+          .leftJoin(schema.profiles, eq(schema.chatMessages.senderId, schema.profiles.userId))
+          .where(inArray(schema.chatMessages.id, replyIds));
 
-      for (const rep of replies) {
-        replyMap.set(rep.id, {
-          id: rep.id,
-          senderName: rep.senderName,
-          text: rep.messageText || '',
-        });
+        for (const rep of replies) {
+          replyMap.set(rep.id, {
+            id: rep.id,
+            senderName: rep.senderName,
+            text: rep.messageText || '',
+          });
+        }
+      } catch (error) {
+        this.logger.debug(
+          'Unable to load chat reply metadata; returning messages without reply previews.',
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
 
@@ -1440,17 +1463,27 @@ export class ChatRepository {
   }
 
   async getMemberClearedAt(roomId: string, userId: string): Promise<Date | null> {
-    const [member] = await this.db
-      .select({ clearedAt: schema.chatRoomMembers.clearedAt })
-      .from(schema.chatRoomMembers)
-      .where(
-        and(
-          eq(schema.chatRoomMembers.roomId, roomId),
-          eq(schema.chatRoomMembers.userId, userId),
-        ),
-      )
-      .limit(1);
-    return member?.clearedAt ? new Date(member.clearedAt) : null;
+    try {
+      const [member] = await this.db
+        .select({ clearedAt: schema.chatRoomMembers.clearedAt })
+        .from(schema.chatRoomMembers)
+        .where(
+          and(
+            eq(schema.chatRoomMembers.roomId, roomId),
+            eq(schema.chatRoomMembers.userId, userId),
+          ),
+        )
+        .limit(1);
+      return member?.clearedAt ? new Date(member.clearedAt) : null;
+    } catch (error) {
+      // History remains readable on deployments that predate per-user clear
+      // timestamps; the absence of this optional filter must not become 500.
+      this.logger.debug(
+        'Unable to read chat clearedAt; loading the full authorized history.',
+        error instanceof Error ? error.message : String(error),
+      );
+      return null;
+    }
   }
 
   async clearRoomHistory(userId: string, roomId: string): Promise<boolean> {

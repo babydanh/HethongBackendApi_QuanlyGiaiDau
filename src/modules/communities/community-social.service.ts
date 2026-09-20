@@ -1,6 +1,6 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { CommunitiesRepository } from './communities.repository';
-import { CommunitySocialRepository } from './community-social.repository';
+import { CommunitySocialRepository, DuplicateCommunityPostError } from './community-social.repository';
 import type { CreateCommunityPostDto } from './dto/create-community-post.dto';
 import type { CreateCommunityCommentDto } from './dto/create-community-comment.dto';
 import type { UpdateCommunitySocialSettingsDto } from './dto/update-community-social-settings.dto';
@@ -18,7 +18,9 @@ import {
 } from '../notifications/notification-builder';
 import { CommunityWhiteboxService } from './moderation/community-whitebox.service';
 import { CommunityBlackboxAiService } from './moderation/community-blackbox-ai.service';
+import { CommunityImageModerationService } from './moderation/community-image-moderation.service';
 import type { DeleteCommunityPostDto } from './dto/moderate-community-post.dto';
+import { buildCommunityPostFingerprint, getCommunityDuplicateWindowMinutes } from './community-content-fingerprint';
 
 type SocialUser = { id: string; fullName?: string; roles?: string[] };
 
@@ -30,6 +32,7 @@ export class CommunitySocialService {
     private readonly notificationsService: NotificationsService,
     private readonly whiteboxService: CommunityWhiteboxService,
     private readonly blackboxAiService: CommunityBlackboxAiService,
+    @Optional() private readonly imageModerationService?: CommunityImageModerationService,
   ) {}
 
   async getSettings(communityId: string) {
@@ -55,6 +58,7 @@ export class CommunitySocialService {
       cursor: query.cursor,
       date: query.date,
       type: query.type,
+      region: query.region,
       viewerId: viewer?.id,
     });
     if (result.invalidCursor) {
@@ -87,7 +91,6 @@ export class CommunitySocialService {
     }
     const settings = await this.socialRepository.getSettings(communityId);
     const canManage = member.role === 'OWNER' || member.role === 'ADMIN' || member.role === 'MODERATOR' || user.roles?.includes('ADMIN');
-    const status = settings.postApprovalRequired && !canManage ? 'PENDING' : 'PUBLISHED';
     const isSession = activity.kind === 'SESSION';
     const resourceName = isSession
       ? activity.resource.name?.trim() || `Buổi giao lưu CLB ${community.name}`
@@ -95,6 +98,8 @@ export class CommunitySocialService {
     const body = dto.body?.trim() || (isSession
       ? `🏸 ${resourceName} đang mở đăng ký.`
       : `🏆 ${resourceName} đang mở đăng ký.`);
+    const moderation = await this.moderateText(body, user, community.name);
+    const status = moderation.flagged || (settings.postApprovalRequired && !canManage) ? 'PENDING' : 'PUBLISHED';
     const result = await this.socialRepository.createLinkedActivityPost({
       communityId,
       authorId: user.id,
@@ -150,32 +155,44 @@ export class CommunitySocialService {
       throw new ForbiddenException('Chỉ ban quản trị được đăng bài.');
     }
 
-    // ── LỚP 1: WHITEBOX GUARD ENGINE (Regex, Từ khóa cấm, Link spam) ──
-    const textToCheck = [body, dto.poll?.question, ...(dto.poll?.options || [])].filter(Boolean).join('\n');
-    const whiteboxResult = this.whiteboxService.checkContent(textToCheck);
-    if (whiteboxResult.rejected) {
-      throw new BadRequestException({
-        statusCode: 400,
-        error: 'CONTENT_MODERATION_REJECTED',
-        ruleCode: whiteboxResult.ruleCode,
-        message: whiteboxResult.reasonVi || 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
-      });
-    }
-
-    // ── LỚP 2: BLACKBOX AI GUARD (Semantic Analysis via LLM) ──
-    let aiFlagged = false;
-    let aiReason: string | undefined = undefined;
-    // Nếu Whitebox nghi vấn (FLAGGED / NEEDS_REVIEW) hoặc bài viết có độ dài đáng kể
-    if (whiteboxResult.flagged || (textToCheck.length > 15 && !canManage)) {
-      const aiResult = await this.blackboxAiService.evaluatePost(textToCheck, {
-        authorName: user.fullName || 'Thành viên',
-        communityName: community.name,
-      });
-      if (!aiResult.isSafe && aiResult.riskScore >= 0.7) {
-        aiFlagged = true;
-        aiReason = aiResult.reasonVi || 'Nội dung có nguy cơ vi phạm tiêu chuẩn cộng đồng.';
+    // Chặn bài giống hệt của cùng người trong cùng cộng đồng trước khi tải ảnh
+    // hoặc gọi AI. Chỉ retry cùng idempotency key được phép dùng lại bản ghi cũ;
+    // cung cấp key mới không thể trở thành đường vòng cho bộ lọc trùng.
+    const normalizedIdempotencyKey = idempotencyKey?.trim();
+    if (typeof (this.socialRepository as CommunitySocialRepository & {
+      findRecentDuplicatePost?: CommunitySocialRepository['findRecentDuplicatePost'];
+    }).findRecentDuplicatePost === 'function') {
+      const duplicate = await this.socialRepository.findRecentDuplicatePost(
+        communityId,
+        user.id,
+        buildCommunityPostFingerprint(dto),
+        getCommunityDuplicateWindowMinutes(),
+      );
+      const isSameIdempotencyRetry = Boolean(normalizedIdempotencyKey) && duplicate?.idempotencyKey === normalizedIdempotencyKey;
+      if (duplicate && !isSameIdempotencyRetry) {
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'DUPLICATE_POST_SPAM',
+          message: 'Bài viết giống bài bạn vừa đăng gần đây. Hãy chỉnh sửa nội dung trước khi đăng lại.',
+        });
       }
     }
+
+    // Whitebox chặn chắc chắn; AI chỉ xử lý tín hiệu mơ hồ. QR/OCR của ảnh
+    // được đưa vào cùng bộ lọc để ảnh không trở thành đường vòng cho link/số điện thoại.
+    const imageScan = this.imageModerationService
+      ? await this.imageModerationService.scanMediaUrls(mediaUrls)
+      : { status: 'CLEAN' as const, extractedText: '', scannedUrls: [], reasonVi: undefined };
+    const textToCheck = [
+      body,
+      ...(dto.topics || []),
+      dto.poll?.question,
+      ...(dto.poll?.options || []),
+      imageScan.extractedText,
+    ].filter(Boolean).join('\n');
+    const moderation = await this.moderateText(textToCheck, user, community.name, imageScan.scannedUrls);
+    const aiFlagged = moderation.flagged || imageScan.status === 'NEEDS_REVIEW';
+    const aiReason = moderation.reason || imageScan.reasonVi;
 
     // Trạng thái bài viết:
     // 1. Nếu AI phát hiện vi phạm nguy cơ cao -> Bắt buộc PENDING để BQT duyệt (hoặc từ chối nếu policy khắt khe)
@@ -185,7 +202,19 @@ export class CommunitySocialService {
       ? 'PENDING'
       : 'PUBLISHED';
 
-    const post = await this.socialRepository.createPost(communityId, user.id, { ...dto, mentions: validMentionIds }, status, idempotencyKey);
+    let post: Awaited<ReturnType<CommunitySocialRepository['createPost']>>;
+    try {
+      post = await this.socialRepository.createPost(communityId, user.id, { ...dto, mentions: validMentionIds }, status, idempotencyKey);
+    } catch (error: unknown) {
+      if (error instanceof DuplicateCommunityPostError) {
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'DUPLICATE_POST_SPAM',
+          message: 'Bài viết giống bài bạn vừa đăng gần đây. Hãy chỉnh sửa nội dung trước khi đăng lại.',
+        });
+      }
+      throw error;
+    }
     if (!post) throw new BadRequestException('Không thể tạo bài viết.');
 
     let createdPoll: any = null;
@@ -285,6 +314,7 @@ export class CommunitySocialService {
         throw new BadRequestException('Bình luận cha không hợp lệ.');
       }
     }
+    await this.requireTextAllowed(dto.body, user, community.name);
     void member;
     const comment = await this.socialRepository.createComment(postId, user.id, dto.body, dto.parentId);
     if (comment && post.authorId && post.authorId !== user.id) {
@@ -303,12 +333,14 @@ export class CommunitySocialService {
   }
 
   async updateComment(communityId: string, commentId: string, user: SocialUser, dto: UpdateCommunityCommentDto) {
+    const community = await this.ensureCommunity(communityId);
     const comment = await this.socialRepository.findComment(commentId);
     if (!comment) throw new NotFoundException('Không tìm thấy bình luận.');
     if (comment.authorId !== user.id) throw new ForbiddenException('Bạn chỉ có thể sửa bình luận của mình.');
     const post = await this.socialRepository.findPost(comment.postId);
     if (!post || post.communityId !== communityId || post.status !== 'PUBLISHED') throw new NotFoundException('Không tìm thấy bài viết.');
     await this.requireJoined(communityId, user.id);
+    await this.requireTextAllowed(dto.body, user, community.name);
     return this.socialRepository.updateComment(commentId, dto.body);
   }
 
@@ -454,7 +486,7 @@ export class CommunitySocialService {
   }
 
   async addPollOption(communityId: string, pollId: string, optionText: string, user: SocialUser) {
-    await this.ensureCommunity(communityId);
+    const community = await this.ensureCommunity(communityId);
     await this.requireJoined(communityId, user.id);
     const poll = await this.socialRepository.getPollDetails(pollId);
     if (!poll || poll.communityId !== communityId) {
@@ -466,6 +498,7 @@ export class CommunitySocialService {
     if (poll.isClosed || (poll.expiresAt && new Date(poll.expiresAt) < new Date())) {
       throw new BadRequestException('Cuộc bình chọn đã kết thúc.');
     }
+    await this.requireTextAllowed(optionText, user, community.name);
     const updated = await this.socialRepository.addPollOption(pollId, user.id, optionText);
     return updated;
   }
@@ -483,6 +516,65 @@ export class CommunitySocialService {
     }
     const updated = await this.socialRepository.closePoll(pollId);
     return updated;
+  }
+
+  private async moderateText(
+    content: string,
+    user: SocialUser,
+    communityName: string,
+    mediaUrls: string[] = [],
+  ): Promise<{ flagged: boolean; reason?: string }> {
+    const whiteboxResult = this.whiteboxService.checkContent(content);
+    if (whiteboxResult.rejected) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'CONTENT_MODERATION_REJECTED',
+        ruleCode: whiteboxResult.ruleCode,
+        message: whiteboxResult.reasonVi || 'Nội dung vi phạm tiêu chuẩn cộng đồng.',
+      });
+    }
+    if (!whiteboxResult.flagged && mediaUrls.length === 0) return { flagged: false };
+
+    const normalizedContent = typeof (this.whiteboxService as CommunityWhiteboxService & {
+      getNormalizedText?: (value?: string | null) => string;
+    }).getNormalizedText === 'function'
+      ? this.whiteboxService.getNormalizedText(content)
+      : content;
+    // Gửi bản đã chuẩn hóa một lần để tránh nhân đôi token bởi cả bản gốc và
+    // bản chống né luật. Whitebox đã giữ lại nội dung có ý nghĩa cần xét.
+    const aiContent = normalizedContent;
+    const aiResult = await this.blackboxAiService.evaluatePost(
+      aiContent,
+      {
+        authorName: user.fullName || 'Thành viên',
+        communityName,
+      },
+      mediaUrls,
+    );
+    if (aiResult.isFallback) {
+      return {
+        flagged: true,
+        reason: 'Không thể hoàn tất kiểm tra tự động; nội dung đang chờ duyệt.',
+      };
+    }
+    if (!aiResult.isSafe && aiResult.riskScore >= 0.7) {
+      return {
+        flagged: true,
+        reason: aiResult.reasonVi || 'Nội dung có nguy cơ vi phạm tiêu chuẩn cộng đồng.',
+      };
+    }
+    return { flagged: false };
+  }
+
+  private async requireTextAllowed(content: string, user: SocialUser, communityName: string) {
+    const decision = await this.moderateText(content, user, communityName);
+    if (decision.flagged) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'CONTENT_MODERATION_REVIEW_REQUIRED',
+        message: decision.reason || 'Nội dung cần được kiểm duyệt trước khi đăng.',
+      });
+    }
   }
 
   private async ensureCommunity(communityId: string) {

@@ -1850,6 +1850,17 @@ export class TournamentsService {
       throw new BadRequestException('Phường/xã phải đi kèm tỉnh/thành phố.');
     }
 
+    // A tournament location is authoritative when supplied. If the quick
+    // create form has no province selected, snapshot the creator profile's
+    // province at creation time; never derive an old activity from a later
+    // profile edit.
+    const creatorProfile =
+      typeof this.tournamentsRepository.findUserProfile === 'function'
+        ? await this.tournamentsRepository.findUserProfile(userId)
+        : null;
+    const effectiveProvinceCode =
+      dto.provinceCode?.trim() || creatorProfile?.provinceCode?.trim() || null;
+
     const locationParts = [
       dto.venueName,
       dto.locationAddress,
@@ -1871,7 +1882,7 @@ export class TournamentsService {
         ...(startDateTime ? { startDate: startDateTime } : {}),
         ...(endDateTime ? { endDate: endDateTime } : {}),
       },
-      ...(locationParts.length
+      ...(locationParts.length || effectiveProvinceCode
         ? {
             location: {
               ...(dto.venueName ? { venueName: dto.venueName.trim() } : {}),
@@ -1879,9 +1890,11 @@ export class TournamentsService {
                 ? { address: dto.locationAddress.trim() }
                 : {}),
               ...(dto.province ? { province: dto.province.trim() } : {}),
+              ...(effectiveProvinceCode ? { provinceCode: effectiveProvinceCode } : {}),
               ...(dto.district ? { district: dto.district.trim() } : {}),
               ...(dto.ward ? { ward: dto.ward.trim() } : {}),
-              display: locationParts.join(', '),
+              ...(dto.wardCode ? { wardCode: dto.wardCode.trim() } : {}),
+              ...(locationParts.length ? { display: locationParts.join(', ') } : {}),
             },
           }
         : {}),

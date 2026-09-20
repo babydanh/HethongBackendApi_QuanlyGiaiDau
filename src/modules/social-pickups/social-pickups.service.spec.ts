@@ -17,6 +17,7 @@ const projection = {
     maxSlots: 4,
     currentSlots: 1,
     status: 'OPEN',
+    metadata: { mediaUrls: ['https://res.cloudinary.com/example/image/upload/pickup.jpg'] },
   },
   host: { id: 'user-1', name: 'Người tạo', avatarUrl: null },
   category: { id: 'category-1', name: 'Pickleball', slug: 'pickleball' },
@@ -26,7 +27,7 @@ const projection = {
 };
 
 describe('SocialPickupsService', () => {
-  let repository: jest.Mocked<Pick<SocialPickupsRepository, 'findCategory' | 'findByCreationKey' | 'findVenueCourt' | 'createPickup' | 'getProjection' | 'joinPickup'>>;
+  let repository: jest.Mocked<Pick<SocialPickupsRepository, 'findCategory' | 'findByCreationKey' | 'findVenueCourt' | 'findHostProvinceCode' | 'createPickup' | 'getProjection' | 'joinPickup'>>;
   let service: SocialPickupsService;
 
   beforeEach(() => {
@@ -34,6 +35,7 @@ describe('SocialPickupsService', () => {
       findCategory: jest.fn(),
       findByCreationKey: jest.fn(),
       findVenueCourt: jest.fn(),
+      findHostProvinceCode: jest.fn(),
       createPickup: jest.fn(),
       getProjection: jest.fn(),
       joinPickup: jest.fn(),
@@ -55,6 +57,7 @@ describe('SocialPickupsService', () => {
         startTime: '19:30',
         endTime: '21:30',
         location: 'D-Sport Quận 7',
+        imageUrls: ['https://res.cloudinary.com/example/image/upload/pickup.jpg'],
         maxSlots: 4,
       },
     );
@@ -62,9 +65,39 @@ describe('SocialPickupsService', () => {
     expect(repository.createPickup).toHaveBeenCalledWith(expect.objectContaining({
       hostUserId: 'user-1',
       categoryId: 'category-1',
+      imageUrls: ['https://res.cloudinary.com/example/image/upload/pickup.jpg'],
     }));
     expect(repository.createPickup.mock.calls[0][0]).not.toHaveProperty('communityId');
-    expect(result.data).toMatchObject({ id: 'pickup-1', type: 'PERSONAL_PICKUP', currentSlots: 1 });
+    expect(result.data).toMatchObject({
+      id: 'pickup-1',
+      type: 'PERSONAL_PICKUP',
+      currentSlots: 1,
+      imageUrls: ['https://res.cloudinary.com/example/image/upload/pickup.jpg'],
+    });
+  });
+
+  it('snapshots the host profile province when the pickup has no selected province', async () => {
+    repository.findCategory.mockResolvedValue({ id: 'category-1', name: 'Pickleball', slug: 'pickleball' });
+    repository.findHostProvinceCode.mockResolvedValue('79');
+    repository.createPickup.mockResolvedValue({ id: 'pickup-1' } as never);
+    repository.getProjection.mockResolvedValue(projection as never);
+
+    await service.create(
+      { id: 'user-1' },
+      {
+        categoryId: 'category-1',
+        title: 'Tìm người chơi buổi tối',
+        playDate: '2099-01-01',
+        startTime: '19:30',
+        endTime: '21:30',
+        location: 'Địa điểm nhập tay',
+        maxSlots: 4,
+      },
+    );
+
+    expect(repository.createPickup).toHaveBeenCalledWith(expect.objectContaining({
+      provinceCode: '79',
+    }));
   });
 
   it('rejects a court that does not belong to the selected venue', async () => {
@@ -183,4 +216,3 @@ describe('SocialPickupsService', () => {
     expect(res.data?.success).toBe(true);
   });
 });
-

@@ -4,6 +4,7 @@ import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
+import { locationRegionCondition, type LocationRegion } from '../../common/helpers/location-region.helper';
 
 export type SocialPickupProjection = {
   pickup: typeof schema.socialPickupSessions.$inferSelect;
@@ -40,6 +41,15 @@ export class SocialPickupsRepository {
       .where(eq(schema.categories.id, categoryId))
       .limit(1);
     return row ?? null;
+  }
+
+  async findHostProvinceCode(userId: string) {
+    const [profile] = await this.db
+      .select({ provinceCode: schema.profiles.provinceCode })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+    return profile?.provinceCode ?? null;
   }
 
   async findVenueCourt(venueId: string, courtId?: string): Promise<{
@@ -114,6 +124,9 @@ export class SocialPickupsRepository {
     startTime: string;
     endTime: string;
     location: string;
+    provinceCode?: string | null;
+    wardCode?: string | null;
+    imageUrls?: string[];
     venueId?: string | null;
     courtId?: string | null;
     feePerSlot: number;
@@ -136,6 +149,13 @@ export class SocialPickupsRepository {
           startTime: input.startTime,
           endTime: input.endTime,
           courtLocation: input.location,
+          metadata: {
+            location: {
+              ...(input.provinceCode ? { provinceCode: input.provinceCode } : {}),
+              ...(input.wardCode ? { wardCode: input.wardCode } : {}),
+            },
+            ...(input.imageUrls?.length ? { mediaUrls: input.imageUrls } : {}),
+          },
           venueId: input.venueId ?? null,
           courtId: input.courtId ?? null,
           feePerSlot: input.feePerSlot,
@@ -553,7 +573,7 @@ export class SocialPickupsRepository {
     };
   }
 
-  async list(input: { date?: string; categoryId?: string; limit: number; cursor?: string; viewerId?: string }) {
+  async list(input: { date?: string; categoryId?: string; region?: LocationRegion; limit: number; cursor?: string; viewerId?: string }) {
     const cursor = input.cursor
       ? CursorPaginationHelper.decodeCursor<CursorValue>(input.cursor)
       : null;
@@ -562,11 +582,19 @@ export class SocialPickupsRepository {
     const conditions = [
       isNull(schema.socialPickupSessions.deletedAt),
       isNull(schema.socialPickupSessions.communityId),
-      inArray(schema.socialPickupSessions.status, ['OPEN', 'FULL']),
+      inArray(schema.socialPickupSessions.status, ['OPEN']),
       gte(schema.socialPickupSessions.playDate, sql`(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date`),
     ];
     if (input.date) conditions.push(eq(schema.socialPickupSessions.playDate, input.date));
     if (input.categoryId) conditions.push(eq(schema.socialPickupSessions.categoryId, input.categoryId));
+    if (input.region) {
+      const pickupLocationText = sql<string>`COALESCE(${schema.tournamentVenues.locationAddress}, ${schema.socialPickupSessions.courtLocation})`;
+      const pickupProvinceCode = sql<string>`${schema.socialPickupSessions.metadata}->'location'->>'provinceCode'`;
+      conditions.push(locationRegionCondition(input.region, {
+        provinceCode: pickupProvinceCode,
+        locationText: pickupLocationText,
+      }));
+    }
     if (cursor) {
       conditions.push(
         or(
@@ -582,6 +610,7 @@ export class SocialPickupsRepository {
     const rows = await this.db
       .select({ id: schema.socialPickupSessions.id, createdAt: schema.socialPickupSessions.createdAt })
       .from(schema.socialPickupSessions)
+      .leftJoin(schema.tournamentVenues, eq(schema.tournamentVenues.id, schema.socialPickupSessions.venueId))
       .where(and(...conditions))
       .orderBy(desc(schema.socialPickupSessions.createdAt), desc(schema.socialPickupSessions.id))
       .limit(input.limit + 1);

@@ -1,10 +1,32 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { aliasedTable, and, asc, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { aliasedTable, and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
+import { locationRegionCondition, type LocationRegion } from '../../common/helpers/location-region.helper';
 import type { CreateCommunityPostDto } from './dto/create-community-post.dto';
+import { buildCommunityPostFingerprint, getCommunityDuplicateWindowMinutes } from './community-content-fingerprint';
+
+const PUBLIC_TOURNAMENT_ACTIVITY_STATUSES = [
+  'UPCOMING',
+  'REGISTRATION_OPEN',
+  'REGISTRATION_CLOSED',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'FINISHED',
+  'DONE',
+  'ENDED',
+] as const;
+
+export class DuplicateCommunityPostError extends Error {
+  readonly code = 'DUPLICATE_POST_SPAM';
+
+  constructor() {
+    super('A canonical duplicate community post already exists in the configured window.');
+    this.name = 'DuplicateCommunityPostError';
+  }
+}
 
 @Injectable()
 export class CommunitySocialRepository {
@@ -47,22 +69,46 @@ export class CommunitySocialRepository {
       mentions: dto.mentions ?? [],
       status,
       idempotencyKey: idempotencyKey?.trim() || null,
+      contentFingerprint: buildCommunityPostFingerprint(dto),
     };
-    const [created] = await this.db
-      .insert(schema.communityPosts)
-      .values(values)
-      .onConflictDoNothing()
-      .returning();
-    
-    const postRecord = created || (values.idempotencyKey ? (await this.db
-      .select()
-      .from(schema.communityPosts)
-      .where(and(
-        eq(schema.communityPosts.communityId, communityId),
-        eq(schema.communityPosts.authorId, authorId),
-        eq(schema.communityPosts.idempotencyKey, values.idempotencyKey),
-      ))
-      .limit(1))[0] : null);
+    const postRecord = await this.db.transaction(async (tx) => {
+      // The service precheck avoids expensive work. This transaction lock closes
+      // the remaining race when two identical requests arrive simultaneously.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`community-post:${communityId}:${authorId}:${values.contentFingerprint}`}))`);
+      const cutoff = new Date(Date.now() - getCommunityDuplicateWindowMinutes() * 60_000);
+      const [duplicate] = await tx
+        .select({ id: schema.communityPosts.id, idempotencyKey: schema.communityPosts.idempotencyKey })
+        .from(schema.communityPosts)
+        .where(and(
+          eq(schema.communityPosts.communityId, communityId),
+          eq(schema.communityPosts.authorId, authorId),
+          eq(schema.communityPosts.contentFingerprint, values.contentFingerprint),
+          gte(schema.communityPosts.createdAt, cutoff),
+          sql`${schema.communityPosts.status} IN ('PUBLISHED', 'PENDING')`,
+          isNull(schema.communityPosts.deletedAt),
+        ))
+        .orderBy(desc(schema.communityPosts.createdAt))
+        .limit(1);
+      const isSameIdempotencyRetry = Boolean(values.idempotencyKey) && duplicate?.idempotencyKey === values.idempotencyKey;
+      if (duplicate && !isSameIdempotencyRetry) {
+        throw new DuplicateCommunityPostError();
+      }
+
+      const [created] = await tx
+        .insert(schema.communityPosts)
+        .values(values)
+        .onConflictDoNothing()
+        .returning();
+      return created || (values.idempotencyKey ? (await tx
+        .select()
+        .from(schema.communityPosts)
+        .where(and(
+          eq(schema.communityPosts.communityId, communityId),
+          eq(schema.communityPosts.authorId, authorId),
+          eq(schema.communityPosts.idempotencyKey, values.idempotencyKey),
+        ))
+        .limit(1))[0] : null);
+    });
 
     if (!postRecord) return null;
 
@@ -244,6 +290,34 @@ export class CommunitySocialRepository {
     };
   }
 
+  async findRecentDuplicatePost(
+    communityId: string,
+    authorId: string,
+    contentFingerprint: string,
+    windowMinutes: number,
+  ) {
+    const cutoff = new Date(Date.now() - Math.max(1, windowMinutes) * 60_000);
+    const [duplicate] = await this.db
+      .select({
+        id: schema.communityPosts.id,
+        createdAt: schema.communityPosts.createdAt,
+        status: schema.communityPosts.status,
+        idempotencyKey: schema.communityPosts.idempotencyKey,
+      })
+      .from(schema.communityPosts)
+      .where(and(
+        eq(schema.communityPosts.communityId, communityId),
+        eq(schema.communityPosts.authorId, authorId),
+        eq(schema.communityPosts.contentFingerprint, contentFingerprint),
+        gte(schema.communityPosts.createdAt, cutoff),
+        sql`${schema.communityPosts.status} IN ('PUBLISHED', 'PENDING')`,
+        isNull(schema.communityPosts.deletedAt),
+      ))
+      .orderBy(desc(schema.communityPosts.createdAt))
+      .limit(1);
+    return duplicate ?? null;
+  }
+
   /**
    * Product activity projection over the existing social graph. This is not a
    * second event store: the linked session/tournament remains authoritative and
@@ -254,6 +328,7 @@ export class CommunitySocialRepository {
     cursor?: string;
     date?: string;
     type?: 'CLUB_RECRUITING' | 'TOURNAMENT_OPENED';
+    region?: LocationRegion;
     viewerId?: string;
   }) {
     const decoded = input.cursor
@@ -268,6 +343,45 @@ export class CommunitySocialRepository {
     const tournament = schema.tournaments;
     const sessionVenues = aliasedTable(schema.tournamentVenues, 'session_venues');
     const eventAt = sql`COALESCE(${session.startAt}, ${tournament.registrationStartDate}, ${post.createdAt})`;
+    const activityProvinceCode = sql<string>`COALESCE(
+      ${schema.communities.provinceCode},
+      ${tournament.tournamentConfig}->'location'->>'provinceCode',
+      ${session.sessionConfig}->'location'->>'provinceCode'
+    )`;
+    const locationText = sql<string>`COALESCE(
+      ${sessionVenues.locationAddress},
+      ${schema.tournamentVenues.locationAddress},
+      ${schema.communities.locationAddress},
+      ${tournament.tournamentConfig}->'location'->>'address',
+      ${tournament.tournamentConfig}->'location'->>'province',
+      ${session.sessionConfig}->'location'->>'display',
+      ${tournament.city}
+    )`;
+    const sessionParticipantCount = sql<number>`(
+      SELECT count(*)::int
+      FROM club_match_session_participants p
+      WHERE p.session_id = ${session.id} AND p.status = 'ACTIVE'
+    )`;
+    const tournamentParticipantCount = sql<number>`(
+      SELECT count(*)::int
+      FROM tournament_participants p
+      WHERE p.tournament_id = ${tournament.id}
+        AND p.team_status NOT IN ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
+    )`;
+    const hasAvailableSlot = sql`(
+      (
+        ${session.id} IS NOT NULL
+        AND ${session.pairingMode} = 'FREE'
+        AND ${session.maxParticipants} > ${sessionParticipantCount}
+      )
+      OR (
+        ${tournament.id} IS NOT NULL
+        AND (
+          ${tournament.maxParticipants} IS NULL
+          OR ${tournament.maxParticipants} > ${tournamentParticipantCount} + COALESCE(${tournament.reservedSlotsCount}, 0)
+        )
+      )
+    )`;
     const targetIsCurrent = sql`
       NOT EXISTS (
         SELECT 1
@@ -307,6 +421,7 @@ export class CommunitySocialRepository {
       eq(schema.communities.status, 'ACTIVE'),
       activityIsVisible,
       or(isNotNull(post.clubMatchSessionId), isNotNull(post.tournamentId)) as SQL,
+      hasAvailableSlot,
       sql`(
         (
           ${post.clubMatchSessionId} IS NOT NULL
@@ -316,18 +431,24 @@ export class CommunitySocialRepository {
             ${session.pairingMode} <> 'BRACKET'
             OR (
               ${tournament.id} IS NOT NULL
-              AND ${tournament.status} NOT IN ('COMPLETED', 'FINISHED', 'DONE', 'ENDED', 'CANCELLED', 'PENDING_DELETE')
+              AND ${inArray(tournament.status, [...PUBLIC_TOURNAMENT_ACTIVITY_STATUSES])}
             )
           )
         )
         OR (
           ${post.tournamentId} IS NOT NULL
           AND ${tournament.id} IS NOT NULL
-          AND ${tournament.status} NOT IN ('COMPLETED', 'FINISHED', 'DONE', 'ENDED', 'CANCELLED', 'PENDING_DELETE')
+          AND ${inArray(tournament.status, [...PUBLIC_TOURNAMENT_ACTIVITY_STATUSES])}
         )
       )`,
       targetIsCurrent,
     ];
+    if (input.region) {
+      conditions.push(locationRegionCondition(input.region, {
+        provinceCode: activityProvinceCode,
+        locationText,
+      }));
+    }
     if (input.type === 'CLUB_RECRUITING') {
       conditions.push(sql`${post.clubMatchSessionId} IS NOT NULL AND ${session.pairingMode} = 'FREE'`);
     }
@@ -353,6 +474,12 @@ export class CommunitySocialRepository {
           id: schema.communities.id,
           name: schema.communities.name,
           logoUrl: schema.communities.logoUrl,
+          bannerUrl: schema.communities.bannerUrl,
+        },
+        host: {
+          id: schema.users.id,
+          name: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
         },
         session: {
           id: session.id,
@@ -370,6 +497,7 @@ export class CommunitySocialRepository {
           name: tournament.name,
           description: tournament.description,
           status: tournament.status,
+          logoUrl: tournament.logoUrl,
           bannerUrl: tournament.bannerUrl,
           maxParticipants: tournament.maxParticipants,
           reservedSlotsCount: tournament.reservedSlotsCount,
@@ -384,14 +512,9 @@ export class CommunitySocialRepository {
         venueAddress: sql<string | null>`COALESCE(${sessionVenues.locationAddress}, ${schema.tournamentVenues.locationAddress}, ${schema.communities.locationAddress})`,
         courtName: schema.venueCourts.courtName,
         participantCount: sql<number>`CASE
-          WHEN ${session.id} IS NOT NULL AND ${session.pairingMode} = 'FREE' THEN (
-            SELECT count(*)::int FROM club_match_session_participants p
-            WHERE p.session_id = ${session.id} AND p.status = 'ACTIVE'
-          )
+          WHEN ${session.id} IS NOT NULL AND ${session.pairingMode} = 'FREE' THEN ${sessionParticipantCount}
           WHEN ${tournament.id} IS NOT NULL THEN (
-            SELECT count(*)::int FROM tournament_participants p
-            WHERE p.tournament_id = ${tournament.id}
-              AND p.team_status NOT IN ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
+            ${tournamentParticipantCount}
           )
           ELSE 0
         END`,
@@ -404,6 +527,8 @@ export class CommunitySocialRepository {
       .innerJoin(schema.communities, eq(schema.communities.id, post.communityId))
       .leftJoin(schema.communitySocialSettings, eq(schema.communitySocialSettings.communityId, post.communityId))
       .leftJoin(session, eq(session.id, post.clubMatchSessionId))
+      .leftJoin(schema.users, eq(schema.users.id, session.createdBy))
+      .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
       .leftJoin(
         tournament,
         sql`${tournament.id} = COALESCE(${post.tournamentId}, ${session.bracketTournamentId})`,
@@ -472,6 +597,13 @@ export class CommunitySocialRepository {
         startTime: eventDate?.toISOString() ?? null,
         endTime: row.session?.endAt?.toISOString() ?? null,
         location: row.venueAddress || locationDisplay || row.venueName || null,
+        host: row.session?.id && row.host?.id
+          ? {
+              id: row.host.id,
+              name: row.host.name,
+              avatarUrl: row.host.avatarUrl,
+            }
+          : null,
         clubMatchSessionId: row.session?.id ?? null,
         tournamentId: row.tournament?.id ?? null,
         verified: false,
@@ -490,6 +622,8 @@ export class CommunitySocialRepository {
         tournament: row.cardType === 'TOURNAMENT_OPENED' && row.tournament
           ? {
               id: row.tournament.id,
+              logoUrl: row.tournament.logoUrl,
+              status: row.tournament.status,
               remainingSlots: Math.max((row.tournament.maxParticipants ?? 0) - current - (row.tournament.reservedSlotsCount ?? 0), 0),
               totalSlots: row.tournament.maxParticipants ?? 0,
               bannerUrl: row.tournament.bannerUrl,

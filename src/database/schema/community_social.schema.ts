@@ -89,6 +89,7 @@ export const communityPosts = pgTable(
       .notNull(),
     status: varchar('status', { length: 30 }).default('PUBLISHED').notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 128 }),
+    contentFingerprint: varchar('content_fingerprint', { length: 64 }),
     reactionCount: integer('reaction_count').default(0).notNull(),
     commentCount: integer('comment_count').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -119,6 +120,12 @@ export const communityPosts = pgTable(
     idempotencyUnique: uniqueIndex('uq_community_posts_idempotency')
       .on(table.communityId, table.authorId, table.idempotencyKey)
       .where(sql`${table.idempotencyKey} IS NOT NULL`),
+    contentFingerprintIndex: index('idx_community_posts_content_fingerprint').on(
+      table.communityId,
+      table.authorId,
+      table.contentFingerprint,
+      table.createdAt,
+    ),
   }),
 );
 

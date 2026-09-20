@@ -290,6 +290,11 @@ export class CreateLiteTournamentDto {
   @IsOptional()
   province?: string;
 
+  @ApiPropertyOptional({ example: '79', description: 'Mã tỉnh/thành từ API địa giới Việt Nam' })
+  @IsString()
+  @IsOptional()
+  provinceCode?: string;
+
   @ApiPropertyOptional({ example: 'Nam Từ Liêm', description: 'Quận/huyện' })
   @IsString()
   @IsOptional()
@@ -299,6 +304,11 @@ export class CreateLiteTournamentDto {
   @IsString()
   @IsOptional()
   ward?: string;
+
+  @ApiPropertyOptional({ example: '760', description: 'Mã phường/xã từ API địa giới Việt Nam' })
+  @IsString()
+  @IsOptional()
+  wardCode?: string;
 
   @ApiPropertyOptional({ example: '2026-10-01T09:00:00Z', description: 'Ngày giờ mở đăng ký; mặc định hiện tại' })
   @IsDateString()

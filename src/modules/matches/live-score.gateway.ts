@@ -99,8 +99,6 @@ export class LiveScoreGateway
       }
     }
 
-    this.logger.log(`Client connected: ${client.id}`);
-    
     // Zombie connection prevention: 
     // Ngắt kết nối client sau 30 giây nếu họ không tham gia bất kỳ phòng (Room) trận đấu nào.
     const zombieTimer = setTimeout(() => {
@@ -140,7 +138,6 @@ export class LiveScoreGateway
     this.clientTournamentRooms.delete(client.id);
     this.clientClubSessionRooms.delete(client.id);
     this.clientClubCommunityRooms.delete(client.id);
-    this.logger.log(`Client disconnected: ${client.id}`);
   }
 
   private getViewerCount(matchId: string): number {
@@ -183,8 +180,12 @@ export class LiveScoreGateway
     }
 
     const room = `match:${normalizedMatchId}`;
-    client.join(room);
     const joinedMatchIds = this.clientMatchRooms.get(client.id) ?? new Set<string>();
+    if (joinedMatchIds.has(normalizedMatchId)) {
+      return { event: 'joined', data: room };
+    }
+
+    client.join(room);
     joinedMatchIds.add(normalizedMatchId);
     this.clientMatchRooms.set(client.id, joinedMatchIds);
     
@@ -194,7 +195,6 @@ export class LiveScoreGateway
     client.emit('viewer:count', payload);
     this.server.to(room).emit('viewer:count', payload);
     
-    this.logger.log(`Client ${client.id} joined room ${room} (viewers: ${viewerCount})`);
     return { event: 'joined', data: room };
   }
 
@@ -218,7 +218,6 @@ export class LiveScoreGateway
     // Đăng ký cập nhật lượt xem vào hàng chờ gộp tin
     this.pendingViewerUpdates.add(matchId);
     
-    this.logger.log(`Client ${client.id} left room ${room}`);
     return { event: 'left', data: room };
   }
 

@@ -3906,6 +3906,7 @@ export class TournamentsRepository {
         phoneNumber: schema.profiles.phoneNumber,
         dateOfBirth: schema.profiles.dateOfBirth,
         gender: schema.profiles.gender,
+        provinceCode: schema.profiles.provinceCode,
       })
       .from(schema.profiles)
       .where(eq(schema.profiles.userId, userId))

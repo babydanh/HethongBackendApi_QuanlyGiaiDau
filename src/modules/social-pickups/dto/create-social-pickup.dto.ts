@@ -4,8 +4,11 @@ import {
   IsIn,
   IsInt,
   IsOptional,
+  IsArray,
   IsString,
   IsUUID,
+  IsUrl,
+  ArrayMaxSize,
   Matches,
   Max,
   MaxLength,
@@ -46,6 +49,25 @@ export class CreateSocialPickupDto {
   @MaxLength(255)
   location!: string;
 
+  @ApiPropertyOptional({ example: '79', description: 'Mã tỉnh/thành từ API địa giới Việt Nam' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  provinceCode?: string;
+
+  @ApiPropertyOptional({ example: '760', description: 'Mã phường/xã từ API địa giới Việt Nam' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  wardCode?: string;
+
+  @ApiPropertyOptional({ type: [String], maxItems: 4, description: 'Ảnh tùy chọn đã tải lên từ upload service' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true }, { each: true })
+  imageUrls?: string[];
+
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
   @IsUUID()
@@ -82,4 +104,3 @@ export class CreateSocialPickupDto {
   @IsIn(['ANY', 'MALE', 'FEMALE', 'MIXED'])
   genderRequirement?: string;
 }
-

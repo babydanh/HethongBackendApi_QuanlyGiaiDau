@@ -495,6 +495,15 @@ export class CommunitiesRepository {
     });
   }
 
+  async findCreatorProvinceCode(userId: string) {
+    const [profile] = await this.db
+      .select({ provinceCode: schema.profiles.provinceCode })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+    return profile?.provinceCode ?? null;
+  }
+
   async update(
     id: string,
     data: Partial<typeof schema.communities.$inferInsert>,

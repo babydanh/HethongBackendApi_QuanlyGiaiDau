@@ -1,6 +1,5 @@
 import { Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
-import { MatchesRepository } from './matches.repository';
 import { LiveScoreGateway } from './live-score.gateway';
 
 const createClient = (token?: string, queryToken?: string) =>
@@ -53,7 +52,25 @@ describe('LiveScoreGateway room authorization', () => {
       data: 'match:match-1',
     });
     expect(repository.canAccessLiveMatch).toHaveBeenCalledWith('match-1', undefined, []);
-    expect(client.join).toHaveBeenCalledWith('match:match-1');
+    const joinMock = Reflect.get(client, 'join') as jest.Mock;
+    expect(joinMock).toHaveBeenCalledWith('match:match-1');
+  });
+
+  it('does not rebroadcast or log a duplicate room join from the same client', async () => {
+    repository.canAccessLiveMatch.mockResolvedValue(true);
+    const client = createClient();
+    const roomEmit = jest.fn();
+    gateway.server = {
+      sockets: { adapter: { rooms: new Map() } },
+      to: jest.fn(() => ({ emit: roomEmit })),
+    } as never;
+
+    await gateway.handleJoinMatch('match-1', client);
+    await gateway.handleJoinMatch('match-1', client);
+
+    const joinMock = Reflect.get(client, 'join') as jest.Mock;
+    expect(joinMock).toHaveBeenCalledTimes(1);
+    expect(roomEmit).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a client that is not authorized for a private tournament room', async () => {
@@ -63,7 +80,8 @@ describe('LiveScoreGateway room authorization', () => {
     await expect(gateway.handleJoinTournament('tournament-1', client)).rejects.toThrow(
       'Bạn không có quyền theo dõi giải đấu này',
     );
-    expect(client.join).not.toHaveBeenCalled();
+    const joinMock = Reflect.get(client, 'join') as jest.Mock;
+    expect(joinMock).not.toHaveBeenCalled();
   });
 
   it('does not use query-string tokens for live authorization', () => {

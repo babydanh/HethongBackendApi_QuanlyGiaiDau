@@ -31,7 +31,11 @@ function parseVietnamDateTime(date: string, time: string) {
   return value;
 }
 
-function fingerprint(dto: CreateSocialPickupDto) {
+function normalizeImageUrls(imageUrls?: string[]) {
+  return Array.from(new Set((imageUrls ?? []).map((url) => url.trim()).filter(Boolean))).slice(0, 4);
+}
+
+function fingerprint(dto: CreateSocialPickupDto, imageUrls: string[]) {
   return createHash('sha256')
     .update(JSON.stringify({
       categoryId: dto.categoryId,
@@ -41,6 +45,9 @@ function fingerprint(dto: CreateSocialPickupDto) {
       startTime: dto.startTime,
       endTime: dto.endTime,
       location: dto.location.trim(),
+      provinceCode: dto.provinceCode?.trim() || null,
+      wardCode: dto.wardCode?.trim() || null,
+      imageUrls,
       venueId: dto.venueId ?? null,
       courtId: dto.courtId ?? null,
       feePerSlot: dto.feePerSlot ?? 0,
@@ -58,6 +65,7 @@ export class SocialPickupsService {
   async create(actor: Actor, dto: CreateSocialPickupDto, rawKey?: string) {
     const title = dto.title.trim();
     const location = dto.location.trim();
+    const imageUrls = normalizeImageUrls(dto.imageUrls);
     if (title.length < 3 || location.length < 2) {
       throw new BadRequestException({ code: 'INVALID_PICKUP_TEXT' });
     }
@@ -82,7 +90,7 @@ export class SocialPickupsService {
     if (!category) throw new BadRequestException({ code: 'INVALID_PICKUP_CATEGORY' });
 
     const key = normalizeKey(rawKey);
-    const creationFingerprint = fingerprint(dto);
+    const creationFingerprint = fingerprint(dto, imageUrls);
     if (key) {
       const existing = await this.repository.findByCreationKey(actor.id, key);
       if (existing) {
@@ -93,6 +101,15 @@ export class SocialPickupsService {
       }
     }
 
+    // The activity's selected location wins. The profile province is only a
+    // creation-time default, so changing the profile later cannot move this
+    // pickup to another feed region.
+    const provinceCode =
+      dto.provinceCode?.trim() ||
+      (typeof this.repository.findHostProvinceCode === 'function'
+        ? await this.repository.findHostProvinceCode(actor.id)
+        : null);
+
     const created = await this.repository.createPickup({
       hostUserId: actor.id,
       categoryId: category.id,
@@ -102,6 +119,9 @@ export class SocialPickupsService {
       startTime: dto.startTime,
       endTime: dto.endTime,
       location,
+      provinceCode: provinceCode || null,
+      wardCode: dto.wardCode?.trim() || null,
+      imageUrls,
       venueId: dto.venueId ?? null,
       courtId: dto.courtId ?? null,
       feePerSlot: dto.feePerSlot ?? 0,
@@ -122,6 +142,7 @@ export class SocialPickupsService {
     const result = await this.repository.list({
       date: query.date,
       categoryId: query.categoryId,
+      region: query.region,
       limit: query.limit ?? 20,
       cursor: query.cursor,
       viewerId: viewer?.id,
@@ -246,11 +267,16 @@ export class SocialPickupsService {
 
   private toApi(item: Awaited<ReturnType<SocialPickupsRepository['getProjection']>>) {
     if (!item) return null;
+    const metadata = item.pickup.metadata as { mediaUrls?: unknown } | null;
+    const imageUrls = Array.isArray(metadata?.mediaUrls)
+      ? metadata.mediaUrls.filter((url): url is string => typeof url === 'string')
+      : [];
     return {
       id: item.pickup.id,
       type: 'PERSONAL_PICKUP' as const,
       title: item.pickup.title,
       description: item.pickup.description,
+      imageUrls,
       playDate: item.pickup.playDate,
       startTime: item.pickup.startTime,
       endTime: item.pickup.endTime,

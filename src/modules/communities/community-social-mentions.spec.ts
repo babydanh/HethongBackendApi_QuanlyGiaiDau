@@ -51,6 +51,8 @@ describe('CommunitySocialService @mention policy', () => {
     findMember: jest.Mock;
   };
   let notificationsService: { sendNotification: jest.Mock };
+  let whiteboxService: { checkContent: jest.Mock };
+  let blackboxAiService: { evaluatePost: jest.Mock };
 
   beforeEach(() => {
     socialRepository = {
@@ -79,10 +81,10 @@ describe('CommunitySocialService @mention policy', () => {
     notificationsService = {
       sendNotification: jest.fn().mockResolvedValue(undefined),
     };
-    const whiteboxService = {
+    whiteboxService = {
       checkContent: jest.fn().mockReturnValue({ passed: true, flagged: false, rejected: false, severity: 'CLEAN' }),
     };
-    const blackboxAiService = {
+    blackboxAiService = {
       evaluatePost: jest.fn().mockResolvedValue({ isSafe: true, riskScore: 0.0, flaggedCategory: 'NONE', isFallback: true }),
     };
     service = new CommunitySocialService(
@@ -141,4 +143,96 @@ describe('CommunitySocialService @mention policy', () => {
     );
     expect(notificationsService.sendNotification).toHaveBeenCalledTimes(1);
   });
+
+  it('does not call AI for clean content', async () => {
+    socialRepository.createPost.mockResolvedValueOnce({ id: 'post-id', status: 'PUBLISHED' });
+
+    await service.createPost(
+      COMMUNITY_ID,
+      { id: AUTHOR_ID },
+      {
+        body: 'Nội dung đủ dài để kích hoạt kiểm duyệt AI khi provider không khả dụng.',
+        mentions: [MENTION_ID],
+      },
+    );
+
+    expect(socialRepository.createPost).toHaveBeenCalledWith(
+      COMMUNITY_ID,
+      AUTHOR_ID,
+      expect.objectContaining({ mentions: [MENTION_ID] }),
+      'PUBLISHED',
+      undefined,
+    );
+    expect(blackboxAiService.evaluatePost).not.toHaveBeenCalled();
+    expect(notificationsService.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes topics in the same moderation scan as post text', async () => {
+    await service.createPost(
+      COMMUNITY_ID,
+      { id: AUTHOR_ID },
+      {
+        body: 'Tìm người chơi cầu lông cuối tuần',
+        topics: ['example.com'],
+        mentions: [MENTION_ID],
+      },
+    );
+
+    expect(whiteboxService.checkContent).toHaveBeenCalledWith(
+      expect.stringContaining('example.com'),
+    );
+  });
+
+  it('rejects deterministic violations before calling AI', async () => {
+    whiteboxService.checkContent.mockReturnValueOnce({
+      passed: false,
+      flagged: true,
+      rejected: true,
+      severity: 'CRITICAL',
+      ruleCode: 'WHITEBOX_LINK_FORBIDDEN',
+      reasonVi: 'Bài viết không được chứa đường dẫn hoặc liên kết mời.',
+    });
+
+    await expect(
+      service.createPost(
+        COMMUNITY_ID,
+        { id: AUTHOR_ID },
+        { body: 'https://example.com/giai', mentions: [MENTION_ID] },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(blackboxAiService.evaluatePost).not.toHaveBeenCalled();
+    expect(socialRepository.createPost).not.toHaveBeenCalled();
+  });
+
+  it('keeps suspicious content pending when AI falls back', async () => {
+    whiteboxService.checkContent.mockReturnValueOnce({
+      passed: true,
+      flagged: true,
+      rejected: false,
+      severity: 'NEEDS_REVIEW',
+      ruleCode: 'WHITEBOX_SUSPICIOUS_CONTACT_OR_LINK',
+    });
+    socialRepository.createPost.mockResolvedValueOnce({ id: 'post-id', status: 'PENDING' });
+
+    await service.createPost(
+      COMMUNITY_ID,
+      { id: AUTHOR_ID },
+      {
+        body: 'Ai biết thì inbox mình để trao đổi lịch chơi nhé',
+        mentions: [MENTION_ID],
+      },
+    );
+
+    expect(blackboxAiService.evaluatePost).toHaveBeenCalledTimes(1);
+    expect(socialRepository.createPost).toHaveBeenCalledWith(
+      COMMUNITY_ID,
+      AUTHOR_ID,
+      expect.objectContaining({ mentions: [MENTION_ID] }),
+      'PENDING',
+      undefined,
+    );
+    expect(notificationsService.sendNotification).not.toHaveBeenCalled();
+  });
+
 });

@@ -97,6 +97,20 @@ export class ChatController {
     return this.chatService.getMessages(user.sub, id, query.limit, query.cursor);
   }
 
+  /**
+   * Compatibility endpoint for older web/app bundles that request the latest
+   * message as `rooms/:id/head` before loading the paginated history.
+   */
+  @Get('rooms/:id/head')
+  @ApiOperation({ summary: 'Lấy tin nhắn mới nhất của một phòng chat' })
+  async getRoomHead(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const page = await this.chatService.getMessages(user.sub, id, 1);
+    return page.data?.[0] ?? null;
+  }
+
   @Put('rooms/:id/read')
   async markRoomRead(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.chatService.markRoomRead(user.sub, id);

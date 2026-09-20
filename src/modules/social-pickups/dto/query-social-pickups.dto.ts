@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID, Matches } from 'class-validator';
+import { IsIn, IsOptional, IsUUID, Matches } from 'class-validator';
 import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
+import type { LocationRegion } from '../../../common/helpers/location-region.helper';
 
 export class QuerySocialPickupsDto extends CursorPaginationDto {
   @ApiPropertyOptional({ example: '2026-09-25' })
@@ -12,5 +13,9 @@ export class QuerySocialPickupsDto extends CursorPaginationDto {
   @IsOptional()
   @IsUUID()
   categoryId?: string;
-}
 
+  @ApiPropertyOptional({ enum: ['VIETNAM', 'FOREIGN', 'OTHER'] })
+  @IsOptional()
+  @IsIn(['VIETNAM', 'FOREIGN', 'OTHER'])
+  region?: LocationRegion;
+}
