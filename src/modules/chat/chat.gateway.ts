@@ -237,7 +237,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
     const persisted = await this.chatRepository.saveMessage(user.sub, { roomId: payload.roomId, messageText: payload.content.trim() });
     const messagePayload = { ...persisted, content: persisted.messageText, timestamp: persisted.createdAt.toISOString() };
-    if (room.type === 'CLUB') this.broadcastClubMessage(payload.roomId, messagePayload);
+    if (room.type === 'CLUB') {
+      this.broadcastClubMessage(payload.roomId, messagePayload);
+      // CLUB members are not all subscribed to the room socket while the
+      // widget is closed, so refresh their inbox unread counts explicitly.
+      if (room.communityId) {
+        void this.chatRepository
+          .getCommunityMemberUserIds(room.communityId, user.sub)
+          .then((memberIds) => {
+            for (const memberId of memberIds) {
+              this.notifyDirectRoomUpdated(memberId, payload.roomId);
+            }
+          })
+          .catch(() => undefined);
+      }
+    }
     else {
       this.broadcastMessage(payload.roomId, messagePayload);
       const memberIds = await this.chatRepository.getRoomMemberIds(payload.roomId);

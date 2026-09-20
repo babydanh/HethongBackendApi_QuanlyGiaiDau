@@ -44,7 +44,7 @@ export class ChatService {
     return new ForbiddenException({
       statusCode: 403,
       code: 'NO_SHARED_CURRENT_CLUB',
-      message: 'Hai người dùng phải đang cùng là thành viên JOINED của ít nhất một CLB.',
+      message: 'Hai người dùng phải là bạn bè đã chấp nhận hoặc cùng là thành viên JOINED của ít nhất một CLB.',
     });
   }
 
@@ -280,6 +280,17 @@ export class ChatService {
       };
       this.chatGateway.broadcastClubMessage(data.roomId, clubPayload);
       this.chatGateway.broadcastMessage(data.roomId, clubPayload);
+      // A CLUB room is not joined by the global widget socket, so notify
+      // every member separately to refresh the inbox and its unread badge.
+      // This is best-effort: the message is already persisted.
+      void this.chatRepository
+        .getCommunityMemberUserIds(room.communityId, userId)
+        .then((memberIds) => {
+          for (const memberId of memberIds) {
+            this.chatGateway.notifyDirectRoomUpdated(memberId, data.roomId);
+          }
+        })
+        .catch(() => undefined);
     } else {
       this.chatGateway.broadcastMessage(data.roomId, message);
       const memberIds = await this.chatRepository.getRoomMemberIds(data.roomId);

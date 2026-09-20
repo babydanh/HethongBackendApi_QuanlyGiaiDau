@@ -494,9 +494,9 @@ export class ChatRepository {
   }
 
   /**
-   * DIRECT authorization source of truth. Both users must currently have a
-   * JOINED membership row for the same community. History, follows,
-   * friendships, tournaments and profile opt-ins are intentionally ignored.
+   * DIRECT authorization source of truth. Users may message when they either
+   * currently share a JOINED community or have an accepted, non-deleted
+   * friendship. Other relationships and historical memberships are ignored.
    * Query failures are not swallowed so callers can deny with the stable
    * fail-closed policy result.
    */

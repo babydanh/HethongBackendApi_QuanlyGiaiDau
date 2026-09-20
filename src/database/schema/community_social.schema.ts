@@ -60,9 +60,11 @@ export const communityPosts = pgTable(
   'community_posts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    communityId: uuid('community_id')
-      .references(() => communities.id, { onDelete: 'cascade' })
-      .notNull(),
+    // NULL marks a profile post. Existing club posts keep their community
+    // scope; the migration is additive and the service enforces the split.
+    communityId: uuid('community_id').references(() => communities.id, {
+      onDelete: 'cascade',
+    }),
     authorId: uuid('author_id').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -74,6 +76,12 @@ export const communityPosts = pgTable(
       { onDelete: 'cascade' },
     ),
     type: varchar('type', { length: 30 }).default('NORMAL').notNull(),
+    visibility: varchar('visibility', { length: 20 })
+      .default('COMMUNITY')
+      .notNull(),
+    sharedPostId: uuid('shared_post_id').references(() => communityPosts.id, {
+      onDelete: 'set null',
+    }),
     body: text('body'),
     mediaUrls: text('media_urls')
       .array()
@@ -106,6 +114,9 @@ export const communityPosts = pgTable(
       table.createdAt,
       table.id,
     ),
+    profileFeedIndex: index('idx_profile_posts_feed')
+      .on(table.authorId, table.createdAt, table.id)
+      .where(sql`${table.communityId} IS NULL`),
     statusIndex: index('idx_community_posts_status').on(
       table.communityId,
       table.status,

@@ -11,6 +11,12 @@ import { SendFriendRequestDto } from './dto/send-friend-request.dto';
 import { UpdateFriendshipDto, FriendshipAction } from './dto/update-friendship.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../notifications/notification-types';
+import { CommunitySocialRepository } from '../communities/community-social.repository';
+import { CommunityWhiteboxService } from '../communities/moderation/community-whitebox.service';
+import { CommunityBlackboxAiService } from '../communities/moderation/community-blackbox-ai.service';
+import { CommunityImageModerationService } from '../communities/moderation/community-image-moderation.service';
+import type { CreateProfilePostDto } from './dto/create-profile-post.dto';
+import type { CreateCommunityCommentDto } from '../communities/dto/create-community-comment.dto';
 import type {
   FriendshipDirection,
   FriendshipStatus,
@@ -24,6 +30,10 @@ export class SocialService {
   constructor(
     private readonly socialRepository: SocialRepository,
     private readonly notificationsService: NotificationsService,
+    private readonly communitySocialRepository: CommunitySocialRepository,
+    private readonly whiteboxService: CommunityWhiteboxService,
+    private readonly blackboxAiService: CommunityBlackboxAiService,
+    private readonly imageModerationService: CommunityImageModerationService,
   ) {}
 
   async sendFriendRequest(userId: string, data: SendFriendRequestDto) {
@@ -113,6 +123,143 @@ export class SocialService {
 
   async getMyFriends(userId: string) {
     return this.socialRepository.getFriends(userId);
+  }
+
+  async listProfileFeed(userId: string, limit: number, cursor?: string) {
+    const result = await this.socialRepository.listProfilePosts({ viewerId: userId, limit, cursor });
+    if (result.invalidCursor) throw new BadRequestException({ code: 'INVALID_CURSOR' });
+    return { data: await this.sanitizeProfilePosts(result.data, userId), meta: result.meta };
+  }
+
+  async listMyProfilePosts(userId: string, limit: number, cursor?: string) {
+    const result = await this.socialRepository.listProfilePosts({ viewerId: userId, authorId: userId, limit, cursor });
+    if (result.invalidCursor) throw new BadRequestException({ code: 'INVALID_CURSOR' });
+    return { data: await this.sanitizeProfilePosts(result.data, userId), meta: result.meta };
+  }
+
+  async createProfilePost(userId: string, dto: CreateProfilePostDto, idempotencyKey?: string) {
+    const body = dto.body?.trim() || '';
+    const mediaUrls = [...new Set((dto.mediaUrls ?? []).map((url) => url.trim()).filter(Boolean))].slice(0, 10);
+    if (!body && mediaUrls.length === 0 && !dto.sharedPostId) {
+      throw new BadRequestException('Bài viết cần có nội dung hoặc ảnh.');
+    }
+
+    if (dto.sharedPostId) {
+      const original = await this.socialRepository.getProfilePost(dto.sharedPostId, userId);
+      if (!original || original.status !== 'PUBLISHED') throw new NotFoundException('Không tìm thấy bài viết được chia sẻ.');
+      await this.requireProfilePostVisible(original, userId);
+    }
+
+    const imageScan = await this.imageModerationService.scanMediaUrls(mediaUrls);
+    const textToCheck = [body, imageScan.extractedText].filter(Boolean).join('\n');
+    const whitebox = this.whiteboxService.checkContent(textToCheck);
+    if (whitebox.rejected) {
+      throw new BadRequestException({
+        error: 'CONTENT_MODERATION_REJECTED',
+        ruleCode: whitebox.ruleCode,
+        message: whitebox.reasonVi || 'Nội dung vi phạm tiêu chuẩn cộng đồng.',
+      });
+    }
+
+    let flagged = imageScan.status === 'NEEDS_REVIEW';
+    let moderationReason = imageScan.reasonVi;
+    if (whitebox.flagged || mediaUrls.length > 0) {
+      const aiResult = await this.blackboxAiService.evaluatePost(
+        this.whiteboxService.getNormalizedText(textToCheck),
+        { authorName: 'Thành viên', communityName: 'Trang cá nhân' },
+        imageScan.scannedUrls,
+      );
+      if (aiResult.isFallback) {
+        flagged = true;
+        moderationReason = 'Không thể hoàn tất kiểm tra tự động; bài viết đang chờ duyệt.';
+      } else if (!aiResult.isSafe && aiResult.riskScore >= 0.7) {
+        flagged = true;
+        moderationReason = aiResult.reasonVi || 'Nội dung cần được kiểm duyệt thêm.';
+      }
+    }
+
+    const post = await this.socialRepository.createProfilePost({
+      authorId: userId,
+      body: body || null,
+      mediaUrls,
+      // Profile posts currently have one product rule: only accepted friends can see them.
+      visibility: 'FRIENDS',
+      sharedPostId: dto.sharedPostId ?? null,
+      idempotencyKey: idempotencyKey?.trim() || null,
+      status: flagged ? 'PENDING' : 'PUBLISHED',
+    });
+    if (!post) throw new BadRequestException('Không thể tạo bài viết.');
+    return { ...post, moderationNotes: flagged ? moderationReason : undefined };
+  }
+
+  async deleteProfilePost(postId: string, userId: string) {
+    const deleted = await this.socialRepository.deleteProfilePost(postId, userId);
+    if (!deleted) throw new NotFoundException('Không tìm thấy bài viết hoặc bạn không có quyền xóa.');
+    return deleted;
+  }
+
+  async listProfileComments(postId: string, userId: string, limit: number, cursor?: string) {
+    const post = await this.socialRepository.getProfilePost(postId, userId);
+    await this.requireProfilePostVisible(post, userId);
+    return this.communitySocialRepository.listComments(postId, limit, cursor, userId);
+  }
+
+  async createProfileComment(postId: string, userId: string, dto: CreateCommunityCommentDto) {
+    const post = await this.socialRepository.getProfilePost(postId, userId);
+    await this.requireProfilePostVisible(post, userId);
+    const body = dto.body?.trim() || '';
+    if (!body) throw new BadRequestException('Bình luận không được để trống.');
+    const whitebox = this.whiteboxService.checkContent(body);
+    if (whitebox.rejected) {
+      throw new BadRequestException({ error: 'CONTENT_MODERATION_REJECTED', ruleCode: whitebox.ruleCode, message: whitebox.reasonVi || 'Bình luận vi phạm tiêu chuẩn cộng đồng.' });
+    }
+    if (whitebox.flagged) {
+      throw new BadRequestException({ error: 'CONTENT_MODERATION_REVIEW_REQUIRED', message: 'Bình luận cần được kiểm duyệt trước khi đăng.' });
+    }
+    return this.communitySocialRepository.createComment(postId, userId, body, dto.parentId);
+  }
+
+  async reactToProfilePost(postId: string, userId: string, reactionType: string) {
+    const post = await this.socialRepository.getProfilePost(postId, userId);
+    await this.requireProfilePostVisible(post, userId);
+    return this.communitySocialRepository.setReaction(postId, userId, reactionType);
+  }
+
+  async getProfilePostReactions(postId: string, userId: string) {
+    const post = await this.socialRepository.getProfilePost(postId, userId);
+    await this.requireProfilePostVisible(post, userId);
+    return this.communitySocialRepository.listPostReactions(postId, userId);
+  }
+
+  async shareProfilePost(postId: string, userId: string, dto: CreateProfilePostDto, idempotencyKey?: string) {
+    const original = await this.socialRepository.getProfilePost(postId, userId);
+    await this.requireProfilePostVisible(original, userId);
+    if (original?.status !== 'PUBLISHED') throw new NotFoundException('Bài viết này chưa thể được chia sẻ.');
+    return this.createProfilePost(userId, {
+      ...dto,
+      body: dto.body?.trim() || 'Đã chia sẻ một bài viết.',
+      sharedPostId: postId,
+      visibility: 'FRIENDS',
+    }, idempotencyKey);
+  }
+
+  private async requireProfilePostVisible(post: any, viewerId: string) {
+    if (!post || post.communityId !== null || post.deletedAt || post.status !== 'PUBLISHED') {
+      throw new NotFoundException('Không tìm thấy bài viết.');
+    }
+    if (post.visibility !== 'FRIENDS') throw new NotFoundException('Không tìm thấy bài viết.');
+    if (post.authorId === viewerId) return;
+    const friendship = await this.socialRepository.findFriendship(viewerId, post.authorId);
+    if (friendship?.status !== 'ACCEPTED') throw new NotFoundException('Không tìm thấy bài viết.');
+  }
+
+  private async sanitizeProfilePosts(posts: any[], viewerId: string) {
+    return Promise.all(posts.map(async (post) => {
+      if (!post.sharedPost) return post;
+      const sharedVisible = post.sharedPost.authorId === viewerId
+        || (post.sharedPost.visibility === 'FRIENDS' && (await this.socialRepository.findFriendship(viewerId, post.sharedPost.authorId))?.status === 'ACCEPTED');
+      return sharedVisible ? post : { ...post, sharedPost: null };
+    }));
   }
 
   async getFriendshipStatus(userId: string, targetUserId: string): Promise<FriendshipStatusView> {
