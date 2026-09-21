@@ -4442,15 +4442,15 @@ export class TournamentsService {
       }
     }
 
-    const leaderRoster =
-      await this.tournamentsRepository.findLeaderByParticipantId(participantId);
-    const userIds = [userId];
-    if (leaderRoster) {
-      userIds.push(leaderRoster.userId);
-    }
-
     const participant =
       await this.tournamentsRepository.findParticipantById(participantId);
+    // The participant owner is the canonical leader. Do not infer the leader
+    // from the first MAIN roster: legacy data can contain more than one MAIN
+    // row after a previous pairing/unpairing flow.
+    const leaderUserId = participant?.registeredBy ?? null;
+    const userIds = [leaderUserId, userId].filter(
+      (value): value is string => Boolean(value),
+    );
     if (participant?.rosterLockedAt) {
       throw new BadRequestException(
         'Roster đội đã được khóa, không thể thêm thành viên.',
@@ -4464,10 +4464,7 @@ export class TournamentsService {
 
     await this.validateEloLimits(tournament, userIds, { division });
     // Partner bấm link/QR join: chặn đội vi phạm genderRestriction của division
-    await this.validateGenderRestriction(division, [
-      userId,
-      leaderRoster?.userId,
-    ]);
+    await this.validateGenderRestriction(division, userIds);
 
     const result = await this.tournamentsRepository.joinTeam(
       tournamentId,
@@ -4501,11 +4498,11 @@ export class TournamentsService {
         );
       const notifications: Array<Promise<unknown>> = [];
 
-      if (leaderRoster && leaderRoster.userId !== userId) {
+      if (leaderUserId && leaderUserId !== userId) {
         notifications.push(
           this.notificationsService.sendNotification(
             buildParticipantTeammateJoinedNotification({
-              receiverId: leaderRoster.userId,
+              receiverId: leaderUserId,
               tournamentId,
               tournamentName: tournament.name,
               divisionId: result.participant.tournamentDivisionId,

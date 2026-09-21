@@ -3059,7 +3059,12 @@ export class TournamentsRepository {
       const leaderRoster = await tx
         .select()
         .from(schema.tournamentRosters)
-        .where(eq(schema.tournamentRosters.participantId, participantId))
+        .where(
+          and(
+            eq(schema.tournamentRosters.participantId, participantId),
+            eq(schema.tournamentRosters.userId, participant.registeredBy),
+          ),
+        )
         .limit(1);
 
       if (leaderRoster.length === 0) {
