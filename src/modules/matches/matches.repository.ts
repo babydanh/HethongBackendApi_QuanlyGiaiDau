@@ -2328,8 +2328,11 @@ export class MatchesRepository {
           });
 
           if (courtConflict) {
+            const courtLabel = /^sân(?:\s|$)/i.test(effectiveCourtName.trim())
+              ? effectiveCourtName.trim()
+              : `Sân ${effectiveCourtName.trim()}`;
             throw new BadRequestException(
-              `Sân ${effectiveCourtName} đã có trận đấu khác trong cùng khung giờ.`,
+              `${courtLabel} đã có trận đấu khác trong cùng giải và khung giờ.`,
             );
           }
         }
