@@ -29,6 +29,15 @@ export class AdminTicketsController {
     return this.adminService.getUserVerificationTickets(user.sub);
   }
 
+  @Post(':id/withdraw')
+  @ApiOperation({ summary: 'Hủy yêu cầu xác minh đang chờ duyệt' })
+  async withdraw(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.adminService.withdrawVerificationTicket(id, user.sub);
+  }
+
   @Get()
   @Roles(UserRole.ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Lấy danh sách các yêu cầu xác minh (Chỉ ADMIN)' })
@@ -66,5 +75,16 @@ export class AdminTicketsController {
     @Body() dto: RejectTicketDto,
   ) {
     return this.adminService.rejectVerificationTicket(id, admin.sub, dto.rejectReason);
+  }
+
+  @Patch(':id/revoke')
+  @Roles(UserRole.ADMIN, UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Thu hồi quyền xác minh đã được duyệt' })
+  async revoke(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectTicketDto,
+  ) {
+    return this.adminService.revokeVerificationTicket(id, admin.sub, dto.rejectReason);
   }
 }

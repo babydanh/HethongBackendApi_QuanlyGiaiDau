@@ -7,6 +7,8 @@ import {
   IsEnum,
   IsDateString,
   IsInt,
+  ArrayMinSize,
+  ArrayMaxSize,
   Max,
   MaxLength,
   Min,
@@ -26,15 +28,23 @@ import {
 } from '../../users/dto/query-my-reports.dto';
 
 export class SubmitTicketDto {
-  @ApiProperty({ description: 'Danh sách các link ảnh minh chứng giấy phép, hoạt động' })
+  @ApiProperty({
+    description: 'Danh sách link ảnh minh chứng; tối thiểu 1, tối đa 5 ảnh',
+    minItems: 1,
+    maxItems: 5,
+  })
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(5)
   @IsString({ each: true })
+  @MaxLength(2048, { each: true })
   @IsNotEmpty({ each: true })
   evidenceUrls: string[];
 
   @ApiProperty({ description: 'Số điện thoại liên hệ' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(20)
   contactPhone: string;
 }
 

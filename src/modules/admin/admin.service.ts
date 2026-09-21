@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -28,6 +28,8 @@ import {
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly eloEngine: EloEngineService,
@@ -377,12 +379,38 @@ export class AdminService {
   // ─── Verification Tickets ─────────────────────────────────────
 
   async submitVerificationTicket(userId: string, evidenceUrls: string[], contactPhone: string) {
+    const normalizedEvidenceUrls = Array.isArray(evidenceUrls)
+      ? Array.from(new Set(evidenceUrls.map((url) => String(url).trim()).filter(Boolean)))
+      : [];
+    const normalizedPhone = String(contactPhone ?? '').trim();
+    if (normalizedEvidenceUrls.length < 1 || normalizedEvidenceUrls.length > 5) {
+      throw new BadRequestException('Cần từ 1 đến 5 ảnh minh chứng hợp lệ.');
+    }
+    if (normalizedEvidenceUrls.some((url) => url.length > 2048)) {
+      throw new BadRequestException('Link ảnh minh chứng không hợp lệ.');
+    }
+    if (!normalizedPhone || normalizedPhone.length > 20) {
+      throw new BadRequestException('Số điện thoại liên hệ không hợp lệ.');
+    }
+
+    const [pendingTicket] = await this.db
+      .select({ id: schema.verificationTickets.id })
+      .from(schema.verificationTickets)
+      .where(and(
+        eq(schema.verificationTickets.userId, userId),
+        eq(schema.verificationTickets.status, 'PENDING'),
+      ))
+      .limit(1);
+    if (pendingTicket) {
+      throw new ConflictException('Bạn đang có một hồ sơ chờ duyệt.');
+    }
+
     const [ticket] = await this.db
       .insert(schema.verificationTickets)
       .values({
         userId,
-        evidenceUrls,
-        contactPhone,
+        evidenceUrls: normalizedEvidenceUrls,
+        contactPhone: normalizedPhone,
         status: 'PENDING',
       })
       .returning();
@@ -392,10 +420,51 @@ export class AdminService {
       action: 'VERIFICATION_SUBMIT',
       tableName: 'verification_tickets',
       recordId: ticket.id,
-      newValues: { userId, contactPhone, evidenceUrls },
+      newValues: { userId, contactPhone: normalizedPhone, evidenceUrls: normalizedEvidenceUrls },
     });
 
     return ticket;
+  }
+
+  async withdrawVerificationTicket(ticketId: string, userId: string) {
+    const [ticket] = await this.db
+      .select()
+      .from(schema.verificationTickets)
+      .where(and(
+        eq(schema.verificationTickets.id, ticketId),
+        eq(schema.verificationTickets.userId, userId),
+      ))
+      .limit(1);
+    if (!ticket) throw new NotFoundException('Verification ticket not found');
+    if (ticket.status !== 'PENDING') {
+      throw new BadRequestException('Chỉ hồ sơ đang chờ duyệt mới có thể hủy.');
+    }
+
+    const [updatedTicket] = await this.db
+      .update(schema.verificationTickets)
+      .set({
+        status: 'REJECTED',
+        rejectReason: 'Người dùng đã hủy yêu cầu.',
+        reviewedBy: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(schema.verificationTickets.id, ticketId),
+        eq(schema.verificationTickets.userId, userId),
+        eq(schema.verificationTickets.status, 'PENDING'),
+      ))
+      .returning();
+    if (!updatedTicket) throw new ConflictException('Hồ sơ vừa được xử lý, vui lòng tải lại.');
+
+    await this.db.insert(schema.auditLogs).values({
+      userId,
+      action: 'VERIFICATION_WITHDRAW',
+      tableName: 'verification_tickets',
+      recordId: ticketId,
+      oldValues: ticket,
+      newValues: updatedTicket,
+    });
+    return updatedTicket;
   }
 
   async listVerificationTickets(status?: string, page = 1, limit = 10, cursor?: string) {
@@ -484,8 +553,14 @@ export class AdminService {
           reviewedBy: adminId,
           updatedAt: new Date(),
         })
-        .where(eq(schema.verificationTickets.id, ticketId))
+        .where(and(
+          eq(schema.verificationTickets.id, ticketId),
+          eq(schema.verificationTickets.status, 'PENDING'),
+        ))
         .returning();
+      if (!updatedTicket) {
+        throw new ConflictException('Hồ sơ vừa được xử lý, vui lòng tải lại.');
+      }
 
       await tx
         .update(schema.profiles)
@@ -535,7 +610,11 @@ export class AdminService {
       return updatedTicket;
     });
 
-    await this.notificationsService.sendNotification(notification);
+    try {
+      await this.notificationsService.sendNotification(notification);
+    } catch (error) {
+      this.logger.error(`Verification approval notification failed for ${ticketId}`, error);
+    }
     return updatedTicket;
   }
 
@@ -557,8 +636,12 @@ export class AdminService {
         reviewedBy: adminId,
         updatedAt: new Date(),
       })
-      .where(eq(schema.verificationTickets.id, ticketId))
+      .where(and(
+        eq(schema.verificationTickets.id, ticketId),
+        eq(schema.verificationTickets.status, 'PENDING'),
+      ))
       .returning();
+    if (!updatedTicket) throw new ConflictException('Hồ sơ vừa được xử lý, vui lòng tải lại.');
 
     await this.db.insert(schema.auditLogs).values({
       userId: adminId,
@@ -569,13 +652,100 @@ export class AdminService {
       newValues: updatedTicket,
     });
 
-    await this.notificationsService.sendNotification(
-      buildVerificationRejectedNotification({
-        receiverId: ticket.userId,
-        reason: rejectReason,
-      }),
-    );
+    try {
+      await this.notificationsService.sendNotification(
+        buildVerificationRejectedNotification({
+          receiverId: ticket.userId,
+          reason: rejectReason,
+        }),
+      );
+    } catch (error) {
+      this.logger.error(`Verification rejection notification failed for ${ticketId}`, error);
+    }
 
+    return updatedTicket;
+  }
+
+  async revokeVerificationTicket(ticketId: string, adminId: string, revokeReason: string) {
+    const reason = revokeReason.trim();
+    if (!reason) throw new BadRequestException('Lý do thu hồi là bắt buộc.');
+
+    const [ticket] = await this.db
+      .select()
+      .from(schema.verificationTickets)
+      .where(eq(schema.verificationTickets.id, ticketId))
+      .limit(1);
+    if (!ticket) throw new NotFoundException('Verification ticket not found');
+    if (ticket.status !== 'APPROVED') {
+      throw new BadRequestException('Chỉ hồ sơ đã được duyệt mới có thể thu hồi.');
+    }
+
+    const updatedTicket = await this.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(schema.verificationTickets)
+        .set({
+          status: 'REJECTED',
+          rejectReason: `Thu hồi bởi quản trị viên: ${reason}`,
+          reviewedBy: adminId,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(schema.verificationTickets.id, ticketId),
+          eq(schema.verificationTickets.status, 'APPROVED'),
+        ))
+        .returning();
+      if (!updated) throw new ConflictException('Hồ sơ vừa được xử lý, vui lòng tải lại.');
+
+      const [remainingApproved] = await tx
+        .select({ id: schema.verificationTickets.id })
+        .from(schema.verificationTickets)
+        .where(and(
+          eq(schema.verificationTickets.userId, ticket.userId),
+          eq(schema.verificationTickets.status, 'APPROVED'),
+        ))
+        .limit(1);
+      if (!remainingApproved) {
+        await tx
+          .update(schema.profiles)
+          .set({ isVerified: false, updatedAt: new Date() })
+          .where(eq(schema.profiles.userId, ticket.userId));
+
+        const [organizerRole] = await tx
+          .select({ id: schema.roles.id })
+          .from(schema.roles)
+          .where(eq(schema.roles.slug, 'organizer'))
+          .limit(1);
+        if (organizerRole) {
+          await tx
+            .delete(schema.userToRoles)
+            .where(and(
+              eq(schema.userToRoles.userId, ticket.userId),
+              eq(schema.userToRoles.roleId, organizerRole.id),
+            ));
+        }
+      }
+
+      await tx.insert(schema.auditLogs).values({
+        userId: adminId,
+        action: 'VERIFICATION_REVOKE',
+        tableName: 'verification_tickets',
+        recordId: ticketId,
+        oldValues: ticket,
+        newValues: updated,
+      });
+      return updated;
+    });
+
+    try {
+      await this.notificationsService.sendNotification(
+        buildVerificationRejectedNotification({
+          receiverId: ticket.userId,
+          reason: `Quyền Ban Tổ Chức đã bị thu hồi: ${reason}`,
+        }),
+      );
+    } catch (error) {
+      this.logger.error(`Verification revocation notification failed for ${ticketId}`, error);
+    }
     return updatedTicket;
   }
 
