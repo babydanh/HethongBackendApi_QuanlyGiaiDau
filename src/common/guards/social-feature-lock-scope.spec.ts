@@ -5,8 +5,12 @@ const source = (relativePath: string) =>
   readFileSync(resolve(__dirname, '../../', relativePath), 'utf8');
 
 describe('social feature lock scope', () => {
-  it('keeps the generic personal social API locked', () => {
-    expect(source('modules/social/social.controller.ts')).toContain(
+  it('keeps the generic personal social API unavailable while the replacement is pending', () => {
+    expect(source('app.module.ts')).not.toContain('SocialModule');
+    expect(
+      existsSync(resolve(__dirname, '../../modules/social')),
+    ).toBe(false);
+    expect(source('common/guards/social-feature-lock.guard.ts')).toContain(
       'SocialFeatureLockGuard',
     );
   });

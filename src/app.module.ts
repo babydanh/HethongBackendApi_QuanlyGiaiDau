@@ -29,7 +29,6 @@ import { TournamentsModule } from './modules/tournaments/tournaments.module';
 import { MatchesModule } from './modules/matches/matches.module';
 import { RankingsModule } from './modules/rankings/rankings.module';
 import { PaymentsModule } from './modules/payments/payments.module';
-import { SocialModule } from './modules/social/social.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -90,7 +89,6 @@ import { ZaloModule } from './providers/zalo/zalo.module';
     MatchesModule,
     RankingsModule,
     PaymentsModule,
-    SocialModule,
     ChatModule,
     NotificationsModule,
     AuditModule,
