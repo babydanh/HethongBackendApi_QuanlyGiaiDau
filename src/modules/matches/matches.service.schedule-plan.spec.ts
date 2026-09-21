@@ -166,4 +166,49 @@ describe('MatchesService schedule plan preview', () => {
       Math.max(...firstRound.map((item) => new Date(item.scheduledAt).getTime())) + 15 * 60_000,
     );
   });
+
+  it('schedules every round of a 16-slot knockout bracket in dependency order', async () => {
+    repository.findScheduleCourts.mockResolvedValue([
+      { id: 'court-1', venueId: 'venue-1', courtName: 'Court 1', status: 'AVAILABLE' },
+      { id: 'court-2', venueId: 'venue-1', courtName: 'Court 2', status: 'AVAILABLE' },
+      { id: 'court-3', venueId: 'venue-1', courtName: 'Court 3', status: 'AVAILABLE' },
+      { id: 'court-4', venueId: 'venue-1', courtName: 'Court 4', status: 'AVAILABLE' },
+      { id: 'court-5', venueId: 'venue-1', courtName: 'Court 5', status: 'AVAILABLE' },
+    ]);
+    repository.findAll.mockResolvedValue(result([
+      ...Array.from({ length: 8 }, (_, index) => match({ id: `r1-${index + 1}`, roundNumber: 1, matchOrder: index + 1, participant1Id: null, participant2Id: null })),
+      ...Array.from({ length: 4 }, (_, index) => match({ id: `r2-${index + 1}`, roundNumber: 2, matchOrder: index + 1, participant1Id: null, participant2Id: null })),
+      ...Array.from({ length: 2 }, (_, index) => match({ id: `r3-${index + 1}`, roundNumber: 3, matchOrder: index + 1, participant1Id: null, participant2Id: null })),
+      match({ id: 'r4-1', roundNumber: 4, matchOrder: 1, participant1Id: null, participant2Id: null }),
+    ]));
+
+    const preview = await service.previewSchedulePlan(
+      'tournament-1',
+      { sub: 'owner-1', roles: ['PLAYER'] } as never,
+      {
+        date: '2026-08-27',
+        courtIds: ['court-1', 'court-2', 'court-3', 'court-4', 'court-5'],
+        durationMinutes: 15,
+        bufferMinutes: 0,
+        minimumStartIntervalMinutes: 15,
+        strategy: 'ROUND_ORDER_EARLIEST_AVAILABLE',
+      } as never,
+    );
+
+    expect(preview.data.assignments).toHaveLength(15);
+    const assignmentTime = (id: string) => {
+      const assignment = preview.data.assignments.find((item) => item.matchId === id);
+      expect(assignment).toBeDefined();
+      return new Date(assignment!.scheduledAt).getTime();
+    };
+    const r1End = Math.max(...Array.from({ length: 8 }, (_, index) => assignmentTime(`r1-${index + 1}`))) + 15 * 60_000;
+    const r2Start = Math.min(...Array.from({ length: 4 }, (_, index) => assignmentTime(`r2-${index + 1}`)));
+    const r2End = Math.max(...Array.from({ length: 4 }, (_, index) => assignmentTime(`r2-${index + 1}`))) + 15 * 60_000;
+    const r3Start = Math.min(...Array.from({ length: 2 }, (_, index) => assignmentTime(`r3-${index + 1}`)));
+    const r3End = Math.max(...Array.from({ length: 2 }, (_, index) => assignmentTime(`r3-${index + 1}`))) + 15 * 60_000;
+
+    expect(r2Start).toBeGreaterThanOrEqual(r1End);
+    expect(r3Start).toBeGreaterThanOrEqual(r2End);
+    expect(assignmentTime('r4-1')).toBeGreaterThanOrEqual(r3End);
+  });
 });
