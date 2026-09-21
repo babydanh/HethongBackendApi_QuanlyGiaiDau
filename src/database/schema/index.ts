@@ -26,4 +26,5 @@ export * from './user-devices.schema';
 export * from './club-match-sessions.schema';
 export * from './club-standalone-matches.schema';
 export * from './social-pickups.schema';
+export * from './social-sessions.schema';
 export * from './zalo-notification.schema';
