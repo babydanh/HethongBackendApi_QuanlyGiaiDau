@@ -956,6 +956,54 @@ export class TournamentsRepository {
     return await this.db.transaction(async (tx) => {
       const inviteCode = await this.generateUniqueInviteCode(tx);
 
+      // The create forms keep the venue draft in tournamentConfig.location.
+      // Materialize that draft in the same transaction so the manage page can
+      // immediately load the tournament venue card instead of showing an
+      // unlinked location snapshot.
+      const sourceTournamentConfig = data.tournamentConfig && typeof data.tournamentConfig === 'object'
+        ? data.tournamentConfig
+        : {};
+      const rawLocation = sourceTournamentConfig.location;
+      const location = rawLocation && typeof rawLocation === 'object' && !Array.isArray(rawLocation)
+        ? rawLocation as Record<string, unknown>
+        : null;
+      const readLocationText = (key: string) => {
+        const value = location?.[key];
+        return typeof value === 'string' ? value.trim() : '';
+      };
+      let venueId = data.venueId || null;
+      let tournamentConfig = sourceTournamentConfig;
+
+      if (!venueId && location) {
+        const venueName = readLocationText('venueName');
+        const locationAddress = [
+          readLocationText('address'),
+          readLocationText('ward'),
+          readLocationText('district'),
+          readLocationText('province'),
+        ].filter(Boolean).join(', ');
+
+        if (venueName && locationAddress) {
+          const [createdVenue] = await tx
+            .insert(schema.tournamentVenues)
+            .values({
+              ownerUserId: userId,
+              name: venueName,
+              locationAddress,
+            })
+            .returning({ id: schema.tournamentVenues.id });
+          venueId = createdVenue.id;
+
+          const configuredVenueIds = Array.isArray(sourceTournamentConfig.venueIds)
+            ? sourceTournamentConfig.venueIds.filter((value): value is string => typeof value === 'string')
+            : [];
+          tournamentConfig = {
+            ...sourceTournamentConfig,
+            venueIds: Array.from(new Set([...configuredVenueIds, venueId])),
+          };
+        }
+      }
+
       // Get platform fee percentage from configs dynamically
       let configKey = 'PLATFORM_FEE_PERCENTAGE_CLUB';
       let defaultPct = '0';
@@ -1017,7 +1065,7 @@ export class TournamentsRepository {
           description: data.description || null,
           matchType: data.matchType,
           sportRules: data.sportRules,
-          tournamentConfig: data.tournamentConfig,
+          tournamentConfig,
           entryFee: (data.entryFee || 0).toString(),
           platformFeePercentage,
           platformFeeThreshold: platformFeeThreshold.toString(),
@@ -1031,7 +1079,7 @@ export class TournamentsRepository {
           maxParticipants: data.maxParticipants || null,
           startDate: data.startDate ? new Date(data.startDate) : null,
           endDate: data.endDate ? new Date(data.endDate) : null,
-          venueId: data.venueId || null,
+          venueId,
           tournamentType: data.tournamentType || 'CLUB',
           bannerUrl: data.bannerUrl || null,
           logoUrl: data.logoUrl || null,
