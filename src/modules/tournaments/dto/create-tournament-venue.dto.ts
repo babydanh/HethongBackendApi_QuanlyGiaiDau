@@ -7,6 +7,7 @@ import {
   IsString,
   Max,
   Min,
+  IsUUID,
 } from 'class-validator';
 import { CreateVenueDto } from '../../venues/dto/create-venue.dto';
 
@@ -19,6 +20,13 @@ import { CreateVenueDto } from '../../venues/dto/create-venue.dto';
  * only as a TypeScript intersection.
  */
 export class CreateTournamentVenueDto extends CreateVenueDto {
+  @ApiPropertyOptional({
+    description: 'Gắn một địa điểm đã lưu vào giải thay vì tạo bản ghi mới',
+  })
+  @IsOptional()
+  @IsUUID()
+  venueId?: string;
+
   @ApiPropertyOptional({
     description: 'Đặt địa điểm này làm địa điểm mặc định của giải',
   })

@@ -325,7 +325,12 @@ export class TournamentsService {
       systemRoles,
     );
 
-    const venue = await this.venuesService.create(user.sub, dto);
+    // The organizer can reuse a venue that was created earlier. Keep the
+    // existing venue row and only add its id to this tournament configuration.
+    // This prevents duplicate venue cards and preserves the venue's courts.
+    const venue = dto.venueId
+      ? await this.venuesService.findOne(dto.venueId)
+      : await this.venuesService.create(user.sub, dto);
 
     const config = (tournament.tournamentConfig || {}) as Record<
       string,
@@ -347,7 +352,7 @@ export class TournamentsService {
       },
     });
 
-    if (dto.initialCourtCount && dto.initialCourtCount > 0) {
+    if (!dto.venueId && dto.initialCourtCount && dto.initialCourtCount > 0) {
       await this.venuesService.addCourtsBatch(
         venue.id,
         dto.initialCourtCount,
@@ -4463,8 +4468,9 @@ export class TournamentsService {
       : null;
 
     await this.validateEloLimits(tournament, userIds, { division });
-    // Partner bấm link/QR join: chặn đội vi phạm genderRestriction của division
-    await this.validateGenderRestriction(division, userIds);
+    // Gender validation runs once inside the join transaction using the
+    // locked participant and its canonical registeredBy leader. This avoids
+    // two sources of truth for legacy rosters.
 
     const result = await this.tournamentsRepository.joinTeam(
       tournamentId,
