@@ -2260,6 +2260,11 @@ export class MatchesRepository {
         : data.courtName !== undefined
           ? data.courtName?.trim() || null
           : existing.courtName;
+      const effectiveCourtAddress = canonicalCourt
+        ? canonicalCourt.courtAddress
+        : data.courtAddress !== undefined
+          ? data.courtAddress?.trim() || null
+          : existing.courtAddress;
       const effectiveCourtId =
         data.courtId !== undefined ? data.courtId || null : existing.courtId;
       const effectiveScheduledAt =
@@ -2300,17 +2305,22 @@ export class MatchesRepository {
 
         if (effectiveCourtName) {
           // A tournament may use multiple venues whose courts share display
-          // names such as "Sân 1". Prefer the stable court ID; only fall back
-          // to the name for legacy rows that predate courtId persistence.
-          const samePhysicalCourt = effectiveCourtId
-            ? or(
-                eq(schema.matches.courtId, effectiveCourtId),
-                and(
-                  isNull(schema.matches.courtId),
-                  eq(schema.matches.courtName, effectiveCourtName),
-                ),
+          // names such as "Sân 1". A persisted court ID is authoritative. A
+          // legacy row without an ID can only be matched by name when its
+          // stored venue address also identifies the same physical location;
+          // never let a same-named court at another venue block this write.
+          const legacySamePhysicalCourt = effectiveCourtAddress
+            ? and(
+                isNull(schema.matches.courtId),
+                eq(schema.matches.courtName, effectiveCourtName),
+                eq(schema.matches.courtAddress, effectiveCourtAddress),
               )
-            : eq(schema.matches.courtName, effectiveCourtName);
+            : null;
+          const samePhysicalCourt = effectiveCourtId
+            ? legacySamePhysicalCourt
+              ? or(eq(schema.matches.courtId, effectiveCourtId), legacySamePhysicalCourt)
+              : eq(schema.matches.courtId, effectiveCourtId)
+            : legacySamePhysicalCourt || eq(schema.matches.courtName, effectiveCourtName);
           const candidateMatches = await tx
             .select({
               id: schema.matches.id,
