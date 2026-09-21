@@ -6,7 +6,6 @@ import type { AppDb, AppDbOrTx, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import { AuditService } from '../audit/audit.service';
 import { selectScoringPreset } from './scoring-preset';
-import { isSocialFeatureEnabled } from '../../common/guards/social-feature-lock.guard';
 
 type MatchType = 'SINGLES' | 'DOUBLES' | 'MIXED_DOUBLES';
 type SessionStatus = 'OPEN' | 'LIVE' | 'CLOSED' | 'ENDED' | 'CANCELLED';
@@ -293,7 +292,7 @@ export class ClubMatchSessionsRepository {
   }) {
     return this.db.transaction(async (tx) => {
       const {
-        publishAnnouncement: _publishAnnouncement,
+        publishAnnouncement,
         registrationOpenAt,
         registrationClosedAt,
         ...sessionInput
@@ -334,7 +333,7 @@ export class ClubMatchSessionsRepository {
         return existingFull[0];
       }
       const displayName = input.name?.trim() || 'Buổi giao lưu CLB';
-      if (input.publishAnnouncement !== false && isSocialFeatureEnabled()) {
+      if (publishAnnouncement !== false) {
         await tx.insert(schema.communityPosts).values({
           communityId: created.communityId,
           authorId: created.createdBy,
@@ -1047,10 +1046,6 @@ export class ClubMatchSessionsRepository {
     sessionId: string,
     flushRemainder: boolean,
   ) {
-    if (!isSocialFeatureEnabled()) {
-      return { postsCreated: 0, matchesPublished: 0 };
-    }
-
     // Match creation is concurrent. Serialize only digest selection per
     // session so two creators cannot include the same match in two posts.
     await tx.execute(

@@ -44,10 +44,6 @@ import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guar
 import { CommunitySocialService } from './community-social.service';
 import { SearchCommunityDto } from './dto/search-community.dto';
 import { QueryCommunityActivityFeedDto } from './dto/query-community-activity-feed.dto';
-import {
-  assertSocialFeatureEnabled,
-  isSocialFeatureEnabled,
-} from '../../common/guards/social-feature-lock.guard';
 
 @ApiTags('communities')
 @Controller('communities')
@@ -67,7 +63,6 @@ export class CommunitiesController {
     @Query() query: QueryCommunityActivityFeedDto,
     @CurrentUser() user?: { id: string; roles?: string[] },
   ) {
-    assertSocialFeatureEnabled();
     return this.communitySocialService.listActivityFeed(query, user);
   }
 
@@ -132,7 +127,7 @@ export class CommunitiesController {
     const type = query.type ?? 'ALL';
     const include = (candidate: string) => type === 'ALL' || type === candidate;
     const [posts, members, matches, tournaments] = await Promise.all([
-      include('POSTS') && isSocialFeatureEnabled()
+      include('POSTS')
         ? this.communitySocialService.listPosts(id, query.limit, undefined, user, query.q)
         : Promise.resolve({ data: [] }),
       include('MEMBERS')
