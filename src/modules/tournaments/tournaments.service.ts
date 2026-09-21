@@ -2795,6 +2795,52 @@ export class TournamentsService {
       updateTournamentDto,
     );
 
+    // Introduction and visual identity are shared by a multi-division
+    // tournament. Keep the parent projection in sync for every management
+    // write path (inline overview, Basic Info tab, API clients), but only when
+    // the caller also owns the parent or is an administrator. A co-organizer
+    // may still update the child division without receiving parent access.
+    if (
+      existing.parentId &&
+      (updateTournamentDto.description !== undefined ||
+        updateTournamentDto.bannerUrl !== undefined ||
+        updateTournamentDto.logoUrl !== undefined)
+    ) {
+      try {
+        const parent = await this.tournamentsRepository.findParentById(
+          existing.parentId,
+        );
+        if (
+          parent &&
+          (parent.createdBy === userId || systemRoles.includes('ADMIN'))
+        ) {
+          await this.tournamentsRepository.updateParent(
+            existing.parentId,
+            userId,
+            {
+              ...(updateTournamentDto.description !== undefined && {
+                description: updateTournamentDto.description,
+              }),
+              ...(updateTournamentDto.bannerUrl !== undefined && {
+                bannerUrl: updateTournamentDto.bannerUrl,
+              }),
+              ...(updateTournamentDto.logoUrl !== undefined && {
+                logoUrl: updateTournamentDto.logoUrl,
+              }),
+            },
+          );
+        }
+      } catch (error) {
+        // The child update is already committed and remains canonical. A
+        // parent sync failure must never turn that successful PATCH into an
+        // error response for the organizer.
+        console.error(
+          `Failed to sync parent tournament ${existing.parentId}:`,
+          error,
+        );
+      }
+    }
+
     // Thông báo cho người theo dõi khi dời lịch
     const dateChanged =
       (updateTournamentDto.startDate &&
