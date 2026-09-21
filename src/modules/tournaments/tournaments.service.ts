@@ -93,6 +93,10 @@ import {
 import { CommunitySocialRepository } from '../communities/community-social.repository';
 import { validateFootballRosterSelection } from './utils/football-roster-validation';
 import {
+  normalizeGenderRestriction,
+  normalizeProfileGender,
+} from '../../common/helpers/gender.helper';
+import {
   assertValidFootballTeamConfig,
   resolveFootballTeamConfig,
 } from './utils/football-team-config';
@@ -3849,13 +3853,10 @@ export class TournamentsService {
   private normalizeGenderValue(
     value?: string | null,
   ): 'MALE' | 'FEMALE' | null {
-    const v = String(value ?? '')
-      .trim()
-      .toUpperCase()
-      .replace(/[-–\s]/g, '_');
-    if (['MALE', 'MEN', 'NAM'].includes(v)) return 'MALE';
-    if (['FEMALE', 'WOMEN', 'NU', 'NỮ'].includes(v)) return 'FEMALE';
-    return null; // không nhận biết → không block (tránh chặn oan)
+    const normalized = normalizeProfileGender(value);
+    return normalized === 'MALE' || normalized === 'FEMALE'
+      ? normalized
+      : null;
   }
 
   /**
@@ -3869,7 +3870,8 @@ export class TournamentsService {
     userIds: Array<string | null | undefined>,
   ): Promise<void> {
     if (!division?.genderRestriction) return;
-    const restriction = String(division.genderRestriction).trim().toUpperCase();
+    const restriction = normalizeGenderRestriction(division.genderRestriction);
+    if (!restriction) return;
     const knownUsers = userIds.filter(Boolean) as string[];
 
     if (restriction === 'MIXED') {

@@ -8,10 +8,12 @@ describe('gender normalization', () => {
   it.each([
     ['MALE', 'MALE'],
     ['Nam', 'MALE'],
+    ['M', 'MALE'],
     [' men ', 'MALE'],
     ['FEMALE', 'FEMALE'],
     ['Nữ', 'FEMALE'],
     ['NỮ', 'FEMALE'],
+    ['F', 'FEMALE'],
     [' women ', 'FEMALE'],
     ['Khác', 'OTHER'],
     ['OTHER', 'OTHER'],

@@ -67,17 +67,20 @@ import { assertFootballRosterLockable } from './utils/football-roster-lock';
 import { resolveFootballTeamConfig } from './utils/football-team-config';
 import { isRegistrationRosterCompleteForPayment } from './utils/registration-payment-eligibility';
 import { isRegistrationOpenStatus } from './utils/registration-lifecycle';
+import {
+  normalizeGenderRestriction,
+  normalizeProfileGender,
+} from '../../common/helpers/gender.helper';
 
 @Injectable()
 export class TournamentsRepository {
   private normalizeGender(
     value: string | null | undefined,
   ): 'MALE' | 'FEMALE' | null {
-    const normalized = value?.trim().toUpperCase();
-    if (normalized === 'MALE' || normalized === 'NAM') return 'MALE';
-    if (normalized === 'FEMALE' || normalized === 'NU' || normalized === 'NỮ')
-      return 'FEMALE';
-    return null;
+    const normalized = normalizeProfileGender(value);
+    return normalized === 'MALE' || normalized === 'FEMALE'
+      ? normalized
+      : null;
   }
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
@@ -2757,7 +2760,7 @@ export class TournamentsRepository {
       const targetMatchType =
         targetGender === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
       const divisionGender =
-        this.normalizeGender(division?.genderRestriction) ??
+        normalizeGenderRestriction(division?.genderRestriction) ??
         (division?.genderRestriction || '').toUpperCase();
       if (
         division &&
@@ -3096,7 +3099,7 @@ export class TournamentsRepository {
           targetGenderRestriction === 'MIXED' ? 'MIXED_DOUBLES' : 'DOUBLES';
 
         const divGender =
-          this.normalizeGender(division.genderRestriction) ??
+          normalizeGenderRestriction(division.genderRestriction) ??
           (division.genderRestriction || '').toUpperCase();
         const isMatchTypeValid =
           division.matchType === targetMatchType ||
@@ -3120,7 +3123,7 @@ export class TournamentsRepository {
           );
         }
         const restriction =
-          this.normalizeGender(tournament.genderRestriction) ??
+          normalizeGenderRestriction(tournament.genderRestriction) ??
           tournament.genderRestriction.toUpperCase();
 
         if (restriction === 'MALE' && teamPartnerGender !== 'MALE') {
