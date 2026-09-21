@@ -1032,6 +1032,13 @@ export class MatchesService {
     type Interval = { start: number; end: number; participantIds: string[] };
     const busyByCourt = new Map<string, Interval[]>();
     const busyByParticipant = new Map<string, Interval[]>();
+    const latestEndByRound = new Map<string, number>();
+    const getRoundScopeKey = (match: Record<string, unknown>) =>
+      `${String(match.divisionId ?? 'default')}::${String(match.stageId ?? 'stage')}::${String(match.bracketBranch ?? 'main')}`;
+    const getRoundNumber = (match: Record<string, unknown>) => {
+      const value = Number(match.roundNumber);
+      return Number.isFinite(value) && value > 0 ? value : 1;
+    };
     const addBusy = (courtId: string, interval: Interval) => {
       const list = busyByCourt.get(courtId) || [];
       list.push(interval);
@@ -1061,6 +1068,8 @@ export class MatchesService {
           (value): value is string => Boolean(value),
         ),
       });
+      const roundKey = `${getRoundScopeKey(match as unknown as Record<string, unknown>)}::${getRoundNumber(match as unknown as Record<string, unknown>)}`;
+      latestEndByRound.set(roundKey, Math.max(latestEndByRound.get(roundKey) || 0, end));
     }
 
     const overlaps = (start: number, end: number, interval: Interval) =>
@@ -1092,13 +1101,6 @@ export class MatchesService {
         skipped.push({ matchId: match.id, reason: 'BYE' });
         continue;
       }
-      if (!match.participant1Id || !match.participant2Id) {
-        skipped.push({
-          matchId: match.id,
-          reason: 'TBD_OR_DEPENDENCY_BLOCKED',
-        });
-        continue;
-      }
       if (
         ['COMPLETED', 'CANCELLED', 'DISPUTED', 'ONGOING'].includes(match.status)
       ) {
@@ -1111,9 +1113,18 @@ export class MatchesService {
       }
 
       let best: { courtId: string; start: number } | null = null;
+      const matchRecord = match as unknown as Record<string, unknown>;
+      const roundNumber = getRoundNumber(matchRecord);
+      const scopeKey = getRoundScopeKey(matchRecord);
+      const previousRoundEnd = roundNumber > 1
+        ? latestEndByRound.get(`${scopeKey}::${roundNumber - 1}`) || 0
+        : 0;
+      const participantIds = [match.participant1Id, match.participant2Id].filter(
+        (value): value is string => Boolean(value),
+      );
       for (const court of courts) {
-        let candidateStart = windowStart.getTime();
-        const participantIds = [match.participant1Id, match.participant2Id];
+        let candidateStart = Math.max(windowStart.getTime(), previousRoundEnd);
+        candidateStart = snapToGrid(candidateStart);
         while (candidateStart + durationMs + bufferMs <= windowEnd.getTime()) {
           const candidateEnd = candidateStart + durationMs + bufferMs;
           const courtConflict = (busyByCourt.get(court.id) || []).find(
@@ -1148,9 +1159,14 @@ export class MatchesService {
       const interval = {
         start: best.start,
         end: best.start + durationMs + bufferMs,
-        participantIds: [match.participant1Id, match.participant2Id],
+        participantIds,
       };
       addBusy(best.courtId, interval);
+      const roundKey = `${scopeKey}::${roundNumber}`;
+      latestEndByRound.set(
+        roundKey,
+        Math.max(latestEndByRound.get(roundKey) || 0, interval.end),
+      );
       assignments.push({
         matchId: match.id,
         courtId: best.courtId,

@@ -105,7 +105,7 @@ describe('MatchesService schedule plan preview', () => {
     expect(repository.findAll).not.toHaveBeenCalled();
   });
 
-  it('skips BYE, TBD, ongoing and already scheduled matches', async () => {
+  it('schedules TBD bracket slots but skips BYE, ongoing and already scheduled matches', async () => {
     repository.findScheduleCourts.mockResolvedValue([
       { id: 'court-1', venueId: 'venue-1', courtName: 'Court 1', status: 'AVAILABLE' },
     ]);
@@ -122,12 +122,48 @@ describe('MatchesService schedule plan preview', () => {
       { date: '2026-08-27', courtIds: ['court-1'], strategy: 'ROUND_ORDER_EARLIEST_AVAILABLE' } as never,
     );
 
-    expect(preview.data.assignments).toHaveLength(0);
+    expect(preview.data.assignments).toHaveLength(1);
+    expect(preview.data.assignments[0]).toMatchObject({
+      matchId: 'tbd',
+      courtId: 'court-1',
+    });
     expect(preview.data.skipped.map((item) => item.reason)).toEqual([
       'BYE',
-      'TBD_OR_DEPENDENCY_BLOCKED',
       'TERMINAL_OR_ONGOING',
       'ALREADY_SCHEDULED',
     ]);
+  });
+
+  it('does not start a later knockout round before the previous round ends', async () => {
+    repository.findScheduleCourts.mockResolvedValue([
+      { id: 'court-1', venueId: 'venue-1', courtName: 'Court 1', status: 'AVAILABLE' },
+      { id: 'court-2', venueId: 'venue-1', courtName: 'Court 2', status: 'AVAILABLE' },
+    ]);
+    repository.findAll.mockResolvedValue(result([
+      match({ id: 'r1-a', matchOrder: 1, roundNumber: 1, participant1Id: 'p1', participant2Id: 'p2' }),
+      match({ id: 'r1-b', matchOrder: 2, roundNumber: 1, participant1Id: 'p3', participant2Id: 'p4' }),
+      match({ id: 'r2-a', matchOrder: 3, roundNumber: 2, participant1Id: null, participant2Id: null }),
+    ]));
+
+    const preview = await service.previewSchedulePlan(
+      'tournament-1',
+      { sub: 'owner-1', roles: ['PLAYER'] } as never,
+      {
+        date: '2026-08-27',
+        courtIds: ['court-1', 'court-2'],
+        durationMinutes: 15,
+        bufferMinutes: 0,
+        minimumStartIntervalMinutes: 15,
+        strategy: 'ROUND_ORDER_EARLIEST_AVAILABLE',
+      } as never,
+    );
+
+    const firstRound = preview.data.assignments.filter((item) => item.matchId !== 'r2-a');
+    const laterRound = preview.data.assignments.find((item) => item.matchId === 'r2-a');
+    expect(firstRound).toHaveLength(2);
+    expect(laterRound).toBeDefined();
+    expect(new Date(laterRound!.scheduledAt).getTime()).toBeGreaterThanOrEqual(
+      Math.max(...firstRound.map((item) => new Date(item.scheduledAt).getTime())) + 15 * 60_000,
+    );
   });
 });
