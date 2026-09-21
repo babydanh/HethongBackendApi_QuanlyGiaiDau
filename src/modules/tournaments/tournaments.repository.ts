@@ -3940,6 +3940,9 @@ export class TournamentsRepository {
       isPaid: boolean;
       tournamentDivisionId: string | null;
       teamStatus: string;
+      teamInviteToken: string | null;
+      partnerInviteExpiresAt: Date | null;
+      isWildcard: boolean;
       registeredAt: Date;
       customResponses: Record<string, unknown> | null;
       registeredBy: {
@@ -3977,6 +3980,10 @@ export class TournamentsRepository {
         tournamentDivisionId:
           schema.tournamentParticipants.tournamentDivisionId,
         teamStatus: schema.tournamentParticipants.teamStatus,
+        teamInviteToken: schema.tournamentParticipants.teamInviteToken,
+        partnerInviteExpiresAt:
+          schema.tournamentParticipants.partnerInviteExpiresAt,
+        isWildcard: schema.tournamentParticipants.isWildcard,
         registeredAt: schema.tournamentParticipants.registeredAt,
         customResponses: schema.tournamentParticipants.customResponses,
         registeredBy: {
@@ -4230,33 +4237,43 @@ export class TournamentsRepository {
           p.teamStatus === 'PENDING_PARTNER' ||
           p.teamStatus === 'PENDING_APPROVAL',
       )
-      .map((p) => ({
-        ...p,
-        customResponses: null,
-        payment: null,
-        registeredBy: p.registeredBy
-          ? {
-              id: p.registeredBy.id,
-              fullName: p.registeredBy.fullName,
-              avatarUrl: p.registeredBy.avatarUrl,
-              email: null,
-            }
-          : null,
-        members: p.members.map((m) => ({
-          id: m.id,
-          userId: m.userId,
-          fullName: m.fullName,
-          avatarUrl: m.avatarUrl,
-          role: m.role,
-          teamRole: m.teamRole,
-          isTemporary: m.isTemporary,
-          confirmedAt: m.confirmedAt,
-          invitationToken: m.invitationToken,
-          createdAt: m.createdAt,
-          isMock: m.isMock,
-          elo: m.elo,
-        })),
-      }));
+      .map((p) => {
+        // Invite metadata is only for the authorized organizer projection.
+        // Public roster responses must never expose a reusable partner token.
+        const {
+          teamInviteToken: _teamInviteToken,
+          partnerInviteExpiresAt: _partnerInviteExpiresAt,
+          isWildcard: _isWildcard,
+          ...safeParticipant
+        } = p;
+        return {
+          ...safeParticipant,
+          customResponses: null,
+          payment: null,
+          registeredBy: p.registeredBy
+            ? {
+                id: p.registeredBy.id,
+                fullName: p.registeredBy.fullName,
+                avatarUrl: p.registeredBy.avatarUrl,
+                email: null,
+              }
+            : null,
+          members: p.members.map((m) => ({
+            id: m.id,
+            userId: m.userId,
+            fullName: m.fullName,
+            avatarUrl: m.avatarUrl,
+            role: m.role,
+            teamRole: m.teamRole,
+            isTemporary: m.isTemporary,
+            confirmedAt: m.confirmedAt,
+            invitationToken: m.invitationToken,
+            createdAt: m.createdAt,
+            isMock: m.isMock,
+            elo: m.elo,
+          })),
+        };
+      });
   }
 
   async findOpsAuditLogs(
