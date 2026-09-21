@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { isDeepStrictEqual } from 'node:util';
 import { TournamentsRepository } from './tournaments.repository';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
+import { CreateTournamentVenueDto } from './dto/create-tournament-venue.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
@@ -314,11 +315,7 @@ export class TournamentsService {
 
   async createTournamentVenue(
     tournamentId: string,
-    dto: CreateVenueDto & {
-      isDefault?: boolean;
-      initialCourtCount?: number;
-      courtPrefix?: string;
-    },
+    dto: CreateTournamentVenueDto,
     user: JwtPayload,
     systemRoles: string[] = [],
   ) {

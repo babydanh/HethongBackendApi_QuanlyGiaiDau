@@ -15,6 +15,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
+import { SocialFeatureLockGuard } from '../../common/guards/social-feature-lock.guard';
 import { CreateSocialPickupDto } from './dto/create-social-pickup.dto';
 import { QuerySocialPickupsDto } from './dto/query-social-pickups.dto';
 import { RequestSocialPickupDto } from './dto/request-social-pickup.dto';
@@ -25,6 +26,7 @@ type RequestUser = { id: string; roles?: string[] };
 @ApiTags('social-pickups')
 @ApiBearerAuth()
 @Controller('social/pickups')
+@UseGuards(SocialFeatureLockGuard)
 export class SocialPickupsController {
   constructor(private readonly service: SocialPickupsService) {}
 

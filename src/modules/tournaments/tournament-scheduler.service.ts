@@ -8,6 +8,7 @@ import {
   evaluateTournamentCleanup,
   TOURNAMENT_CLEANUP_GRACE_DAYS,
 } from './utils/tournament-cleanup-policy';
+import { isSocialFeatureEnabled } from '../../common/guards/social-feature-lock.guard';
 
 @Injectable()
 export class TournamentSchedulerService {
@@ -373,18 +374,20 @@ export class TournamentSchedulerService {
           }
 
           // Auto-post to Community Feed
-          try {
-            await this.db.insert(schema.communityPosts).values({
-              communityId: t.communityId,
-              authorId: t.createdBy,
-              tournamentId: newTournament[0].id,
-              type: 'TOURNAMENT_ANNOUNCEMENT',
-              body: `⚡ CLB vừa mở giải đấu định kỳ: **${newName}**! Nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`,
-              mediaUrls: [],
-              status: 'PUBLISHED',
-            });
-          } catch (feedErr) {
-            this.logger.error('Failed to post recurring tournament to community feed:', feedErr.message);
+          if (isSocialFeatureEnabled()) {
+            try {
+              await this.db.insert(schema.communityPosts).values({
+                communityId: t.communityId,
+                authorId: t.createdBy,
+                tournamentId: newTournament[0].id,
+                type: 'TOURNAMENT_ANNOUNCEMENT',
+                body: `⚡ CLB vừa mở giải đấu định kỳ: **${newName}**! Nhấn vào thẻ giải đấu bên dưới để xem chi tiết và đăng ký tham gia.`,
+                mediaUrls: [],
+                status: 'PUBLISHED',
+              });
+            } catch (feedErr) {
+              this.logger.error('Failed to post recurring tournament to community feed:', feedErr.message);
+            }
           }
         }
 

@@ -12,6 +12,7 @@ import { ReportCommunityContentDto } from './dto/report-community-content.dto';
 import { UpdateCommunityPreferencesDto } from './dto/update-community-preferences.dto';
 import { ModerateCommunityPostDto, DeleteCommunityPostDto } from './dto/moderate-community-post.dto';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
+import { SocialFeatureLockGuard } from '../../common/guards/social-feature-lock.guard';
 import { UpdateCommunityCommentDto } from './dto/update-community-comment.dto';
 import { ModerateCommunityCommentDto } from './dto/moderate-community-comment.dto';
 import { UpdateCommunityReportStatusDto } from './dto/update-community-report-status.dto';
@@ -19,6 +20,7 @@ import { ShareCommunityActivityDto } from './dto/share-community-activity.dto';
 
 @ApiTags('community-social')
 @Controller('communities/:communityId')
+@UseGuards(SocialFeatureLockGuard)
 export class CommunitySocialController {
   constructor(private readonly socialService: CommunitySocialService) {}
 

@@ -22,6 +22,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
+import { CreateTournamentVenueDto } from './dto/create-tournament-venue.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
@@ -365,12 +366,7 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Tạo địa điểm thi đấu mới cho giải' })
   async createTournamentVenue(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    dto: CreateVenueDto & {
-      isDefault?: boolean;
-      initialCourtCount?: number;
-      courtPrefix?: string;
-    },
+    @Body() dto: CreateTournamentVenueDto,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.createTournamentVenue(

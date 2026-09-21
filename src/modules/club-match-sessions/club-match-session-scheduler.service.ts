@@ -4,6 +4,7 @@ import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
+import { isSocialFeatureEnabled } from '../../common/guards/social-feature-lock.guard';
 
 const MS_PER_DAY = 86400000;
 
@@ -161,20 +162,22 @@ export class ClubMatchSessionSchedulerService {
             .where(eq(schema.clubMatchSessions.id, template.id));
 
           const displayName = templateName || 'Buổi giao lưu CLB';
-          await tx.insert(schema.communityPosts).values({
-            communityId: template.communityId,
-            authorId: template.createdBy,
-            clubMatchSessionId: created.id,
-            type: 'CLUB_SESSION_ANNOUNCEMENT',
-            body: `🏸 Buổi giao lưu mới: **${displayName}** đã mở đăng ký.`,
-            mediaUrls: [],
-            status: 'PUBLISHED',
-            idempotencyKey:
-              `club-match-session:${template.id}:${eventAt.toISOString()}`.slice(
-                0,
-                128,
-              ),
-          });
+          if (isSocialFeatureEnabled()) {
+            await tx.insert(schema.communityPosts).values({
+              communityId: template.communityId,
+              authorId: template.createdBy,
+              clubMatchSessionId: created.id,
+              type: 'CLUB_SESSION_ANNOUNCEMENT',
+              body: `🏸 Buổi giao lưu mới: **${displayName}** đã mở đăng ký.`,
+              mediaUrls: [],
+              status: 'PUBLISHED',
+              idempotencyKey:
+                `club-match-session:${template.id}:${eventAt.toISOString()}`.slice(
+                  0,
+                  128,
+                ),
+            });
+          }
           return created;
         });
 

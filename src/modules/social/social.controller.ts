@@ -6,6 +6,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
+import { SocialFeatureLockGuard } from '../../common/guards/social-feature-lock.guard';
 import { CreateProfilePostDto } from './dto/create-profile-post.dto';
 import { CreateCommunityCommentDto } from '../communities/dto/create-community-comment.dto';
 import { ReactCommunityPostDto } from '../communities/dto/react-community-post.dto';
@@ -13,6 +14,7 @@ import { ReactCommunityPostDto } from '../communities/dto/react-community-post.d
 @ApiTags('social')
 @ApiBearerAuth()
 @Controller('social')
+@UseGuards(SocialFeatureLockGuard)
 export class SocialController {
   constructor(private readonly socialService: SocialService) {}
 
