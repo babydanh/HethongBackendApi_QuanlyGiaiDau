@@ -1880,79 +1880,7 @@ export class TournamentsRepository {
         return { division: selectedDivision, isWaitlisted: false };
       };
 
-      // (resolveMatchingDivision được gọi sau khi partnerId xác định xong — xem step 9 bên dưới)
-
-      // 6. Kiểm tra số lượng tối đa cấp tournament cho backward-compatible (trong transaction với FOR UPDATE)
-      if (tournament.maxParticipants) {
-        // Lock hàng tournament để tránh race condition
-        const [lockedTournament] = await tx
-          .select()
-          .from(schema.tournaments)
-          .where(eq(schema.tournaments.id, tournamentId))
-          .for('update');
-
-        if (!lockedTournament)
-          throw new BadRequestException('Giải đấu không tồn tại.');
-
-        // Lite tournament: count distinct roster users; SINGLES max=maxParticipants, DOUBLES max=maxParticipants*2
-        const tCfg = (lockedTournament.tournamentConfig || {}) as Record<
-          string,
-          unknown
-        >;
-        if (tCfg.isLite === true) {
-          const isDoubles =
-            lockedTournament.matchType === 'DOUBLES' ||
-            lockedTournament.matchType === 'MIXED_DOUBLES';
-          const maxSlots: number = isDoubles
-            ? lockedTournament.maxParticipants! * 2
-            : lockedTournament.maxParticipants!;
-
-          const [{ count: activeRosterUsers }] = await tx
-            .select({
-              count: sql<number>`count(distinct ${schema.tournamentRosters.userId})`,
-            })
-            .from(schema.tournamentRosters)
-            .innerJoin(
-              schema.tournamentParticipants,
-              eq(
-                schema.tournamentRosters.participantId,
-                schema.tournamentParticipants.id,
-              ),
-            )
-            .where(
-              and(
-                eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-              ),
-            );
-
-          if (Number(activeRosterUsers) >= maxSlots) {
-            throw new BadRequestException(
-              'Giải đấu đã đủ số lượng người tham gia.',
-            );
-          }
-        } else {
-          // Normal (non-Lite) mode: count COMPLETE+paid participants (existing behavior)
-          const [participantCount] = await tx
-            .select({ count: count() })
-            .from(schema.tournamentParticipants)
-            .where(
-              and(
-                eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
-              ),
-            );
-
-          if (participantCount.count >= tournament.maxParticipants) {
-            throw new BadRequestException('Giải đấu đã đầy.');
-          }
-        }
-      }
-
-      // 7. CLUB check: user must be community member
+      // 6. CLUB check: user must be community member
       const isLiteTournament = Boolean(
         tConfig.isLite || tConfig.mode === 'LITE',
       );
@@ -2142,6 +2070,70 @@ export class TournamentsRepository {
       const resolvedDivision = await resolveMatchingDivision(partnerId);
       const selectedDivision = resolvedDivision?.division ?? null;
       const isWaitlisted = resolvedDivision?.isWaitlisted === true;
+
+      // A tournament can contain several independent divisions. In that
+      // shape, the division limit is authoritative and must not be blocked by
+      // the legacy tournament-level limit (otherwise an empty division shows
+      // 0/16 but registration is rejected because another division is full).
+      // Keep the tournament-level check only as a fallback for tournaments
+      // without a configured division limit.
+      if (tournament.maxParticipants && !selectedDivision?.maxParticipants) {
+        const tournamentConfig = (tournament.tournamentConfig || {}) as Record<
+          string,
+          unknown
+        >;
+        if (tournamentConfig.isLite === true) {
+          const isDoublesTournament =
+            tournament.matchType === 'DOUBLES' ||
+            tournament.matchType === 'MIXED_DOUBLES';
+          const maxSlots = isDoublesTournament
+            ? tournament.maxParticipants * 2
+            : tournament.maxParticipants;
+          const [{ count: activeRosterUsers }] = await tx
+            .select({
+              count: sql<number>`count(distinct ${schema.tournamentRosters.userId})`,
+            })
+            .from(schema.tournamentRosters)
+            .innerJoin(
+              schema.tournamentParticipants,
+              eq(
+                schema.tournamentRosters.participantId,
+                schema.tournamentParticipants.id,
+              ),
+            )
+            .where(
+              and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ),
+            );
+
+          if (Number(activeRosterUsers) >= maxSlots) {
+            throw new BadRequestException(
+              'Giải đấu đã đủ số lượng người tham gia.',
+            );
+          }
+        } else {
+          const [participantCount] = await tx
+            .select({ count: count() })
+            .from(schema.tournamentParticipants)
+            .where(
+              and(
+                eq(schema.tournamentParticipants.tournamentId, tournamentId),
+                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+                eq(schema.tournamentParticipants.isPaid, true),
+              ),
+            );
+
+          if (participantCount.count >= tournament.maxParticipants) {
+            throw new BadRequestException('Giải đấu đã đầy.');
+          }
+        }
+      }
+
+      // 7. Add participant
       const effectiveMatchType =
         selectedDivision?.matchType ?? tournament.matchType;
       const isDoubles = this.isDoublesMatchType(effectiveMatchType);
