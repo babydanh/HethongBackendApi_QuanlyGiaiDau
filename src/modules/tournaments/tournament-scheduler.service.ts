@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, lte, ne, isNull, sql } from 'drizzle-orm';
+import { eq, and, lte, ne, isNull, isNotNull, sql } from 'drizzle-orm';
 import {
   evaluateTournamentCleanup,
   TOURNAMENT_CLEANUP_GRACE_DAYS,
@@ -72,6 +72,7 @@ export class TournamentSchedulerService {
         .where(
           and(
             isNull(schema.tournaments.deletedAt),
+            isNotNull(schema.tournaments.endDate),
             lte(schema.tournaments.endDate, now),
             sql`${schema.tournaments.status} IN ('REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'UPCOMING', 'IN_PROGRESS')`,
           ),

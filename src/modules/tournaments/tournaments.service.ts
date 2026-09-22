@@ -1809,12 +1809,10 @@ export class TournamentsService {
           )
         : 90); // Default to 90 minutes (1h30) only if not specified or calculable
 
-    if (!endDateTime && startDateTime) {
-      endDateTime = new Date(
-        new Date(startDateTime).getTime() +
-          calculatedDurationMinutes * 60 * 1000,
-      ).toISOString();
-    }
+    // A missing end date means the organizer will finish the tournament
+    // manually. Do not derive an end timestamp from the default duration:
+    // the scheduler must only auto-complete tournaments with an explicit
+    // endDate.
 
     const registrationStartDate = dto.registrationStartDate
       ? new Date(dto.registrationStartDate)
