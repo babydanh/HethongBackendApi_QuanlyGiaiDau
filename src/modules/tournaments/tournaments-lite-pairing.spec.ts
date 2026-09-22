@@ -251,6 +251,32 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRepo.findById!.mockResolvedValue({
         ...liteTournament,
         tournamentConfig: { mode: 'ADVANCED' },
+        matchType: 'SINGLES',
+      });
+      await expect(
+        (service as any).checkLiteAuthorization('tournament-1', 'user-1', []),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows standard doubles with the organizer pairing default', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        tournamentConfig: { mode: 'ADVANCED' },
+        matchType: 'DOUBLES',
+      });
+      const result = await (service as any).checkLiteAuthorization(
+        'tournament-1',
+        'user-1',
+        [],
+      );
+      expect(result.tournament.id).toBe('tournament-1');
+    });
+
+    it('rejects standard doubles explicitly configured for self pairing', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        tournamentConfig: { mode: 'ADVANCED', doublesPairingMode: 'SELF' },
+        matchType: 'DOUBLES',
       });
       await expect(
         (service as any).checkLiteAuthorization('tournament-1', 'user-1', []),
@@ -301,6 +327,19 @@ describe('TournamentsService — Lite pairing guards', () => {
           [],
         ),
       ).rejects.toThrow();
+    });
+  });
+
+  describe('doubles pairing policy', () => {
+    it('defaults doubles to organizer pairing and preserves explicit self pairing', () => {
+      expect(
+        (service as any).applyDefaultDoublesPairingMode('DOUBLES', {}),
+      ).toEqual({ doublesPairingMode: 'ORGANIZER' });
+      expect(
+        (service as any).applyDefaultDoublesPairingMode('MIXED_DOUBLES', {
+          doublesPairingMode: 'SELF',
+        }),
+      ).toEqual({ doublesPairingMode: 'SELF' });
     });
   });
 

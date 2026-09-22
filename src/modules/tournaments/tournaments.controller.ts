@@ -858,6 +858,68 @@ export class TournamentsController {
     );
   }
 
+  @Get(':id/pairing/participants')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lấy danh sách người chơi chờ BTC ghép đôi' })
+  async getTournamentPairingParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.getLiteParticipants(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post(':id/pairing')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'BTC ghép thủ công hai người chơi thành một đôi' })
+  async pairTournamentParticipants(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PairLiteParticipantsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.pairLiteParticipants(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/pairing/generate')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'BTC tự động ghép đôi theo RANDOM hoặc ELO_BALANCED' })
+  async generateTournamentPairs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: GenerateLitePairsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.generateLitePairs(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/pairing/:participantId/unpair')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'BTC tách một đôi đã ghép trước khi thi đấu' })
+  async unpairTournamentParticipant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.unpairLiteParticipant(
+      id,
+      participantId,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
   @Patch('lite/:id/divisions/:divisionId/bracket/slots')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật slot bracket cho giải Lite' })

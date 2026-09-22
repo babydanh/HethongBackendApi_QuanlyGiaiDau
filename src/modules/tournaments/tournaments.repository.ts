@@ -22,6 +22,7 @@ import {
   lt,
   like,
   isNull,
+  isNotNull,
   desc,
   asc,
   gt,
@@ -1649,6 +1650,13 @@ export class TournamentsRepository {
         string,
         unknown
       >;
+      const configuredDoublesPairingMode =
+        tConfig.doublesPairingMode === 'SELF' ? 'SELF' : 'ORGANIZER';
+      const requestedDoublesPairingMode =
+        data.doublesPairingMode === 'SELF' ||
+        data.doublesPairingMode === 'ORGANIZER'
+          ? data.doublesPairingMode
+          : configuredDoublesPairingMode;
       const rawRegMode = (tConfig.registrationMode as string) || 'OPEN';
       const regMode = rawRegMode;
 
@@ -1758,7 +1766,8 @@ export class TournamentsRepository {
           !partnerUserId &&
           targetMatchType === 'MIXED_DOUBLES' &&
           !requestedDivisionId &&
-          !isLiteTournament
+          !isLiteTournament &&
+          requestedDoublesPairingMode === 'SELF'
         ) {
           throw new BadRequestException(
             'Hình thức Đôi Nam Nữ yêu cầu nhập đồng đội để xác định giới tính cặp.',
@@ -2142,6 +2151,18 @@ export class TournamentsRepository {
         unknown
       >;
       const isTeamSport = resolveFootballTeamConfig(tConfigForTeam).isTeamSport;
+      const isDoublesPairing = isDoubles && !isTeamSport;
+      if (
+        isDoublesPairing &&
+        requestedDoublesPairingMode === 'ORGANIZER' &&
+        partnerId
+      ) {
+        throw new BadRequestException(
+          'Nội dung này do BTC ghép đôi. Vui lòng đăng ký cá nhân, không mời đồng đội trực tiếp.',
+        );
+      }
+      const organizerPairing =
+        isDoublesPairing && requestedDoublesPairingMode === 'ORGANIZER';
       const payableEntryFeeAmount = await this.resolveDivisionEntryFee(
         tx,
         tournament,
@@ -2167,11 +2188,12 @@ export class TournamentsRepository {
       // Team sport: luôn tạo link mời mở (token), không giới hạn 1h partner.
       // Đôi: token mời đồng đội như cũ (PENDING_PARTNER, hết hạn theo deadline).
       const teamInviteToken =
-        isDoubles || (isTeamSport && !data.footballTeamId)
+        (isDoubles && !organizerPairing) ||
+        (isTeamSport && !data.footballTeamId)
           ? crypto.randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase()
           : null;
       const inviteBaseExpiresAt = new Date(now.getTime() + 60 * 60 * 1000);
-      const partnerInviteExpiresAt = isDoubles
+      const partnerInviteExpiresAt = isDoubles && !organizerPairing
         ? registrationDeadline
           ? new Date(
               Math.min(
@@ -2684,7 +2706,9 @@ export class TournamentsRepository {
           Number.isSafeInteger(payableEntryFeeAmount) &&
           payableEntryFeeAmount > 0,
         teamInviteLink:
-          isDoubles || (isTeamSport && !data.footballTeamId)
+          ((isDoubles && !organizerPairing) ||
+            (isTeamSport && !data.footballTeamId)) &&
+          teamInviteToken
             ? `/tournaments/${tournamentId}/join-team?pid=${participant.id}&token=${teamInviteToken}`
             : null,
         isWaitlisted,
@@ -7863,6 +7887,10 @@ export class TournamentsRepository {
         .where(
           and(
             eq(schema.tournamentParticipants.teamStatus, 'PENDING_PARTNER'),
+            // Organizer-pairing registrations intentionally remain in the
+            // queue until the organizer assigns a teammate. Only self-invite
+            // rows carry a token and are eligible for the timeout cleanup.
+            isNotNull(schema.tournamentParticipants.teamInviteToken),
             lt(schema.tournamentParticipants.registeredAt, timeoutThreshold),
           ),
         );
@@ -9128,6 +9156,12 @@ export class TournamentsRepository {
       );
     }
 
+    if (p1.tournamentDivisionId !== p2.tournamentDivisionId) {
+      throw new BadRequestException(
+        'Chỉ được ghép người chơi trong cùng một nội dung thi đấu.',
+      );
+    }
+
     // Check each has exactly 1 roster
     const p1Rosters = await tx
       .select()
@@ -9143,6 +9177,61 @@ export class TournamentsRepository {
     }
     if (p2Rosters.length !== 1) {
       throw new BadRequestException('Participant 2 phải có đúng 1 thành viên');
+    }
+
+    const [division] = p1.tournamentDivisionId
+      ? await tx
+          .select({
+            matchType: schema.tournamentDivisions.matchType,
+            genderRestriction: schema.tournamentDivisions.genderRestriction,
+          })
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.id, p1.tournamentDivisionId))
+          .limit(1)
+      : [null];
+    const profileRows = await tx
+      .select({
+        userId: schema.profiles.userId,
+        gender: schema.profiles.gender,
+      })
+      .from(schema.profiles)
+      .where(
+        inArray(schema.profiles.userId, [p1Rosters[0].userId, p2Rosters[0].userId]),
+      );
+    const genders = new Map(
+      profileRows.map((profile) => {
+        const raw = (profile.gender || '').trim().toUpperCase();
+        const normalized =
+          raw === 'NAM' || raw === 'MALE'
+            ? 'MALE'
+            : raw === 'NỮ' || raw === 'NU' || raw === 'FEMALE'
+              ? 'FEMALE'
+              : null;
+        return [profile.userId, normalized] as const;
+      }),
+    );
+    const p1Gender = genders.get(p1Rosters[0].userId);
+    const p2Gender = genders.get(p2Rosters[0].userId);
+    const restriction = (division?.genderRestriction || '').toUpperCase();
+    const hasGenderRestriction = ['MALE', 'FEMALE', 'MIXED'].includes(
+      restriction,
+    );
+    if (hasGenderRestriction && (!p1Gender || !p2Gender)) {
+      throw new BadRequestException(
+        'Cả hai VĐV cần cập nhật giới tính trong hồ sơ trước khi BTC ghép đôi.',
+      );
+    }
+    if (
+      hasGenderRestriction &&
+      ((restriction === 'MALE' &&
+        (p1Gender !== 'MALE' || p2Gender !== 'MALE')) ||
+        (restriction === 'FEMALE' &&
+          (p1Gender !== 'FEMALE' || p2Gender !== 'FEMALE')) ||
+        (restriction === 'MIXED' && p1Gender === p2Gender))
+    ) {
+      throw new BadRequestException(
+        'Hai VĐV không phù hợp với giới hạn giới tính của nội dung thi đấu.',
+      );
     }
 
     // Verify neither roster user already appears in another active participant
@@ -9181,13 +9270,25 @@ export class TournamentsRepository {
       .where(eq(schema.tournamentRosters.id, p2Roster.id));
 
     // Update p1
-    // Lite pairing is always finalized immediately; there is no approval queue.
-    const targetStatus = 'COMPLETE';
+    const [pairTournament] = await tx
+      .select({ tournamentConfig: schema.tournaments.tournamentConfig })
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1);
+    const tournamentConfig = pairTournament?.tournamentConfig;
+    const targetStatus = registrationMode === 'APPROVAL'
+      ? 'PENDING_APPROVAL'
+      : 'COMPLETE';
+    const isLitePairing =
+      (tournamentConfig && typeof tournamentConfig === 'object' &&
+        ((tournamentConfig as Record<string, unknown>).isLite === true ||
+          (tournamentConfig as Record<string, unknown>).mode === 'LITE')) ||
+      registrationMode === 'LITE';
     const [updatedP1] = await tx
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: targetStatus,
-        isPaid: true,
+        ...(isLitePairing ? { isPaid: true } : {}),
         teamInviteToken: null,
         teamName,
       })
@@ -9278,6 +9379,18 @@ export class TournamentsRepository {
       );
     }
 
+    const [pairingTournament] = await tx
+      .select({ tournamentConfig: schema.tournaments.tournamentConfig })
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1);
+    const pairingConfig = pairingTournament?.tournamentConfig;
+    const isLitePairing =
+      pairingConfig &&
+      typeof pairingConfig === 'object' &&
+      ((pairingConfig as Record<string, unknown>).isLite === true ||
+        (pairingConfig as Record<string, unknown>).mode === 'LITE');
+
     // Create invite tokens
     const leaderToken = crypto
       .randomUUID()
@@ -9310,7 +9423,7 @@ export class TournamentsRepository {
         tournamentDivisionId: participant.tournamentDivisionId,
         registeredBy: partnerRoster.userId,
         teamName: partnerProfile?.fullName || 'Vận động viên',
-        isPaid: true,
+        isPaid: isLitePairing ? true : participant.isPaid,
         teamInviteToken: partnerToken,
         teamStatus: 'PENDING_PARTNER',
       })
@@ -9327,7 +9440,7 @@ export class TournamentsRepository {
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: 'PENDING_PARTNER',
-        isPaid: true,
+        isPaid: isLitePairing ? true : participant.isPaid,
         teamInviteToken: leaderToken,
         teamName: leaderProfile?.fullName || 'Vận động viên',
       })
@@ -9372,13 +9485,32 @@ export class TournamentsRepository {
     if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
     const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (tCfg.isLite !== true) {
-      throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
+    const isLite = tCfg.isLite === true || tCfg.mode === 'LITE';
+    const topLevelDoubles =
+      tournament.matchType === 'DOUBLES' ||
+      tournament.matchType === 'MIXED_DOUBLES';
+    const [doublesDivision] = topLevelDoubles
+      ? []
+      : await tx
+          .select({ matchType: schema.tournamentDivisions.matchType })
+          .from(schema.tournamentDivisions)
+          .where(
+            and(
+              eq(schema.tournamentDivisions.tournamentId, tournamentId),
+              inArray(schema.tournamentDivisions.matchType, [
+                'DOUBLES',
+                'MIXED_DOUBLES',
+              ]),
+            ),
+          )
+          .limit(1);
+    const hasDoublesDivision = topLevelDoubles || Boolean(doublesDivision);
+    if (!isLite && !hasDoublesDivision) {
+      throw new BadRequestException(
+        'Thao tác này chỉ hỗ trợ giải Lite hoặc nội dung thi đấu đôi.',
+      );
     }
-    if (
-      tournament.matchType !== 'DOUBLES' &&
-      tournament.matchType !== 'MIXED_DOUBLES'
-    ) {
+    if (!hasDoublesDivision) {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
@@ -9426,13 +9558,32 @@ export class TournamentsRepository {
     if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
     const tCfg = (tournament.tournamentConfig || {}) as Record<string, unknown>;
-    if (tCfg.isLite !== true) {
-      throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
+    const isLite = tCfg.isLite === true || tCfg.mode === 'LITE';
+    const topLevelDoubles =
+      tournament.matchType === 'DOUBLES' ||
+      tournament.matchType === 'MIXED_DOUBLES';
+    const [doublesDivision] = topLevelDoubles
+      ? []
+      : await tx
+          .select({ matchType: schema.tournamentDivisions.matchType })
+          .from(schema.tournamentDivisions)
+          .where(
+            and(
+              eq(schema.tournamentDivisions.tournamentId, tournamentId),
+              inArray(schema.tournamentDivisions.matchType, [
+                'DOUBLES',
+                'MIXED_DOUBLES',
+              ]),
+            ),
+          )
+          .limit(1);
+    const hasDoublesDivision = topLevelDoubles || Boolean(doublesDivision);
+    if (!isLite && !hasDoublesDivision) {
+      throw new BadRequestException(
+        'Thao tác này chỉ hỗ trợ giải Lite hoặc nội dung thi đấu đôi.',
+      );
     }
-    if (
-      tournament.matchType !== 'DOUBLES' &&
-      tournament.matchType !== 'MIXED_DOUBLES'
-    ) {
+    if (!hasDoublesDivision) {
       throw new BadRequestException('Tách cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
@@ -9507,18 +9658,21 @@ export class TournamentsRepository {
         (((tournament.tournamentConfig || {}) as Record<string, unknown>)
           .registrationMode as string) || 'OPEN';
       const registrationMode =
-        rawRegistrationMode === 'APPROVAL' ? 'OPEN' : rawRegistrationMode;
-
+        rawRegistrationMode === 'APPROVAL'
+          ? 'APPROVAL'
+          : rawRegistrationMode;
       // Query pending participants INSIDE the transaction with FOR UPDATE (fixes TOCTOU + no lock outside tx)
+      const pendingConditions = [
+        eq(schema.tournamentParticipants.tournamentId, tournamentId),
+        eq(schema.tournamentParticipants.teamStatus, 'PENDING_PARTNER'),
+        // Only registrations that chose "BTC ghép đôi" have no invite token.
+        // Keep direct invite/QR registrations out of the organizer queue.
+        isNull(schema.tournamentParticipants.teamInviteToken),
+      ];
       const pendingParticipants = await tx
         .select()
         .from(schema.tournamentParticipants)
-        .where(
-          and(
-            eq(schema.tournamentParticipants.tournamentId, tournamentId),
-            eq(schema.tournamentParticipants.teamStatus, 'PENDING_PARTNER'),
-          ),
-        )
+        .where(and(...pendingConditions))
         .for('update')
         .orderBy(schema.tournamentParticipants.id); // deterministic order
 
@@ -9569,49 +9723,6 @@ export class TournamentsRepository {
         );
       }
 
-      let ordered = [...pending];
-
-      if (strategy === 'RANDOM') {
-        for (let i = ordered.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
-        }
-      } else {
-        // ELO_BALANCED
-        const eloEntries = await Promise.all(
-          ordered.map(async (p) => {
-            const rosterUser = p.rosters?.[0];
-            const elo = rosterUser?.userId
-              ? await this.getUserEloInTx(
-                  tx,
-                  rosterUser.userId,
-                  tournament.categoryId,
-                  tournament.matchType,
-                )
-              : 1000;
-            return { participant: p, elo };
-          }),
-        );
-
-        eloEntries.sort((a, b) => b.elo - a.elo);
-        ordered = eloEntries.map((e) => e.participant);
-
-        const reordered: typeof pending = [];
-        let left = 0;
-        let right = ordered.length - 1;
-        while (left <= right) {
-          if (left !== right) {
-            reordered.push(ordered[left]);
-            reordered.push(ordered[right]);
-          } else {
-            reordered.push(ordered[left]);
-          }
-          left++;
-          right--;
-        }
-        ordered = reordered;
-      }
-
       const paired: Array<{
         participant1Id: string;
         participant2Id: string;
@@ -9619,33 +9730,75 @@ export class TournamentsRepository {
       }> = [];
       const unpairedIds: string[] = [];
 
-      for (let i = 0; i < ordered.length; i += 2) {
-        if (i + 1 >= ordered.length) {
-          unpairedIds.push(ordered[i].id);
-          break;
+      // A tournament may contain multiple divisions. Pair only within the
+      // same division so a men's queue can never consume a mixed/women slot.
+      const groups = new Map<string, typeof pending>();
+      for (const participant of pending) {
+        const key = participant.tournamentDivisionId || '__NO_DIVISION__';
+        const group = groups.get(key) || [];
+        group.push(participant);
+        groups.set(key, group);
+      }
+
+      for (const group of groups.values()) {
+        let ordered = [...group];
+        if (strategy === 'RANDOM') {
+          for (let i = ordered.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+          }
+        } else {
+          const eloEntries = await Promise.all(
+            ordered.map(async (p) => {
+              const rosterUser = p.rosters?.[0];
+              const elo = rosterUser?.userId
+                ? await this.getUserEloInTx(
+                    tx,
+                    rosterUser.userId,
+                    tournament.categoryId,
+                    tournament.matchType,
+                  )
+                : 1000;
+              return { participant: p, elo };
+            }),
+          );
+          eloEntries.sort((a, b) => b.elo - a.elo);
+          const sorted = eloEntries.map((entry) => entry.participant);
+          const balanced: typeof pending = [];
+          let left = 0;
+          let right = sorted.length - 1;
+          while (left <= right) {
+            balanced.push(sorted[left]);
+            if (left !== right) balanced.push(sorted[right]);
+            left++;
+            right--;
+          }
+          ordered = balanced;
         }
 
-        const p1 = ordered[i];
-        const p2 = ordered[i + 1];
-
-        const p1User = p1.rosters?.[0]?.userId;
-        const p2User = p2.rosters?.[0]?.userId;
-        const p1Profile = p1User ? profileMap.get(p1User) : null;
-        const p2Profile = p2User ? profileMap.get(p2User) : null;
-        const p1Name = p1Profile?.fullName || 'VĐV';
-        const p2Name = p2Profile?.fullName || 'VĐV';
-        const teamName = `${p1Name} / ${p2Name}`;
-
-        await this.pairLiteParticipantsInTx(
-          tx,
-          tournamentId,
-          p1.id,
-          p2.id,
-          userId,
-          registrationMode,
-          teamName,
-        );
-        paired.push({ participant1Id: p1.id, participant2Id: p2.id, teamName });
+        for (let i = 0; i < ordered.length; i += 2) {
+          if (i + 1 >= ordered.length) {
+            unpairedIds.push(ordered[i].id);
+            break;
+          }
+          const p1 = ordered[i];
+          const p2 = ordered[i + 1];
+          const p1User = p1.rosters?.[0]?.userId;
+          const p2User = p2.rosters?.[0]?.userId;
+          const p1Name = (p1User ? profileMap.get(p1User)?.fullName : null) || 'VĐV';
+          const p2Name = (p2User ? profileMap.get(p2User)?.fullName : null) || 'VĐV';
+          const teamName = `${p1Name} / ${p2Name}`;
+          await this.pairLiteParticipantsInTx(
+            tx,
+            tournamentId,
+            p1.id,
+            p2.id,
+            userId,
+            registrationMode,
+            teamName,
+          );
+          paired.push({ participant1Id: p1.id, participant2Id: p2.id, teamName });
+        }
       }
 
       return {

@@ -1,11 +1,11 @@
-import { IsNotEmpty, IsString, IsArray, IsUUID, IsOptional, IsIn, Matches, IsBoolean, IsObject } from 'class-validator';
+import { IsString, IsArray, IsUUID, IsOptional, IsIn, Matches, IsBoolean, IsObject } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterTournamentDto {
-  @ApiProperty({ description: 'Tên đội tham gia' })
+  @ApiPropertyOptional({ description: 'Tên đội/cặp tham gia; chế độ BTC ghép đôi sẽ tự dùng tên hồ sơ nếu bỏ trống' })
   @IsString()
-  @IsNotEmpty()
-  teamName: string;
+  @IsOptional()
+  teamName?: string;
 
   @ApiPropertyOptional({ description: 'Danh sách ID các thành viên trong đội', type: [String] })
   @IsArray()
@@ -31,6 +31,15 @@ export class RegisterTournamentDto {
     message: 'Đồng đội phải là Email hoặc Số điện thoại Việt Nam hợp lệ',
   })
   partnerEmailOrPhone?: string;
+
+  @ApiPropertyOptional({
+    description: 'Chính sách ghép đôi của nội dung đôi',
+    enum: ['ORGANIZER', 'SELF'],
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn(['ORGANIZER', 'SELF'])
+  doublesPairingMode?: 'ORGANIZER' | 'SELF';
 
   @ApiPropertyOptional({ description: 'ID hình thức thi đấu muốn đăng ký' })
   @IsUUID('4')

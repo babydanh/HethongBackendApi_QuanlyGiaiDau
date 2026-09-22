@@ -779,8 +779,8 @@ export class TournamentsService {
   private validateRegistrationMode(config: unknown) {
     if (!config || typeof config !== 'object') return;
 
-    const registrationMode = (config as Record<string, unknown>)
-      .registrationMode;
+    const record = config as Record<string, unknown>;
+    const registrationMode = record.registrationMode;
     if (registrationMode !== undefined) {
       if (
         typeof registrationMode !== 'string' ||
@@ -791,6 +791,29 @@ export class TournamentsService {
         );
       }
     }
+
+    const doublesPairingMode = record.doublesPairingMode;
+    if (
+      doublesPairingMode !== undefined &&
+      (typeof doublesPairingMode !== 'string' ||
+        !['ORGANIZER', 'SELF'].includes(doublesPairingMode))
+    ) {
+      throw new BadRequestException(
+        'Chế độ ghép đôi phải là một trong: ORGANIZER, SELF',
+      );
+    }
+  }
+
+  private applyDefaultDoublesPairingMode(
+    matchType: string | null | undefined,
+    config: Record<string, unknown>,
+  ) {
+    const isDoubles =
+      matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+    if (isDoubles && config.doublesPairingMode === undefined) {
+      return { ...config, doublesPairingMode: 'ORGANIZER' };
+    }
+    return config;
   }
 
   async findAll(query: QueryTournamentDto) {
@@ -1072,6 +1095,10 @@ export class TournamentsService {
     }
 
     this.validateRegistrationMode(createTournamentDto.tournamentConfig);
+    createTournamentDto.tournamentConfig = this.applyDefaultDoublesPairingMode(
+      createTournamentDto.matchType,
+      createTournamentDto.tournamentConfig,
+    );
     await this.assertEntryFeeAllowed(createTournamentDto.entryFee);
 
     // 1. Validate category existence and sportRules default fallback
@@ -1673,6 +1700,9 @@ export class TournamentsService {
           : 'INVITE_ONLY',
       liteVisibility,
       bracketSetupMode: 'RANDOM',
+      ...(matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES'
+        ? { doublesPairingMode: 'ORGANIZER' }
+        : {}),
       allowPlayerReferee: true,
       // Only pure Super Lite hides advanced settings. Configured divisions or
       // restrictions belong to the standard management workspace.
@@ -2495,7 +2525,11 @@ export class TournamentsService {
       }
 
       if (incomingConfigPatch) {
-        for (const key of ['registrationMode', 'registrationForm']) {
+        for (const key of [
+          'registrationMode',
+          'registrationForm',
+          'doublesPairingMode',
+        ]) {
           if (
             incomingConfigPatch[key] !== undefined &&
             !isDeepStrictEqual(incomingConfigPatch[key], existingConfig[key])
@@ -4139,6 +4173,38 @@ export class TournamentsService {
     const requestedDivision = requestedDivisionId
       ? await this.tournamentsRepository.findDivisionById(requestedDivisionId)
       : null;
+
+    const registrationMatchType =
+      requestedDivision?.matchType ?? tournament.matchType;
+    const isDoublesRegistration =
+      registrationMatchType === 'DOUBLES' ||
+      registrationMatchType === 'MIXED_DOUBLES';
+    if (
+      !isDoublesRegistration &&
+      !registerTournamentDto.teamName?.trim() &&
+      !registerTournamentDto.footballTeamId
+    ) {
+      throw new BadRequestException('Vui lòng nhập tên đội hoặc tên thi đấu.');
+    }
+    const configuredDoublesPairingMode =
+      ((tournament.tournamentConfig || {}) as Record<string, unknown>)
+        .doublesPairingMode === 'SELF'
+        ? 'SELF'
+        : 'ORGANIZER';
+    const requestedDoublesPairingMode =
+      registerTournamentDto.doublesPairingMode === 'SELF' ||
+      registerTournamentDto.doublesPairingMode === 'ORGANIZER'
+        ? registerTournamentDto.doublesPairingMode
+        : configuredDoublesPairingMode;
+    if (
+      isDoublesRegistration &&
+      requestedDoublesPairingMode === 'ORGANIZER' &&
+      registerTournamentDto.partnerEmailOrPhone
+    ) {
+      throw new BadRequestException(
+        'Nội dung này do BTC ghép đôi. Vui lòng đăng ký cá nhân.',
+      );
+    }
 
     const tournamentConfig = (tournament.tournamentConfig || {}) as Record<
       string,
@@ -7708,9 +7774,25 @@ export class TournamentsService {
       string,
       unknown
     >;
-    // Support legacy Lite records that predate the canonical isLite flag.
-    if (config.isLite !== true && config.mode !== 'LITE') {
-      throw new BadRequestException('Thao tác này chỉ hỗ trợ giải đấu Lite.');
+    // Keep the existing Lite route while allowing standard doubles whose
+    // policy explicitly (or by backwards-compatible default) assigns pairs
+    // to the organizer.
+    const isLite = config.isLite === true || config.mode === 'LITE';
+    const divisions = await this.tournamentsRepository.getDivisionsByTournament(
+      tournamentId,
+    );
+    const isDoubles =
+      tournament.matchType === 'DOUBLES' ||
+      tournament.matchType === 'MIXED_DOUBLES' ||
+      divisions.some(
+        (division) =>
+          division.matchType === 'DOUBLES' ||
+          division.matchType === 'MIXED_DOUBLES',
+      );
+    if (!isLite && !isDoubles) {
+      throw new BadRequestException(
+        'Thao tác này chỉ hỗ trợ giải Lite hoặc nội dung thi đấu đôi.',
+      );
     }
 
     let isAuthorized = await this.isManager(tournament, userId, systemRoles);
@@ -7758,15 +7840,25 @@ export class TournamentsService {
     );
 
     // Verify DOUBLES match type
-    if (
-      tournament.matchType !== 'DOUBLES' &&
-      tournament.matchType !== 'MIXED_DOUBLES'
-    ) {
+    const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
+    const hasDoublesDivision =
+      tournament.matchType === 'DOUBLES' ||
+      tournament.matchType === 'MIXED_DOUBLES' ||
+      divisions.some(
+        (division) =>
+          division.matchType === 'DOUBLES' ||
+          division.matchType === 'MIXED_DOUBLES',
+      );
+    if (!hasDoublesDivision) {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
     const registrationMode =
-      config.registrationMode === 'INVITE_ONLY' ? 'INVITE_ONLY' : 'OPEN';
+      config.registrationMode === 'APPROVAL'
+        ? 'APPROVAL'
+        : config.registrationMode === 'INVITE_ONLY'
+          ? 'INVITE_ONLY'
+          : 'OPEN';
 
     // Build teamName from profiles
     const p1Profile = await this.tournamentsRepository.findUserBasicById(
@@ -7810,10 +7902,16 @@ export class TournamentsService {
     );
 
     // Verify DOUBLES match type
-    if (
-      tournament.matchType !== 'DOUBLES' &&
-      tournament.matchType !== 'MIXED_DOUBLES'
-    ) {
+    const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
+    const hasDoublesDivision =
+      tournament.matchType === 'DOUBLES' ||
+      tournament.matchType === 'MIXED_DOUBLES' ||
+      divisions.some(
+        (division) =>
+          division.matchType === 'DOUBLES' ||
+          division.matchType === 'MIXED_DOUBLES',
+      );
+    if (!hasDoublesDivision) {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
 
