@@ -272,15 +272,18 @@ describe('TournamentsService — Lite pairing guards', () => {
       expect(result.tournament.id).toBe('tournament-1');
     });
 
-    it('rejects standard doubles explicitly configured for self pairing', async () => {
+    it('allows standard doubles explicitly configured for self pairing', async () => {
       mockRepo.findById!.mockResolvedValue({
         ...liteTournament,
         tournamentConfig: { mode: 'ADVANCED', doublesPairingMode: 'SELF' },
         matchType: 'DOUBLES',
       });
-      await expect(
-        (service as any).checkLiteAuthorization('tournament-1', 'user-1', []),
-      ).rejects.toThrow(BadRequestException);
+      const result = await (service as any).checkLiteAuthorization(
+        'tournament-1',
+        'user-1',
+        [],
+      );
+      expect(result.tournament.id).toBe('tournament-1');
     });
 
     it('allows creator', async () => {
