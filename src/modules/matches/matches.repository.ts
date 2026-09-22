@@ -30,6 +30,7 @@ import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { AuditService } from '../audit/audit.service';
 import { mergeMatchConfig } from './utils/merge-match-config';
+import { reflowScheduleStart } from './utils/reflow-schedule';
 import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
@@ -2267,7 +2268,7 @@ export class MatchesRepository {
           : existing.courtAddress;
       const effectiveCourtId =
         data.courtId !== undefined ? data.courtId || null : existing.courtId;
-      const effectiveScheduledAt =
+      let effectiveScheduledAt =
         data.scheduledAt !== undefined
           ? data.scheduledAt
             ? new Date(data.scheduledAt)
@@ -2283,7 +2284,6 @@ export class MatchesRepository {
 
       // Kiểm tra scheduling conflict: cùng sân hoặc cùng đội có khoảng thời gian thi đấu chồng lấn (exact time overlap)
       if (effectiveScheduledAt) {
-        const scheduledDate = effectiveScheduledAt;
         const currentDurationMin =
           ((data.matchConfig as Record<string, unknown> | undefined)
             ?.durationMinutes as number | undefined) ??
@@ -2291,17 +2291,25 @@ export class MatchesRepository {
             ?.durationMinutes as number | undefined) ??
           30;
         const currentDurationMs = Math.max(15, currentDurationMin) * 60 * 1000;
-        const currentStartMs = scheduledDate.getTime();
-        const currentEndMs = currentStartMs + currentDurationMs;
+        let currentStartMs = effectiveScheduledAt.getTime();
 
-        // Query candidate matches within ±2 hours to check exact continuous interval overlap
-        const windowStart = new Date(currentStartMs - 2 * 60 * 60 * 1000);
-        const windowEnd = new Date(currentStartMs + 2 * 60 * 60 * 1000);
+        // Read a wide enough window for a server-side reflow. A conflict is
+        // not a terminal validation error: the organizer's auto scheduler
+        // expects the API to move the requested match to the next free grid
+        // slot when a legacy/committed row occupies the requested interval.
+        const maxReflowAttempts = 192;
+        const maxReflowMs = maxReflowAttempts * 15 * 60 * 1000;
+        const windowStart = new Date(currentStartMs - maxReflowMs);
+        const windowEnd = new Date(
+          currentStartMs + maxReflowMs + currentDurationMs,
+        );
 
         const activeScheduledStatuses = inArray(schema.matches.status, [
           'SCHEDULED',
           'ONGOING',
         ]);
+
+        const courtIntervals: Array<{ startMs: number; endMs: number }> = [];
 
         if (effectiveCourtName) {
           // A tournament may use multiple venues whose courts share display
@@ -2318,9 +2326,13 @@ export class MatchesRepository {
             : null;
           const samePhysicalCourt = effectiveCourtId
             ? legacySamePhysicalCourt
-              ? or(eq(schema.matches.courtId, effectiveCourtId), legacySamePhysicalCourt)
+              ? or(
+                  eq(schema.matches.courtId, effectiveCourtId),
+                  legacySamePhysicalCourt,
+                )
               : eq(schema.matches.courtId, effectiveCourtId)
-            : legacySamePhysicalCourt || eq(schema.matches.courtName, effectiveCourtName);
+            : legacySamePhysicalCourt ||
+              eq(schema.matches.courtName, effectiveCourtName);
           const candidateMatches = await tx
             .select({
               id: schema.matches.id,
@@ -2340,27 +2352,22 @@ export class MatchesRepository {
               ),
             );
 
-          const courtConflict = candidateMatches.find((m) => {
-            if (!m.scheduledAt) return false;
+          candidateMatches.forEach((m) => {
+            if (!m.scheduledAt) return;
             const otherStartMs = new Date(m.scheduledAt).getTime();
             const otherDurationMin =
               ((m.matchConfig as Record<string, unknown> | undefined)
                 ?.durationMinutes as number | undefined) ?? 30;
             const otherEndMs =
               otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
-            return currentStartMs < otherEndMs && currentEndMs > otherStartMs;
+            if (Number.isFinite(otherStartMs)) {
+              courtIntervals.push({ startMs: otherStartMs, endMs: otherEndMs });
+            }
           });
-
-          if (courtConflict) {
-            const courtLabel = /^sân(?:\s|$)/i.test(effectiveCourtName.trim())
-              ? effectiveCourtName.trim()
-              : `Sân ${effectiveCourtName.trim()}`;
-            throw new BadRequestException(
-              `${courtLabel} đã có trận đấu khác trong cùng giải và khung giờ.`,
-            );
-          }
         }
 
+        const participantIntervals: Array<{ startMs: number; endMs: number }> =
+          [];
         const participantIds = [
           existing.participant1Id,
           existing.participant2Id,
@@ -2392,23 +2399,39 @@ export class MatchesRepository {
               ),
             );
 
-          const participantConflict = candidateParticipantMatches.find((m) => {
-            if (!m.scheduledAt) return false;
+          candidateParticipantMatches.forEach((m) => {
+            if (!m.scheduledAt) return;
             const otherStartMs = new Date(m.scheduledAt).getTime();
             const otherDurationMin =
               ((m.matchConfig as Record<string, unknown> | undefined)
                 ?.durationMinutes as number | undefined) ?? 30;
             const otherEndMs =
               otherStartMs + Math.max(15, otherDurationMin) * 60 * 1000;
-            return currentStartMs < otherEndMs && currentEndMs > otherStartMs;
+            if (Number.isFinite(otherStartMs)) {
+              participantIntervals.push({
+                startMs: otherStartMs,
+                endMs: otherEndMs,
+              });
+            }
           });
-
-          if (participantConflict) {
-            throw new BadRequestException(
-              'Một đội đã có trận đấu khác trong cùng khung giờ.',
-            );
-          }
         }
+
+        // Reflow only on a real overlap. Adjacent 15-minute matches remain
+        // adjacent; a legacy 30-minute row pushes the new match forward.
+        const reflowedStartMs = reflowScheduleStart({
+          requestedStartMs: currentStartMs,
+          durationMs: currentDurationMs,
+          courtIntervals,
+          participantIntervals,
+          maxAttempts: maxReflowAttempts,
+        });
+        if (reflowedStartMs === null) {
+          throw new BadRequestException(
+            'Không tìm được khung giờ trống tiếp theo cho trận đấu.',
+          );
+        }
+
+        effectiveScheduledAt = new Date(reflowedStartMs);
       }
 
       const [updated] = await tx

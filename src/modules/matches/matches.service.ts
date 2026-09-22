@@ -2325,8 +2325,8 @@ export class MatchesService {
     if (data.refereeId && data.refereeId !== existing.refereeId) {
       try {
         const matchName = `${existing.participant1?.teamName || 'TBD'} vs ${existing.participant2?.teamName || 'TBD'}`;
-        const scheduledTime = data.scheduledAt
-          ? new Date(data.scheduledAt).toLocaleString('vi-VN')
+        const scheduledTime = updatedMatch?.scheduledAt
+          ? new Date(updatedMatch.scheduledAt).toLocaleString('vi-VN')
           : existing.scheduledAt
             ? new Date(existing.scheduledAt).toLocaleString('vi-VN')
             : 'chưa xác định';
