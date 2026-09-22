@@ -1701,7 +1701,12 @@ export class TournamentsService {
       liteVisibility,
       bracketSetupMode: 'RANDOM',
       ...(matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES'
-        ? { doublesPairingMode: 'ORGANIZER' }
+        ? {
+            // The creator may turn BTC pairing off. Missing/invalid values
+            // are rejected by the DTO; omitting it keeps the safe default.
+            doublesPairingMode:
+              dto.doublesPairingMode === 'SELF' ? 'SELF' : 'ORGANIZER',
+          }
         : {}),
       allowPlayerReferee: true,
       // Only pure Super Lite hides advanced settings. Configured divisions or

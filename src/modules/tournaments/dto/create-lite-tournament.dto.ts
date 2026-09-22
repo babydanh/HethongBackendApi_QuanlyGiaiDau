@@ -141,6 +141,17 @@ export class CreateLiteTournamentDto {
   format?: string;
 
   @ApiPropertyOptional({
+    example: 'ORGANIZER',
+    description:
+      'Cách ghép đôi cho nội dung đôi. ORGANIZER bật BTC ghép đôi (mặc định); SELF chỉ cho người chơi mời đồng đội trực tiếp/QR.',
+    enum: ['ORGANIZER', 'SELF'],
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn(['ORGANIZER', 'SELF'])
+  doublesPairingMode?: 'ORGANIZER' | 'SELF';
+
+  @ApiPropertyOptional({
     example: 'MALE',
     description:
       'Giới hạn giới tính cho hình thức đơn/đôi; bỏ trống là không ràng buộc',
