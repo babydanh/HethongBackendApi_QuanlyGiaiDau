@@ -27,7 +27,11 @@ import { WebhookDto } from './dto/webhook.dto';
 import { PaymentsRepository } from './payments.repository';
 import { RegistrationLockService } from '../tournaments/registration-lock.service';
 import { resolveFootballTeamConfig } from '../tournaments/utils/football-team-config';
-import { isRegistrationRosterCompleteForPayment } from '../tournaments/utils/registration-payment-eligibility';
+import {
+  isLiteRegistrationTournament,
+  isRegistrationFeePaid,
+  isRegistrationRosterCompleteForPayment,
+} from '../tournaments/utils/registration-payment-eligibility';
 
 interface CalculatedPayment {
   amount: number;
@@ -636,10 +640,15 @@ export class PaymentsService {
       ) {
         amount = Number(division.entryFee);
       }
-      // isPaid=true from a paid registration is only trusted together with the
-      // positive fee snapshot; a free registration remains free if the current
-      // division fee is later increased for new participants.
-      if (participant.isPaid && amount > 0) {
+      const registrationIsPaid = isRegistrationFeePaid({
+        persistedIsPaid: participant.isPaid,
+        feeSnapshot: amount,
+        hasCompletedPayment: Boolean(completedPayment),
+        isLiteRegistration: isLiteRegistrationTournament(
+          tournament.tournamentConfig,
+        ),
+      });
+      if (registrationIsPaid) {
         throw new BadRequestException('Lượt đăng ký đã thanh toán.');
       }
 
@@ -872,7 +881,19 @@ export class PaymentsService {
     if (participant.registeredBy !== payment.userId) {
       return 'PARTICIPANT_OWNER_MISMATCH';
     }
-    if (participant.isPaid) {
+    const [tournament, completedPayment] = await Promise.all([
+      this.paymentsRepository.findTournamentById(payment.tournamentId),
+      this.paymentsRepository.findCompletedParticipantPayment(participant.id),
+    ]);
+    const registrationIsPaid = isRegistrationFeePaid({
+      persistedIsPaid: participant.isPaid,
+      feeSnapshot: payment.amount,
+      hasCompletedPayment: Boolean(completedPayment),
+      isLiteRegistration: isLiteRegistrationTournament(
+        tournament?.tournamentConfig,
+      ),
+    });
+    if (registrationIsPaid) {
       return 'PARTICIPANT_ALREADY_PAID';
     }
     if (
