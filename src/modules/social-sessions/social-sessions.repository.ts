@@ -403,7 +403,7 @@ export class SocialSessionsRepository {
         and(
           isNull(schema.socialSessions.deletedAt),
           inArray(schema.socialSessions.status, ['OPEN', 'FULL']),
-          sql`${schema.socialSessions.startAt} + (${schema.socialSessions.durationMinutes} * INTERVAL '1 minute') <= ${now}`,
+          sql`${schema.socialSessions.startAt}::timestamptz + make_interval(mins => ${schema.socialSessions.durationMinutes}::int) <= ${now}`,
         ),
       )
       .returning({ id: schema.socialSessions.id });

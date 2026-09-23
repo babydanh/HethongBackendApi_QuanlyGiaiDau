@@ -202,8 +202,6 @@ export class SocialSessionsService {
     if (!DATE_RE.test(query.date)) {
       apiError(BadRequestException, 'INVALID_DATE');
     }
-    // Dọn nền: đóng các kèo đã quá giờ trước khi select để list theo ngày đúng.
-    await this.repository.closeExpiredSessions();
     const categoryId = query.sport
       ? await this.resolveCategoryId(query.sport)
       : undefined;
@@ -267,8 +265,6 @@ export class SocialSessionsService {
   ) {
     const community = await this.repository.findCommunityById(communityId);
     if (!community) apiError(NotFoundException, 'COMMUNITY_NOT_FOUND');
-
-    await this.repository.closeExpiredSessions();
 
     const rawStatuses = (query.status ?? 'OPEN,FULL,COMPLETED')
       .split(',')
