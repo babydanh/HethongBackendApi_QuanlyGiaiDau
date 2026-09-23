@@ -349,6 +349,7 @@ export class SocialSessionsRepository {
     });
   }
 
+  /** Cập nhật thông tin Social */
   async updateSession(
     id: string,
     patch: Partial<typeof schema.socialSessions.$inferInsert>,
@@ -491,6 +492,7 @@ export class SocialSessionsRepository {
     return { items, total: Number(totalRows[0]?.total ?? 0) };
   }
 
+  /** Cập nhật trạng thái thanh toán của người tham gia */
   async updatePaymentStatus(
     sessionId: string,
     userId: string,
@@ -509,6 +511,7 @@ export class SocialSessionsRepository {
     return updated ?? null;
   }
 
+  /** Lấy các Social gần đây do người dùng tổ chức */
   async recentSessionsByHost(hostUserId: string, limit = 20) {
     return this.db
       .select()

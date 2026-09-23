@@ -286,6 +286,12 @@ export class QuerySocialByCommunityDto {
   limit?: number = 20;
 }
 
+export class QuerySocialSessionByCommunityDto extends QuerySocialByCommunityDto {
+  @ApiProperty({ description: 'ID Câu lạc bộ (communities.id)' })
+  @IsUUID()
+  communityId: string;
+}
+
 export class SendSocialMessageDto {
   @ApiProperty({ example: 'Chào mọi người, mai đá đúng giờ nhé!' })
   @IsString()
