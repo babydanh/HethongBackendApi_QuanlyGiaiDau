@@ -18,7 +18,6 @@ import {
   AddSocialParticipantDto,
   JoinSocialSessionDto,
   QuerySocialByCommunityDto,
-  QuerySocialSessionByCommunityDto,
   QuerySocialSessionsDto,
   CreateSocialSessionDto,
   SendSocialMessageDto,
@@ -64,21 +63,6 @@ export class SocialSessionsController {
     @CurrentUser() user?: RequestUser,
   ) {
     return this.service.listByCommunity(user, communityId, query);
-  }
-
-  /**
-   * API đọc danh sách Social theo Câu lạc bộ — communityId truyền qua query
-   * (GET /social-sessions/community?communityId=...). Tách biệt hoàn toàn với
-   * API theo ngày (GET /social-sessions?date=...) mà app dùng làm fallback.
-   */
-  @Public()
-  @UseGuards(OptionalJwtAuthGuard)
-  @Get('community')
-  listByCommunityQuery(
-    @Query() query: QuerySocialSessionByCommunityDto,
-    @CurrentUser() user?: RequestUser,
-  ) {
-    return this.service.listByCommunity(user, query.communityId, query);
   }
 
   @Public()
