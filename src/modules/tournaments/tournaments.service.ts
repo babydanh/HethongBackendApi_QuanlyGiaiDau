@@ -4184,13 +4184,6 @@ export class TournamentsService {
     const isDoublesRegistration =
       registrationMatchType === 'DOUBLES' ||
       registrationMatchType === 'MIXED_DOUBLES';
-    if (
-      !isDoublesRegistration &&
-      !registerTournamentDto.teamName?.trim() &&
-      !registerTournamentDto.footballTeamId
-    ) {
-      throw new BadRequestException('Vui lòng nhập tên đội hoặc tên thi đấu.');
-    }
     const configuredDoublesPairingMode =
       ((tournament.tournamentConfig || {}) as Record<string, unknown>)
         .doublesPairingMode === 'SELF'
@@ -4201,6 +4194,19 @@ export class TournamentsService {
       registerTournamentDto.doublesPairingMode === 'ORGANIZER'
         ? registerTournamentDto.doublesPairingMode
         : configuredDoublesPairingMode;
+
+    const isOrganizerPairing =
+      isDoublesRegistration && requestedDoublesPairingMode === 'ORGANIZER';
+
+    if (
+      !isDoublesRegistration &&
+      !isOrganizerPairing &&
+      !registerTournamentDto.teamName?.trim() &&
+      !registerTournamentDto.footballTeamId
+    ) {
+      throw new BadRequestException('Vui lòng nhập tên đội hoặc tên thi đấu.');
+    }
+
     if (
       isDoublesRegistration &&
       requestedDoublesPairingMode === 'ORGANIZER' &&
@@ -7865,24 +7871,27 @@ export class TournamentsService {
           ? 'INVITE_ONLY'
           : 'OPEN';
 
-    // Build teamName from profiles
-    const p1Profile = await this.tournamentsRepository.findUserBasicById(
-      (
-        await this.tournamentsRepository.findLeaderByParticipantId(
-          dto.participant1Id,
-        )
-      )?.userId ?? '',
-    );
-    const p2Profile = await this.tournamentsRepository.findUserBasicById(
-      (
-        await this.tournamentsRepository.findLeaderByParticipantId(
-          dto.participant2Id,
-        )
-      )?.userId ?? '',
-    );
-    const teamName = [p1Profile?.fullName, p2Profile?.fullName]
-      .filter(Boolean)
-      .join(' / ');
+    // Build teamName from dto or profiles fallback
+    let teamName = dto.teamName?.trim();
+    if (!teamName) {
+      const p1Profile = await this.tournamentsRepository.findUserBasicById(
+        (
+          await this.tournamentsRepository.findLeaderByParticipantId(
+            dto.participant1Id,
+          )
+        )?.userId ?? '',
+      );
+      const p2Profile = await this.tournamentsRepository.findUserBasicById(
+        (
+          await this.tournamentsRepository.findLeaderByParticipantId(
+            dto.participant2Id,
+          )
+        )?.userId ?? '',
+      );
+      teamName = [p1Profile?.fullName, p2Profile?.fullName]
+        .filter(Boolean)
+        .join(' / ');
+    }
 
     return await this.tournamentsRepository.lockTournamentAndPair(
       id,
