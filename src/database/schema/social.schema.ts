@@ -14,6 +14,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
 import { communities } from './communities.schema';
+import { socialSessions } from './social-sessions.schema';
 
 export const friendships = pgTable(
   'friendships',
@@ -64,6 +65,10 @@ export const chatRooms = pgTable(
     communityId: uuid('community_id').references(() => communities.id, {
       onDelete: 'cascade',
     }),
+    // Social Session Chat — 1 session có tối đa 1 room type=SOCIAL (unique partial bên dưới).
+    socialSessionId: uuid('social_session_id').references(() => socialSessions.id, {
+      onDelete: 'cascade',
+    }),
     clubName: varchar('club_name', { length: 255 }),
     clubAvatar: text('club_avatar'),
     isAnnouncementOnly: boolean('is_announcement_only').default(false).notNull(),
@@ -77,6 +82,9 @@ export const chatRooms = pgTable(
     clubRoomUnique: uniqueIndex('uq_chat_rooms_club_community')
       .on(table.communityId)
       .where(sql`${table.type} = 'CLUB'`),
+    socialRoomUnique: uniqueIndex('uq_chat_rooms_social_session')
+      .on(table.socialSessionId)
+      .where(sql`${table.type} = 'SOCIAL'`),
   }),
 );
 

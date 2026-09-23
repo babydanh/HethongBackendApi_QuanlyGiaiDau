@@ -4,14 +4,19 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { UserRole } from '../../common/constants/enums';
 import * as schema from '../../database/schema';
+import { ChatService } from '../chat/chat.service';
 import {
   AddSocialParticipantDto,
   CreateSocialSessionDto,
   JoinSocialSessionDto,
+  QuerySocialByCommunityDto,
   QuerySocialSessionsDto,
+  SendSocialMessageDto,
+  SOCIAL_STATUSES,
   UpdateSocialPaymentDto,
   UpdateSocialSessionDto,
 } from './dto/social-session.dto';
@@ -54,7 +59,10 @@ function toPlayDate(startAt: string): string {
 
 @Injectable()
 export class SocialSessionsService {
-  constructor(private readonly repository: SocialSessionsRepository) {}
+  constructor(
+    private readonly repository: SocialSessionsRepository,
+    @Optional() private readonly chatService?: ChatService,
+  ) {}
 
   private isPlatformAdmin(actor: Actor): boolean {
     return Boolean(actor.roles?.some((role) => role === UserRole.ADMIN));
@@ -78,10 +86,50 @@ export class SocialSessionsService {
     return category!.id;
   }
 
+  /** Hết giờ = NOW() >= startAt + durationMinutes. */
+  private isExpired(session: SessionRow, now: Date = new Date()): boolean {
+    const start = session.startAt instanceof Date ? session.startAt : new Date(session.startAt);
+    if (Number.isNaN(start.getTime())) return false;
+    return now.getTime() >= start.getTime() + session.durationMinutes * 60000;
+  }
+
+  /**
+   * Lazy auto-close: session OPEN/FULL đã quá giờ → COMPLETED ngay khi có
+   * request chạm vào (kết hợp với cron dọn nền). Trả về row mới nhất.
+   */
+  private async refreshStatusIfExpired(session: SessionRow): Promise<SessionRow> {
+    if (
+      (session.status === 'OPEN' || session.status === 'FULL') &&
+      this.isExpired(session)
+    ) {
+      const updated = await this.repository.updateSession(session.id, {
+        status: 'COMPLETED',
+      });
+      if (updated) return updated;
+    }
+    return session;
+  }
+
+  private assertSocialWritable(session: SessionRow): void {
+    if (session.status === 'CANCELLED' || session.status === 'COMPLETED') {
+      apiError(BadRequestException, 'SESSION_CLOSED');
+    }
+  }
+
+  /** Chỉ host hoặc participant JOINED mới được đọc/gửi chat Social. */
+  private async assertSocialParticipant(session: SessionRow, userId: string): Promise<void> {
+    if (session.hostUserId === userId) return;
+    const joined = await this.repository.isParticipant(session.id, userId);
+    if (!joined) {
+      apiError(ForbiddenException, 'FORBIDDEN_NOT_PARTICIPANT');
+    }
+  }
+
   private shapeDetail(
     row: NonNullable<Awaited<ReturnType<SocialSessionsRepository['findSessionById']>>>,
     participants: Awaited<ReturnType<SocialSessionsRepository['listParticipants']>>,
     viewerId?: string,
+    chat?: { chatRoomId: string | null; chatMessages: unknown },
   ) {
     const joined = participants.filter((p) => p.participant.status === 'JOINED');
     return {
@@ -100,6 +148,8 @@ export class SocialSessionsService {
         ? joined.some((p) => p.participant.userId === viewerId)
         : false,
       isHost: viewerId ? row.session.hostUserId === viewerId : false,
+      chatRoomId: chat?.chatRoomId ?? null,
+      chatMessages: chat?.chatMessages ?? null,
     };
   }
 
@@ -152,6 +202,8 @@ export class SocialSessionsService {
     if (!DATE_RE.test(query.date)) {
       apiError(BadRequestException, 'INVALID_DATE');
     }
+    // Dọn nền: đóng các kèo đã quá giờ trước khi select để list theo ngày đúng.
+    await this.repository.closeExpiredSessions();
     const categoryId = query.sport
       ? await this.resolveCategoryId(query.sport)
       : undefined;
@@ -180,8 +232,108 @@ export class SocialSessionsService {
   async getById(id: string, viewerId?: string) {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    const session = await this.refreshStatusIfExpired(row!.session);
     const participants = await this.repository.listParticipants(id);
-    return this.shapeDetail(row!, participants, viewerId);
+
+    // Chat preview (20 tin mới nhất): chỉ participant mới thấy.
+    let chat: { chatRoomId: string | null; chatMessages: unknown } | undefined;
+    const isParticipant =
+      !!viewerId &&
+      (session.hostUserId === viewerId ||
+        participants.some(
+          (p) => p.participant.userId === viewerId && p.participant.status === 'JOINED',
+        ));
+    if (isParticipant && this.chatService) {
+      try {
+        const room = await this.chatService.getOrCreateSocialRoom(id, viewerId!);
+        const page = await this.chatService.getMessages(viewerId!, room.id, 20);
+        chat = { chatRoomId: room.id, chatMessages: page };
+      } catch {
+        chat = { chatRoomId: null, chatMessages: null };
+      }
+    }
+    return this.shapeDetail({ ...row!, session }, participants, viewerId, chat);
+  }
+
+  /**
+   * List Social thuộc 1 CLB (kể cả quá ngày / đã xong) cho trang CLB.
+   * - Mặc định status = OPEN,FULL,COMPLETED; CANCELLED chỉ manager thấy.
+   * - Kèo CLUB_ONLY chỉ member JOINED của club thấy; khách chỉ thấy PUBLIC.
+   */
+  async listByCommunity(
+    viewer: Actor | undefined,
+    communityId: string,
+    query: QuerySocialByCommunityDto,
+  ) {
+    const community = await this.repository.findCommunityById(communityId);
+    if (!community) apiError(NotFoundException, 'COMMUNITY_NOT_FOUND');
+
+    await this.repository.closeExpiredSessions();
+
+    const rawStatuses = (query.status ?? 'OPEN,FULL,COMPLETED')
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    for (const s of rawStatuses) {
+      if (!(SOCIAL_STATUSES as readonly string[]).includes(s)) {
+        apiError(BadRequestException, 'INVALID_STATUS', { status: s });
+      }
+    }
+    let statuses = [...new Set(rawStatuses)];
+
+    if (query.from && !DATE_RE.test(query.from)) {
+      apiError(BadRequestException, 'INVALID_FROM_DATE');
+    }
+    if (query.to && !DATE_RE.test(query.to)) {
+      apiError(BadRequestException, 'INVALID_TO_DATE');
+    }
+
+    const categoryId = query.sport
+      ? await this.resolveCategoryId(query.sport)
+      : undefined;
+
+    // Phân quyền xem.
+    const viewerId = viewer?.id;
+    let isMember = false;
+    let isManager = !!viewer && this.isPlatformAdmin(viewer);
+    if (viewerId) {
+      const member = await this.repository.findMember(communityId, viewerId);
+      isMember = !!member && member.status === 'JOINED';
+      if (member && member.status === 'JOINED' && MANAGER_ROLES.has(member.role)) {
+        isManager = true;
+      }
+      // Host của kèo không hẳn là manager club — CANCELLED vẫn ẩn với họ ở list.
+    }
+    if (!isManager) {
+      statuses = statuses.filter((s) => s !== 'CANCELLED');
+    }
+    if (statuses.length === 0) {
+      return { items: [], meta: { page: query.page ?? 1, limit: query.limit ?? 20, total: 0 } };
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const { items, total } = await this.repository.listByCommunity({
+      communityId,
+      statuses,
+      from: query.from,
+      to: query.to,
+      categoryId,
+      visibility: isMember ? undefined : 'PUBLIC',
+      search: query.search,
+      page,
+      limit,
+    });
+    return {
+      items: items.map((row) => ({
+        ...row.session,
+        community: row.session.communityId
+          ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
+          : null,
+        sport: row.categorySlug,
+      })),
+      meta: { page, limit, total },
+    };
   }
 
   async update(actor: Actor, id: string, dto: UpdateSocialSessionDto) {
@@ -189,7 +341,7 @@ export class SocialSessionsService {
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
     await this.assertManager(row!.session, actor);
 
-    const session = row!.session;
+    const session = await this.refreshStatusIfExpired(row!.session);
     if (session.status === 'COMPLETED' || session.status === 'CANCELLED') {
       apiError(BadRequestException, 'SESSION_CLOSED');
     }
@@ -227,12 +379,36 @@ export class SocialSessionsService {
     return this.getById(updated!.id, actor.id);
   }
 
+  /**
+   * Bước 1 — Hủy kèo: đánh dấu CANCELLED (không set deletedAt để GET detail
+   * vẫn xem được; list theo ngày vốn chỉ hiện OPEN/FULL nên tự ẩn).
+   */
   async cancel(actor: Actor, id: string) {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
     await this.assertManager(row!.session, actor);
-    const deleted = await this.repository.softDelete(id);
-    return { id: deleted!.id, status: deleted!.status };
+    const session = await this.refreshStatusIfExpired(row!.session);
+    if (session.status === 'CANCELLED' || session.status === 'COMPLETED') {
+      apiError(BadRequestException, 'SESSION_ALREADY_CLOSED');
+    }
+    const cancelled = await this.repository.cancelSession(id);
+    return { id: cancelled!.id, status: cancelled!.status };
+  }
+
+  /**
+   * Bước 2 — Xóa kèo: xóa cứng hoàn toàn (participants + chat đi theo nhờ
+   * CASCADE). Chỉ cho xóa khi đã CANCELLED.
+   */
+  async remove(actor: Actor, id: string) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    await this.assertManager(row!.session, actor);
+    if (row!.session.status !== 'CANCELLED') {
+      apiError(BadRequestException, 'MUST_CANCEL_FIRST');
+    }
+    const deleted = await this.repository.hardDelete(id);
+    if (!deleted) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    return { id: deleted!.id, deleted: true };
   }
 
   private async doJoin(
@@ -272,7 +448,8 @@ export class SocialSessionsService {
   async join(actor: Actor, id: string, dto: JoinSocialSessionDto) {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
-    const outcome = await this.doJoin(row!.session, actor.id, dto.ticketCount ?? 1, 'PLAYER');
+    const session = await this.refreshStatusIfExpired(row!.session);
+    const outcome = await this.doJoin(session, actor.id, dto.ticketCount ?? 1, 'PLAYER');
     if (!outcome.ok) apiError(BadRequestException, 'SESSION_CLOSED');
     return outcome;
   }
@@ -282,9 +459,11 @@ export class SocialSessionsService {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
     await this.assertManager(row!.session, actor);
+    const session = await this.refreshStatusIfExpired(row!.session);
+    this.assertSocialWritable(session);
     const target = await this.repository.findUserById(dto.userId);
     if (!target) apiError(NotFoundException, 'USER_NOT_FOUND');
-    const outcome = await this.doJoin(row!.session, dto.userId, dto.ticketCount ?? 1, 'PLAYER');
+    const outcome = await this.doJoin(session, dto.userId, dto.ticketCount ?? 1, 'PLAYER');
     if (!outcome.ok) apiError(BadRequestException, 'SESSION_CLOSED');
     return outcome;
   }
@@ -315,5 +494,45 @@ export class SocialSessionsService {
     const updated = await this.repository.updatePaymentStatus(id, userId, dto.paymentStatus);
     if (!updated) apiError(NotFoundException, 'PARTICIPANT_NOT_FOUND');
     return updated;
+  }
+
+  private requireChat(): ChatService {
+    if (!this.chatService) {
+      apiError(BadRequestException, 'CHAT_UNAVAILABLE');
+    }
+    return this.chatService!;
+  }
+
+  /** Lịch sử chat Social (cursor pagination kiểu messenger). Chỉ participant. */
+  async getSocialMessages(
+    actor: Actor,
+    id: string,
+    limit = 20,
+    cursor?: string,
+  ) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    const session = await this.refreshStatusIfExpired(row!.session);
+    await this.assertSocialParticipant(session, actor.id);
+    const chat = this.requireChat();
+    const room = await chat.getOrCreateSocialRoom(id, actor.id);
+    return chat.getMessages(actor.id, room.id, limit, cursor);
+  }
+
+  /** Gửi tin nhắn vào chat Social. Chỉ participant; kèo đóng thì chỉ đọc. */
+  async sendSocialMessage(actor: Actor, id: string, dto: SendSocialMessageDto) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    const session = await this.refreshStatusIfExpired(row!.session);
+    this.assertSocialWritable(session);
+    await this.assertSocialParticipant(session, actor.id);
+    const chat = this.requireChat();
+    const room = await chat.getOrCreateSocialRoom(id, actor.id);
+    return chat.sendMessage(actor.id, {
+      roomId: room.id,
+      messageText: dto.messageText,
+      attachmentsUrls: dto.attachmentsUrls,
+      replyToId: dto.replyToId,
+    });
   }
 }

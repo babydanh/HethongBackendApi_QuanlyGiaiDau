@@ -586,6 +586,9 @@ export class ChatRepository {
       const member = await this.findCommunityMember(room.communityId, userId);
       return member?.status === 'JOINED';
     }
+    if (room.type === 'SOCIAL' && room.socialSessionId) {
+      return this.isSocialParticipant(room.socialSessionId, userId);
+    }
     return this.isMemberOfRoom(roomId, userId);
   }
 
@@ -1532,5 +1535,110 @@ export class ChatRepository {
       })
       .from(schema.communityMembers)
       .where(and(...conditions));
+  }
+
+  // ---------------------------------------------------------------------------
+  // SOCIAL session rooms (1 session = 1 room type=SOCIAL, lazy-create).
+  // Quyền truy cập dựa trên social_session_participants (status JOINED) hoặc
+  // host của session — KHÔNG dùng chat_room_members cho loại phòng này.
+  // ---------------------------------------------------------------------------
+
+  async findSocialRoomBySessionId(sessionId: string) {
+    const [room] = await this.db
+      .select()
+      .from(schema.chatRooms)
+      .where(
+        and(
+          eq(schema.chatRooms.socialSessionId, sessionId),
+          eq(schema.chatRooms.type, 'SOCIAL'),
+        ),
+      )
+      .limit(1);
+    return room ?? null;
+  }
+
+  async findSocialSessionById(sessionId: string) {
+    const [row] = await this.db
+      .select()
+      .from(schema.socialSessions)
+      .where(
+        and(
+          eq(schema.socialSessions.id, sessionId),
+          isNull(schema.socialSessions.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** true nếu user là host hoặc participant JOINED của session. */
+  async isSocialParticipant(sessionId: string, userId: string): Promise<boolean> {
+    const session = await this.findSocialSessionById(sessionId);
+    if (!session) return false;
+    if (session.hostUserId === userId) return true;
+    const [row] = await this.db
+      .select({ id: schema.socialSessionParticipants.id })
+      .from(schema.socialSessionParticipants)
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.userId, userId),
+          eq(schema.socialSessionParticipants.status, 'JOINED'),
+        ),
+      )
+      .limit(1);
+    return !!row;
+  }
+
+  async getSocialRoomMembers(sessionId: string) {
+    return this.db
+      .select({
+        id: schema.users.id,
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+        role: schema.socialSessionParticipants.role,
+      })
+      .from(schema.socialSessionParticipants)
+      .innerJoin(schema.users, eq(schema.socialSessionParticipants.userId, schema.users.id))
+      .leftJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.status, 'JOINED'),
+        ),
+      )
+      .orderBy(asc(schema.socialSessionParticipants.joinedAt));
+  }
+
+  /**
+   * Lazy-create room SOCIAL theo session (unique theo socialSessionId + type=SOCIAL).
+   * Race giữa 2 request được bảo vệ bởi unique index (23505 → đọc lại room đã có).
+   */
+  async getOrCreateSocialRoom(sessionId: string) {
+    const existing = await this.findSocialRoomBySessionId(sessionId);
+    if (existing) return existing;
+
+    const session = await this.findSocialSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException('Social session not found');
+    }
+
+    try {
+      const [room] = await this.db
+        .insert(schema.chatRooms)
+        .values({
+          name: session.title,
+          type: 'SOCIAL',
+          socialSessionId: session.id,
+        })
+        .returning();
+      return room;
+    } catch (err) {
+      if ((err as { code?: string })?.code === '23505') {
+        const room = await this.findSocialRoomBySessionId(sessionId);
+        if (room) return room;
+      }
+      throw err;
+    }
   }
 }

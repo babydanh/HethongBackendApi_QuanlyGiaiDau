@@ -17,11 +17,14 @@ import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guar
 import {
   AddSocialParticipantDto,
   JoinSocialSessionDto,
+  QuerySocialByCommunityDto,
   QuerySocialSessionsDto,
   CreateSocialSessionDto,
+  SendSocialMessageDto,
   UpdateSocialPaymentDto,
   UpdateSocialSessionDto,
 } from './dto/social-session.dto';
+import { QueryChatMessagesDto } from '../chat/dto/query-chat-messages.dto';
 import { SocialSessionsService } from './social-sessions.service';
 
 type RequestUser = { id: string; roles?: string[] };
@@ -50,6 +53,18 @@ export class SocialSessionsController {
     return this.service.list(query, user?.id);
   }
 
+  // Khai báo trước ':id' để không bị ParseUUIDPipe của route param nuốt.
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Get('by-community/:communityId')
+  listByCommunity(
+    @Param('communityId', ParseUUIDPipe) communityId: string,
+    @Query() query: QuerySocialByCommunityDto,
+    @CurrentUser() user?: RequestUser,
+  ) {
+    return this.service.listByCommunity(user, communityId, query);
+  }
+
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
@@ -69,12 +84,40 @@ export class SocialSessionsController {
     return this.service.update(user, id, dto);
   }
 
-  @Delete(':id')
+  /** Bước 1 — Hủy kèo: đánh dấu CANCELLED (vẫn xem được detail). */
+  @Patch(':id/cancel')
   cancel(
     @CurrentUser() user: RequestUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.service.cancel(user, id);
+  }
+
+  /** Bước 2 — Xóa kèo: xóa cứng hoàn toàn (chỉ sau khi đã CANCELLED). */
+  @Delete(':id')
+  remove(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.remove(user, id);
+  }
+
+  @Get(':id/messages')
+  getSocialMessages(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: QueryChatMessagesDto,
+  ) {
+    return this.service.getSocialMessages(user, id, query.limit, query.cursor);
+  }
+
+  @Post(':id/messages')
+  sendSocialMessage(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SendSocialMessageDto,
+  ) {
+    return this.service.sendSocialMessage(user, id, dto);
   }
 
   @Post(':id/join')

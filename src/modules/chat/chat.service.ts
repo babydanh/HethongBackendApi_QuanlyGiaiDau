@@ -125,6 +125,12 @@ export class ChatService {
       );
     }
 
+    if (data.type === RoomType.SOCIAL) {
+      throw new ForbiddenException(
+        'Phòng SOCIAL được tạo tự động theo từng kèo Social.',
+      );
+    }
+
     const memberIds = Array.from(new Set([...data.memberIds, userId]));
 
     if (data.type === RoomType.DIRECT) {
@@ -170,6 +176,40 @@ export class ChatService {
   }
 
   /**
+   * Guard phòng SOCIAL: user phải là host hoặc participant JOINED của session.
+   * Trả về session row để caller kiểm tra status (chỉ đọc khi CANCELLED/COMPLETED).
+   */
+  async assertSocialMember(sessionId: string, userId: string) {
+    const session = await this.chatRepository.findSocialSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException('Không tìm thấy kèo Social.');
+    }
+    const isParticipant = await this.chatRepository.isSocialParticipant(sessionId, userId);
+    if (!isParticipant) {
+      throw new ForbiddenException('Bạn phải tham gia kèo mới được xem chat.');
+    }
+    return session;
+  }
+
+  assertSocialWritable(session: { status: string }) {
+    if (session.status === 'CANCELLED' || session.status === 'COMPLETED') {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'SESSION_CLOSED',
+        message: 'Kèo đã kết thúc hoặc đã hủy, không thể nhắn tin.',
+      });
+    }
+  }
+
+  /** Lazy-create (hoặc lấy) phòng SOCIAL của session — guard participant. */
+  async getOrCreateSocialRoom(sessionId: string, userId: string) {
+    await this.assertSocialMember(sessionId, userId);
+    const room = await this.chatRepository.getOrCreateSocialRoom(sessionId);
+    const members = await this.chatRepository.getSocialRoomMembers(sessionId);
+    return { ...room, members };
+  }
+
+  /**
    * P2D.1 — Guard kênh chat CLUB: user phải là member JOINED của cộng đồng.
    */
   async assertClubMember(communityId: string, userId: string) {
@@ -200,6 +240,8 @@ export class ChatService {
     const roomType = room.type as RoomType;
     if (roomType === RoomType.CLUB && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      await this.assertSocialMember(room.socialSessionId, userId);
     } else if (roomType === RoomType.DIRECT) {
       await this.assertDirectRoomAccess(userId, roomId);
     } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
@@ -220,9 +262,13 @@ export class ChatService {
       throw new NotFoundException('Không tìm thấy phòng chat.');
     }
 
-    // P2D.1: room CLUB guard qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
+    // P2D.1: room CLUB guard qua membership cộng đồng (JOINED), room SOCIAL qua
+    // participant của session, các loại khác qua chat_room_members.
     const roomType = room.type as RoomType;
-    if (roomType === RoomType.CLUB && room.communityId) {
+    if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      const session = await this.assertSocialMember(room.socialSessionId, userId);
+      this.assertSocialWritable(session);
+    } else if (roomType === RoomType.CLUB && room.communityId) {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       if (!role) {
         throw new ForbiddenException('Bạn phải là thành viên của CLB để gửi tin nhắn.');
@@ -268,6 +314,19 @@ export class ChatService {
 
     if (roomType === RoomType.SUPPORT) {
       this.chatGateway.broadcastSupportMessage(data.roomId, message);
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      this.chatGateway.broadcastMessage(data.roomId, message);
+      // SOCIAL members aren't in chat_room_members — notify participants explicitly.
+      void this.chatRepository
+        .getSocialRoomMembers(room.socialSessionId)
+        .then((members) => {
+          for (const member of members) {
+            if (member.id !== userId) {
+              this.chatGateway.notifyDirectRoomUpdated(member.id, data.roomId);
+            }
+          }
+        })
+        .catch(() => undefined);
     } else if (roomType === RoomType.CLUB && room.communityId) {
       // P2D.1: payload kèm tags của sender tại thời điểm gửi (denormalized, client không cần join lại).
       const senderTags = await this.chatRepository.getMemberTags(
@@ -306,6 +365,9 @@ export class ChatService {
         if (roomType === RoomType.DIRECT || roomType === RoomType.SUPPORT) {
           const members = await this.chatRepository.getRoomMemberIds(data.roomId);
           recipientIds = members.filter((m) => m !== userId);
+        } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+          const members = await this.chatRepository.getSocialRoomMembers(room.socialSessionId);
+          recipientIds = members.map((m) => m.id).filter((m) => m !== userId);
         } else if (roomType === RoomType.CLUB && room.communityId) {
           const membersWithPref = await this.chatRepository.getCommunityMembersWithNotificationPref(room.communityId, userId);
           const mentions = (data.metadata?.mentions as string[]) || [];
@@ -372,10 +434,13 @@ export class ChatService {
       throw new NotFoundException('Không tìm thấy phòng chat.');
     }
 
-    // P2D.1: room CLUB guard qua membership cộng đồng (JOINED), các loại khác qua chat_room_members.
+    // P2D.1: room CLUB guard qua membership cộng đồng (JOINED), room SOCIAL qua
+    // participant của session, các loại khác qua chat_room_members.
     const roomType = room.type as RoomType;
     if (roomType === RoomType.CLUB && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      await this.assertSocialMember(room.socialSessionId, userId);
     } else {
       const isMember = await this.chatRepository.isMemberOfRoom(roomId, userId);
       if (!isMember) {
@@ -398,6 +463,8 @@ export class ChatService {
     const roomType = room.type as RoomType;
     if (roomType === RoomType.CLUB && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      await this.assertSocialMember(room.socialSessionId, userId);
     } else {
       const isMember = await this.chatRepository.isMemberOfRoom(roomId, userId);
       if (!isMember) {
@@ -428,6 +495,10 @@ export class ChatService {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       isAllowed = role === 'OWNER' || role === 'ADMIN' || role === 'MODERATOR';
     }
+    if (!isAllowed && roomType === RoomType.SOCIAL && room.socialSessionId) {
+      const session = await this.chatRepository.findSocialSessionById(room.socialSessionId);
+      isAllowed = !!session && session.hostUserId === userId;
+    }
 
     if (!isAllowed) {
       throw new ForbiddenException('Bạn không có quyền thu hồi tin nhắn này.');
@@ -451,6 +522,11 @@ export class ChatService {
       const role = await this.chatRepository.getCommunityRole(room.communityId, userId);
       if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
         throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền ghim tin nhắn.');
+      }
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      const session = await this.assertSocialMember(room.socialSessionId, userId);
+      if (session.hostUserId !== userId) {
+        throw new ForbiddenException('Chỉ chủ kèo mới có quyền ghim tin nhắn.');
       }
     } else if (roomType === RoomType.DIRECT) {
       await this.assertDirectRoomAccess(userId, roomId);
@@ -478,6 +554,11 @@ export class ChatService {
       if (role !== 'OWNER' && role !== 'ADMIN' && role !== 'MODERATOR') {
         throw new ForbiddenException('Chỉ Ban Quản Trị mới có quyền bỏ ghim tin nhắn.');
       }
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      const session = await this.assertSocialMember(room.socialSessionId, userId);
+      if (session.hostUserId !== userId) {
+        throw new ForbiddenException('Chỉ chủ kèo mới có quyền bỏ ghim tin nhắn.');
+      }
     } else if (roomType === RoomType.DIRECT) {
       await this.assertDirectRoomAccess(userId, roomId);
     } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
@@ -496,6 +577,8 @@ export class ChatService {
     const roomType = room.type as RoomType;
     if (roomType === RoomType.CLUB && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      await this.assertSocialMember(room.socialSessionId, userId);
     } else if (roomType === RoomType.DIRECT) {
       await this.assertDirectRoomAccess(userId, roomId);
     } else if (!(await this.chatRepository.isMemberOfRoom(roomId, userId))) {
@@ -515,6 +598,8 @@ export class ChatService {
     const roomType = room.type as RoomType;
     if (roomType === RoomType.CLUB && room.communityId) {
       await this.assertClubMember(room.communityId, userId);
+    } else if (roomType === RoomType.SOCIAL && room.socialSessionId) {
+      await this.assertSocialMember(room.socialSessionId, userId);
     } else if (roomType === RoomType.DIRECT) {
       await this.assertDirectRoomAccess(userId, message.roomId);
     } else if (!(await this.chatRepository.isMemberOfRoom(message.roomId, userId))) {

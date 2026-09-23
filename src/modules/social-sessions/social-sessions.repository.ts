@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -156,6 +156,22 @@ export class SocialSessionsRepository {
         .where(where),
     ]);
     return { items, total: Number(totalRows[0]?.total ?? 0) };
+  }
+
+  /** true nếu user đang JOINED trong session (chưa tính host — caller tự check). */
+  async isParticipant(sessionId: string, userId: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select({ id: schema.socialSessionParticipants.id })
+      .from(schema.socialSessionParticipants)
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.userId, userId),
+          eq(schema.socialSessionParticipants.status, 'JOINED'),
+        ),
+      )
+      .limit(1);
+    return !!row;
   }
 
   async listParticipants(sessionId: string, tx: AppDbOrTx = this.db) {
@@ -350,8 +366,129 @@ export class SocialSessionsRepository {
     return updated ?? null;
   }
 
+  /**
+   * Hủy kèo (bước 1): đánh dấu CANCELLED nhưng KHÔNG set deletedAt để
+   * GET detail vẫn xem được. List theo ngày vốn chỉ lọc OPEN/FULL nên tự ẩn.
+   */
+  async cancelSession(id: string) {
+    return this.updateSession(id, { status: 'CANCELLED' });
+  }
+
+  /** Giữ tương thích ngược cho code cũ (deprecated — dùng cancelSession). */
   async softDelete(id: string) {
-    return this.updateSession(id, { status: 'CANCELLED', deletedAt: new Date() });
+    return this.cancelSession(id);
+  }
+
+  /**
+   * Xóa kèo (bước 2): xóa cứng row. Participants + chat room/messages đi theo
+   * nhờ ON DELETE CASCADE. Chỉ service mới được gọi sau khi đã CANCELLED.
+   */
+  async hardDelete(id: string) {
+    const [deleted] = await this.db
+      .delete(schema.socialSessions)
+      .where(eq(schema.socialSessions.id, id))
+      .returning({ id: schema.socialSessions.id });
+    return deleted ?? null;
+  }
+
+  /**
+   * Đóng hàng loạt session đã quá giờ: status OPEN/FULL và
+   * start_at + duration_minutes <= now → COMPLETED. Dùng cho cron.
+   */
+  async closeExpiredSessions(now: Date = new Date()) {
+    const rows = await this.db
+      .update(schema.socialSessions)
+      .set({ status: 'COMPLETED', updatedAt: now })
+      .where(
+        and(
+          isNull(schema.socialSessions.deletedAt),
+          inArray(schema.socialSessions.status, ['OPEN', 'FULL']),
+          sql`${schema.socialSessions.startAt} + (${schema.socialSessions.durationMinutes} * INTERVAL '1 minute') <= ${now}`,
+        ),
+      )
+      .returning({ id: schema.socialSessions.id });
+    return rows;
+  }
+
+  /**
+   * List Social thuộc 1 CLB (kể cả quá ngày / đã xong) cho trang CLB.
+   * Khác listByDate: lọc theo communityId + khoảng playDate + danh sách status,
+   * sort startAt DESC để xem lịch sử mới → cũ.
+   */
+  async listByCommunity(
+    filters: {
+      communityId: string;
+      statuses: string[];
+      from?: string;
+      to?: string;
+      categoryId?: string;
+      visibility?: 'PUBLIC';
+      search?: string;
+      page: number;
+      limit: number;
+    },
+    tx: AppDbOrTx = this.db,
+  ) {
+    const conditions = [
+      eq(schema.socialSessions.communityId, filters.communityId),
+      isNull(schema.socialSessions.deletedAt),
+    ];
+    if (filters.statuses.length > 0) {
+      conditions.push(inArray(schema.socialSessions.status, filters.statuses));
+    }
+    if (filters.from) {
+      conditions.push(gte(schema.socialSessions.playDate, filters.from));
+    }
+    if (filters.to) {
+      conditions.push(lte(schema.socialSessions.playDate, filters.to));
+    }
+    if (filters.categoryId) {
+      conditions.push(eq(schema.socialSessions.categoryId, filters.categoryId));
+    }
+    if (filters.visibility) {
+      conditions.push(eq(schema.socialSessions.visibility, filters.visibility));
+    }
+    const keyword = filters.search?.trim();
+    if (keyword) {
+      const like = `%${keyword}%`;
+      conditions.push(
+        or(
+          ilike(schema.socialSessions.title, like),
+          ilike(schema.socialSessions.venueName, like),
+          ilike(schema.socialSessions.venueAddress, like),
+        )!,
+      );
+    }
+    const where = and(...conditions);
+    const offset = (filters.page - 1) * filters.limit;
+
+    const [items, totalRows] = await Promise.all([
+      tx
+        .select({
+          session: schema.socialSessions,
+          communityName: schema.communities.name,
+          communityLogoUrl: schema.communities.logoUrl,
+          categorySlug: schema.categories.slug,
+        })
+        .from(schema.socialSessions)
+        .leftJoin(
+          schema.communities,
+          eq(schema.communities.id, schema.socialSessions.communityId),
+        )
+        .leftJoin(
+          schema.categories,
+          eq(schema.categories.id, schema.socialSessions.categoryId),
+        )
+        .where(where)
+        .orderBy(desc(schema.socialSessions.startAt))
+        .limit(filters.limit)
+        .offset(offset),
+      tx
+        .select({ total: count() })
+        .from(schema.socialSessions)
+        .where(where),
+    ]);
+    return { items, total: Number(totalRows[0]?.total ?? 0) };
   }
 
   async updatePaymentStatus(

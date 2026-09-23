@@ -236,6 +236,73 @@ export class QuerySocialSessionsDto {
   limit?: number = 20;
 }
 
+export const SOCIAL_STATUSES = ['OPEN', 'FULL', 'COMPLETED', 'CANCELLED'] as const;
+export type SocialStatus = (typeof SOCIAL_STATUSES)[number];
+
+export class QuerySocialByCommunityDto {
+  @ApiPropertyOptional({
+    example: 'OPEN,FULL,COMPLETED',
+    description: 'Lọc theo status, cách nhau bằng dấu phẩy (mặc định OPEN,FULL,COMPLETED)',
+  })
+  @IsString()
+  @IsOptional()
+  status?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-01', description: 'Từ ngày chơi (YYYY-MM-DD)' })
+  @IsString()
+  @IsOptional()
+  from?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-30', description: 'Đến ngày chơi (YYYY-MM-DD)' })
+  @IsString()
+  @IsOptional()
+  to?: string;
+
+  @ApiPropertyOptional({ enum: SOCIAL_SPORTS })
+  @IsIn([...SOCIAL_SPORTS])
+  @IsOptional()
+  sport?: SocialSport;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiPropertyOptional({ example: 20 })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number = 20;
+}
+
+export class SendSocialMessageDto {
+  @ApiProperty({ example: 'Chào mọi người, mai đá đúng giờ nhé!' })
+  @IsString()
+  @MaxLength(2000)
+  messageText: string;
+
+  @ApiPropertyOptional({ example: ['https://example.com/image.png'] })
+  @IsString({ each: true })
+  @IsOptional()
+  attachmentsUrls?: string[];
+
+  @ApiPropertyOptional({ description: 'ID tin nhắn được trả lời/trích dẫn' })
+  @IsUUID()
+  @IsOptional()
+  replyToId?: string;
+}
+
 export class JoinSocialSessionDto {
   @ApiPropertyOptional({ example: 1, description: 'Số vé muốn giữ (mặc định 1)' })
   @Type(() => Number)
