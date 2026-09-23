@@ -9280,7 +9280,7 @@ export class TournamentsRepository {
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: targetStatus,
-        ...(isLitePairing ? { isPaid: true } : {}),
+        isPaid: Boolean(p1.isPaid || p2.isPaid || Number(p1.entryFeeAtRegistration) === 0),
         teamInviteToken: null,
         teamName,
       })
@@ -9415,7 +9415,7 @@ export class TournamentsRepository {
         tournamentDivisionId: participant.tournamentDivisionId,
         registeredBy: partnerRoster.userId,
         teamName: partnerProfile?.fullName || 'Vận động viên',
-        isPaid: isLitePairing ? true : participant.isPaid,
+        isPaid: participant.isPaid,
         teamInviteToken: partnerToken,
         teamStatus: 'PENDING_PARTNER',
       })
@@ -9432,7 +9432,7 @@ export class TournamentsRepository {
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: 'PENDING_PARTNER',
-        isPaid: isLitePairing ? true : participant.isPaid,
+        isPaid: participant.isPaid,
         teamInviteToken: leaderToken,
         teamName: leaderProfile?.fullName || 'Vận động viên',
       })
