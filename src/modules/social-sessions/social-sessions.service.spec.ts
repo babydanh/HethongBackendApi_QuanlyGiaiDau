@@ -22,6 +22,8 @@ function makeRepositoryMock(): jest.Mocked<SocialSessionsRepository> {
     listParticipants: jest.fn(),
     createWithHost: jest.fn(),
     joinOrAddParticipant: jest.fn(),
+    addGuestParticipant: jest.fn(),
+    addParticipantsBatch: jest.fn(),
     removeParticipant: jest.fn(),
     updateSession: jest.fn(),
     softDelete: jest.fn(),

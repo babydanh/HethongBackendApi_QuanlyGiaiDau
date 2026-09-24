@@ -11,6 +11,7 @@ import * as schema from '../../database/schema';
 import { ChatService } from '../chat/chat.service';
 import {
   AddSocialParticipantDto,
+  AddSocialParticipantsBatchDto,
   CreateSocialSessionDto,
   JoinSocialSessionDto,
   QuerySocialByCommunityDto,
@@ -139,11 +140,17 @@ export class SocialSessionsService {
         : null,
       sport: row.categorySlug,
       sportName: row.categoryName,
-      participants: joined.map((p) => ({
-        ...p.participant,
-        fullName: p.fullName,
-        avatarUrl: p.avatarUrl,
-      })),
+      participants: joined.map((p) => {
+        const participant = p.participant as typeof p.participant & {
+          guestName?: string | null;
+        };
+        return {
+          ...participant,
+          // Guest ngoài CLB không có profile -> fallback tên khách để client cũ vẫn hiện tên.
+          fullName: p.fullName ?? participant.guestName ?? null,
+          avatarUrl: p.avatarUrl,
+        };
+      }),
       isJoined: viewerId
         ? joined.some((p) => p.participant.userId === viewerId)
         : false,
@@ -450,29 +457,98 @@ export class SocialSessionsService {
     return outcome;
   }
 
-  /** Admin/Host thêm người (user phải có tài khoản; kèo CLUB_ONLY: phải là member). */
+  /**
+   * Admin/Host thêm người:
+   * - userId: thành viên có tài khoản (kèo CLUB_ONLY: phải là member).
+   * - guestName: khách ngoài CLB, không cần tài khoản, không tạo user mới,
+   *   chỉ đánh dấu slot đã có người (userId NULL).
+   */
   async addParticipant(actor: Actor, id: string, dto: AddSocialParticipantDto) {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
     await this.assertManager(row!.session, actor);
     const session = await this.refreshStatusIfExpired(row!.session);
     this.assertSocialWritable(session);
-    const target = await this.repository.findUserById(dto.userId);
+
+    const userId = dto.userId?.trim();
+    const guestName = dto.guestName?.trim();
+
+    if ((userId && guestName) || (!userId && !guestName)) {
+      apiError(BadRequestException, 'USER_OR_GUEST_REQUIRED');
+    }
+
+    if (guestName) {
+      if (guestName.length === 0 || guestName.length > 100) {
+        apiError(BadRequestException, 'INVALID_GUEST_NAME');
+      }
+      const outcome = await this.repository.addGuestParticipant(
+        session.id,
+        guestName,
+        dto.ticketCount ?? 1,
+      );
+      if (!outcome.ok) {
+        if (outcome.code === 'SESSION_FULL') apiError(ConflictException, 'SESSION_FULL');
+        apiError(BadRequestException, 'SESSION_CLOSED');
+      }
+      return outcome;
+    }
+
+    const target = await this.repository.findUserById(userId!);
     if (!target) apiError(NotFoundException, 'USER_NOT_FOUND');
-    const outcome = await this.doJoin(session, dto.userId, dto.ticketCount ?? 1, 'PLAYER');
-    if (!outcome.ok) apiError(BadRequestException, 'SESSION_CLOSED');
-    return outcome;
+    return this.doJoin(session, userId!, dto.ticketCount ?? 1, 'PLAYER');
   }
 
-  /** Admin/Host xóa người (rời hộ/kick). Không xóa HOST qua endpoint này. */
-  async removeParticipant(actor: Actor, id: string, userId: string) {
+  /**
+   * Admin/Host thêm hàng loạt thành viên CLB (1 hoặc nhiều) trong 1 request.
+   * Dùng cho sheet chọn nhiều member + nút Xác nhận.
+   */
+  async addParticipantsBatch(actor: Actor, id: string, dto: AddSocialParticipantsBatchDto) {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
     await this.assertManager(row!.session, actor);
-    if (row!.session.hostUserId === userId) {
+    const session = await this.refreshStatusIfExpired(row!.session);
+    this.assertSocialWritable(session);
+
+    const uniqueIds = [...new Set((dto.userIds ?? []).map((v) => v?.trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) {
+      apiError(BadRequestException, 'USER_OR_GUEST_REQUIRED');
+    }
+
+    for (const targetId of uniqueIds) {
+      const target = await this.repository.findUserById(targetId);
+      if (!target) apiError(NotFoundException, 'USER_NOT_FOUND');
+      if (session.visibility === 'CLUB_ONLY' && session.communityId) {
+        const member = await this.repository.findMember(session.communityId, targetId);
+        if (!member || member.status !== 'JOINED') {
+          apiError(ForbiddenException, 'NOT_CLUB_MEMBER');
+        }
+      }
+    }
+
+    const outcome = await this.repository.addParticipantsBatch(
+      session.id,
+      uniqueIds,
+      dto.ticketCount ?? 1,
+    );
+    if (!outcome.ok) {
+      if (outcome.code === 'SESSION_FULL') apiError(ConflictException, 'SESSION_FULL');
+      apiError(BadRequestException, 'SESSION_CLOSED');
+    }
+    return outcome;
+  }
+
+  /**
+   * Admin/Host xóa người (rời hộ/kick). Không xóa HOST qua endpoint này.
+   * identifier có thể là userId hoặc participant id (guest có userId NULL).
+   */
+  async removeParticipant(actor: Actor, id: string, identifier: string) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    await this.assertManager(row!.session, actor);
+    if (row!.session.hostUserId === identifier) {
       apiError(BadRequestException, 'CANNOT_REMOVE_HOST');
     }
-    const removed = await this.repository.removeParticipant(id, userId, 'KICKED');
+    const removed = await this.repository.removeParticipant(id, identifier, 'KICKED');
     if (!removed) apiError(NotFoundException, 'PARTICIPANT_NOT_FOUND');
     return removed;
   }
@@ -481,13 +557,13 @@ export class SocialSessionsService {
   async updatePayment(
     actor: Actor,
     id: string,
-    userId: string,
+    identifier: string,
     dto: UpdateSocialPaymentDto,
   ) {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
     await this.assertManager(row!.session, actor);
-    const updated = await this.repository.updatePaymentStatus(id, userId, dto.paymentStatus);
+    const updated = await this.repository.updatePaymentStatus(id, identifier, dto.paymentStatus);
     if (!updated) apiError(NotFoundException, 'PARTICIPANT_NOT_FOUND');
     return updated;
   }

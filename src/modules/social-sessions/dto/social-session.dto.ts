@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsDateString,
   IsIn,
   IsInt,
@@ -314,9 +317,43 @@ export class JoinSocialSessionDto {
 }
 
 export class AddSocialParticipantDto {
-  @ApiProperty({ description: 'User được thêm (phải có tài khoản)' })
+  @ApiPropertyOptional({
+    description: 'User được thêm (phải có tài khoản). Bỏ trống khi thêm khách ngoài.',
+  })
   @IsUUID()
-  userId: string;
+  @IsOptional()
+  userId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Tên khách ngoài CLB (không cần tài khoản). Bắt buộc khi userId trống. Chỉ đánh dấu slot đã có người.',
+    example: 'Duy',
+    maxLength: 100,
+  })
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  guestName?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(64)
+  @IsOptional()
+  ticketCount?: number;
+}
+
+export class AddSocialParticipantsBatchDto {
+  @ApiProperty({
+    description: 'Danh sách userId thành viên CLB cần thêm (1 hoặc nhiều)',
+    example: ['3fa85f64-5717-4562-b3fc-2c963f66afa6'],
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(64)
+  @IsUUID('4', { each: true })
+  userIds: string[];
 
   @ApiPropertyOptional({ example: 1 })
   @Type(() => Number)

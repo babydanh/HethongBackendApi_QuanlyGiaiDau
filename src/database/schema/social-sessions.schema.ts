@@ -91,7 +91,9 @@ export const socialSessions = pgTable(
 );
 
 /**
- * Social Session Participant (1 row = 1 user trong 1 kèo).
+ * Social Session Participant (1 row = 1 slot trong 1 kèo).
+ * - userId nullable: NULL = khách ngoài CLB (guest, không cần tài khoản).
+ * - guestName: tên hiển thị của khách ngoài (bắt buộc khi userId NULL).
  * Không hard-delete: rời/kick chỉ đổi status (JOINED/CANCELLED/KICKED) để giữ lịch sử.
  */
 export const socialSessionParticipants = pgTable(
@@ -101,9 +103,10 @@ export const socialSessionParticipants = pgTable(
     sessionId: uuid('session_id')
       .references(() => socialSessions.id, { onDelete: 'cascade' })
       .notNull(),
-    userId: uuid('user_id')
-      .references(() => users.id, { onDelete: 'restrict' })
-      .notNull(),
+    userId: uuid('user_id').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
+    guestName: varchar('guest_name', { length: 100 }),
     role: varchar('role', { length: 20 }).default('PLAYER').notNull(),
     status: varchar('status', { length: 20 }).default('JOINED').notNull(),
     paymentStatus: varchar('payment_status', { length: 20 })
@@ -133,6 +136,10 @@ export const socialSessionParticipants = pgTable(
     ticketCheck: check(
       'social_session_participants_ticket_check',
       sql`${table.ticketCount} >= 1`,
+    ),
+    guestCheck: check(
+      'social_session_participants_guest_check',
+      sql`(${table.userId} IS NOT NULL OR ${table.guestName} IS NOT NULL)`,
     ),
     sessionIdx: index('social_session_participants_session_idx').on(
       table.sessionId,

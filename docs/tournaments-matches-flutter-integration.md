@@ -57,7 +57,7 @@ Call chain hiện tại trong Flutter:
 
 - `lib/features/home/screens/home_screen.dart`: vòng lặp các tournament gọi `ref.watch(matchesProvider(t.id))` để quyết định giải nào có trận phù hợp.
 - `lib/providers/query_providers.dart`: `matchesProvider` gọi `watchByTournament(tournamentId)`.
-- `lib/data/repositories/api/api_match_repository.dart`: `watchByTournament` gọi `_fetchAllByTournament` với `usePublicSnapshot: false`; `_getMatchPages` tải tất cả trang riêng cho từng `tournamentId`, page size 100.
+- `lib/data/repositories/api/api_match_repository.dart`: trước thay đổi, `watchByTournament` gọi `_fetchAllByTournament` với `usePublicSnapshot: false`, khiến `_getMatchPages` tải các trang riêng cho từng `tournamentId`, page size 100. Hiện luồng này dùng snapshot public chung và chỉ fallback sang request riêng khi snapshot vượt giới hạn completeness.
 
 Vì vậy log có 31 HTTP GET cho 28 tournament ID: đây là fan-out HTTP ở client, không phải N+1 SQL của backend. Sau khi danh sách được lọc, `LiveTournamentWithMatchesCard` còn có luồng tải trang hiển thị riêng (`getTournamentMatchesPaged`); cần lưu ý tránh tải toàn bộ match history ở parent chỉ để xác định card có dữ liệu hay không.
 
@@ -71,7 +71,7 @@ Không cần endpoint mới để giữ tương thích API. Flutter có thể gi
 
 Để tránh kết quả thiếu, client xác nhận tổng số public matches nằm trong giới hạn 50 trang (tối đa 5000 match) trước khi dùng snapshot. Nếu vượt giới hạn, client fallback về phân trang riêng theo tournament; khi đó có thể xuất hiện fan-out như trước, nhưng không âm thầm bỏ các match cũ. Truy vấn theo tournament/division tiếp tục được dùng cho màn hình lọc division.
 
-Ở Home, lựa chọn tốt hơn về payload là để card tải trang đầu mà nó thực sự hiển thị, hoặc thay prefetch toàn bộ history bằng summary/batch API có kết quả theo tournament. Nếu yêu cầu đầy đủ vượt giới hạn snapshot, cần thiết kế endpoint batch có giới hạn số tournament ID, cursor, visibility enforcement và response nhóm theo `tournamentId`; chưa có endpoint batch đó trong backend hiện tại, không nên gọi endpoint giả định.
+Ở Home, lựa chọn tốt hơn về payload vẫn là để card tải trang đầu mà nó thực sự hiển thị, hoặc thay prefetch toàn bộ history bằng summary/batch API có kết quả theo tournament. Nếu cần giảm request cả khi tập public vượt giới hạn snapshot, cần thiết kế endpoint batch có giới hạn số tournament ID, cursor, visibility enforcement và response nhóm theo `tournamentId`; chưa có endpoint batch đó trong backend hiện tại, không nên gọi endpoint giả định.
 
 ## Triển khai và kiểm tra
 

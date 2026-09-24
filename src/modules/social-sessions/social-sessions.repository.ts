@@ -302,10 +302,189 @@ export class SocialSessionsRepository {
     });
   }
 
-  /** Rời/kick: đổi status + giải phóng slot trong cùng transaction. */
+  /**
+   * Thêm khách ngoài CLB: không cần userId, không tạo user mới.
+   * Chỉ insert 1 row với userId NULL + guestName, cộng slot.
+   */
+  async addGuestParticipant(
+    sessionId: string,
+    guestName: string,
+    ticketCount: number,
+  ): Promise<JoinOutcome> {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        SELECT id, current_slots, max_slots, status
+        FROM social_sessions
+        WHERE id = ${sessionId} AND deleted_at IS NULL
+        FOR UPDATE
+      `)) as unknown as Array<{
+        id: string;
+        current_slots: number;
+        max_slots: number;
+        status: string;
+      }>;
+      const session = locked[0];
+      if (!session) return { ok: false, code: 'SESSION_NOT_FOUND' } as const;
+      if (session.status !== 'OPEN' && session.status !== 'FULL') {
+        return { ok: false, code: 'SESSION_CLOSED' } as const;
+      }
+      if (session.current_slots + ticketCount > session.max_slots) {
+        return { ok: false, code: 'SESSION_FULL' } as const;
+      }
+
+      const [created] = await tx
+        .insert(schema.socialSessionParticipants)
+        .values({
+          sessionId,
+          userId: null,
+          guestName: guestName.trim().slice(0, 100),
+          role: 'PLAYER',
+          status: 'JOINED',
+          ticketCount,
+        })
+        .returning();
+      if (!created) return { ok: false, code: 'SESSION_CLOSED' } as const;
+
+      const currentSlots = session.current_slots + ticketCount;
+      const status = currentSlots >= session.max_slots ? 'FULL' : 'OPEN';
+      await tx
+        .update(schema.socialSessions)
+        .set({ currentSlots, status, updatedAt: new Date() })
+        .where(eq(schema.socialSessions.id, sessionId));
+
+      return { ok: true, participant: created, currentSlots, status };
+    });
+  }
+
+  /**
+   * Thêm hàng loạt thành viên CLB (1 hoặc nhiều) trong 1 transaction.
+   * - Dedupe userIds, bỏ qua những user đã JOINED (trả về skipped).
+   * - Check capacity 1 lần cho tổng ticketCount.
+   */
+  async addParticipantsBatch(
+    sessionId: string,
+    userIds: string[],
+    ticketCount: number,
+  ): Promise<
+    | {
+        ok: true;
+        added: SocialParticipantRow[];
+        skipped: string[];
+        currentSlots: number;
+        status: string;
+      }
+    | { ok: false; code: 'SESSION_NOT_FOUND' | 'SESSION_CLOSED' | 'SESSION_FULL' }
+  > {
+    const uniqueIds = [...new Set(userIds.filter(Boolean))];
+    if (uniqueIds.length === 0) {
+      return { ok: false, code: 'SESSION_CLOSED' };
+    }
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        SELECT id, current_slots, max_slots, status
+        FROM social_sessions
+        WHERE id = ${sessionId} AND deleted_at IS NULL
+        FOR UPDATE
+      `)) as unknown as Array<{
+        id: string;
+        current_slots: number;
+        max_slots: number;
+        status: string;
+      }>;
+      const session = locked[0];
+      if (!session) return { ok: false, code: 'SESSION_NOT_FOUND' } as const;
+      if (session.status !== 'OPEN' && session.status !== 'FULL') {
+        return { ok: false, code: 'SESSION_CLOSED' } as const;
+      }
+
+      const existingRows = await tx
+        .select({
+          id: schema.socialSessionParticipants.id,
+          userId: schema.socialSessionParticipants.userId,
+          status: schema.socialSessionParticipants.status,
+        })
+        .from(schema.socialSessionParticipants)
+        .where(
+          and(
+            eq(schema.socialSessionParticipants.sessionId, sessionId),
+            inArray(schema.socialSessionParticipants.userId, uniqueIds),
+          ),
+        );
+
+      const joinedSet = new Set(
+        existingRows.filter((r) => r.status === 'JOINED').map((r) => r.userId as string),
+      );
+      const reactivateMap = new Map(
+        existingRows
+          .filter((r) => r.status !== 'JOINED' && r.userId)
+          .map((r) => [r.userId as string, r.id]),
+      );
+      const skipped = uniqueIds.filter((id) => joinedSet.has(id));
+      const toAdd = uniqueIds.filter((id) => !joinedSet.has(id));
+
+      if (toAdd.length === 0) {
+        return {
+          ok: true,
+          added: [],
+          skipped,
+          currentSlots: session.current_slots,
+          status: session.status,
+        };
+      }
+
+      const needed = toAdd.length * ticketCount;
+      if (session.current_slots + needed > session.max_slots) {
+        return { ok: false, code: 'SESSION_FULL' } as const;
+      }
+
+      const added: SocialParticipantRow[] = [];
+      for (const userId of toAdd) {
+        const reactivateId = reactivateMap.get(userId);
+        if (reactivateId) {
+          const [updated] = await tx
+            .update(schema.socialSessionParticipants)
+            .set({ status: 'JOINED', ticketCount, role: 'PLAYER' })
+            .where(eq(schema.socialSessionParticipants.id, reactivateId))
+            .returning();
+          if (updated) added.push(updated);
+        } else {
+          const [created] = await tx
+            .insert(schema.socialSessionParticipants)
+            .values({ sessionId, userId, role: 'PLAYER', status: 'JOINED', ticketCount })
+            .onConflictDoNothing({
+              target: [
+                schema.socialSessionParticipants.sessionId,
+                schema.socialSessionParticipants.userId,
+              ],
+            })
+            .returning();
+          if (created) {
+            added.push(created);
+          } else {
+            skipped.push(userId);
+          }
+        }
+      }
+
+      const currentSlots = session.current_slots + added.length * ticketCount;
+      const status = currentSlots >= session.max_slots ? 'FULL' : 'OPEN';
+      await tx
+        .update(schema.socialSessions)
+        .set({ currentSlots, status, updatedAt: new Date() })
+        .where(eq(schema.socialSessions.id, sessionId));
+
+      return { ok: true, added, skipped, currentSlots, status };
+    });
+  }
+
+  /**
+   * Rời/kick: đổi status + giải phóng slot trong cùng transaction.
+   * identifier có thể là userId (user thật) hoặc participant id (guest ngoài CLB
+   * có userId NULL nên phải xóa bằng id của row participant).
+   */
   async removeParticipant(
     sessionId: string,
-    userId: string,
+    identifier: string,
     nextStatus: 'CANCELLED' | 'KICKED',
   ) {
     return this.db.transaction(async (tx) => {
@@ -323,7 +502,10 @@ export class SocialSessionsRepository {
         .where(
           and(
             eq(schema.socialSessionParticipants.sessionId, sessionId),
-            eq(schema.socialSessionParticipants.userId, userId),
+            or(
+              eq(schema.socialSessionParticipants.userId, identifier),
+              eq(schema.socialSessionParticipants.id, identifier),
+            ),
           ),
         )
         .limit(1);
@@ -492,10 +674,13 @@ export class SocialSessionsRepository {
     return { items, total: Number(totalRows[0]?.total ?? 0) };
   }
 
-  /** Cập nhật trạng thái thanh toán của người tham gia */
+  /**
+   * Cập nhật trạng thái thanh toán của người tham gia.
+   * identifier có thể là userId hoặc participant id (cho guest userId NULL).
+   */
   async updatePaymentStatus(
     sessionId: string,
-    userId: string,
+    identifier: string,
     paymentStatus: 'UNPAID' | 'PAID' | 'PENDING',
   ) {
     const [updated] = await this.db
@@ -504,7 +689,10 @@ export class SocialSessionsRepository {
       .where(
         and(
           eq(schema.socialSessionParticipants.sessionId, sessionId),
-          eq(schema.socialSessionParticipants.userId, userId),
+          or(
+            eq(schema.socialSessionParticipants.userId, identifier),
+            eq(schema.socialSessionParticipants.id, identifier),
+          ),
         ),
       )
       .returning();

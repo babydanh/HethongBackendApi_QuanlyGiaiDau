@@ -16,6 +16,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import {
   AddSocialParticipantDto,
+  AddSocialParticipantsBatchDto,
   JoinSocialSessionDto,
   QuerySocialByCommunityDto,
   QuerySocialSessionsDto,
@@ -136,6 +137,15 @@ export class SocialSessionsController {
     @Body() dto: AddSocialParticipantDto,
   ) {
     return this.service.addParticipant(user, id, dto);
+  }
+
+  @Post(':id/participants/batch')
+  addParticipantsBatch(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddSocialParticipantsBatchDto,
+  ) {
+    return this.service.addParticipantsBatch(user, id, dto);
   }
 
   @Delete(':id/participants/:userId')
