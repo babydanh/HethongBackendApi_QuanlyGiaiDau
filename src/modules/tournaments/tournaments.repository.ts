@@ -66,7 +66,11 @@ import {
 import { validateFootballRosterSelection } from './utils/football-roster-validation';
 import { assertFootballRosterLockable } from './utils/football-roster-lock';
 import { resolveFootballTeamConfig } from './utils/football-team-config';
-import { isRegistrationRosterCompleteForPayment } from './utils/registration-payment-eligibility';
+import {
+  isLiteRegistrationTournament,
+  isRegistrationFeePaid,
+  isRegistrationRosterCompleteForPayment,
+} from './utils/registration-payment-eligibility';
 import { isRegistrationOpenStatus } from './utils/registration-lifecycle';
 import {
   normalizeGenderRestriction,
@@ -3778,15 +3782,14 @@ export class TournamentsRepository {
       divisionMatchType = divisionRow?.matchType ?? null;
     }
     const rosterCount = members.length;
-    const footballConfig = resolveFootballTeamConfig(
-      (
-        await this.db
-          .select({ tournamentConfig: schema.tournaments.tournamentConfig })
-          .from(schema.tournaments)
-          .where(eq(schema.tournaments.id, tournamentId))
-          .limit(1)
-      )[0]?.tournamentConfig,
-    );
+    const [registrationTournament] = await this.db
+      .select({ tournamentConfig: schema.tournaments.tournamentConfig })
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.id, tournamentId))
+      .limit(1);
+    const tournamentConfig = registrationTournament?.tournamentConfig;
+    const isLiteRegistration = isLiteRegistrationTournament(tournamentConfig);
+    const footballConfig = resolveFootballTeamConfig(tournamentConfig);
     const isFootball =
       Boolean(participant.footballTeamId) || footballConfig.isTeamSport;
     const rosterComplete = isRegistrationRosterCompleteForPayment({
@@ -3799,7 +3802,11 @@ export class TournamentsRepository {
       requiredFootballMainRosterCount: footballConfig.mainSize,
     });
     const [completedRegistrationPayment] = await this.db
-      .select({ id: schema.payments.id })
+      .select({
+        id: schema.payments.id,
+        refundableAmount: sql<string>`GREATEST(${schema.payments.amount} - COALESCE(${schema.payments.refundedAmount}, 0), 0)`,
+        refundStatus: schema.payments.refundStatus,
+      })
       .from(schema.payments)
       .where(
         and(
@@ -3808,10 +3815,22 @@ export class TournamentsRepository {
           eq(schema.payments.status, 'COMPLETED'),
         ),
       )
+      .orderBy(desc(schema.payments.paidAt), desc(schema.payments.createdAt))
       .limit(1);
+    const effectiveIsPaid = isRegistrationFeePaid({
+      persistedIsPaid: participant.isPaid,
+      feeSnapshot: payableEntryFeeAmount,
+      hasCompletedPayment: Boolean(completedRegistrationPayment),
+      isLiteRegistration,
+    });
+    const hasRefundablePayment = Boolean(
+      completedRegistrationPayment &&
+        Number(completedRegistrationPayment.refundableAmount) > 0 &&
+        completedRegistrationPayment.refundStatus !== 'REFUNDED',
+    );
     const paymentEligible =
       rosterComplete &&
-      !participant.isPaid &&
+      !effectiveIsPaid &&
       !completedRegistrationPayment &&
       Number.isSafeInteger(payableEntryFeeAmount) &&
       payableEntryFeeAmount > 0;
@@ -3824,7 +3843,8 @@ export class TournamentsRepository {
         teamName: participant.teamName,
         teamStatus: participant.teamStatus,
         partnerUserId: participant.partnerUserId,
-        isPaid: participant.isPaid,
+        isPaid: effectiveIsPaid,
+        hasRefundablePayment,
         tournamentDivisionId: participant.tournamentDivisionId,
         entryFeeAtRegistration: participant.entryFeeAtRegistration,
         registeredAt: participant.registeredAt,
@@ -9348,15 +9368,24 @@ export class TournamentsRepository {
       ? 'PENDING_APPROVAL'
       : 'COMPLETE';
     const isLitePairing =
-      (tournamentConfig && typeof tournamentConfig === 'object' &&
-        ((tournamentConfig as Record<string, unknown>).isLite === true ||
-          (tournamentConfig as Record<string, unknown>).mode === 'LITE')) ||
+      isLiteRegistrationTournament(tournamentConfig) ||
       registrationMode === 'LITE';
+    const primaryCapturedPayment = await this.findCompletedParticipantPaymentInTx(
+      tx,
+      tournamentId,
+      p1Id,
+    );
+    const registrationIsPaid = isRegistrationFeePaid({
+      persistedIsPaid: p1.isPaid,
+      feeSnapshot: p1.entryFeeAtRegistration,
+      hasCompletedPayment: Boolean(primaryCapturedPayment),
+      isLiteRegistration: isLitePairing,
+    });
     const [updatedP1] = await tx
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: targetStatus,
-        isPaid: Boolean(p1.isPaid || p2.isPaid || Number(p1.entryFeeAtRegistration) === 0),
+        isPaid: registrationIsPaid,
         teamInviteToken: null,
         teamName,
       })
