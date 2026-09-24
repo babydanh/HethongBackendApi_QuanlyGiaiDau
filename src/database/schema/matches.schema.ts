@@ -119,6 +119,9 @@ export const matches = pgTable(
       table.tournamentId,
       table.status,
     ),
+    idxMatchesTournamentUpdatedAt: index(
+      'idx_matches_tournament_updated_at',
+    ).on(table.tournamentId, table.updatedAt, table.id),
     idxMatchesStageRoundOrder: index('idx_matches_stage_round_order').on(
       table.stageId,
       table.roundNumber,
