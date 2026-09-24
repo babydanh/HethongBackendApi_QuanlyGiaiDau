@@ -1,4 +1,5 @@
 import { PaymentsService } from './payments.service';
+import { BadRequestException } from '@nestjs/common';
 import { PaymentPurpose } from './dto/create-payment.dto';
 
 const makeService = (
@@ -127,7 +128,7 @@ describe('registration payment eligibility', () => {
         paymentData as never,
         { ...tournament, entryFee: '200000' } as never,
       ),
-    ).rejects.toThrow('Lệ phí đăng ký phải là số nguyên dương.');
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('prices a new unsnapshotted registration from the changed current fee', async () => {

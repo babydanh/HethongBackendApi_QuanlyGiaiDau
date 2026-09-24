@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
@@ -613,6 +613,22 @@ export class PaymentsRepository {
     return this.db
       .select({
         payment: schema.payments,
+        requestedRefundAmount: sql<string | null>`(
+          select ${schema.paymentRefunds.amount}
+          from ${schema.paymentRefunds}
+          where ${schema.paymentRefunds.paymentId} = ${schema.payments.id}
+            and ${schema.paymentRefunds.status} = 'REQUESTED'
+          order by ${schema.paymentRefunds.createdAt} desc
+          limit 1
+        )`,
+        requestedRefundReason: sql<string | null>`(
+          select ${schema.paymentRefunds.reason}
+          from ${schema.paymentRefunds}
+          where ${schema.paymentRefunds.paymentId} = ${schema.payments.id}
+            and ${schema.paymentRefunds.status} = 'REQUESTED'
+          order by ${schema.paymentRefunds.createdAt} desc
+          limit 1
+        )`,
         tournament: {
           id: schema.tournaments.id,
           name: schema.tournaments.name,
@@ -646,7 +662,7 @@ export class PaymentsRepository {
     const [paymentTotals] = await this.db
       .select({
         amount: sql<string>`coalesce(sum(${schema.payments.amount}), 0)`,
-        fee: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), 0)`,
+        fee: sql<string>`GREATEST(coalesce(sum(${schema.payments.platformFeeAmount}), 0) - coalesce((select sum(${schema.financialLedgerEntries.amount}) from ${schema.financialLedgerEntries} where ${schema.financialLedgerEntries.entryType} = 'PLATFORM_FEE_REVERSED' and ${schema.financialLedgerEntries.direction} = 'CREDIT'), 0), 0)`,
       })
       .from(schema.payments)
       .where(eq(schema.payments.status, 'COMPLETED'));
@@ -685,44 +701,103 @@ export class PaymentsRepository {
         return null;
       }
 
+      const [requestedRefund] = await tx
+        .select()
+        .from(schema.paymentRefunds)
+        .where(
+          and(
+            eq(schema.paymentRefunds.paymentId, paymentId),
+            eq(schema.paymentRefunds.status, 'REQUESTED'),
+          ),
+        )
+        .orderBy(desc(schema.paymentRefunds.createdAt))
+        .limit(1);
+      const refundAmount = requestedRefund?.amount ?? payment.amount;
+      const reason = requestedRefund?.reason ?? 'LEGACY_WITHDRAWAL_REFUND';
       const [updated] = await tx
         .update(schema.payments)
         .set({
           refundStatus: 'REFUNDED',
-          refundedAmount: payment.amount,
+          refundedAmount: sql`COALESCE(${schema.payments.refundedAmount}, 0) + ${refundAmount}`,
           updatedAt: new Date(),
         })
         .where(
           and(
             eq(schema.payments.id, paymentId),
+            eq(schema.payments.status, 'COMPLETED'),
             eq(schema.payments.refundStatus, 'PENDING_REFUND'),
           ),
         )
         .returning();
       if (!updated) return null;
 
-      const [refund] = await tx
-        .insert(schema.paymentRefunds)
-        .values({
-          paymentId,
-          amount: payment.amount,
-          status: 'PAID',
-          reason: 'LEGACY_WITHDRAWAL_REFUND',
-          transactionProofUrl: proofUrl,
-          processedBy: adminId,
-          processedAt: new Date(),
-        })
-        .returning();
+      let refund = requestedRefund;
+      if (requestedRefund) {
+        const [settledRefund] = await tx
+          .update(schema.paymentRefunds)
+          .set({
+            status: 'PAID',
+            transactionProofUrl: proofUrl,
+            processedBy: adminId,
+            processedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.paymentRefunds.id, requestedRefund.id),
+              eq(schema.paymentRefunds.status, 'REQUESTED'),
+            ),
+          )
+          .returning();
+        if (!settledRefund) {
+          throw new ConflictException('Refund request has already changed.');
+        }
+        refund = settledRefund;
+      } else {
+        const [legacyRefund] = await tx
+          .insert(schema.paymentRefunds)
+          .values({
+            paymentId,
+            amount: refundAmount,
+            status: 'PAID',
+            reason,
+            transactionProofUrl: proofUrl,
+            processedBy: adminId,
+            processedAt: new Date(),
+          })
+          .returning();
+        refund = legacyRefund;
+      }
+
+      if (!refund) {
+        throw new ConflictException('Refund record was not created.');
+      }
       await tx.insert(schema.financialLedgerEntries).values({
         tournamentId: payment.tournamentId,
         paymentId,
         refundId: refund.id,
         entryType: 'REFUND_PAID',
         direction: 'DEBIT',
-        amount: payment.amount,
+        amount: refundAmount,
         idempotencyKey: `refund:${refund.id}:paid`,
         createdBy: adminId,
       });
+      if (
+        requestedRefund &&
+        ['WITHDRAWAL_WITHIN_3_HOURS', 'PARTICIPANT_KICKED'].includes(reason) &&
+        Number(payment.platformFeeAmount ?? 0) > 0
+      ) {
+        await tx.insert(schema.financialLedgerEntries).values({
+          tournamentId: payment.tournamentId,
+          paymentId,
+          refundId: refund.id,
+          entryType: 'PLATFORM_FEE_REVERSED',
+          direction: 'CREDIT',
+          amount: payment.platformFeeAmount!,
+          idempotencyKey: `refund:${refund.id}:platform-fee-reversed`,
+          createdBy: adminId,
+        });
+      }
       await tx.insert(schema.paymentStatusLogs).values({
         paymentId,
         previousStatus: payment.status,

@@ -506,7 +506,7 @@ export const buildParticipantKickedNotification = (params: {
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.TOURNAMENT_KICKED,
   title: 'Bị loại khỏi giải đấu',
-  content: `Đơn đăng ký tham gia giải đấu ${params.tournamentName} của bạn đã bị loại.${params.reason ? ` Lý do: ${params.reason}.` : ''}`,
+  content: `Đơn đăng ký tham gia giải đấu ${params.tournamentName} của bạn đã bị loại.${params.reason ? ` Lý do: ${params.reason}.` : ''} Nếu đã thanh toán, bạn được hoàn toàn bộ khoản đã trả, không trừ phí; yêu cầu đang chờ Ban tổ chức xác nhận và chuyển tiền.`,
   redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
     divisionId: params.divisionId ?? undefined,
   }),
@@ -520,7 +520,7 @@ export const buildRegistrationCancelledFullNotification = (params: {
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.TOURNAMENT_FULL_CANCELLED,
   title: 'Hủy đăng ký do giải đấu đã đầy',
-  content: 'Đơn đăng ký Đôi của bạn đã bị hủy vì giải đấu đã đạt số lượng slot tối đa.',
+  content: 'Đơn đăng ký Đôi của bạn đã bị hủy vì giải đấu đã đạt số lượng slot tối đa. Nếu đã thanh toán, bạn được hoàn toàn bộ khoản đã trả, không trừ phí; yêu cầu đang chờ Ban tổ chức xác nhận và chuyển tiền.',
   redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
     divisionId: params.divisionId ?? undefined,
   }),
@@ -535,7 +535,7 @@ export const buildRegistrationTimeoutNotification = (params: {
   receiverId: params.receiverId,
   type: NOTIFICATION_TYPES.TOURNAMENT_TEAM_TIMEOUT,
   title: 'Hủy đăng ký Đôi do hết hạn xác nhận',
-  content: `Đăng ký Đôi của bạn tại giải đấu ${params.tournamentName} đã bị hủy do đồng đội không xác nhận tham gia kịp thời.`,
+  content: `Đăng ký Đôi của bạn tại giải đấu ${params.tournamentName} đã bị hủy do đồng đội không xác nhận kịp thời. Nếu đã thanh toán, bạn được hoàn toàn bộ khoản đã trả, không trừ phí; yêu cầu đang chờ Ban tổ chức xác nhận và chuyển tiền.`,
   redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
     divisionId: params.divisionId ?? undefined,
   }),

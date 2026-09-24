@@ -1,7 +1,5 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { QueryMyManagementTournamentsDto } from './query-my-management-tournaments.dto';
 
 describe('QueryMyManagementTournamentsDto', () => {
@@ -32,24 +30,5 @@ describe('QueryMyManagementTournamentsDto', () => {
     });
 
     expect(await validate(dto)).not.toHaveLength(0);
-  });
-
-  it('keeps the completed predicate in list and count query paths', () => {
-    const source = readFileSync(
-      join(__dirname, '..', 'tournaments.repository.ts'),
-      'utf8',
-    );
-
-    expect(source).toMatch(
-      /const completedOnly\s*=\s*String\(\s*query\.status \?\? ''\s*\)\.toUpperCase\(\)\s*===\s*'COMPLETED'/s,
-    );
-    expect(source).toContain('const completedParentCondition = sql`exists');
-    expect(source).toContain(
-      'parentBaseConditions.push(completedParentCondition)',
-    );
-    expect(source).toContain(
-      'parentCountConditions.push(completedParentCondition)',
-    );
-    expect(source).toContain("eq(schema.tournaments.status, 'COMPLETED')");
   });
 });

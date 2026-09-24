@@ -122,3 +122,9 @@ export function resolveFootballTeamConfig(input: unknown): FootballTeamConfigRes
 
   return { isTeamSport: true, mainSize, maxReserve, maxTotalSize };
 }
+
+/** Preserve legacy non-team tournaments while resolving football team sizes once. */
+export function getRequiredFootballMainRosterCount(config: unknown): number {
+  const resolved = resolveFootballTeamConfig(config);
+  return resolved.isTeamSport ? resolved.mainSize : 1;
+}

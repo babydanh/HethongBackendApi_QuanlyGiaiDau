@@ -8,6 +8,7 @@ import {
   evaluateTournamentCleanup,
   TOURNAMENT_CLEANUP_GRACE_DAYS,
 } from './utils/tournament-cleanup-policy';
+import { TournamentRegistrationService } from './services/tournament-registration.service';
 
 @Injectable()
 export class TournamentSchedulerService {
@@ -15,7 +16,12 @@ export class TournamentSchedulerService {
 
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
+    private readonly tournamentRegistrationService: TournamentRegistrationService,
   ) {}
+  @Cron('*/5 * * * *')
+  async handleRegistrationsTimeout() {
+    await this.tournamentRegistrationService.processPendingRegistrationTimeout();
+  }
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async handleAutoCloseRegistration() {

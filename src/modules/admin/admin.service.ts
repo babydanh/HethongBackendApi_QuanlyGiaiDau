@@ -76,7 +76,7 @@ export class AdminService {
     const [paymentsSumTotal] = await this.db
       .select({
         gmv: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
-        netRevenue: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`,
+        netRevenue: sql<string>`coalesce(sum(GREATEST(COALESCE(${schema.payments.platformFeeAmount}, 0) - COALESCE((select sum(${schema.financialLedgerEntries.amount}) from ${schema.financialLedgerEntries} where ${schema.financialLedgerEntries.paymentId} = ${schema.payments.id} and ${schema.financialLedgerEntries.entryType} = 'PLATFORM_FEE_REVERSED' and ${schema.financialLedgerEntries.direction} = 'CREDIT'), 0), 0)), '0')`,
         transactionsCount: sql<number>`count(*)::int`,
       })
       .from(schema.payments)
@@ -85,7 +85,7 @@ export class AdminService {
     const [paymentsSumCurrent] = await this.db
       .select({
         gmv: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
-        netRevenue: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`,
+        netRevenue: sql<string>`coalesce(sum(GREATEST(COALESCE(${schema.payments.platformFeeAmount}, 0) - COALESCE((select sum(${schema.financialLedgerEntries.amount}) from ${schema.financialLedgerEntries} where ${schema.financialLedgerEntries.paymentId} = ${schema.payments.id} and ${schema.financialLedgerEntries.entryType} = 'PLATFORM_FEE_REVERSED' and ${schema.financialLedgerEntries.direction} = 'CREDIT'), 0), 0)), '0')`,
         transactionsCount: sql<number>`count(*)::int`,
       })
       .from(schema.payments)
@@ -99,7 +99,7 @@ export class AdminService {
     const [paymentsSumPrev] = await this.db
       .select({
         gmv: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
-        netRevenue: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`,
+        netRevenue: sql<string>`coalesce(sum(GREATEST(COALESCE(${schema.payments.platformFeeAmount}, 0) - COALESCE((select sum(${schema.financialLedgerEntries.amount}) from ${schema.financialLedgerEntries} where ${schema.financialLedgerEntries.paymentId} = ${schema.payments.id} and ${schema.financialLedgerEntries.entryType} = 'PLATFORM_FEE_REVERSED' and ${schema.financialLedgerEntries.direction} = 'CREDIT'), 0), 0)), '0')`,
         transactionsCount: sql<number>`count(*)::int`,
       })
       .from(schema.payments)
@@ -278,7 +278,7 @@ export class AdminService {
       .select({
         period: sql<string>`date_trunc(${sql.raw(`'${truncateUnit}'`)}, "payments"."paid_at")`,
         gmv: sql<string>`coalesce(sum(${schema.payments.amount}), '0')`,
-        revenue: sql<string>`coalesce(sum(${schema.payments.platformFeeAmount}), '0')`,
+        revenue: sql<string>`coalesce(sum(GREATEST(COALESCE(${schema.payments.platformFeeAmount}, 0) - COALESCE((select sum(${schema.financialLedgerEntries.amount}) from ${schema.financialLedgerEntries} where ${schema.financialLedgerEntries.paymentId} = ${schema.payments.id} and ${schema.financialLedgerEntries.entryType} = 'PLATFORM_FEE_REVERSED' and ${schema.financialLedgerEntries.direction} = 'CREDIT'), 0), 0)), '0')`,
         count: sql<number>`count(*)::int`,
       })
       .from(schema.payments)

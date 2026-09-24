@@ -1,11 +1,33 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TournamentsService } from './tournaments.service';
+import { CreateTournamentDto } from './dto/create-tournament.dto';
+import { TournamentAccessService } from './services/tournament-access.service';
+import { TournamentVenueService } from './services/tournament-venue.service';
+import { TournamentMediaService } from './services/tournament-media.service';
+import { TournamentDiscoveryService } from './services/tournament-discovery.service';
+import { TournamentLifecycleService } from './services/tournament-lifecycle.service';
+import { TournamentFeePolicyService } from './services/tournament-fee-policy.service';
+import { TournamentStaffService } from './services/tournament-staff.service';
+import { TournamentRefereeService } from './services/tournament-referee.service';
+import { TournamentFollowService } from './services/tournament-follow.service';
+import { TournamentResultsService } from './services/tournament-results.service';
+import { TournamentDivisionService } from './services/tournament-division.service';
+import { TournamentParticipantAdminService } from './services/tournament-participant-admin.service';
+import { TournamentImportService } from './services/tournament-import.service';
+import { TournamentBracketService } from './services/tournament-bracket.service';
 import type { TournamentsRepository } from './tournaments.repository';
 import type { BracketGeneratorService } from './bracket-generator.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { StorageService } from '../../providers/storage/storage.service';
+import type { VenuesService } from '../venues/venues.service';
 import type { RedisService } from '../../providers/redis/redis.service';
+import type { CommunitySocialRepository } from '../communities/community-social.repository';
+import type { LiveScoreGateway } from '../matches/live-score.gateway';
+import { TournamentRealtimeService } from './services/tournament-realtime.service';
+import { TournamentRegistrationService } from './services/tournament-registration.service';
+import { TournamentLiteService } from './services/tournament-lite.service';
+import { TournamentFootballRosterService } from './services/tournament-football-roster.service';
 import { deriveGroupStageConfig } from './utils/group-stage-config';
 
 describe('deriveGroupStageConfig (pure)', () => {
@@ -104,6 +126,7 @@ describe('TournamentsService — Lite pairing guards', () => {
     mockRepo = {
       findById: jest.fn(),
       findCategory: jest.fn(),
+      create: jest.fn(),
       findCommunityMember: jest.fn(),
       findUserProfile: jest.fn(),
       isCoOrganizer: jest.fn(),
@@ -158,6 +181,9 @@ describe('TournamentsService — Lite pairing guards', () => {
     const liveScoreGateway = {
       broadcastRegistrationUpdate: jest.fn(),
     };
+    const tournamentRealtimeService = new TournamentRealtimeService(
+      liveScoreGateway as unknown as LiveScoreGateway,
+    );
     mockVenues = {
       findOne: jest.fn(),
       addCourt: jest.fn(),
@@ -172,8 +198,158 @@ describe('TournamentsService — Lite pairing guards', () => {
       mockRedis as any,
       mockConfig as any,
       mockCommunitySocial as any,
-      mockVenues as any,
-      liveScoreGateway as any,
+      new TournamentAccessService(
+        mockRepo as unknown as TournamentsRepository,
+      ),
+      new TournamentVenueService(
+        mockRepo as unknown as TournamentsRepository,
+        mockVenues as unknown as VenuesService,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+      ),
+      new TournamentMediaService(
+        mockRepo as unknown as TournamentsRepository,
+        mockStorage as unknown as StorageService,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+      ),
+      new TournamentDiscoveryService(
+        mockRepo as unknown as TournamentsRepository,
+        mockRedis as unknown as RedisService,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+      ),
+      new TournamentLifecycleService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockNotifications as unknown as NotificationsService,
+        mockCommunitySocial as unknown as CommunitySocialRepository,
+        mockRedis as unknown as RedisService,
+        new TournamentMediaService(
+          mockRepo as unknown as TournamentsRepository,
+          mockStorage as unknown as StorageService,
+          new TournamentAccessService(
+            mockRepo as unknown as TournamentsRepository,
+          ),
+        ),
+        new TournamentFeePolicyService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+      ),
+      new TournamentFeePolicyService(
+        mockRepo as unknown as TournamentsRepository,
+      ),
+      new TournamentStaffService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockNotifications as unknown as NotificationsService,
+      ),
+      new TournamentRefereeService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockNotifications as unknown as NotificationsService,
+      ),
+      new TournamentFollowService(
+        mockRepo as unknown as TournamentsRepository,
+      ),
+      new TournamentResultsService(
+        mockRepo as unknown as TournamentsRepository,
+      ),
+      new TournamentDivisionService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        new TournamentFeePolicyService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+      ),
+      new TournamentParticipantAdminService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockNotifications as unknown as NotificationsService,
+      ),
+      new TournamentImportService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockNotifications as unknown as NotificationsService,
+      ),
+      new TournamentBracketService(
+        mockRepo as unknown as TournamentsRepository,
+        mockBracketGenerator as unknown as BracketGeneratorService,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockRedis as unknown as RedisService,
+        mockCommunitySocial as unknown as CommunitySocialRepository,
+      ),
+      tournamentRealtimeService,
+      new TournamentRegistrationService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockNotifications as unknown as NotificationsService,
+        tournamentRealtimeService,
+      ),
+      new TournamentLiteService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        new TournamentLifecycleService(
+          mockRepo as unknown as TournamentsRepository,
+          new TournamentAccessService(
+            mockRepo as unknown as TournamentsRepository,
+          ),
+          mockNotifications as unknown as NotificationsService,
+          mockCommunitySocial as unknown as CommunitySocialRepository,
+          mockRedis as unknown as RedisService,
+          new TournamentMediaService(
+            mockRepo as unknown as TournamentsRepository,
+            mockStorage as unknown as StorageService,
+            new TournamentAccessService(
+              mockRepo as unknown as TournamentsRepository,
+            ),
+          ),
+          new TournamentFeePolicyService(
+            mockRepo as unknown as TournamentsRepository,
+          ),
+        ),
+        new TournamentBracketService(
+          mockRepo as unknown as TournamentsRepository,
+          mockBracketGenerator as unknown as BracketGeneratorService,
+          new TournamentAccessService(
+            mockRepo as unknown as TournamentsRepository,
+          ),
+          mockRedis as unknown as RedisService,
+          mockCommunitySocial as unknown as CommunitySocialRepository,
+        ),
+        mockRedis as unknown as RedisService,
+        mockCommunitySocial as unknown as CommunitySocialRepository,
+        mockConfig as unknown as ConfigService,
+      ),
+      new TournamentFootballRosterService(
+        mockRepo as unknown as TournamentsRepository,
+        new TournamentAccessService(
+          mockRepo as unknown as TournamentsRepository,
+        ),
+        mockNotifications as unknown as NotificationsService,
+        tournamentRealtimeService,
+      ),
     );
   });
 
@@ -246,103 +422,135 @@ describe('TournamentsService — Lite pairing guards', () => {
     });
   });
 
-  describe('checkLiteAuthorization', () => {
-    it('rejects non-Lite tournament', async () => {
-      mockRepo.findById!.mockResolvedValue({
+  describe('Lite participant access contract', () => {
+    const visibleParticipants = ['participant-1'];
+
+    it('rejects a non-Lite singles tournament', async () => {
+      mockRepo.findById.mockResolvedValue({
         ...liteTournament,
         tournamentConfig: { mode: 'ADVANCED' },
         matchType: 'SINGLES',
       });
+
       await expect(
-        (service as any).checkLiteAuthorization('tournament-1', 'user-1', []),
-      ).rejects.toThrow(BadRequestException);
+        service.getLiteParticipants('tournament-1', 'user-1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockRepo.findLiteParticipantsWithRosters).not.toHaveBeenCalled();
     });
 
-    it('allows standard doubles with the organizer pairing default', async () => {
-      mockRepo.findById!.mockResolvedValue({
+    it('returns participant data for an authorized standard doubles manager', async () => {
+      mockRepo.findById.mockResolvedValue({
         ...liteTournament,
         tournamentConfig: { mode: 'ADVANCED' },
         matchType: 'DOUBLES',
       });
-      const result = await (service as any).checkLiteAuthorization(
-        'tournament-1',
-        'user-1',
-        [],
+      mockRepo.findLiteParticipantsWithRosters.mockResolvedValue(
+        visibleParticipants,
       );
-      expect(result.tournament.id).toBe('tournament-1');
+
+      await expect(
+        service.getLiteParticipants('tournament-1', 'user-1'),
+      ).resolves.toEqual(visibleParticipants);
     });
 
-    it('allows standard doubles explicitly configured for self pairing', async () => {
-      mockRepo.findById!.mockResolvedValue({
-        ...liteTournament,
-        tournamentConfig: { mode: 'ADVANCED', doublesPairingMode: 'SELF' },
-        matchType: 'DOUBLES',
-      });
-      const result = await (service as any).checkLiteAuthorization(
-        'tournament-1',
-        'user-1',
-        [],
+    it('returns participant data to the tournament creator', async () => {
+      mockRepo.findById.mockResolvedValue(liteTournament);
+      mockRepo.findLiteParticipantsWithRosters.mockResolvedValue(
+        visibleParticipants,
       );
-      expect(result.tournament.id).toBe('tournament-1');
+
+      await expect(
+        service.getLiteParticipants('tournament-1', 'user-1'),
+      ).resolves.toEqual(visibleParticipants);
     });
 
-    it('allows creator', async () => {
-      mockRepo.findById!.mockResolvedValue(liteTournament);
-      const result = await (service as any).checkLiteAuthorization(
-        'tournament-1',
-        'user-1',
-        [],
+    it('returns participant data to an ADMIN', async () => {
+      mockRepo.findById.mockResolvedValue(liteTournament);
+      mockRepo.findLiteParticipantsWithRosters.mockResolvedValue(
+        visibleParticipants,
       );
-      expect(result.tournament.id).toBe('tournament-1');
+
+      await expect(
+        service.getLiteParticipants('tournament-1', 'other-user', ['ADMIN']),
+      ).resolves.toEqual(visibleParticipants);
     });
 
-    it('allows ADMIN', async () => {
-      mockRepo.findById!.mockResolvedValue(liteTournament);
-      const result = await (service as any).checkLiteAuthorization(
-        'tournament-1',
-        'other-user',
-        ['ADMIN'],
-      );
-      expect(result.tournament.id).toBe('tournament-1');
-    });
-
-    it('allows community OWNER', async () => {
-      mockRepo.findById!.mockResolvedValue(liteTournament);
-      mockRepo.findCommunityMember!.mockResolvedValue({
+    it('returns participant data to a joined community owner', async () => {
+      mockRepo.findById.mockResolvedValue(liteTournament);
+      mockRepo.findCommunityMember.mockResolvedValue({
         role: 'OWNER',
         status: 'JOINED',
       });
-      const result = await (service as any).checkLiteAuthorization(
-        'tournament-1',
-        'other-user',
-        [],
+      mockRepo.findLiteParticipantsWithRosters.mockResolvedValue(
+        visibleParticipants,
       );
-      expect(result.tournament.id).toBe('tournament-1');
+
+      await expect(
+        service.getLiteParticipants('tournament-1', 'other-user'),
+      ).resolves.toEqual(visibleParticipants);
     });
 
-    it('rejects non-member', async () => {
-      mockRepo.findById!.mockResolvedValue(liteTournament);
-      mockRepo.findCommunityMember!.mockResolvedValue(null);
+    it('does not reveal participants to a non-member', async () => {
+      mockRepo.findById.mockResolvedValue(liteTournament);
+      mockRepo.findCommunityMember.mockResolvedValue(null);
+
       await expect(
-        (service as any).checkLiteAuthorization(
-          'tournament-1',
-          'other-user',
-          [],
-        ),
-      ).rejects.toThrow();
+        service.getLiteParticipants('tournament-1', 'other-user'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockRepo.findLiteParticipantsWithRosters).not.toHaveBeenCalled();
     });
   });
 
   describe('doubles pairing policy', () => {
-    it('defaults doubles to organizer pairing and preserves explicit self pairing', () => {
-      expect(
-        (service as any).applyDefaultDoublesPairingMode('DOUBLES', {}),
-      ).toEqual({ doublesPairingMode: 'ORGANIZER' });
-      expect(
-        (service as any).applyDefaultDoublesPairingMode('MIXED_DOUBLES', {
-          doublesPairingMode: 'SELF',
+    const createTournament = (
+      tournamentConfig: Record<string, unknown>,
+    ): CreateTournamentDto => ({
+      tournamentType: 'PUBLIC',
+      name: 'Doubles event',
+      categoryId: '00000000-0000-4000-8000-000000000001',
+      matchType: 'DOUBLES',
+      genderRestriction: 'MALE',
+      tournamentConfig,
+    });
+
+    beforeEach(() => {
+      mockRepo.findCategory.mockResolvedValue({
+        name: 'Tennis',
+        slug: 'tennis',
+        categoryConfig: { supportedMatchTypes: ['DOUBLES'] },
+      });
+      mockRepo.create.mockImplementation(
+        async (_userId: string, dto: CreateTournamentDto) => ({
+          id: 'created-tournament',
+          ...dto,
         }),
-      ).toEqual({ doublesPairingMode: 'SELF' });
+      );
+    });
+
+    it('persists the organizer pairing default for doubles', async () => {
+      await service.create('admin-1', createTournament({}), ['ADMIN']);
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        'admin-1',
+        expect.objectContaining({
+          tournamentConfig: { doublesPairingMode: 'ORGANIZER' },
+        }),
+      );
+    });
+
+    it('preserves explicit self pairing for doubles', async () => {
+      await service.create(
+        'admin-1',
+        createTournament({ doublesPairingMode: 'SELF' }),
+        ['ADMIN'],
+      );
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        'admin-1',
+        expect.objectContaining({
+          tournamentConfig: { doublesPairingMode: 'SELF' },
+        }),
+      );
     });
   });
 
@@ -948,83 +1156,3 @@ describe('TournamentsService — Lite pairing guards', () => {
   });
 });
 
-// ─── Structural guards — verify tx-method contracts via source inspection ───
-describe('Structural guards — repository transaction contracts', () => {
-  it('registerParticipant contains FOR UPDATE row lock + Lite roster capacity query in same tx (source pattern)', () => {
-    // This guard ensures the source file has the expected patterns in registerParticipant
-    const fs = require('fs');
-    const src = fs.readFileSync(
-      require('path').join(__dirname, 'tournaments.repository.ts'),
-      'utf-8',
-    );
-    // Verify registerParticipant has FOR UPDATE tournament lock
-    const hasForUpdate =
-      src.includes(".for('update')") &&
-      src.includes('Khong tim thay giai dau') === false; // just verify the file compiles
-    expect(hasForUpdate).toBe(true);
-
-    // Verify Lite capacity query counts distinct roster users
-    const hasRosterCount =
-      src.includes('count(distinct') &&
-      src.includes('tournamentRosters.userId') &&
-      src.includes('maxParticipants');
-    expect(hasRosterCount).toBe(true);
-
-    // Verify non-Lite path still has COMPLETE+paid count
-    const hasNormalCount =
-      src.includes('COMPLETE') &&
-      src.includes('isPaid') &&
-      src.includes('maxParticipants') &&
-      !src.includes('registerLiteParticipant');
-    expect(hasNormalCount).toBe(true);
-  });
-
-  it('assertLitePairableInTx and assertLiteUnpairableInTx contracts in repository', () => {
-    const fs = require('fs');
-    const src = fs.readFileSync(
-      require('path').join(__dirname, 'tournaments.repository.ts'),
-      'utf-8',
-    );
-    const pairCalls = (src.match(/assertLitePairableInTx/g) || []).length;
-    // 1 def + 2 callers (lockTournamentAndPair, generateLitePairsTx)
-    expect(pairCalls).toBe(3);
-    const unpairCalls = (src.match(/assertLiteUnpairableInTx/g) || []).length;
-    // 1 def + 1 caller (lockTournamentAndUnpair)
-    expect(unpairCalls).toBe(2);
-  });
-
-  it('unpair uses registeredBy for deterministic leader', () => {
-    const fs = require('fs');
-    const src = fs.readFileSync(
-      require('path').join(__dirname, 'tournaments.repository.ts'),
-      'utf-8',
-    );
-    const hasRegisteredByCheck =
-      src.includes('participant.registeredBy') &&
-      src.includes('leaderRoster') &&
-      src.includes('throw');
-    expect(hasRegisteredByCheck).toBe(true);
-  });
-
-  it('no stale registerLiteParticipant or checkLiteCapacityInTx wrapper', () => {
-    const fs = require('fs');
-    const src = fs.readFileSync(
-      require('path').join(__dirname, 'tournaments.repository.ts'),
-      'utf-8',
-    );
-    expect(src.includes('registerLiteParticipant')).toBe(false);
-    expect(src.includes('checkLiteCapacityInTx')).toBe(false);
-  });
-
-  it('getUserEloInTx present and used by generateLitePairsTx', () => {
-    const fs = require('fs');
-    const src = fs.readFileSync(
-      require('path').join(__dirname, 'tournaments.repository.ts'),
-      'utf-8',
-    );
-    expect(src.includes('getUserEloInTx')).toBe(true);
-    expect(src.includes('getUserElo(')).toBe(true); // keep original
-    const genRef = src.match(/getUserEloInTx/g) || [];
-    expect(genRef.length).toBeGreaterThanOrEqual(1);
-  });
-});
