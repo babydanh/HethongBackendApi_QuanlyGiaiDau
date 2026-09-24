@@ -230,6 +230,9 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   idxParticipantsTournamentId: index('idx_participants_tournament_id').on(
     table.tournamentId,
   ),
+  idxParticipantsDivisionStatus: index(
+    'idx_participants_division_status',
+  ).on(table.tournamentDivisionId, table.teamStatus),
 }));
 
 export const tournamentRosters = pgTable('tournament_rosters', {

@@ -537,106 +537,144 @@ export class TournamentsRepository {
     const resolvedRows = await rows;
     const hasMore = resolvedRows.length > limit;
     const rowData = hasMore ? resolvedRows.slice(0, limit) : resolvedRows;
+    if (rowData.length === 0) {
+      return {
+        data: [],
+        meta: {
+          total: totalRecord.count,
+          page,
+          limit,
+          totalPages: Math.ceil(totalRecord.count / limit),
+          nextCursor: null,
+          hasMore: false,
+        },
+      };
+    }
+    const tournamentIds = rowData.map((row) => row.tournament.id);
 
-    const data = await Promise.all(
-      rowData.map(async (row) => {
-        const [participantCount] = await this.db
-          .select({ count: count() })
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(schema.tournamentParticipants.tournamentId, row.tournament.id),
-              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
-              ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
-            ),
-          );
+    const [tournamentParticipantCounts, rawDivisions] = await Promise.all([
+      this.db
+        .select({
+          tournamentId: schema.tournamentParticipants.tournamentId,
+          participantCount: count(),
+        })
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            inArray(schema.tournamentParticipants.tournamentId, tournamentIds),
+            notInArray(schema.tournamentParticipants.teamStatus, [
+              'REJECTED',
+              'WITHDRAWN',
+              'KICKED',
+              'EXPIRED',
+              'CANCELLED',
+            ]),
+          ),
+        )
+        .groupBy(schema.tournamentParticipants.tournamentId),
+      this.db
+        .select({
+          id: schema.tournamentDivisions.id,
+          tournamentId: schema.tournamentDivisions.tournamentId,
+          name: schema.tournamentDivisions.name,
+          matchType: schema.tournamentDivisions.matchType,
+          genderRestriction: schema.tournamentDivisions.genderRestriction,
+          status: schema.tournamentDivisions.status,
+          maxParticipants: schema.tournamentDivisions.maxParticipants,
+          entryFee: schema.tournamentDivisions.entryFee,
+          entryFeeOverrideEnabled:
+            schema.tournamentDivisions.entryFeeOverrideEnabled,
+        })
+        .from(schema.tournamentDivisions)
+        .where(inArray(schema.tournamentDivisions.tournamentId, tournamentIds)),
+    ]);
 
-        type DivisionInfo = {
-          id: string;
-          name: string;
-          matchType: string;
-          genderRestriction: string | null;
-          status: string;
-          categoryId: string;
-          maxParticipants: number | null;
-          entryFee: string | null;
-          entryFeeOverride: string | null;
-          entryFeeOverrideEnabled: boolean;
-          effectiveEntryFee: string | null;
-          inviteCode: string | null;
-          _count: { participants: number };
-        };
-        const rawDivs = await this.db
-          .select({
-            id: schema.tournamentDivisions.id,
-            name: schema.tournamentDivisions.name,
-            matchType: schema.tournamentDivisions.matchType,
-            genderRestriction: schema.tournamentDivisions.genderRestriction,
-            status: schema.tournamentDivisions.status,
-            maxParticipants: schema.tournamentDivisions.maxParticipants,
-            entryFee: schema.tournamentDivisions.entryFee,
-            entryFeeOverrideEnabled:
-              schema.tournamentDivisions.entryFeeOverrideEnabled,
-          })
-          .from(schema.tournamentDivisions)
-          .where(
-            eq(schema.tournamentDivisions.tournamentId, row.tournament.id),
-          );
+    const divisionIds = rawDivisions.map((division) => division.id);
+    const divisionParticipantCounts =
+      divisionIds.length > 0
+        ? await this.db
+            .select({
+              divisionId: schema.tournamentParticipants.tournamentDivisionId,
+              participantCount: count(),
+            })
+            .from(schema.tournamentParticipants)
+            .where(
+              and(
+                inArray(schema.tournamentParticipants.tournamentDivisionId, divisionIds),
+                notInArray(schema.tournamentParticipants.teamStatus, [
+                  'REJECTED',
+                  'WITHDRAWN',
+                  'KICKED',
+                  'EXPIRED',
+                  'CANCELLED',
+                ]),
+              ),
+            )
+            .groupBy(schema.tournamentParticipants.tournamentDivisionId)
+        : [];
 
-        const divisions: DivisionInfo[] = await Promise.all(
-          rawDivs.map(async (d) => {
-            const [dCount] = await this.db
-              .select({ count: count() })
-              .from(schema.tournamentParticipants)
-              .where(
-                and(
-                  eq(schema.tournamentParticipants.tournamentDivisionId, d.id),
-                  ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-                  ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                  ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-                  ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
-                  ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
-                ),
-              );
-            const division = {
-              ...d,
-              categoryId: row.tournament.categoryId,
-              entryFee: d.entryFeeOverrideEnabled
-                ? d.entryFee
-                : row.tournament.entryFee,
-              entryFeeOverride: d.entryFeeOverrideEnabled
-                ? d.entryFee
-                : null,
-              effectiveEntryFee: d.entryFeeOverrideEnabled
-                ? d.entryFee
-                : row.tournament.entryFee,
-              _count: {
-                participants: dCount.count,
-              },
-            };
-            return {
-              ...division,
-              inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
-            };
-          }),
-        );
-
-        const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
-        return {
-          ...safeTournament,
-          inviteCode: includeInviteCode ? _inviteCode : null,
-          category: row.category?.id ? row.category : null,
-          venue: row.venue?.id ? row.venue : null,
-          _count: {
-            participants: participantCount.count,
-          },
-          divisions: divisions.length > 0 ? divisions : null,
-        };
-      }),
+    const participantCountByTournament = new Map(
+      tournamentParticipantCounts.map((row) => [row.tournamentId, row.participantCount]),
     );
+    const participantCountByDivision = new Map(
+      divisionParticipantCounts.map((row) => [row.divisionId, row.participantCount]),
+    );
+    const divisionsByTournament = new Map<string, (typeof rawDivisions)[number][]>();
+    for (const division of rawDivisions) {
+      const divisions = divisionsByTournament.get(division.tournamentId) ?? [];
+      divisions.push(division);
+      divisionsByTournament.set(division.tournamentId, divisions);
+    }
+
+    const data = rowData.map((row) => {
+      type DivisionInfo = {
+        id: string;
+        name: string;
+        matchType: string;
+        genderRestriction: string | null;
+        status: string;
+        categoryId: string;
+        maxParticipants: number | null;
+        entryFee: string | null;
+        entryFeeOverride: string | null;
+        entryFeeOverrideEnabled: boolean;
+        effectiveEntryFee: string | null;
+        inviteCode: string | null;
+        _count: { participants: number };
+      };
+      const divisions: DivisionInfo[] = (
+        divisionsByTournament.get(row.tournament.id) ?? []
+      ).map((d) => {
+        const { tournamentId: _tournamentId, ...divisionData } = d;
+        return {
+          ...divisionData,
+          categoryId: row.tournament.categoryId,
+          entryFee: d.entryFeeOverrideEnabled
+            ? d.entryFee
+            : row.tournament.entryFee,
+          entryFeeOverride: d.entryFeeOverrideEnabled ? d.entryFee : null,
+          effectiveEntryFee: d.entryFeeOverrideEnabled
+            ? d.entryFee
+            : row.tournament.entryFee,
+          _count: {
+            participants: participantCountByDivision.get(d.id) ?? 0,
+          },
+          inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
+        };
+      });
+
+      const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
+      return {
+        ...safeTournament,
+        inviteCode: includeInviteCode ? _inviteCode : null,
+        category: row.category?.id ? row.category : null,
+        venue: row.venue?.id ? row.venue : null,
+        _count: {
+          participants: participantCountByTournament.get(row.tournament.id) ?? 0,
+        },
+        divisions: divisions.length > 0 ? divisions : null,
+      };
+    });
 
     return {
       data,
@@ -878,53 +916,64 @@ export class TournamentsRepository {
       .from(schema.tournamentDivisions)
       .where(eq(schema.tournamentDivisions.tournamentId, id));
 
-    divisions = await Promise.all(
-      rawDivisions.map(async (division) => {
-        const [participantCountByDivision] = await this.db
-          .select({ count: count() })
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(
-                schema.tournamentParticipants.tournamentDivisionId,
-                division.id,
-              ),
-              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-              ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
-              ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
-            ),
-          );
-
-        const [matchCountByDivision] = await this.db
-          .select({ count: count() })
-          .from(schema.tournamentStages)
-          .where(eq(schema.tournamentStages.tournamentDivisionId, division.id));
-
-        const divisionWithCounts = {
-          ...division,
-          categoryId: row.tournament.categoryId,
-          entryFee: division.entryFeeOverrideEnabled
-            ? division.entryFee
-            : row.tournament.entryFee,
-          entryFeeOverride: division.entryFeeOverrideEnabled
-            ? division.entryFee
-            : null,
-          effectiveEntryFee: division.entryFeeOverrideEnabled
-            ? division.entryFee
-            : row.tournament.entryFee,
-          _count: {
-            participants: participantCountByDivision.count,
-            matches: matchCountByDivision.count,
-          },
-        };
-        return {
-          ...divisionWithCounts,
-          inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
-        };
-      }),
+    const divisionIds = rawDivisions.map((division) => division.id);
+    const [participantCountRows, matchCountRows] =
+      divisionIds.length > 0
+        ? await Promise.all([
+            this.db
+              .select({
+                divisionId: schema.tournamentParticipants.tournamentDivisionId,
+                participantCount: count(),
+              })
+              .from(schema.tournamentParticipants)
+              .where(
+                and(
+                  inArray(schema.tournamentParticipants.tournamentDivisionId, divisionIds),
+                  notInArray(schema.tournamentParticipants.teamStatus, [
+                    'REJECTED',
+                    'WITHDRAWN',
+                    'KICKED',
+                    'EXPIRED',
+                    'CANCELLED',
+                  ]),
+                ),
+              )
+              .groupBy(schema.tournamentParticipants.tournamentDivisionId),
+            this.db
+              .select({
+                divisionId: schema.tournamentStages.tournamentDivisionId,
+                matchCount: count(),
+              })
+              .from(schema.tournamentStages)
+              .where(inArray(schema.tournamentStages.tournamentDivisionId, divisionIds))
+              .groupBy(schema.tournamentStages.tournamentDivisionId),
+          ])
+        : [[], []];
+    const participantCountsByDivision = new Map(
+      participantCountRows.map((item) => [item.divisionId, item.participantCount]),
     );
+    const matchCountsByDivision = new Map(
+      matchCountRows.map((item) => [item.divisionId, item.matchCount]),
+    );
+
+    divisions = rawDivisions.map((division) => ({
+      ...division,
+      categoryId: row.tournament.categoryId,
+      entryFee: division.entryFeeOverrideEnabled
+        ? division.entryFee
+        : row.tournament.entryFee,
+      entryFeeOverride: division.entryFeeOverrideEnabled
+        ? division.entryFee
+        : null,
+      effectiveEntryFee: division.entryFeeOverrideEnabled
+        ? division.entryFee
+        : row.tournament.entryFee,
+      _count: {
+        participants: participantCountsByDivision.get(division.id) ?? 0,
+        matches: matchCountsByDivision.get(division.id) ?? 0,
+      },
+      inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
+    }));
 
     const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
     return {
@@ -5021,35 +5070,43 @@ export class TournamentsRepository {
       )
       .orderBy(desc(schema.tournaments.createdAt));
 
-    return await Promise.all(
-      rows.map(async (r) => {
-        const [participantCount] = await this.db
-          .select({ count: count() })
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(schema.tournamentParticipants.tournamentId, r.tournament.id),
-              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-            ),
-          );
-
-        const pCount = participantCount?.count || 0;
-        return {
-          ...r.tournament,
-          category: r.category?.id ? r.category : null,
-          community: r.community?.id ? r.community : null,
-          participantCount: pCount,
-          _count: {
-            participants: pCount,
-          },
-          _summary: {
-            participantCount: pCount,
-          },
-        };
-      }),
+    const tournamentIds = rows.map((row) => row.tournament.id);
+    const participantCountRows = await this.db
+      .select({
+        tournamentId: schema.tournamentParticipants.tournamentId,
+        participantCount: count(),
+      })
+      .from(schema.tournamentParticipants)
+      .where(
+        and(
+          inArray(schema.tournamentParticipants.tournamentId, tournamentIds),
+          notInArray(schema.tournamentParticipants.teamStatus, [
+            'REJECTED',
+            'WITHDRAWN',
+            'KICKED',
+          ]),
+        ),
+      )
+      .groupBy(schema.tournamentParticipants.tournamentId);
+    const participantCounts = new Map(
+      participantCountRows.map((item) => [item.tournamentId, item.participantCount]),
     );
+
+    return rows.map((r) => {
+      const pCount = participantCounts.get(r.tournament.id) ?? 0;
+      return {
+        ...r.tournament,
+        category: r.category?.id ? r.category : null,
+        community: r.community?.id ? r.community : null,
+        participantCount: pCount,
+        _count: {
+          participants: pCount,
+        },
+        _summary: {
+          participantCount: pCount,
+        },
+      };
+    });
   }
 
   async findMyManagementTournaments(
@@ -6056,34 +6113,41 @@ export class TournamentsRepository {
       )
       .orderBy(asc(schema.tournaments.createdAt));
 
-    const divisions = await Promise.all(
-      rawDivisions.map(async (div) => {
-        // Count active participants
-        const [pCount] = await this.db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(schema.tournamentParticipants.tournamentId, div.id),
-              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-            ),
-          );
-
-        const countVal = pCount?.count || 0;
-        return {
-          ...div,
-          participantCount: countVal,
-          _count: {
-            participants: countVal,
-          },
-          _summary: {
-            participantCount: countVal,
-          },
-        };
-      }),
+    const childIds = rawDivisions.map((division) => division.id);
+    const participantCountRows =
+      childIds.length > 0
+        ? await this.db
+            .select({
+              tournamentId: schema.tournamentParticipants.tournamentId,
+              participantCount: sql<number>`count(*)::int`,
+            })
+            .from(schema.tournamentParticipants)
+            .where(
+              and(
+                inArray(schema.tournamentParticipants.tournamentId, childIds),
+                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ),
+            )
+            .groupBy(schema.tournamentParticipants.tournamentId)
+        : [];
+    const participantCounts = new Map(
+      participantCountRows.map((item) => [item.tournamentId, item.participantCount]),
     );
+    const divisions = rawDivisions.map((div) => {
+      const countVal = participantCounts.get(div.id) ?? 0;
+      return {
+        ...div,
+        participantCount: countVal,
+        _count: {
+          participants: countVal,
+        },
+        _summary: {
+          participantCount: countVal,
+        },
+      };
+    });
 
     return {
       ...parent,
@@ -7712,24 +7776,30 @@ export class TournamentsRepository {
         ),
       );
 
-    const participantCounts = await Promise.all(
-      children.map(async (child) => {
-        const [result] = await this.db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(schema.tournamentParticipants.tournamentId, child.id),
-              ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-              ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-              ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-            ),
-          );
-        return result?.count || 0;
-      }),
-    );
+    const childIds = children.map((child) => child.id);
+    const participantCountRows =
+      childIds.length > 0
+        ? await this.db
+            .select({
+              tournamentId: schema.tournamentParticipants.tournamentId,
+              participantCount: sql<number>`count(*)::int`,
+            })
+            .from(schema.tournamentParticipants)
+            .where(
+              and(
+                inArray(schema.tournamentParticipants.tournamentId, childIds),
+                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+              ),
+            )
+            .groupBy(schema.tournamentParticipants.tournamentId)
+        : [];
 
-    const totalParticipants = participantCounts.reduce((sum, c) => sum + c, 0);
+    const totalParticipants = participantCountRows.reduce(
+      (sum, row) => sum + row.participantCount,
+      0,
+    );
     const statuses = children.map((c) => c.status);
 
     return {
@@ -8227,44 +8297,50 @@ export class TournamentsRepository {
         .where(eq(schema.tournamentDivisions.tournamentId, tournamentId))
         .orderBy(schema.tournamentDivisions.createdAt);
 
-      return await Promise.all(
-        divisions.map(async (division) => {
-          const [participantCountByDivision] = await this.db
-            .select({ count: count() })
-            .from(schema.tournamentParticipants)
-            .where(
-              and(
-                eq(
-                  schema.tournamentParticipants.tournamentDivisionId,
-                  division.id,
+      const divisionIds = divisions.map((division) => division.id);
+      const participantCountRows =
+        divisionIds.length > 0
+          ? await this.db
+              .select({
+                divisionId: schema.tournamentParticipants.tournamentDivisionId,
+                participantCount: count(),
+              })
+              .from(schema.tournamentParticipants)
+              .where(
+                and(
+                  inArray(schema.tournamentParticipants.tournamentDivisionId, divisionIds),
+                  notInArray(schema.tournamentParticipants.teamStatus, [
+                    'REJECTED',
+                    'WITHDRAWN',
+                    'KICKED',
+                    'EXPIRED',
+                    'CANCELLED',
+                  ]),
                 ),
-                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-                ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
-                ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
-              ),
-            );
-
-          return {
-            ...division,
-            // API consumers receive the effective fee. The nullable raw fee
-            // remains available as entryFeeOverride for organizer controls.
-            entryFee: division.entryFeeOverrideEnabled
-              ? division.entryFee
-              : tournamentEntryFee,
-            entryFeeOverride: division.entryFeeOverrideEnabled
-              ? division.entryFee
-              : null,
-            effectiveEntryFee: division.entryFeeOverrideEnabled
-              ? division.entryFee
-              : tournamentEntryFee,
-            _count: {
-              participants: participantCountByDivision.count,
-            },
-          };
-        }),
+              )
+              .groupBy(schema.tournamentParticipants.tournamentDivisionId)
+          : [];
+      const participantCounts = new Map(
+        participantCountRows.map((item) => [item.divisionId, item.participantCount]),
       );
+
+      return divisions.map((division) => ({
+        ...division,
+        // API consumers receive the effective fee. The nullable raw fee
+        // remains available as entryFeeOverride for organizer controls.
+        entryFee: division.entryFeeOverrideEnabled
+          ? division.entryFee
+          : tournamentEntryFee,
+        entryFeeOverride: division.entryFeeOverrideEnabled
+          ? division.entryFee
+          : null,
+        effectiveEntryFee: division.entryFeeOverrideEnabled
+          ? division.entryFee
+          : tournamentEntryFee,
+        _count: {
+          participants: participantCounts.get(division.id) ?? 0,
+        },
+      }));
     } catch (error) {
       console.error(
         `Failed to get divisions for tournament ${tournamentId}:`,
