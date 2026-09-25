@@ -51,10 +51,17 @@ export class SocialSessionsController {
     @Query() query: QuerySocialSessionsDto,
     @CurrentUser() user?: RequestUser,
   ) {
-    return this.service.list(query, user?.id);
+    return this.service.list(query, user?.id, user?.roles);
   }
 
   // Khai báo trước ':id' để không bị ParseUUIDPipe của route param nuốt.
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Get('short/:code')
+  getByShortCode(@Param('code') code: string) {
+    return this.service.getByShortCode(code);
+  }
+
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
   @Get('by-community/:communityId')
@@ -73,7 +80,7 @@ export class SocialSessionsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user?: RequestUser,
   ) {
-    return this.service.getById(id, user?.id);
+    return this.service.getById(id, user?.id, user?.roles);
   }
 
   @Patch(':id')

@@ -25,6 +25,7 @@ export const socialSessions = pgTable(
   'social_sessions',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    shortCode: varchar('short_code', { length: 16 }).notNull(),
     communityId: uuid('community_id').references(() => communities.id, {
       onDelete: 'cascade',
     }),
@@ -87,6 +88,7 @@ export const socialSessions = pgTable(
       table.status,
     ),
     hostIdx: index('social_session_host_idx').on(table.hostUserId),
+    shortCodeIdx: uniqueIndex('social_session_short_code_idx').on(table.shortCode),
   }),
 );
 

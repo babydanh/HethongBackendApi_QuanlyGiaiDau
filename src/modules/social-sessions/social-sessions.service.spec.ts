@@ -15,6 +15,7 @@ function makeRepositoryMock(): jest.Mocked<SocialSessionsRepository> {
     findMember: jest.fn(),
     findUserById: jest.fn(),
     findSessionById: jest.fn(),
+    findSessionIdByShortCode: jest.fn(),
     listByDate: jest.fn(),
     listByCommunity: jest.fn(),
     isParticipant: jest.fn(),
@@ -43,6 +44,7 @@ const COMMUNITY_ID = '55555555-5555-4555-8555-555555555555';
 function baseSession(overrides = {}) {
   return {
     id: SESSION_ID,
+    shortCode: 'abc12345678',
     communityId: COMMUNITY_ID,
     hostUserId: HOST_ID,
     categoryId: CATEGORY_ID,
@@ -368,6 +370,35 @@ describe('SocialSessionsService', () => {
         expect.objectContaining({ status: 'COMPLETED' }),
       );
       expect(result).toMatchObject({ status: 'COMPLETED' });
+    });
+  });
+
+  describe('shared social links', () => {
+    it('resolves a short code to its session ID', async () => {
+      repository.findSessionIdByShortCode.mockResolvedValue(SESSION_ID);
+      await expect(service.getByShortCode('abc12345678')).resolves.toEqual({ id: SESSION_ID });
+    });
+
+    it('does not reveal CLUB_ONLY details to a non-member', async () => {
+      repository.findSessionById.mockResolvedValue(
+        sessionRow(baseSession({ visibility: 'CLUB_ONLY' })) as never,
+      );
+      repository.findMember.mockResolvedValue(null as never);
+      await expect(service.getById(SESSION_ID, MEMBER_ID)).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'NOT_CLUB_MEMBER' }),
+      });
+      expect(repository.listParticipants).not.toHaveBeenCalled();
+    });
+
+    it('allows a platform admin to view CLUB_ONLY details', async () => {
+      repository.findSessionById.mockResolvedValue(
+        sessionRow(baseSession({ visibility: 'CLUB_ONLY' })) as never,
+      );
+      repository.listParticipants.mockResolvedValue([]);
+      await expect(service.getById(SESSION_ID, MEMBER_ID, ['ADMIN'])).resolves.toMatchObject({
+        id: SESSION_ID,
+      });
+      expect(repository.findMember).not.toHaveBeenCalled();
     });
   });
 

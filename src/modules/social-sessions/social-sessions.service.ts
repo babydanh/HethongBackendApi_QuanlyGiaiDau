@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { UserRole } from '../../common/constants/enums';
 import * as schema from '../../database/schema';
 import { ChatService } from '../chat/chat.service';
@@ -184,6 +185,7 @@ export class SocialSessionsService {
     const { session } = await this.repository.createWithHost(
       {
         communityId: dto.communityId ?? null,
+        shortCode: randomBytes(8).toString('base64url'),
         hostUserId: actor.id,
         categoryId,
         title: dto.title.trim(),
@@ -205,10 +207,10 @@ export class SocialSessionsService {
       },
       actor.id,
     );
-    return this.getById(session.id, actor.id);
+    return this.getById(session.id, actor.id, actor.roles);
   }
 
-  async list(query: QuerySocialSessionsDto, viewerId?: string) {
+  async list(query: QuerySocialSessionsDto, viewerId?: string, viewerRoles?: string[]) {
     if (!DATE_RE.test(query.date)) {
       apiError(BadRequestException, 'INVALID_DATE');
     }
@@ -221,6 +223,8 @@ export class SocialSessionsService {
       playDate: query.date,
       categoryId,
       communityId: query.communityId,
+      viewerId,
+      includePrivate: this.isPlatformAdmin({ id: viewerId ?? '', roles: viewerRoles }),
       search: query.search,
       page,
       limit,
@@ -237,9 +241,19 @@ export class SocialSessionsService {
     };
   }
 
-  async getById(id: string, viewerId?: string) {
+  async getById(id: string, viewerId?: string, viewerRoles?: string[]) {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    if (row!.session.visibility === 'CLUB_ONLY' &&
+        row!.session.hostUserId !== viewerId &&
+        !this.isPlatformAdmin({ id: viewerId ?? '', roles: viewerRoles })) {
+      const member = viewerId && row!.session.communityId
+        ? await this.repository.findMember(row!.session.communityId, viewerId)
+        : null;
+      if (!member || member.status !== 'JOINED') {
+        apiError(ForbiddenException, 'NOT_CLUB_MEMBER');
+      }
+    }
     const session = await this.refreshStatusIfExpired(row!.session);
     const participants = await this.repository.listParticipants(id);
 
@@ -261,6 +275,12 @@ export class SocialSessionsService {
       }
     }
     return this.shapeDetail({ ...row!, session }, participants, viewerId, chat);
+  }
+
+  async getByShortCode(shortCode: string) {
+    const id = await this.repository.findSessionIdByShortCode(shortCode);
+    if (!id) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    return { id };
   }
 
   /**
@@ -392,7 +412,7 @@ export class SocialSessionsService {
     if (dto.status !== undefined) patch.status = dto.status;
 
     const updated = await this.repository.updateSession(id, patch);
-    return this.getById(updated!.id, actor.id);
+    return this.getById(updated!.id, actor.id, actor.roles);
   }
 
   /**

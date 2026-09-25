@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -93,11 +93,27 @@ export class SocialSessionsRepository {
     return row ?? null;
   }
 
+  async findSessionIdByShortCode(shortCode: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select({ id: schema.socialSessions.id })
+      .from(schema.socialSessions)
+      .where(
+        and(
+          eq(schema.socialSessions.shortCode, shortCode),
+          isNull(schema.socialSessions.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
   async listByDate(
     filters: {
       playDate: string;
       categoryId?: string;
       communityId?: string;
+      viewerId?: string;
+      includePrivate?: boolean;
       search?: string;
       page: number;
       limit: number;
@@ -109,6 +125,23 @@ export class SocialSessionsRepository {
       sql`${schema.socialSessions.status} IN ('OPEN', 'FULL')`,
       isNull(schema.socialSessions.deletedAt),
     ];
+    if (!filters.includePrivate) conditions.push(
+      filters.viewerId
+        ? or(
+            eq(schema.socialSessions.visibility, 'PUBLIC'),
+            eq(schema.socialSessions.hostUserId, filters.viewerId),
+            exists(
+              tx.select({ id: schema.communityMembers.id })
+                .from(schema.communityMembers)
+                .where(and(
+                  eq(schema.communityMembers.communityId, schema.socialSessions.communityId),
+                  eq(schema.communityMembers.userId, filters.viewerId),
+                  eq(schema.communityMembers.status, 'JOINED'),
+                )),
+            ),
+          )!
+        : eq(schema.socialSessions.visibility, 'PUBLIC'),
+    );
     if (filters.categoryId) {
       conditions.push(eq(schema.socialSessions.categoryId, filters.categoryId));
     }
@@ -509,7 +542,9 @@ export class SocialSessionsRepository {
           ),
         )
         .limit(1);
-      if (!existing || existing.status !== 'JOINED') return null;
+      if (!existing || existing.status !== 'JOINED' || existing.role === 'HOST') {
+        return null;
+      }
 
       const [updated] = await tx
         .update(schema.socialSessionParticipants)
