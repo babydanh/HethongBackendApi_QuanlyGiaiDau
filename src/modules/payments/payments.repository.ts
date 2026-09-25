@@ -712,8 +712,13 @@ export class PaymentsRepository {
         )
         .orderBy(desc(schema.paymentRefunds.createdAt))
         .limit(1);
-      const refundAmount = requestedRefund?.amount ?? payment.amount;
-      const reason = requestedRefund?.reason ?? 'LEGACY_WITHDRAWAL_REFUND';
+      if (!requestedRefund) {
+        throw new ConflictException(
+          'Refund request amount is missing; manual review is required.',
+        );
+      }
+      const refundAmount = requestedRefund.amount;
+      const reason = requestedRefund.reason;
       const [updated] = await tx
         .update(schema.payments)
         .set({
@@ -731,46 +736,24 @@ export class PaymentsRepository {
         .returning();
       if (!updated) return null;
 
-      let refund = requestedRefund;
-      if (requestedRefund) {
-        const [settledRefund] = await tx
-          .update(schema.paymentRefunds)
-          .set({
-            status: 'PAID',
-            transactionProofUrl: proofUrl,
-            processedBy: adminId,
-            processedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(schema.paymentRefunds.id, requestedRefund.id),
-              eq(schema.paymentRefunds.status, 'REQUESTED'),
-            ),
-          )
-          .returning();
-        if (!settledRefund) {
-          throw new ConflictException('Refund request has already changed.');
-        }
-        refund = settledRefund;
-      } else {
-        const [legacyRefund] = await tx
-          .insert(schema.paymentRefunds)
-          .values({
-            paymentId,
-            amount: refundAmount,
-            status: 'PAID',
-            reason,
-            transactionProofUrl: proofUrl,
-            processedBy: adminId,
-            processedAt: new Date(),
-          })
-          .returning();
-        refund = legacyRefund;
-      }
-
+      const [refund] = await tx
+        .update(schema.paymentRefunds)
+        .set({
+          status: 'PAID',
+          transactionProofUrl: proofUrl,
+          processedBy: adminId,
+          processedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.paymentRefunds.id, requestedRefund.id),
+            eq(schema.paymentRefunds.status, 'REQUESTED'),
+          ),
+        )
+        .returning();
       if (!refund) {
-        throw new ConflictException('Refund record was not created.');
+        throw new ConflictException('Refund request has already changed.');
       }
       await tx.insert(schema.financialLedgerEntries).values({
         tournamentId: payment.tournamentId,
