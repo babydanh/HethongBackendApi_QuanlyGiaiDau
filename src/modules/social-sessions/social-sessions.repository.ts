@@ -576,19 +576,23 @@ export class SocialSessionsRepository {
 
   /**
    * Đóng hàng loạt session đã quá giờ: status OPEN/FULL và
-   * start_at + duration_minutes <= now → COMPLETED. Dùng cho cron.
+   * start_at + duration_minutes <= now → COMPLETED. Dùng cho cron
+   * (không truyền communityId) và lazy auto-close trong listByCommunity
+   * (truyền communityId để chỉ lock/update đúng Club).
    */
-  async closeExpiredSessions(now: Date = new Date()) {
+  async closeExpiredSessions(now: Date = new Date(), communityId?: string) {
+    const conditions = [
+      isNull(schema.socialSessions.deletedAt),
+      inArray(schema.socialSessions.status, ['OPEN', 'FULL']),
+      sql`${schema.socialSessions.startAt}::timestamptz + make_interval(mins => ${schema.socialSessions.durationMinutes}::int) <= ${now}`,
+    ];
+    if (communityId) {
+      conditions.push(eq(schema.socialSessions.communityId, communityId));
+    }
     const rows = await this.db
       .update(schema.socialSessions)
       .set({ status: 'COMPLETED', updatedAt: now })
-      .where(
-        and(
-          isNull(schema.socialSessions.deletedAt),
-          inArray(schema.socialSessions.status, ['OPEN', 'FULL']),
-          sql`${schema.socialSessions.startAt}::timestamptz + make_interval(mins => ${schema.socialSessions.durationMinutes}::int) <= ${now}`,
-        ),
-      )
+      .where(and(...conditions))
       .returning({ id: schema.socialSessions.id });
     return rows;
   }

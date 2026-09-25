@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -60,6 +61,8 @@ function toPlayDate(startAt: string): string {
 
 @Injectable()
 export class SocialSessionsService {
+  private readonly logger = new Logger(SocialSessionsService.name);
+
   constructor(
     private readonly repository: SocialSessionsRepository,
     @Optional() private readonly chatService?: ChatService,
@@ -272,6 +275,16 @@ export class SocialSessionsService {
   ) {
     const community = await this.repository.findCommunityById(communityId);
     if (!community) apiError(NotFoundException, 'COMMUNITY_NOT_FOUND');
+
+    // Lazy auto-close: đóng các kèo OPEN/FULL đã quá giờ của đúng Club này
+    // trước khi query, để filter status + total/page luôn đúng.
+    // Lỗi close không chặn list (cron dọn nền sẽ xử lý lại).
+    try {
+      await this.repository.closeExpiredSessions(new Date(), communityId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`listByCommunity auto-close failed: ${message}`);
+    }
 
     const rawStatuses = (query.status ?? 'OPEN,FULL,COMPLETED')
       .split(',')
