@@ -365,6 +365,21 @@ export const buildParticipantRegistrationPendingNotification = (params: {
   }),
 });
 
+export const buildParticipantOrganizerPairingPendingNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  divisionId?: string | null;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  type: NOTIFICATION_TYPES.TOURNAMENT_REGISTER_PENDING,
+  title: 'Đã duyệt, đang chờ BTC ghép cặp',
+  content: `Đơn đăng ký giải ${params.tournamentName} đã được Ban tổ chức duyệt. Bạn đang chờ ghép cặp; hệ thống sẽ cập nhật khi BTC sắp xếp xong.`,
+  redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
+    divisionId: params.divisionId ?? undefined,
+  }),
+});
+
 export const buildParticipantRegistrationSuccessNotification = (params: {
   tournamentId: string;
   tournamentName: string;

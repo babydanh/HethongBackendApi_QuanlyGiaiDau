@@ -8,6 +8,7 @@ import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentAccessService } from './tournament-access.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import {
+  buildParticipantOrganizerPairingPendingNotification,
   buildParticipantRegistrationRejectedNotification,
   buildParticipantRegistrationSuccessNotification,
 } from '../../notifications/notification-builder';
@@ -193,6 +194,10 @@ export class TournamentParticipantAdminService {
 
     let nextStatus = status;
     let participantRosters: Array<{ userId: string }> | null = null;
+    const tournamentConfig = (tournament.tournamentConfig || {}) as Record<
+      string,
+      unknown
+    >;
     if (status === 'COMPLETE') {
       const division = participant.tournamentDivisionId
         ? await this.tournamentsRepository.findDivisionById(
@@ -201,10 +206,6 @@ export class TournamentParticipantAdminService {
         : null;
       participantRosters =
         await this.tournamentsRepository.getParticipantRosters(participantId);
-      const tournamentConfig = (tournament.tournamentConfig || {}) as Record<
-        string,
-        unknown
-      >;
       const matchType = division?.matchType ?? tournament.matchType;
       nextStatus = resolveDoublesParticipantStatus({
         event: 'APPROVE',
@@ -249,9 +250,12 @@ export class TournamentParticipantAdminService {
     let updated = await this.tournamentsRepository.updateParticipantStatus(
       participantId,
       nextStatus,
+      'PENDING_APPROVAL',
     );
     if (!updated) {
-      throw new NotFoundException('Người tham gia không tồn tại');
+      throw new BadRequestException(
+        'Hồ sơ không còn ở trạng thái chờ Ban tổ chức duyệt.',
+      );
     }
 
     if (nextStatus === 'COMPLETE') {
@@ -279,6 +283,19 @@ export class TournamentParticipantAdminService {
         if (nextStatus === 'COMPLETE') {
           await this.notificationsService.sendNotification(
             buildParticipantRegistrationSuccessNotification({
+              receiverId: roster.userId,
+              tournamentId: tournament.id,
+              tournamentName: tournament.name,
+              divisionId: updated.tournamentDivisionId,
+            }),
+          );
+        } else if (
+          nextStatus === 'PENDING_PARTNER' &&
+          !participant.teamInviteToken &&
+          tournamentConfig.doublesPairingMode !== 'SELF'
+        ) {
+          await this.notificationsService.sendNotification(
+            buildParticipantOrganizerPairingPendingNotification({
               receiverId: roster.userId,
               tournamentId: tournament.id,
               tournamentName: tournament.name,
