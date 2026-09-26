@@ -7,7 +7,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { UserRole } from '../../common/constants/enums';
 import * as schema from '../../database/schema';
 import { ChatService } from '../chat/chat.service';
@@ -17,6 +17,7 @@ import {
   CreateSocialSessionDto,
   JoinSocialSessionDto,
   QuerySocialByCommunityDto,
+  QuerySocialJoinRequestsDto,
   QuerySocialSessionsDto,
   SendSocialMessageDto,
   SOCIAL_STATUSES,
@@ -84,6 +85,11 @@ export class SocialSessionsService {
       apiError(ForbiddenException, 'FORBIDDEN_NOT_MANAGER');
     }
   }
+  private assertHost(session: SessionRow, actor: Actor): void {
+    if (session.hostUserId !== actor.id) {
+      apiError(ForbiddenException, 'FORBIDDEN_NOT_HOST');
+    }
+  }
 
   private async resolveCategoryId(sport: string) {
     const category = await this.repository.findCategoryBySlug(sport);
@@ -136,9 +142,14 @@ export class SocialSessionsService {
     viewerId?: string,
     chat?: { chatRoomId: string | null; chatMessages: unknown },
   ) {
+    const {
+      creationIdempotencyKey: _creationIdempotencyKey,
+      creationFingerprint: _creationFingerprint,
+      ...publicSession
+    } = row.session;
     const joined = participants.filter((p) => p.participant.status === 'JOINED');
     return {
-      ...row.session,
+      ...publicSession,
       community: row.session.communityId
         ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
         : null,
@@ -164,13 +175,11 @@ export class SocialSessionsService {
     };
   }
 
-  async create(actor: Actor, dto: CreateSocialSessionDto) {
+  async create(actor: Actor, dto: CreateSocialSessionDto, idempotencyKey?: string) {
     const categoryId = await this.resolveCategoryId(dto.sport);
     if (dto.communityId) {
       const community = await this.repository.findCommunityById(dto.communityId);
-      if (!community) {
-        apiError(NotFoundException, 'COMMUNITY_NOT_FOUND');
-      }
+      if (!community) apiError(NotFoundException, 'COMMUNITY_NOT_FOUND');
       if (dto.visibility === 'CLUB_ONLY') {
         const member = await this.repository.findMember(dto.communityId, actor.id);
         if (!member || member.status !== 'JOINED') {
@@ -181,33 +190,193 @@ export class SocialSessionsService {
       apiError(BadRequestException, 'CLUB_ONLY_REQUIRES_COMMUNITY');
     }
 
+    const key = idempotencyKey?.trim() || undefined;
+    if (key && key.length > 128) {
+      apiError(BadRequestException, 'INVALID_IDEMPOTENCY_KEY');
+    }
     const startAt = new Date(dto.startAt);
-    const { session } = await this.repository.createWithHost(
-      {
-        communityId: dto.communityId ?? null,
-        shortCode: randomBytes(8).toString('base64url'),
-        hostUserId: actor.id,
-        categoryId,
-        title: dto.title.trim(),
-        description: dto.description?.trim() || null,
-        playFormat: dto.playFormat ?? 'Giao lưu',
-        playDate: toPlayDate(dto.startAt),
-        startAt,
-        durationMinutes: dto.durationMinutes ?? 120,
-        venueName: dto.venueName.trim(),
-        venueAddress: dto.venueAddress.trim(),
-        maxSlots: dto.maxSlots ?? 6,
-        currentSlots: 1,
-        feePerSlot: dto.feePerSlot ?? 0,
-        levelRequirement: dto.levelRequirement ?? 'ALL',
-        visibility: dto.visibility ?? 'PUBLIC',
-        contactPhone: dto.contactPhone ?? null,
-        zaloGroupUrl: dto.zaloGroupUrl ?? null,
-        status: 'OPEN',
-      },
-      actor.id,
+    const fingerprint = key
+      ? createHash('sha256')
+          .update(
+            JSON.stringify({
+              communityId: dto.communityId ?? null,
+              categoryId,
+              title: dto.title.trim(),
+              description: dto.description?.trim() || null,
+              playFormat: dto.playFormat ?? 'Giao lưu',
+              playDate: toPlayDate(dto.startAt),
+              startAt: startAt.toISOString(),
+              durationMinutes: dto.durationMinutes ?? 120,
+              venueName: dto.venueName.trim(),
+              venueAddress: dto.venueAddress.trim(),
+              venueId: dto.venueId ?? null,
+              courtId: dto.courtId ?? null,
+              genderRequirement: dto.genderRequirement ?? 'ANY',
+              maxSlots: dto.maxSlots ?? 6,
+              feePerSlot: dto.feePerSlot ?? 0,
+              levelRequirement: dto.levelRequirement ?? 'ALL',
+              visibility: dto.visibility ?? 'PUBLIC',
+              contactPhone: dto.contactPhone ?? null,
+              zaloGroupUrl: dto.zaloGroupUrl ?? null,
+            }),
+          )
+          .digest('hex')
+      : null;
+    if (key) {
+      const existing = await this.repository.findSessionByIdempotencyKey(
+        actor.id,
+        key,
+      );
+      if (existing) {
+        if (existing.deletedAt || existing.creationFingerprint !== fingerprint) {
+          apiError(ConflictException, 'CREATE_IDEMPOTENCY_KEY_REUSED');
+        }
+        return this.getById(existing.id, actor.id, actor.roles);
+      }
+    }
+    const venue = dto.venueId
+      ? await this.repository.findVenueById(dto.venueId)
+      : null;
+    if (dto.venueId && !venue) apiError(BadRequestException, 'VENUE_NOT_FOUND');
+    if (dto.courtId && !dto.venueId) {
+      apiError(BadRequestException, 'COURT_REQUIRES_VENUE');
+    }
+    const court = dto.courtId && dto.venueId
+      ? await this.repository.findAvailableCourt(dto.venueId, dto.courtId)
+      : null;
+    if (dto.courtId && !court) apiError(BadRequestException, 'COURT_NOT_AVAILABLE');
+    const values: typeof schema.socialSessions.$inferInsert = {
+      communityId: dto.communityId ?? null,
+      shortCode: randomBytes(8).toString('base64url'),
+      hostUserId: actor.id,
+      categoryId,
+      title: dto.title.trim(),
+      description: dto.description?.trim() || null,
+      playFormat: dto.playFormat ?? 'Giao lưu',
+      playDate: toPlayDate(dto.startAt),
+      startAt,
+      durationMinutes: dto.durationMinutes ?? 120,
+      venueName: venue?.name ?? dto.venueName.trim(),
+      venueAddress: venue?.locationAddress ?? dto.venueAddress.trim(),
+      venueId: venue?.id ?? null,
+      courtId: court?.id ?? null,
+      genderRequirement: dto.genderRequirement ?? 'ANY',
+      maxSlots: dto.maxSlots ?? 6,
+      currentSlots: 1,
+      feePerSlot: dto.feePerSlot ?? 0,
+      levelRequirement: dto.levelRequirement ?? 'ALL',
+      visibility: dto.visibility ?? 'PUBLIC',
+      contactPhone: dto.contactPhone ?? null,
+      zaloGroupUrl: dto.zaloGroupUrl ?? null,
+      status: 'OPEN',
+    };
+    values.creationIdempotencyKey = key ?? null;
+    values.creationFingerprint = fingerprint;
+    const outcome = await this.repository.createWithHost(values, actor.id);
+    if (!outcome.ok) apiError(ConflictException, outcome.code);
+    return this.getById(outcome.session.id, actor.id, actor.roles);
+  }
+
+  async requestToJoin(actor: Actor, id: string, ticketCount = 1) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    const session = await this.refreshStatusIfExpired(row!.session);
+    this.assertSocialWritable(session);
+    if (session.visibility === 'CLUB_ONLY') {
+      const member = session.communityId
+        ? await this.repository.findMember(session.communityId, actor.id)
+        : null;
+      if (!member || member.status !== 'JOINED') {
+        apiError(ForbiddenException, 'NOT_CLUB_MEMBER');
+      }
+    }
+
+    const outcome = await this.repository.requestToJoin(id, actor.id, ticketCount);
+    if (!outcome.ok) {
+      if (outcome.code === 'SESSION_NOT_FOUND') {
+        apiError(NotFoundException, 'SESSION_NOT_FOUND');
+      }
+      if (outcome.code === 'SESSION_FULL') {
+        apiError(ConflictException, 'SESSION_FULL');
+      }
+      if (outcome.code === 'ALREADY_JOINED') {
+        apiError(ConflictException, 'ALREADY_JOINED');
+      }
+      if (outcome.code === 'REQUEST_NOT_PENDING') {
+        apiError(ConflictException, 'REQUEST_NOT_PENDING');
+      }
+      apiError(BadRequestException, 'SESSION_CLOSED');
+    }
+    return {
+      participant: outcome.participant,
+      status: 'REQUESTED',
+      replayed: outcome.replayed,
+    };
+  }
+
+  async listJoinRequests(
+    actor: Actor,
+    id: string,
+    query: QuerySocialJoinRequestsDto,
+  ) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    this.assertHost(row!.session, actor);
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const { items, total } = await this.repository.listJoinRequests(id, page, limit);
+    return { items, meta: { page, limit, total } };
+  }
+
+  async approveJoinRequest(actor: Actor, id: string, participantId: string) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    this.assertHost(row!.session, actor);
+    const session = await this.refreshStatusIfExpired(row!.session);
+    this.assertSocialWritable(session);
+    const outcome = await this.repository.approveJoinRequest(id, participantId);
+    if (!outcome.ok) {
+      if (outcome.code === 'SESSION_NOT_FOUND') {
+        apiError(NotFoundException, 'SESSION_NOT_FOUND');
+      }
+      if (outcome.code === 'SESSION_FULL') {
+        apiError(ConflictException, 'SESSION_FULL');
+      }
+      if (outcome.code === 'REQUEST_NOT_PENDING') {
+        apiError(ConflictException, 'REQUEST_NOT_PENDING');
+      }
+      apiError(BadRequestException, 'SESSION_CLOSED');
+    }
+    return outcome;
+  }
+
+  async rejectJoinRequest(actor: Actor, id: string, participantId: string) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    this.assertHost(row!.session, actor);
+    const participant = await this.repository.setJoinRequestStatus(
+      id,
+      participantId,
+      'REJECTED',
     );
-    return this.getById(session.id, actor.id, actor.roles);
+    if (!participant) apiError(ConflictException, 'REQUEST_NOT_PENDING');
+    return { participant, status: 'REJECTED' };
+  }
+
+  async withdrawJoinRequest(actor: Actor, id: string) {
+    const row = await this.repository.findSessionById(id);
+    if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
+    const participant = await this.repository.findParticipant(id, actor.id);
+    if (!participant || participant.status !== 'REQUESTED') {
+      apiError(ConflictException, 'REQUEST_NOT_PENDING');
+    }
+    const updated = await this.repository.setJoinRequestStatus(
+      id,
+      participant!.id,
+      'CANCELLED',
+    );
+    if (!updated) apiError(ConflictException, 'REQUEST_NOT_PENDING');
+    return { participant: updated, status: 'CANCELLED' };
   }
 
   async list(query: QuerySocialSessionsDto, viewerId?: string, viewerRoles?: string[]) {
@@ -230,13 +399,20 @@ export class SocialSessionsService {
       limit,
     });
     return {
-      items: items.map((row) => ({
-        ...row.session,
-        community: row.session.communityId
-          ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
-          : null,
-        sport: row.categorySlug,
-      })),
+      items: items.map((row) => {
+        const {
+          creationIdempotencyKey: _creationIdempotencyKey,
+          creationFingerprint: _creationFingerprint,
+          ...session
+        } = row.session;
+        return {
+          ...session,
+          community: row.session.communityId
+            ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
+            : null,
+          sport: row.categorySlug,
+        };
+      }),
       meta: { page, limit, total },
     };
   }
@@ -255,6 +431,9 @@ export class SocialSessionsService {
       }
     }
     const session = await this.refreshStatusIfExpired(row!.session);
+    const viewerParticipant = viewerId
+      ? await this.repository.findParticipant(id, viewerId)
+      : null;
     const participants = await this.repository.listParticipants(id);
 
     // Chat preview (20 tin mới nhất): chỉ participant mới thấy.
@@ -274,7 +453,12 @@ export class SocialSessionsService {
         chat = { chatRoomId: null, chatMessages: null };
       }
     }
-    return this.shapeDetail({ ...row!, session }, participants, viewerId, chat);
+    const detail = this.shapeDetail({ ...row!, session }, participants, viewerId, chat);
+    return {
+      ...detail,
+      joinRequestStatus:
+        viewerParticipant?.status === 'REQUESTED' ? 'REQUESTED' : null,
+    };
   }
 
   async getByShortCode(shortCode: string) {
@@ -361,13 +545,20 @@ export class SocialSessionsService {
       limit,
     });
     return {
-      items: items.map((row) => ({
-        ...row.session,
-        community: row.session.communityId
-          ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
-          : null,
-        sport: row.categorySlug,
-      })),
+      items: items.map((row) => {
+        const {
+          creationIdempotencyKey: _creationIdempotencyKey,
+          creationFingerprint: _creationFingerprint,
+          ...session
+        } = row.session;
+        return {
+          ...session,
+          community: row.session.communityId
+            ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
+            : null,
+          sport: row.categorySlug,
+        };
+      }),
       meta: { page, limit, total },
     };
   }
@@ -401,8 +592,46 @@ export class SocialSessionsService {
       patch.playDate = toPlayDate(dto.startAt);
     }
     if (dto.durationMinutes !== undefined) patch.durationMinutes = dto.durationMinutes;
-    if (dto.venueName !== undefined) patch.venueName = dto.venueName.trim();
-    if (dto.venueAddress !== undefined) patch.venueAddress = dto.venueAddress.trim();
+    if (dto.venueId !== undefined) {
+      if (dto.venueId === null) {
+        patch.venueId = null;
+        patch.courtId = null;
+      } else {
+        const venue = await this.repository.findVenueById(dto.venueId);
+        if (!venue) apiError(BadRequestException, 'VENUE_NOT_FOUND');
+        patch.venueId = venue!.id;
+        patch.venueName = venue!.name;
+        patch.venueAddress = venue!.locationAddress;
+        if (dto.courtId === undefined && dto.venueId !== session.venueId) {
+          patch.courtId = null;
+        }
+      }
+    }
+    if (dto.courtId !== undefined) {
+      if (dto.courtId === null) {
+        patch.courtId = null;
+      } else {
+        const venueId = dto.venueId === undefined ? session.venueId : dto.venueId;
+        if (!venueId) apiError(BadRequestException, 'COURT_REQUIRES_VENUE');
+        if (dto.venueId === undefined) {
+          const venue = await this.repository.findVenueById(venueId!);
+          if (!venue) apiError(BadRequestException, 'VENUE_NOT_FOUND');
+        }
+        const court = await this.repository.findAvailableCourt(venueId!, dto.courtId);
+        if (!court) apiError(BadRequestException, 'COURT_NOT_AVAILABLE');
+        patch.courtId = court!.id;
+      }
+    }
+    if (dto.genderRequirement !== undefined) {
+      patch.genderRequirement = dto.genderRequirement;
+    }
+    if (
+      dto.venueId === null ||
+      (dto.venueId === undefined && !session.venueId)
+    ) {
+      if (dto.venueName !== undefined) patch.venueName = dto.venueName.trim();
+      if (dto.venueAddress !== undefined) patch.venueAddress = dto.venueAddress.trim();
+    }
     if (dto.maxSlots !== undefined) patch.maxSlots = dto.maxSlots;
     if (dto.feePerSlot !== undefined) patch.feePerSlot = dto.feePerSlot;
     if (dto.levelRequirement !== undefined) patch.levelRequirement = dto.levelRequirement;

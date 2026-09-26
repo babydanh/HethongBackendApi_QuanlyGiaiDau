@@ -14,6 +14,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export const SOCIAL_SPORTS = ['tennis', 'pickleball', 'badminton'] as const;
@@ -21,6 +22,8 @@ export type SocialSport = (typeof SOCIAL_SPORTS)[number];
 
 export const SOCIAL_VISIBILITIES = ['PUBLIC', 'CLUB_ONLY'] as const;
 export type SocialVisibility = (typeof SOCIAL_VISIBILITIES)[number];
+export const SOCIAL_GENDER_REQUIREMENTS = ['ANY', 'MALE', 'FEMALE', 'MIXED'] as const;
+export type SocialGenderRequirement = (typeof SOCIAL_GENDER_REQUIREMENTS)[number];
 
 export const SOCIAL_PLAY_FORMATS = [
   'Giao lưu',
@@ -75,6 +78,20 @@ export class CreateSocialSessionDto {
   @IsString()
   @MaxLength(500)
   venueAddress: string;
+  @ApiPropertyOptional({ format: 'uuid', description: 'ID địa điểm lấy từ GET /venues' })
+  @IsUUID()
+  @IsOptional()
+  venueId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'ID sân thuộc venueId đã chọn' })
+  @IsUUID()
+  @IsOptional()
+  courtId?: string;
+
+  @ApiPropertyOptional({ enum: SOCIAL_GENDER_REQUIREMENTS, default: 'ANY' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn([...SOCIAL_GENDER_REQUIREMENTS])
+  genderRequirement?: SocialGenderRequirement;
 
   @ApiPropertyOptional({ example: 6, minimum: 2, maximum: 64 })
   @Type(() => Number)
@@ -156,6 +173,20 @@ export class UpdateSocialSessionDto {
   @MaxLength(500)
   @IsOptional()
   venueAddress?: string;
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsUUID()
+  @IsOptional()
+  venueId?: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @IsUUID()
+  @IsOptional()
+  courtId?: string | null;
+
+  @ApiPropertyOptional({ enum: SOCIAL_GENDER_REQUIREMENTS })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn([...SOCIAL_GENDER_REQUIREMENTS])
+  genderRequirement?: SocialGenderRequirement;
 
   @ApiPropertyOptional()
   @Type(() => Number)
@@ -307,7 +338,7 @@ export class SendSocialMessageDto {
 }
 
 export class JoinSocialSessionDto {
-  @ApiPropertyOptional({ example: 1, description: 'Số vé muốn giữ (mặc định 1)' })
+  @ApiPropertyOptional({ example: 1, description: 'Number of participant slots requested or joined (default 1)' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -368,4 +399,20 @@ export class UpdateSocialPaymentDto {
   @ApiProperty({ enum: ['UNPAID', 'PAID', 'PENDING'] })
   @IsIn(['UNPAID', 'PAID', 'PENDING'])
   paymentStatus: 'UNPAID' | 'PAID' | 'PENDING';
+}
+export class QuerySocialJoinRequestsDto {
+  @ApiPropertyOptional({ example: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  page?: number = 1;
+
+  @ApiPropertyOptional({ example: 20, maximum: 50 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  @IsOptional()
+  limit?: number = 20;
 }

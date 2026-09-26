@@ -10,7 +10,34 @@ export type SocialParticipantRow =
 
 export type JoinOutcome =
   | { ok: true; participant: SocialParticipantRow; currentSlots: number; status: string }
-  | { ok: false; code: 'SESSION_NOT_FOUND' | 'SESSION_CLOSED' | 'SESSION_FULL' | 'ALREADY_JOINED' };
+  | {
+      ok: false;
+      code:
+        | 'SESSION_NOT_FOUND'
+        | 'SESSION_CLOSED'
+        | 'SESSION_FULL'
+        | 'ALREADY_JOINED'
+        | 'REQUEST_NOT_PENDING';
+    };
+export type CreateWithHostOutcome =
+  | { ok: true; session: SocialSessionRow; replayed: boolean }
+  | { ok: false; code: 'CREATE_IDEMPOTENCY_KEY_REUSED' };
+
+export type JoinRequestOutcome =
+  | {
+      ok: true;
+      participant: SocialParticipantRow;
+      replayed: boolean;
+    }
+  | {
+      ok: false;
+      code:
+        | 'SESSION_NOT_FOUND'
+        | 'SESSION_CLOSED'
+        | 'SESSION_FULL'
+        | 'ALREADY_JOINED'
+        | 'REQUEST_NOT_PENDING';
+    };
 
 @Injectable()
 export class SocialSessionsRepository {
@@ -34,6 +61,57 @@ export class SocialSessionsRepository {
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(and(eq(schema.users.id, id), isNull(schema.users.deletedAt)))
+      .limit(1);
+    return row ?? null;
+  }
+  async findVenueById(id: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select({
+        id: schema.tournamentVenues.id,
+        name: schema.tournamentVenues.name,
+        locationAddress: schema.tournamentVenues.locationAddress,
+      })
+      .from(schema.tournamentVenues)
+      .where(
+        and(
+          eq(schema.tournamentVenues.id, id),
+          isNull(schema.tournamentVenues.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findAvailableCourt(venueId: string, courtId: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select({
+        id: schema.venueCourts.id,
+        venueId: schema.venueCourts.venueId,
+        courtName: schema.venueCourts.courtName,
+        status: schema.venueCourts.status,
+      })
+      .from(schema.venueCourts)
+      .where(
+        and(
+          eq(schema.venueCourts.id, courtId),
+          eq(schema.venueCourts.venueId, venueId),
+          eq(schema.venueCourts.status, 'AVAILABLE'),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findSessionByIdempotencyKey(hostUserId: string, key: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select()
+      .from(schema.socialSessions)
+      .where(
+        and(
+          eq(schema.socialSessions.hostUserId, hostUserId),
+          eq(schema.socialSessions.creationIdempotencyKey, key),
+        ),
+      )
       .limit(1);
     return row ?? null;
   }
@@ -206,6 +284,68 @@ export class SocialSessionsRepository {
       .limit(1);
     return !!row;
   }
+  async findParticipant(sessionId: string, userId: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select()
+      .from(schema.socialSessionParticipants)
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.userId, userId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async listJoinRequests(sessionId: string, page: number, limit: number) {
+    const where = and(
+      eq(schema.socialSessionParticipants.sessionId, sessionId),
+      eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+    );
+    const offset = (page - 1) * limit;
+    const [items, totalRows] = await Promise.all([
+      this.db
+        .select({
+          participant: schema.socialSessionParticipants,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        })
+        .from(schema.socialSessionParticipants)
+        .leftJoin(
+          schema.profiles,
+          eq(schema.profiles.userId, schema.socialSessionParticipants.userId),
+        )
+        .where(where)
+        .orderBy(asc(schema.socialSessionParticipants.requestedAt))
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ total: count() })
+        .from(schema.socialSessionParticipants)
+        .where(where),
+    ]);
+    return { items, total: Number(totalRows[0]?.total ?? 0) };
+  }
+
+  async setJoinRequestStatus(
+    sessionId: string,
+    participantId: string,
+    status: 'REJECTED' | 'CANCELLED',
+  ) {
+    const [updated] = await this.db
+      .update(schema.socialSessionParticipants)
+      .set({ status })
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.id, participantId),
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+        ),
+      )
+      .returning();
+    return updated ?? null;
+  }
 
   async listParticipants(sessionId: string, tx: AppDbOrTx = this.db) {
     return tx
@@ -219,7 +359,12 @@ export class SocialSessionsRepository {
         schema.profiles,
         eq(schema.profiles.userId, schema.socialSessionParticipants.userId),
       )
-      .where(eq(schema.socialSessionParticipants.sessionId, sessionId))
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.status, 'JOINED'),
+        ),
+      )
       .orderBy(asc(schema.socialSessionParticipants.joinedAt));
   }
 
@@ -227,28 +372,171 @@ export class SocialSessionsRepository {
     values: typeof schema.socialSessions.$inferInsert,
     hostUserId: string,
     tx: AppDbOrTx = this.db,
-  ) {
-    const runner = tx === this.db ? this.db.transaction(async (t) => run(t)) : run(tx);
-    return runner;
-
-    async function run(t: AppDbOrTx) {
-      const [session] = await t
+  ): Promise<CreateWithHostOutcome> {
+    const run = async (transaction: AppDbOrTx) => {
+      const [session] = await transaction
         .insert(schema.socialSessions)
         .values(values)
         .returning();
-      const [host] = await t
+      await transaction.insert(schema.socialSessionParticipants).values({
+        sessionId: session.id,
+        userId: hostUserId,
+        role: 'HOST',
+        status: 'JOINED',
+        paymentStatus: 'UNPAID',
+        ticketCount: 1,
+      });
+      return { ok: true as const, session, replayed: false };
+    };
+
+    try {
+      return tx === this.db
+        ? await this.db.transaction(run)
+        : await run(tx);
+    } catch (error) {
+      const key = values.creationIdempotencyKey;
+      if (!key || tx !== this.db) throw error;
+
+      const existing = await this.findSessionByIdempotencyKey(hostUserId, key);
+      if (!existing) throw error;
+      if (existing.creationFingerprint !== values.creationFingerprint) {
+        return { ok: false, code: 'CREATE_IDEMPOTENCY_KEY_REUSED' };
+      }
+      return { ok: true, session: existing, replayed: true };
+    }
+  }
+  async requestToJoin(
+    sessionId: string,
+    userId: string,
+    ticketCount: number,
+  ): Promise<JoinRequestOutcome> {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        SELECT id, current_slots, max_slots, status
+        FROM social_sessions
+        WHERE id = ${sessionId} AND deleted_at IS NULL
+        FOR UPDATE
+      `)) as unknown as Array<{
+        id: string;
+        current_slots: number;
+        max_slots: number;
+        status: string;
+      }>;
+      const session = locked[0];
+      if (!session) return { ok: false, code: 'SESSION_NOT_FOUND' } as const;
+      if (session.status !== 'OPEN' && session.status !== 'FULL') {
+        return { ok: false, code: 'SESSION_CLOSED' } as const;
+      }
+
+      const existing = await this.findParticipant(sessionId, userId, tx);
+      if (existing?.status === 'JOINED') {
+        return { ok: false, code: 'ALREADY_JOINED' } as const;
+      }
+      if (existing?.status === 'REQUESTED' && existing.ticketCount === ticketCount) {
+        return { ok: true, participant: existing, replayed: true } as const;
+      }
+      if (session.current_slots + ticketCount > session.max_slots) {
+        return { ok: false, code: 'SESSION_FULL' } as const;
+      }
+
+      const requestedAt = new Date();
+      if (existing?.status === 'REQUESTED') {
+        const [participant] = await tx
+          .update(schema.socialSessionParticipants)
+          .set({ ticketCount, requestedAt })
+          .where(
+            and(
+              eq(schema.socialSessionParticipants.id, existing.id),
+              eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+            ),
+          )
+          .returning();
+        if (!participant) return { ok: false, code: 'REQUEST_NOT_PENDING' } as const;
+        return { ok: true, participant, replayed: false } as const;
+      }
+
+      if (existing) {
+        const [participant] = await tx
+          .update(schema.socialSessionParticipants)
+          .set({ status: 'REQUESTED', role: 'PLAYER', ticketCount, requestedAt })
+          .where(eq(schema.socialSessionParticipants.id, existing.id))
+          .returning();
+        return { ok: true, participant, replayed: false } as const;
+      }
+
+      const [participant] = await tx
         .insert(schema.socialSessionParticipants)
         .values({
-          sessionId: session.id,
-          userId: hostUserId,
-          role: 'HOST',
-          status: 'JOINED',
+          sessionId,
+          userId,
+          role: 'PLAYER',
+          status: 'REQUESTED',
           paymentStatus: 'UNPAID',
-          ticketCount: 1,
+          ticketCount,
+          requestedAt,
         })
         .returning();
-      return { session, host };
-    }
+      return { ok: true, participant, replayed: false } as const;
+    });
+  }
+
+  async approveJoinRequest(
+    sessionId: string,
+    participantId: string,
+  ): Promise<JoinOutcome> {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        SELECT id, current_slots, max_slots, status
+        FROM social_sessions
+        WHERE id = ${sessionId} AND deleted_at IS NULL
+        FOR UPDATE
+      `)) as unknown as Array<{
+        id: string;
+        current_slots: number;
+        max_slots: number;
+        status: string;
+      }>;
+      const session = locked[0];
+      if (!session) return { ok: false, code: 'SESSION_NOT_FOUND' } as const;
+      if (session.status !== 'OPEN' && session.status !== 'FULL') {
+        return { ok: false, code: 'SESSION_CLOSED' } as const;
+      }
+
+      const [request] = await tx
+        .select()
+        .from(schema.socialSessionParticipants)
+        .where(
+          and(
+            eq(schema.socialSessionParticipants.id, participantId),
+            eq(schema.socialSessionParticipants.sessionId, sessionId),
+            eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+          ),
+        )
+        .limit(1);
+      if (!request) return { ok: false, code: 'REQUEST_NOT_PENDING' } as const;
+      if (session.current_slots + request.ticketCount > session.max_slots) {
+        return { ok: false, code: 'SESSION_FULL' } as const;
+      }
+
+      const [participant] = await tx
+        .update(schema.socialSessionParticipants)
+        .set({ status: 'JOINED', role: 'PLAYER' })
+        .where(
+          and(
+            eq(schema.socialSessionParticipants.id, participantId),
+            eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+          ),
+        )
+        .returning();
+      if (!participant) return { ok: false, code: 'REQUEST_NOT_PENDING' } as const;
+      const currentSlots = session.current_slots + request.ticketCount;
+      const status = currentSlots >= session.max_slots ? 'FULL' : 'OPEN';
+      await tx
+        .update(schema.socialSessions)
+        .set({ currentSlots, status, updatedAt: new Date() })
+        .where(eq(schema.socialSessions.id, sessionId));
+      return { ok: true, participant, currentSlots, status };
+    });
   }
 
   /**
