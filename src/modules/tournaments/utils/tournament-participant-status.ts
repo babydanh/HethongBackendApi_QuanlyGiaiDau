@@ -54,6 +54,24 @@ export function resolveDoublesParticipantStatus(
       return 'COMPLETE';
   }
 }
+
+export type NonDoublesParticipantStatus =
+  | 'WAITLISTED'
+  | 'PENDING'
+  | 'PENDING_APPROVAL'
+  | 'COMPLETE';
+
+export function resolveNonDoublesParticipantStatus(input: {
+  registrationMode: unknown;
+  waitlisted: boolean;
+  incompleteRoster: boolean;
+}): NonDoublesParticipantStatus {
+  if (input.waitlisted) return 'WAITLISTED';
+  if (input.incompleteRoster) return 'PENDING';
+  return input.registrationMode === 'APPROVAL'
+    ? 'PENDING_APPROVAL'
+    : 'COMPLETE';
+}
 export function isDoublesParticipantPairable(
   teamStatus: string | null | undefined,
   teamInviteToken?: string | null,

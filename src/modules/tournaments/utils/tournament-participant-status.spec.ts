@@ -1,7 +1,50 @@
 import {
   isDoublesParticipantPairable,
   resolveDoublesParticipantStatus,
+  resolveNonDoublesParticipantStatus,
 } from './tournament-participant-status';
+
+describe('non-doubles participant registration status', () => {
+  it('holds quick-created approval-mode registrations for organizer review', () => {
+    expect(
+      resolveNonDoublesParticipantStatus({
+        registrationMode: 'APPROVAL',
+        waitlisted: false,
+        incompleteRoster: false,
+      }),
+    ).toBe('PENDING_APPROVAL');
+  });
+
+  it('keeps explicitly open registrations immediately complete', () => {
+    expect(
+      resolveNonDoublesParticipantStatus({
+        registrationMode: 'OPEN',
+        waitlisted: false,
+        incompleteRoster: false,
+      }),
+    ).toBe('COMPLETE');
+  });
+
+  it('preserves waitlist precedence over approval', () => {
+    expect(
+      resolveNonDoublesParticipantStatus({
+        registrationMode: 'APPROVAL',
+        waitlisted: true,
+        incompleteRoster: false,
+      }),
+    ).toBe('WAITLISTED');
+  });
+
+  it('keeps an incomplete football roster pending roster completion', () => {
+    expect(
+      resolveNonDoublesParticipantStatus({
+        registrationMode: 'APPROVAL',
+        waitlisted: false,
+        incompleteRoster: true,
+      }),
+    ).toBe('PENDING');
+  });
+});
 
 describe('doubles participant approval transitions', () => {
   it('holds an approval-mode individual registration until BTC review', () => {

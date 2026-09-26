@@ -48,7 +48,10 @@ import {
   isRegistrationRosterCompleteForPayment,
 } from '../utils/registration-payment-eligibility';
 import { isRegistrationOpenStatus } from '../utils/registration-lifecycle';
-import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
+import {
+  resolveDoublesParticipantStatus,
+  resolveNonDoublesParticipantStatus,
+} from '../utils/tournament-participant-status';
 import { validateFootballRosterSelection } from '../utils/football-roster-validation';
 import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
 import {
@@ -948,11 +951,11 @@ export class TournamentRegistrationRepository {
             rosterCount: 1,
             hasPartnerInvite: Boolean(teamInviteToken),
           })
-        : isWaitlisted
-          ? 'WAITLISTED'
-          : hasUndersizedFootballRoster
-            ? 'PENDING'
-            : 'COMPLETE';
+        : resolveNonDoublesParticipantStatus({
+            registrationMode: regMode,
+            waitlisted: isWaitlisted,
+            incompleteRoster: hasUndersizedFootballRoster,
+          });
       const isPaid = payableEntryFeeAmount === 0;
 
       if (isTeamSport && data.footballTeamId && selectedDivision) {
