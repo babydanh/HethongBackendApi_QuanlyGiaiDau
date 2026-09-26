@@ -11,6 +11,8 @@ import {
   buildParticipantRegistrationRejectedNotification,
   buildParticipantRegistrationSuccessNotification,
 } from '../../notifications/notification-builder';
+import { isLiteRegistrationTournament } from '../utils/registration-payment-eligibility';
+import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
 
 export type RegistrationChanged = (
   tournamentId: string,
@@ -189,47 +191,70 @@ export class TournamentParticipantAdminService {
       );
     }
 
+    let nextStatus = status;
+    let participantRosters: Array<{ userId: string }> | null = null;
     if (status === 'COMPLETE') {
-      if (!participant.isPaid) {
-        const completedPayment =
-          await this.tournamentsRepository.findCompletedParticipantPayment(
-            participant.id,
-          );
-        if (completedPayment) {
-          await this.tournamentsRepository.markParticipantPaid(participant.id);
-          participant.isPaid = true;
-        }
-      }
-
       const division = participant.tournamentDivisionId
         ? await this.tournamentsRepository.findDivisionById(
             participant.tournamentDivisionId,
           )
         : null;
-      const entryFeeAmount =
-        participant.entryFeeAtRegistration != null
-          ? Number(participant.entryFeeAtRegistration)
-          : division?.entryFeeOverrideEnabled === true &&
-              division.entryFee != null
-            ? Number(division.entryFee)
-            : Number(tournament.entryFee ?? 0);
+      participantRosters =
+        await this.tournamentsRepository.getParticipantRosters(participantId);
+      const tournamentConfig = (tournament.tournamentConfig || {}) as Record<
+        string,
+        unknown
+      >;
+      const matchType = division?.matchType ?? tournament.matchType;
+      nextStatus = resolveDoublesParticipantStatus({
+        event: 'APPROVE',
+        registrationMode: tournamentConfig.registrationMode,
+        isDoubles:
+          matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES',
+        rosterCount: participantRosters.length,
+        isLite: isLiteRegistrationTournament(tournamentConfig),
+        pairingMode:
+          tournamentConfig.doublesPairingMode === 'SELF' ? 'SELF' : 'ORGANIZER',
+        hasPartnerInvite: Boolean(participant.teamInviteToken),
+      });
 
-      if (entryFeeAmount > 0 && !participant.isPaid) {
-        throw new BadRequestException(
-          'Hồ sơ có lệ phí chưa thanh toán, không thể duyệt hoàn tất.',
-        );
+      if (nextStatus === 'COMPLETE') {
+        if (!participant.isPaid) {
+          const completedPayment =
+            await this.tournamentsRepository.findCompletedParticipantPayment(
+              participant.id,
+            );
+          if (completedPayment) {
+            await this.tournamentsRepository.markParticipantPaid(participant.id);
+            participant.isPaid = true;
+          }
+        }
+
+        const entryFeeAmount =
+          participant.entryFeeAtRegistration != null
+            ? Number(participant.entryFeeAtRegistration)
+            : division?.entryFeeOverrideEnabled === true &&
+                division.entryFee != null
+              ? Number(division.entryFee)
+              : Number(tournament.entryFee ?? 0);
+
+        if (entryFeeAmount > 0 && !participant.isPaid) {
+          throw new BadRequestException(
+            'Hồ sơ có lệ phí chưa thanh toán, không thể duyệt hoàn tất.',
+          );
+        }
       }
     }
 
     let updated = await this.tournamentsRepository.updateParticipantStatus(
       participantId,
-      status,
+      nextStatus,
     );
     if (!updated) {
       throw new NotFoundException('Người tham gia không tồn tại');
     }
 
-    if (status === 'COMPLETE') {
+    if (nextStatus === 'COMPLETE') {
       try {
         updated =
           (await this.tournamentsRepository.assignNextAvailableSeed(
@@ -248,9 +273,10 @@ export class TournamentParticipantAdminService {
 
     try {
       const rosters =
-        await this.tournamentsRepository.getParticipantRosters(participantId);
+        participantRosters ??
+        (await this.tournamentsRepository.getParticipantRosters(participantId));
       for (const roster of rosters) {
-        if (status === 'COMPLETE') {
+        if (nextStatus === 'COMPLETE') {
           await this.notificationsService.sendNotification(
             buildParticipantRegistrationSuccessNotification({
               receiverId: roster.userId,

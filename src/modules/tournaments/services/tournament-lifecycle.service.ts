@@ -550,6 +550,19 @@ export class TournamentLifecycleService {
     if (!canUpdate) {
       throw new ForbiddenException('Bạn không có quyền cập nhật giải đấu này');
     }
+    if (
+      incomingConfigPatch?.registrationMode !== undefined &&
+      !isDeepStrictEqual(
+        incomingConfigPatch.registrationMode,
+        existingConfig.registrationMode,
+      ) &&
+      (await this.tournamentsRepository.countActiveParticipants(id)) > 0
+    ) {
+      throw new BadRequestException(
+        'Không thể đổi chế độ xét duyệt sau khi đã có người đăng ký.',
+      );
+    }
+
 
     const isAdmin = systemRoles.includes('ADMIN');
     if (updateTournamentDto.status !== undefined && !isAdmin) {

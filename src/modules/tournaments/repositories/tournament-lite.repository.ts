@@ -26,6 +26,10 @@ import {
 } from '../utils/registration-payment-eligibility';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 import { TournamentRatingRepository } from './tournament-rating.repository';
+import {
+  isDoublesParticipantPairable,
+  resolveDoublesParticipantStatus,
+} from '../utils/tournament-participant-status';
 
 @Injectable()
 export class TournamentLiteRepository {
@@ -116,7 +120,8 @@ export class TournamentLiteRepository {
       await this.findLiteParticipantsWithRosters(tournamentId);
     return allParticipants.filter(
       (p) =>
-        p.teamStatus === 'PENDING_PARTNER' && (p.rosters?.length ?? 0) === 1,
+        isDoublesParticipantPairable(p.teamStatus, p.teamInviteToken) &&
+        (p.rosters?.length ?? 0) === 1,
     );
   }
   async hasNonDeletedStagesOrMatches(tournamentId: string): Promise<boolean> {
@@ -200,12 +205,12 @@ export class TournamentLiteRepository {
     }
 
     // Reject non-PENDING_PARTNER states (idempotency check already handled COMPLETE/PENDING_APPROVAL)
-    if (p1.teamStatus !== 'PENDING_PARTNER') {
+    if (!isDoublesParticipantPairable(p1.teamStatus, p1.teamInviteToken)) {
       throw new BadRequestException(
         `Participant 1 đang ở trạng thái ${p1.teamStatus}, không thể ghép cặp`,
       );
     }
-    if (p2.teamStatus !== 'PENDING_PARTNER') {
+    if (!isDoublesParticipantPairable(p2.teamStatus, p2.teamInviteToken)) {
       throw new BadRequestException(
         `Participant 2 đang ở trạng thái ${p2.teamStatus}, không thể ghép cặp`,
       );
@@ -334,8 +339,7 @@ export class TournamentLiteRepository {
       .where(eq(schema.tournaments.id, tournamentId))
       .limit(1);
     const tournamentConfig = pairTournament?.tournamentConfig;
-    const targetStatus =
-      registrationMode === 'APPROVAL' ? 'PENDING_APPROVAL' : 'COMPLETE';
+    const targetStatus = resolveDoublesParticipantStatus({ event: 'PAIR' });
     const isLitePairing =
       isLiteRegistrationTournament(tournamentConfig) ||
       registrationMode === 'LITE';

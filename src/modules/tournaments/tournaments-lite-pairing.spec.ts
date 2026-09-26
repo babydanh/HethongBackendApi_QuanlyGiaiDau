@@ -134,6 +134,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       findBracket: jest.fn(),
       findLitePendingPartnerParticipants: jest.fn(),
       findLiteParticipantsWithRosters: jest.fn(),
+      countActiveParticipants: jest.fn().mockResolvedValue(0),
       findUserBasicById: jest.fn(),
       findLeaderByParticipantId: jest.fn(),
       generateLitePairsTx: jest.fn(),
@@ -952,6 +953,37 @@ describe('TournamentsService — Lite pairing guards', () => {
       );
       expect(mockRepo.lockTournamentAndPair).toHaveBeenCalled();
       expect(result).toEqual({ id: 'p1', teamStatus: 'COMPLETE' });
+    });
+
+    it('builds a blank pair name from both selected athlete profiles', async () => {
+      mockRepo.findById!.mockResolvedValue(liteTournament);
+      mockRepo.findCommunityMember!.mockResolvedValue(null);
+      mockRepo.getDivisionsByTournament!.mockResolvedValue([]);
+      mockRepo.findLeaderByParticipantId!
+        .mockResolvedValueOnce({ userId: 'leader-1' })
+        .mockResolvedValueOnce({ userId: 'leader-2' });
+      mockRepo.findUserBasicById!
+        .mockResolvedValueOnce({ id: 'leader-1', fullName: 'An Nguyen' })
+        .mockResolvedValueOnce({ id: 'leader-2', fullName: 'Minh Tran' });
+      mockRepo.lockTournamentAndPair!.mockResolvedValue({
+        id: 'p1',
+        teamName: 'An Nguyen / Minh Tran',
+        teamStatus: 'COMPLETE',
+      });
+
+      await service.pairLiteParticipants('tournament-1', 'user-1', [], {
+        participant1Id: 'p1',
+        participant2Id: 'p2',
+      });
+
+      expect(mockRepo.lockTournamentAndPair).toHaveBeenCalledWith(
+        'tournament-1',
+        'p1',
+        'p2',
+        'user-1',
+        'OPEN',
+        'An Nguyen / Minh Tran',
+      );
     });
   });
 
