@@ -373,6 +373,17 @@ export class MatchesRepository {
           )
           or exists (
             select 1
+            from ${schema.tournamentRosters}
+            inner join ${schema.profiles}
+              on ${schema.profiles.userId} = ${schema.tournamentRosters.userId}
+            where (
+              ${schema.tournamentRosters.participantId} = ${schema.matches.participant1Id}
+              or ${schema.tournamentRosters.participantId} = ${schema.matches.participant2Id}
+            )
+            and ${schema.profiles.fullName} ilike ${searchPattern}
+          )
+          or exists (
+            select 1
             from ${schema.tournaments}
             where ${schema.tournaments.id} = ${schema.matches.tournamentId}
             and ${schema.tournaments.name} ilike ${searchPattern}

@@ -22,6 +22,21 @@ export class LivestreamService {
     return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
   }
 
+  private getMediaServerHost() {
+    return this.configService.get<string>('LIVESTREAM_MEDIA_SERVER_HOST') || 'media.aqvision.net';
+  }
+
+  private buildPlaybackEndpoints(streamKey: string) {
+    const host = this.getMediaServerHost();
+    const cleanKey = streamKey.replace(/^\/+|\/+$/g, '');
+    return {
+      flv: `https://${host}/live/${cleanKey}.live.flv`,
+      hls: `https://${host}/live/${cleanKey}/hls.m3u8`,
+      webrtc: `https://${host}/index/api/webrtc?app=live&stream=${cleanKey}&type=play`,
+      rtsp: `rtsp://${host}:554/live/${cleanKey}`,
+    };
+  }
+
   private getRtmpBaseUrl() {
     return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://sporto.asia:1935/live';
   }
@@ -275,11 +290,18 @@ export class LivestreamService {
       };
     }
 
+    const playbackUrl =
+      stream.streamStatus === 'LIVE' ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null;
+    const streamIdentifier = stream.streamName || stream.streamKey;
+
     return {
       matchId,
       streamStatus: stream.streamStatus,
-      playbackUrl:
-        stream.streamStatus === 'LIVE' ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null,
+      playbackUrl,
+      streamId: streamIdentifier ?? null,
+      endpoints: streamIdentifier && stream.streamStatus === 'LIVE'
+        ? this.buildPlaybackEndpoints(streamIdentifier)
+        : null,
       cameraName: stream.cameraName,
       startedAt: stream.startedAt,
       endedAt: stream.endedAt,
