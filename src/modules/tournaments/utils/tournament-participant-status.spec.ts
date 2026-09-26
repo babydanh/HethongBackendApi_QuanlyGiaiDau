@@ -27,7 +27,7 @@ describe('doubles participant approval transitions', () => {
     },
   );
 
-  it('preserves the dedicated Lite pairing path', () => {
+  it('holds registration for review in approval mode even for Lite tournaments', () => {
     expect(
       resolveDoublesParticipantStatus({
         event: 'REGISTER',
@@ -38,7 +38,7 @@ describe('doubles participant approval transitions', () => {
         rosterCount: 1,
         hasPartnerInvite: false,
       }),
-    ).toBe('PENDING_PARTNER');
+    ).toBe('PENDING_APPROVAL');
     expect(
       resolveDoublesParticipantStatus({
         event: 'APPROVE',
@@ -47,7 +47,7 @@ describe('doubles participant approval transitions', () => {
         isDoubles: true,
         rosterCount: 1,
       }),
-    ).toBe('COMPLETE');
+    ).toBe('PENDING_PARTNER');
   });
 
   it('keeps a self-invite available until its partner joins in approval mode', () => {

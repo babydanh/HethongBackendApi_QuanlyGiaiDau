@@ -36,10 +36,7 @@ export function resolveDoublesParticipantStatus(
       const rosterCount = transition.rosterCount ?? 1;
       const hasPartnerInvite = transition.hasPartnerInvite ?? false;
 
-      if (
-        transition.registrationMode === 'APPROVAL' &&
-        transition.isLite !== true
-      ) {
+      if (transition.registrationMode === 'APPROVAL') {
         if (rosterCount >= 2) return 'PENDING_APPROVAL';
         if (pairingMode === 'ORGANIZER' || !hasPartnerInvite) {
           return 'PENDING_APPROVAL';
@@ -49,7 +46,6 @@ export function resolveDoublesParticipantStatus(
     }
     case 'APPROVE':
       return transition.registrationMode === 'APPROVAL' &&
-        transition.isLite !== true &&
         transition.isDoubles &&
         transition.rosterCount === 1
         ? 'PENDING_PARTNER'
