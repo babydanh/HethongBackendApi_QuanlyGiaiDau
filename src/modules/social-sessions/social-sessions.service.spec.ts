@@ -151,6 +151,55 @@ describe('SocialSessionsService', () => {
       expect(repository.createWithHost).toHaveBeenCalled();
       expect(result).toMatchObject({ id: SESSION_ID, isHost: true });
     });
+    it('accepts any active sport category slug, including football', async () => {
+      repository.findCategoryBySlug.mockResolvedValueOnce({
+        id: CATEGORY_ID,
+        slug: 'football',
+      });
+      const session = baseSession({
+        communityId: null,
+        visibility: 'PUBLIC',
+        categoryId: CATEGORY_ID,
+      });
+      repository.createWithHost.mockResolvedValue({
+        ok: true,
+        session,
+        replayed: false,
+      });
+      repository.findSessionById.mockResolvedValue({
+        session,
+        communityName: null,
+        communityLogoUrl: null,
+        categorySlug: 'football',
+        categoryName: 'Bóng đá',
+      });
+      repository.listParticipants.mockResolvedValue([]);
+
+      const result = await service.create(
+        { id: HOST_ID },
+        baseCreateDto({ sport: 'football' }),
+      );
+
+      expect(repository.findCategoryBySlug).toHaveBeenCalledWith('football');
+      expect(result).toMatchObject({ id: SESSION_ID, isHost: true });
+    });
+
+    it('rejects a sport without an active category before persisting', async () => {
+      repository.findCategoryBySlug.mockResolvedValueOnce(null);
+
+      await expect(
+        service.create(
+          { id: HOST_ID },
+          baseCreateDto({ sport: 'inactive-sport' }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(repository.findCategoryBySlug).toHaveBeenCalledWith(
+        'inactive-sport',
+      );
+      expect(repository.createWithHost).not.toHaveBeenCalled();
+    });
+
     it('replays a matching idempotency key and rejects a changed payload', async () => {
       const session = baseSession({ communityId: null, visibility: 'PUBLIC' });
       repository.findSessionByIdempotencyKey.mockResolvedValueOnce(
