@@ -21,7 +21,6 @@ import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
-import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { CreateTournamentVenueDto } from './dto/create-tournament-venue.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -690,25 +689,6 @@ export class TournamentsController {
     }
 
     return null;
-  }
-
-  @Post()
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
-  @Verified()
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Tạo giải đấu mới (hỗ trợ cả Web và App)' })
-  async create(
-    @Body() createTournamentDto: CreateTournamentDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    if (!user?.sub) {
-      throw new UnauthorizedException('Bạn cần đăng nhập để tạo giải đấu.');
-    }
-    return this.tournamentsService.create(
-      user.sub,
-      createTournamentDto,
-      this.getSystemRoles(user),
-    );
   }
 
   @Post('lite')
