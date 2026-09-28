@@ -9,7 +9,11 @@ import { randomUUID } from 'crypto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
-import { LivestreamRepository } from './livestream.repository';
+import {
+  LivestreamMode,
+  LivestreamProtocol,
+  LivestreamRepository,
+} from './livestream.repository';
 
 @Injectable()
 export class LivestreamService {
@@ -181,12 +185,21 @@ export class LivestreamService {
     await this.assertTournamentOperator(tournamentId, user);
     const streamName = `camera_${randomUUID().replace(/-/g, '')}`;
     const streamKey = randomUUID().replace(/-/g, '');
-    const playbackUrl = this.buildPlaybackUrl(streamName);
+    const mode: LivestreamMode = data.mode === 'PULL' ? 'PULL' : 'PUSH';
+    const protocol: LivestreamProtocol = data.protocol ?? 'RTMP';
+
+    // PULL: luồng đã được phát sẵn từ bên ngoài, BTC dán URL phát vào.
+    // Không sinh và không chuẩn hoá lại URL đó — mọi hình dạng đều phải giữ nguyên.
+    const playbackUrl =
+      mode === 'PULL'
+        ? this.assertPullPlaybackUrl(data.playbackUrl)
+        : this.buildPlaybackUrl(streamName);
 
     const camera = await this.livestreamRepository.createCamera({
       tournamentId,
       name: data.name.trim(),
-      protocol: data.protocol ?? 'RTMP',
+      mode,
+      protocol,
       streamName,
       streamKey,
       playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
@@ -195,8 +208,29 @@ export class LivestreamService {
 
     return {
       ...camera,
-      publish: this.buildPublishInfo(data.protocol ?? 'RTMP', streamName),
+      // PULL không có URL ingest để BTC cấu hình ở OBS/Camera Station.
+      publish: mode === 'PULL' ? null : this.buildPublishInfo(protocol, streamName),
     };
+  }
+
+  private assertPullPlaybackUrl(playbackUrl: string | undefined) {
+    const trimmed = playbackUrl?.trim();
+    if (!trimmed) {
+      throw new BadRequestException('Chế độ PULL cần URL phát trực tiếp của sân.');
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new BadRequestException('URL phát trực tiếp không hợp lệ.');
+    }
+
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new BadRequestException('URL phát phải dùng http:// hoặc https://.');
+    }
+
+    return trimmed;
   }
 
   async deleteCamera(cameraId: string, user: JwtPayload) {
@@ -292,19 +326,47 @@ export class LivestreamService {
 
     const playbackUrl =
       stream.streamStatus === 'LIVE' ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null;
+    const isLive = stream.streamStatus === 'LIVE';
     const streamIdentifier = stream.streamName || stream.streamKey;
+    // PULL camera phát từ URL của bên ngoài nên endpoint phải bám theo URL đó,
+    // không dựng lại từ streamName (streamName lúc đó chỉ là mã sinh nội bộ).
+    const endpoints = isLive
+      ? this.resolvePlaybackEndpoints(streamIdentifier, stream.cameraMode, playbackUrl)
+      : null;
 
     return {
       matchId,
       streamStatus: stream.streamStatus,
       playbackUrl,
       streamId: streamIdentifier ?? null,
-      endpoints: streamIdentifier && stream.streamStatus === 'LIVE'
-        ? this.buildPlaybackEndpoints(streamIdentifier)
-        : null,
+      endpoints,
       cameraName: stream.cameraName,
       startedAt: stream.startedAt,
       endedAt: stream.endedAt,
     };
+  }
+
+  private resolvePlaybackEndpoints(
+    streamIdentifier: string | null,
+    cameraMode: string | null | undefined,
+    playbackUrl: string | null,
+  ) {
+    if (cameraMode !== 'PULL') {
+      return streamIdentifier ? this.buildPlaybackEndpoints(streamIdentifier) : null;
+    }
+
+    if (!playbackUrl) return null;
+    return this.deriveEndpointsFromPlaybackUrl(playbackUrl);
+  }
+
+  private deriveEndpointsFromPlaybackUrl(playbackUrl: string) {
+    const flv = playbackUrl.includes('.live.flv')
+      ? playbackUrl
+      : playbackUrl.replace('/hls.m3u8', '.live.flv');
+    const hls = playbackUrl.includes('/hls.m3u8')
+      ? playbackUrl
+      : playbackUrl.replace('.live.flv', '/hls.m3u8');
+
+    return { flv, hls, webrtc: null, rtsp: null };
   }
 }

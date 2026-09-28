@@ -5,10 +5,12 @@ import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 
 export type LivestreamProtocol = 'RTMP' | 'SRT';
+export type LivestreamMode = 'PUSH' | 'PULL';
 
 export interface CreateCameraInput {
   tournamentId: string;
   name: string;
+  mode: LivestreamMode;
   protocol: LivestreamProtocol;
   streamName: string;
   streamKey: string;
@@ -147,6 +149,7 @@ export class LivestreamRepository {
         cameraProtocol: schema.livestreamCameras.protocol,
         streamName: schema.livestreamCameras.streamName,
         streamKey: schema.livestreamCameras.streamKey,
+        cameraMode: schema.livestreamCameras.mode,
       })
       .from(schema.matchLivestreams)
       .leftJoin(

@@ -91,7 +91,13 @@ export class CommunitiesRepository {
 
     if (query.lat !== undefined && query.lng !== undefined) {
       const radiusMeters = (query.radiusKm || 10) * 1000;
-      const point = sql`ST_SetSRID(ST_MakePoint(${query.lng}, ${query.lat}), 4326)`;
+      // `::geography` is required, not cosmetic. Without it the reference point
+      // stays a bare geometry, and PostGIS resolves ST_DWithin to the
+      // (geometry, geometry, double precision) overload whose third argument is in
+      // DEGREES — so a metre radius was compared against degrees and the result
+      // was off by ~111000x. With geography, the third argument is metres.
+      // Same helper shape as social-sessions.repository.ts:66.
+      const point = sql`ST_SetSRID(ST_MakePoint(${query.lng}, ${query.lat}), 4326)::geography`;
       conditions.push(
         sql`ST_DWithin(${schema.communities.locationGeolocation}, ${point}, ${radiusMeters})`,
       );
