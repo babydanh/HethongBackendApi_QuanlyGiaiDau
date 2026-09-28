@@ -19,7 +19,7 @@ export class CreateCameraDto {
     example: 'PUSH',
     enum: ['PUSH', 'PULL'],
     description:
-      'PUSH: SportO sinh URL RTMP/SRT để camera đẩy luồng lên. PULL: bên ngoài đã phát sẵn, BTC dán URL phát.',
+      'Bắt buộc. PUSH: SportO sinh URL RTMP/SRT để camera đẩy luồng lên. PULL: bên ngoài đã phát sẵn, BTC dán URL phát.',
   })
   @IsIn(['PUSH', 'PULL'])
   mode!: 'PUSH' | 'PULL';
