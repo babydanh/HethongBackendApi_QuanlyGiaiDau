@@ -12,6 +12,28 @@ export type JoinOutcome =
   | { ok: true; participant: SocialParticipantRow; currentSlots: number; status: string }
   | { ok: false; code: 'SESSION_NOT_FOUND' | 'SESSION_CLOSED' | 'SESSION_FULL' | 'ALREADY_JOINED' };
 
+/** Bán kính mặc định khi client gửi lat/lng mà không kèm radiusKm (km). */
+export const DEFAULT_NEARBY_RADIUS_KM = 10;
+
+/** Điểm tham chiếu PostGIS geography từ tọa độ user. */
+function userRefPoint(lat: number, lng: number) {
+  return sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`;
+}
+
+/** Biểu thức khoảng cách (km) từ venue tới user — NULL khi venue chưa có tọa độ. */
+function distanceKmExpr(lat: number, lng: number) {
+  return sql<
+    number | null
+  >`(ST_Distance(${schema.socialSessions.venueGeolocation}, ${userRefPoint(lat, lng)}) / 1000)`;
+}
+
+export interface GeoQueryFilters {
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+  sortBy?: 'TIME' | 'DISTANCE';
+}
+
 @Injectable()
 export class SocialSessionsRepository {
   constructor(@Inject(PG_CONNECTION) private readonly db: AppDb) {}
@@ -117,7 +139,7 @@ export class SocialSessionsRepository {
       search?: string;
       page: number;
       limit: number;
-    },
+    } & GeoQueryFilters,
     tx: AppDbOrTx = this.db,
   ) {
     const conditions = [
@@ -125,6 +147,16 @@ export class SocialSessionsRepository {
       sql`${schema.socialSessions.status} IN ('OPEN', 'FULL')`,
       isNull(schema.socialSessions.deletedAt),
     ];
+    // Lọc gần tôi: chỉ venue đã có tọa độ + nằm trong bán kính (m).
+    const withGeo = filters.lat !== undefined && filters.lng !== undefined;
+    if (withGeo) {
+      const radiusMeters = Math.round(
+        (filters.radiusKm ?? DEFAULT_NEARBY_RADIUS_KM) * 1000,
+      );
+      conditions.push(
+        sql`ST_DWithin(${schema.socialSessions.venueGeolocation}, ${userRefPoint(filters.lat!, filters.lng!)}, ${radiusMeters})`,
+      );
+    }
     if (!filters.includePrivate) conditions.push(
       filters.viewerId
         ? or(
@@ -161,6 +193,15 @@ export class SocialSessionsRepository {
     }
     const where = and(...conditions);
     const offset = (filters.page - 1) * filters.limit;
+    // Luôn select distanceKm (NULL khi không có lat/lng hoặc venue chưa ghim).
+    const distanceKm = withGeo
+      ? distanceKmExpr(filters.lat!, filters.lng!)
+      : sql<number | null>`NULL`;
+    // DISTANCE = gần lên trước, venue chưa ghim (NULL) xếp cuối; mặc định theo giờ.
+    const orderClauses =
+      withGeo && filters.sortBy === 'DISTANCE'
+        ? [asc(distanceKm), asc(schema.socialSessions.startAt)]
+        : [asc(schema.socialSessions.startAt)];
 
     const [items, totalRows] = await Promise.all([
       tx
@@ -169,6 +210,7 @@ export class SocialSessionsRepository {
           communityName: schema.communities.name,
           communityLogoUrl: schema.communities.logoUrl,
           categorySlug: schema.categories.slug,
+          distanceKm,
         })
         .from(schema.socialSessions)
         .leftJoin(
@@ -180,7 +222,7 @@ export class SocialSessionsRepository {
           eq(schema.categories.id, schema.socialSessions.categoryId),
         )
         .where(where)
-        .orderBy(asc(schema.socialSessions.startAt))
+        .orderBy(...orderClauses)
         .limit(filters.limit)
         .offset(offset),
       tx
@@ -228,13 +270,21 @@ export class SocialSessionsRepository {
     hostUserId: string,
     tx: AppDbOrTx = this.db,
   ) {
+    // Suy venueGeolocation từ lat/lng (pattern venues.repository) để query geo.
+    const geoValue =
+      values.latitude != null && values.longitude != null
+        ? sql`ST_SetSRID(ST_MakePoint(${values.longitude}, ${values.latitude}), 4326)`
+        : undefined;
+    const insertValues = (
+      geoValue ? { ...values, venueGeolocation: geoValue } : values
+    ) as typeof schema.socialSessions.$inferInsert;
     const runner = tx === this.db ? this.db.transaction(async (t) => run(t)) : run(tx);
     return runner;
 
     async function run(t: AppDbOrTx) {
       const [session] = await t
         .insert(schema.socialSessions)
-        .values(values)
+        .values(insertValues)
         .returning();
       const [host] = await t
         .insert(schema.socialSessionParticipants)
@@ -566,14 +616,29 @@ export class SocialSessionsRepository {
     });
   }
 
-  /** Cập nhật thông tin Social */
+  /** Cập nhật thông tin Social (tự suy venueGeolocation khi patch chạm lat/lng). */
   async updateSession(
     id: string,
     patch: Partial<typeof schema.socialSessions.$inferInsert>,
   ) {
+    const geoPatch: Record<string, unknown> = {};
+    if (patch.latitude !== undefined || patch.longitude !== undefined) {
+      const lat = patch.latitude ?? null;
+      const lng = patch.longitude ?? null;
+      if (lat != null && lng != null) {
+        geoPatch.venueGeolocation = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`;
+      } else {
+        // Xóa vị trí: clear cả 3 cột để không lệch nguồn.
+        geoPatch.venueGeolocation = null;
+        geoPatch.latitude = null;
+        geoPatch.longitude = null;
+      }
+    }
     const [updated] = await this.db
       .update(schema.socialSessions)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({ ...patch, ...geoPatch, updatedAt: new Date() } as Partial<
+        typeof schema.socialSessions.$inferInsert
+      >)
       .where(
         and(
           eq(schema.socialSessions.id, id),
@@ -648,7 +713,7 @@ export class SocialSessionsRepository {
       search?: string;
       page: number;
       limit: number;
-    },
+    } & GeoQueryFilters,
     tx: AppDbOrTx = this.db,
   ) {
     const conditions = [
@@ -681,8 +746,24 @@ export class SocialSessionsRepository {
         )!,
       );
     }
+    const withGeo = filters.lat !== undefined && filters.lng !== undefined;
+    if (withGeo) {
+      const radiusMeters = Math.round(
+        (filters.radiusKm ?? DEFAULT_NEARBY_RADIUS_KM) * 1000,
+      );
+      conditions.push(
+        sql`ST_DWithin(${schema.socialSessions.venueGeolocation}, ${userRefPoint(filters.lat!, filters.lng!)}, ${radiusMeters})`,
+      );
+    }
     const where = and(...conditions);
     const offset = (filters.page - 1) * filters.limit;
+    const distanceKm = withGeo
+      ? distanceKmExpr(filters.lat!, filters.lng!)
+      : sql<number | null>`NULL`;
+    const orderClauses =
+      withGeo && filters.sortBy === 'DISTANCE'
+        ? [asc(distanceKm), desc(schema.socialSessions.startAt)]
+        : [desc(schema.socialSessions.startAt)];
 
     const [items, totalRows] = await Promise.all([
       tx
@@ -691,6 +772,7 @@ export class SocialSessionsRepository {
           communityName: schema.communities.name,
           communityLogoUrl: schema.communities.logoUrl,
           categorySlug: schema.categories.slug,
+          distanceKm,
         })
         .from(schema.socialSessions)
         .leftJoin(
@@ -702,7 +784,7 @@ export class SocialSessionsRepository {
           eq(schema.categories.id, schema.socialSessions.categoryId),
         )
         .where(where)
-        .orderBy(desc(schema.socialSessions.startAt))
+        .orderBy(...orderClauses)
         .limit(filters.limit)
         .offset(offset),
       tx

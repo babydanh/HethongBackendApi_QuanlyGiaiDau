@@ -31,8 +31,7 @@ type SessionRow = typeof schema.socialSessions.$inferSelect;
 const MANAGER_ROLES = new Set(['OWNER', 'MODERATOR']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function apiError(
-  ExceptionType:
+function apiError(  ExceptionType:
     | typeof BadRequestException
     | typeof ConflictException
     | typeof ForbiddenException
@@ -58,6 +57,16 @@ function toPlayDate(startAt: string): string {
     apiError(BadRequestException, 'INVALID_START_AT');
   }
   return playDate;
+}
+
+/**
+ * lat/lng luôn đi cặp: cả hai cùng có hoặc cùng vắng (null/undefined).
+ * Cho phép cả hai null ở update = xóa vị trí đã ghim.
+ */
+function assertLocationPair(lat?: number | null, lng?: number | null): void {
+  if ((lat == null) !== (lng == null)) {
+    apiError(BadRequestException, 'LOCATION_PAIR_REQUIRED');
+  }
 }
 
 @Injectable()
@@ -166,6 +175,7 @@ export class SocialSessionsService {
 
   async create(actor: Actor, dto: CreateSocialSessionDto) {
     const categoryId = await this.resolveCategoryId(dto.sport);
+    assertLocationPair(dto.latitude, dto.longitude);
     if (dto.communityId) {
       const community = await this.repository.findCommunityById(dto.communityId);
       if (!community) {
@@ -196,6 +206,8 @@ export class SocialSessionsService {
         durationMinutes: dto.durationMinutes ?? 120,
         venueName: dto.venueName.trim(),
         venueAddress: dto.venueAddress.trim(),
+        latitude: dto.latitude ?? null,
+        longitude: dto.longitude ?? null,
         maxSlots: dto.maxSlots ?? 6,
         currentSlots: 1,
         feePerSlot: dto.feePerSlot ?? 0,
@@ -219,6 +231,9 @@ export class SocialSessionsService {
       : undefined;
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    if (query.lat !== undefined || query.lng !== undefined) {
+      assertLocationPair(query.lat ?? null, query.lng ?? null);
+    }
     const { items, total } = await this.repository.listByDate({
       playDate: query.date,
       categoryId,
@@ -228,6 +243,10 @@ export class SocialSessionsService {
       search: query.search,
       page,
       limit,
+      lat: query.lat,
+      lng: query.lng,
+      radiusKm: query.radiusKm,
+      sortBy: query.sortBy,
     });
     return {
       items: items.map((row) => ({
@@ -236,6 +255,7 @@ export class SocialSessionsService {
           ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
           : null,
         sport: row.categorySlug,
+        distanceKm: row.distanceKm ?? null,
       })),
       meta: { page, limit, total },
     };
@@ -349,6 +369,9 @@ export class SocialSessionsService {
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    if (query.lat !== undefined || query.lng !== undefined) {
+      assertLocationPair(query.lat ?? null, query.lng ?? null);
+    }
     const { items, total } = await this.repository.listByCommunity({
       communityId,
       statuses,
@@ -359,6 +382,10 @@ export class SocialSessionsService {
       search: query.search,
       page,
       limit,
+      lat: query.lat,
+      lng: query.lng,
+      radiusKm: query.radiusKm,
+      sortBy: query.sortBy,
     });
     return {
       items: items.map((row) => ({
@@ -367,6 +394,7 @@ export class SocialSessionsService {
           ? { id: row.session.communityId, name: row.communityName, logoUrl: row.communityLogoUrl }
           : null,
         sport: row.categorySlug,
+        distanceKm: row.distanceKm ?? null,
       })),
       meta: { page, limit, total },
     };
@@ -376,6 +404,9 @@ export class SocialSessionsService {
     const row = await this.repository.findSessionById(id);
     if (!row) apiError(NotFoundException, 'SESSION_NOT_FOUND');
     await this.assertManager(row!.session, actor);
+    if (dto.latitude !== undefined || dto.longitude !== undefined) {
+      assertLocationPair(dto.latitude ?? null, dto.longitude ?? null);
+    }
 
     const session = await this.refreshStatusIfExpired(row!.session);
     if (session.status === 'COMPLETED' || session.status === 'CANCELLED') {
@@ -403,6 +434,8 @@ export class SocialSessionsService {
     if (dto.durationMinutes !== undefined) patch.durationMinutes = dto.durationMinutes;
     if (dto.venueName !== undefined) patch.venueName = dto.venueName.trim();
     if (dto.venueAddress !== undefined) patch.venueAddress = dto.venueAddress.trim();
+    if (dto.latitude !== undefined) patch.latitude = dto.latitude;
+    if (dto.longitude !== undefined) patch.longitude = dto.longitude;
     if (dto.maxSlots !== undefined) patch.maxSlots = dto.maxSlots;
     if (dto.feePerSlot !== undefined) patch.feePerSlot = dto.feePerSlot;
     if (dto.levelRequirement !== undefined) patch.levelRequirement = dto.levelRequirement;

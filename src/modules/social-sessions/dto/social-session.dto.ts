@@ -7,6 +7,7 @@ import {
   IsDateString,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUrl,
@@ -75,6 +76,22 @@ export class CreateSocialSessionDto {
   @IsString()
   @MaxLength(500)
   venueAddress: string;
+
+  @ApiPropertyOptional({ example: 10.7769, description: 'Vĩ độ sân (do host ghim map). Đi cặp với longitude' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @IsOptional()
+  latitude?: number;
+
+  @ApiPropertyOptional({ example: 106.7009, description: 'Kinh độ sân (do host ghim map). Đi cặp với latitude' })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @IsOptional()
+  longitude?: number;
 
   @ApiPropertyOptional({ example: 6, minimum: 2, maximum: 64 })
   @Type(() => Number)
@@ -157,6 +174,22 @@ export class UpdateSocialSessionDto {
   @IsOptional()
   venueAddress?: string;
 
+  @ApiPropertyOptional({ description: 'Vĩ độ sân mới (đi cặp với longitude; null để xóa vị trí)' })
+  @Transform(({ value }) => (value === null || value === undefined || value === '' ? value : Number(value)))
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  @IsOptional()
+  latitude?: number | null;
+
+  @ApiPropertyOptional({ description: 'Kinh độ sân mới (đi cặp với latitude; null để xóa vị trí)' })
+  @Transform(({ value }) => (value === null || value === undefined || value === '' ? value : Number(value)))
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  @IsOptional()
+  longitude?: number | null;
+
   @ApiPropertyOptional()
   @Type(() => Number)
   @IsInt()
@@ -221,6 +254,38 @@ export class QuerySocialSessionsDto {
   @IsOptional()
   search?: string;
 
+  @ApiPropertyOptional({ example: 10.7769, description: 'Vĩ độ user — bật lọc/sắp xếp theo khoảng cách (đi cặp với lng)' })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null || value === '' ? undefined : Number(value)))
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @ApiPropertyOptional({ example: 106.7009, description: 'Kinh độ user (đi cặp với lat)' })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null || value === '' ? undefined : Number(value)))
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng?: number;
+
+  @ApiPropertyOptional({ example: 10, description: 'Bán kính lọc (km, 0.5 - 50). Chỉ áp dụng khi có lat/lng' })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null || value === '' ? undefined : Number(value)))
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.5)
+  @Max(50)
+  radiusKm?: number;
+
+  @ApiPropertyOptional({ enum: ['TIME', 'DISTANCE'], description: 'DISTANCE = gần lên trước (chỉ khi có lat/lng)' })
+  @IsIn(['TIME', 'DISTANCE'])
+  @IsOptional()
+  sortBy?: 'TIME' | 'DISTANCE';
+
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
   @Transform(({ value }) => Number(value))
@@ -270,6 +335,38 @@ export class QuerySocialByCommunityDto {
   @IsString()
   @IsOptional()
   search?: string;
+
+  @ApiPropertyOptional({ example: 10.7769, description: 'Vĩ độ user — bật lọc/sắp xếp theo khoảng cách (đi cặp với lng)' })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null || value === '' ? undefined : Number(value)))
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @ApiPropertyOptional({ example: 106.7009, description: 'Kinh độ user (đi cặp với lat)' })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null || value === '' ? undefined : Number(value)))
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lng?: number;
+
+  @ApiPropertyOptional({ example: 10, description: 'Bán kính lọc (km, 0.5 - 50). Chỉ áp dụng khi có lat/lng' })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null || value === '' ? undefined : Number(value)))
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.5)
+  @Max(50)
+  radiusKm?: number;
+
+  @ApiPropertyOptional({ enum: ['TIME', 'DISTANCE'], description: 'DISTANCE = gần lên trước (chỉ khi có lat/lng)' })
+  @IsIn(['TIME', 'DISTANCE'])
+  @IsOptional()
+  sortBy?: 'TIME' | 'DISTANCE';
 
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()

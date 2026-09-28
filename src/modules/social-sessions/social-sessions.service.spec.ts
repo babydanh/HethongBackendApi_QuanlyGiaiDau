@@ -56,6 +56,9 @@ function baseSession(overrides = {}) {
     durationMinutes: 120,
     venueName: '22 Cộng Hòa',
     venueAddress: '22 Cộng Hòa, Tân Bình',
+    latitude: null,
+    longitude: null,
+    venueGeolocation: null,
     maxSlots: 8,
     currentSlots: 1,
     feePerSlot: 50000,
@@ -499,6 +502,111 @@ describe('SocialSessionsService', () => {
         response: expect.objectContaining({ code: 'SESSION_CLOSED' }),
       });
       expect(chat.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('geolocation', () => {
+    it('create từ chối khi chỉ có latitude (LOCATION_PAIR_REQUIRED)', async () => {
+      await expect(
+        service.create({ id: HOST_ID }, baseCreateDto({ latitude: 10.7769 })),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'LOCATION_PAIR_REQUIRED' }),
+      });
+      expect(repository.createWithHost).not.toHaveBeenCalled();
+    });
+
+    it('create lưu lat/lng khi đi cặp', async () => {
+      const session = baseSession({ communityId: null, visibility: 'PUBLIC' });
+      repository.createWithHost.mockResolvedValue({ session, host: {} as never });
+      repository.findSessionById.mockResolvedValue({
+        session,
+        communityName: null,
+        communityLogoUrl: null,
+        categorySlug: 'pickleball',
+        categoryName: 'Pickleball',
+      });
+      repository.listParticipants.mockResolvedValue([]);
+      await service.create(
+        { id: HOST_ID },
+        baseCreateDto({ latitude: 10.7769, longitude: 106.7009 }),
+      );
+      expect(repository.createWithHost).toHaveBeenCalledWith(
+        expect.objectContaining({ latitude: 10.7769, longitude: 106.7009 }),
+        HOST_ID,
+      );
+    });
+
+    it('update từ chối khi chỉ có longitude (LOCATION_PAIR_REQUIRED)', async () => {
+      repository.findSessionById.mockResolvedValue(sessionRow(futureSession()) as never);
+      await expect(
+        service.update({ id: HOST_ID }, SESSION_ID, { longitude: 106.7009 }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'LOCATION_PAIR_REQUIRED' }),
+      });
+      expect(repository.updateSession).not.toHaveBeenCalled();
+    });
+
+    it('list từ chối khi chỉ có lat (LOCATION_PAIR_REQUIRED)', async () => {
+      await expect(service.list({ date: '2026-09-17', lat: 10.7769 } as never)).rejects.toMatchObject(
+        {
+          response: expect.objectContaining({ code: 'LOCATION_PAIR_REQUIRED' }),
+        },
+      );
+      expect(repository.listByDate).not.toHaveBeenCalled();
+    });
+
+    it('list chuyển tiếp lat/lng/radiusKm/sortBy + map distanceKm', async () => {
+      const session = baseSession({ communityId: null, visibility: 'PUBLIC' });
+      repository.listByDate.mockResolvedValue({
+        items: [
+          {
+            session,
+            communityName: null,
+            communityLogoUrl: null,
+            categorySlug: 'pickleball',
+            distanceKm: 1.25,
+          },
+        ],
+        total: 1,
+      });
+      const result = await service.list({
+        date: '2026-09-17',
+        lat: 10.7769,
+        lng: 106.7009,
+        radiusKm: 5,
+        sortBy: 'DISTANCE',
+      });
+      expect(repository.listByDate).toHaveBeenCalledWith(
+        expect.objectContaining({ lat: 10.7769, lng: 106.7009, radiusKm: 5, sortBy: 'DISTANCE' }),
+      );
+      expect(result.items[0]).toMatchObject({ distanceKm: 1.25 });
+    });
+
+    it('listByCommunity chuyển tiếp geo + distanceKm null khi venue chưa ghim', async () => {
+      repository.findCommunityById.mockResolvedValue({ id: COMMUNITY_ID, status: 'ACTIVE' });
+      repository.findMember.mockResolvedValue({ role: 'MEMBER', status: 'JOINED' });
+      const session = baseSession();
+      repository.listByCommunity.mockResolvedValue({
+        items: [
+          {
+            session,
+            communityName: 'SB Club',
+            communityLogoUrl: null,
+            categorySlug: 'pickleball',
+            distanceKm: null,
+          },
+        ],
+        total: 1,
+      });
+      const result = await service.listByCommunity(
+        { id: MEMBER_ID },
+        COMMUNITY_ID,
+        { lat: 10.7769, lng: 106.7009, radiusKm: 10, sortBy: 'DISTANCE' },
+      );
+      expect(repository.listByCommunity).toHaveBeenCalledWith(
+        expect.objectContaining({ lat: 10.7769, lng: 106.7009, radiusKm: 10, sortBy: 'DISTANCE' }),
+      );
+      expect(result.items[0]).toMatchObject({ distanceKm: null });
     });
   });
 });

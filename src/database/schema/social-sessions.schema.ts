@@ -1,6 +1,8 @@
 import {
   check,
+  customType,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -15,6 +17,12 @@ import { sql } from 'drizzle-orm';
 import { categories } from './categories.schema';
 import { communities } from './communities.schema';
 import { users } from './users.schema';
+
+const geography = customType<{ data: string }>({
+  dataType() {
+    return 'geography(Point, 4326)';
+  },
+});
 
 /**
  * Social Session (Kèo giao lưu thể thao — Social của Flutter).
@@ -45,6 +53,11 @@ export const socialSessions = pgTable(
     durationMinutes: integer('duration_minutes').default(120).notNull(),
     venueName: varchar('venue_name', { length: 255 }).notNull(),
     venueAddress: varchar('venue_address', { length: 500 }).notNull(),
+    // Tọa độ sân do host ghim trên bản đồ (nullable: kèo cũ chưa có tọa độ).
+    // venueGeolocation là PostGIS geography để query ST_Distance/ST_DWithin.
+    latitude: doublePrecision('latitude'),
+    longitude: doublePrecision('longitude'),
+    venueGeolocation: geography('venue_geolocation'),
     maxSlots: integer('max_slots').default(6).notNull(),
     currentSlots: integer('current_slots').default(1).notNull(),
     feePerSlot: integer('fee_per_slot').default(0).notNull(),
@@ -88,6 +101,10 @@ export const socialSessions = pgTable(
       table.status,
     ),
     hostIdx: index('social_session_host_idx').on(table.hostUserId),
+    geoIdx: index('social_session_geo_idx').using(
+      'gist',
+      table.venueGeolocation,
+    ),
     shortCodeIdx: uniqueIndex('social_session_short_code_idx').on(table.shortCode),
   }),
 );

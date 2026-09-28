@@ -267,6 +267,13 @@
       "when": 1787633730332,
       "tag": "0037_cynical_sister_grimm",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790588280238,
+      "tag": "0038_social-session-geolocation",
+      "breakpoints": true
     }
   ]
 }
