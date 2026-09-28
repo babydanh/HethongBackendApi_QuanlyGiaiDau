@@ -226,8 +226,10 @@ export class LivestreamService {
       throw new BadRequestException('URL phát trực tiếp không hợp lệ.');
     }
 
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new BadRequestException('URL phát phải dùng http:// hoặc https://.');
+    // Trang live chạy HTTPS nên URL http:// sẽ bị trình duyệt chặn mixed content
+    // và màn hình đen. Chỉ nhận https://.
+    if (parsed.protocol !== 'https:') {
+      throw new BadRequestException('URL phát phải dùng https:// để không bị chặn mixed content.');
     }
 
     return trimmed;
@@ -284,7 +286,12 @@ export class LivestreamService {
 
     return {
       livestream,
-      publish: this.buildPublishInfo(protocol, stream.streamName ?? stream.streamKey),
+      // PULL: luồng đã phát sẵn từ URL của sân, không có URL ingest để BTC dán
+      // vào OBS — trả null để không sinh ra link RTMP gây hiểu nhầm.
+      publish:
+        stream.cameraMode === 'PULL'
+          ? null
+          : this.buildPublishInfo(protocol, stream.streamName ?? stream.streamKey),
       playbackUrl,
     };
   }
@@ -358,15 +365,20 @@ export class LivestreamService {
     if (!playbackUrl) return null;
     return this.deriveEndpointsFromPlaybackUrl(playbackUrl);
   }
-
   private deriveEndpointsFromPlaybackUrl(playbackUrl: string) {
-    const flv = playbackUrl.includes('.live.flv')
-      ? playbackUrl
-      : playbackUrl.replace('/hls.m3u8', '.live.flv');
-    const hls = playbackUrl.includes('/hls.m3u8')
-      ? playbackUrl
-      : playbackUrl.replace('.live.flv', '/hls.m3u8');
+    // Chỉ dịch được khi URL theo đúng dialect của media server. URL lạ (ví dụ
+    // /{stream}/index.m3u8 của MediaMTX) không suy ra được biến thể FLV.
+    const isAqvisionFlv = playbackUrl.includes('.live.flv');
+    const isAqvisionHls = playbackUrl.includes('/hls.m3u8');
+    if (!isAqvisionFlv && !isAqvisionHls) {
+      return { flv: null, hls: playbackUrl, webrtc: null, rtsp: null };
+    }
 
-    return { flv, hls, webrtc: null, rtsp: null };
+    return {
+      flv: isAqvisionFlv ? playbackUrl : playbackUrl.replace('/hls.m3u8', '.live.flv'),
+      hls: isAqvisionHls ? playbackUrl : playbackUrl.replace('.live.flv', '/hls.m3u8'),
+      webrtc: null,
+      rtsp: null,
+    };
   }
 }
