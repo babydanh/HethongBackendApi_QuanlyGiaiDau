@@ -48,6 +48,10 @@ import {
   isRegistrationRosterCompleteForPayment,
 } from '../utils/registration-payment-eligibility';
 import { isRegistrationOpenStatus } from '../utils/registration-lifecycle';
+import {
+  resolveDoublesParticipantStatus,
+  resolveNonDoublesParticipantStatus,
+} from '../utils/tournament-participant-status';
 import { validateFootballRosterSelection } from '../utils/football-roster-validation';
 import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
 import {
@@ -937,13 +941,21 @@ export class TournamentRegistrationRepository {
         isTeamSport &&
         Boolean(data.footballTeamId) &&
         footballTeamMemberIds.length < requiredFootballMainRosterCount;
-      const teamStatus = isWaitlisted
-        ? 'WAITLISTED'
-        : isDoubles
-          ? 'PENDING_PARTNER'
-          : hasUndersizedFootballRoster
-            ? 'PENDING'
-            : 'COMPLETE';
+      const teamStatus = isDoublesPairing
+        ? resolveDoublesParticipantStatus({
+            event: 'REGISTER',
+            registrationMode: regMode,
+            waitlisted: isWaitlisted,
+            isLite: isLiteRegistrationTournament(tConfig),
+            pairingMode: requestedDoublesPairingMode,
+            rosterCount: 1,
+            hasPartnerInvite: Boolean(teamInviteToken),
+          })
+        : resolveNonDoublesParticipantStatus({
+            registrationMode: regMode,
+            waitlisted: isWaitlisted,
+            incompleteRoster: hasUndersizedFootballRoster,
+          });
       const isPaid = payableEntryFeeAmount === 0;
 
       if (isTeamSport && data.footballTeamId && selectedDivision) {
@@ -2710,6 +2722,10 @@ export class TournamentRegistrationRepository {
 
       const matchType = division?.matchType ?? tournament?.matchType ?? null;
       const isDoubles = this.isDoublesMatchType(matchType);
+      const isDoublesPairing =
+        isDoubles &&
+        !nextWaitlisted.footballTeamId &&
+        !resolveFootballTeamConfig(tournament?.tournamentConfig).isTeamSport;
       const entryFeeAmount =
         nextWaitlisted.entryFeeAtRegistration !== null &&
         nextWaitlisted.entryFeeAtRegistration !== undefined
@@ -2730,12 +2746,20 @@ export class TournamentRegistrationRepository {
           : promotionConfig.registrationMode === 'APPROVAL'
             ? 'APPROVAL'
             : 'OPEN';
-      const promotedStatus =
-        isDoubles && Number(rosterCount.count) < 2
-          ? 'PENDING_PARTNER'
-          : regMode === 'APPROVAL'
-            ? 'PENDING_APPROVAL'
-            : 'COMPLETE';
+      const promotionPairingMode =
+        promotionConfig.doublesPairingMode === 'SELF' ? 'SELF' : 'ORGANIZER';
+      const promotedStatus = isDoublesPairing
+        ? resolveDoublesParticipantStatus({
+            event: 'REGISTER',
+            registrationMode: regMode,
+            waitlisted: false,
+            pairingMode: promotionPairingMode,
+            rosterCount: Number(rosterCount.count),
+            hasPartnerInvite: Boolean(nextWaitlisted.teamInviteToken),
+          })
+        : regMode === 'APPROVAL'
+          ? 'PENDING_APPROVAL'
+          : 'COMPLETE';
 
       const [promoted] = await tx
         .update(schema.tournamentParticipants)

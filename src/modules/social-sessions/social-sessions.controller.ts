@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -19,6 +20,7 @@ import {
   AddSocialParticipantsBatchDto,
   JoinSocialSessionDto,
   QuerySocialByCommunityDto,
+  QuerySocialJoinRequestsDto,
   QuerySocialSessionsDto,
   CreateSocialSessionDto,
   SendSocialMessageDto,
@@ -40,8 +42,9 @@ export class SocialSessionsController {
   create(
     @CurrentUser() user: RequestUser,
     @Body() dto: CreateSocialSessionDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.service.create(user, dto);
+    return this.service.create(user, dto, idempotencyKey);
   }
 
   @Public()
@@ -81,6 +84,49 @@ export class SocialSessionsController {
     @CurrentUser() user?: RequestUser,
   ) {
     return this.service.getById(id, user?.id, user?.roles);
+  }
+  @Post(':id/requests')
+  requestToJoin(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto?: JoinSocialSessionDto,
+  ) {
+    return this.service.requestToJoin(user, id, dto?.ticketCount);
+  }
+
+  @Get(':id/requests')
+  listJoinRequests(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: QuerySocialJoinRequestsDto,
+  ) {
+    return this.service.listJoinRequests(user, id, query);
+  }
+
+  @Post(':id/requests/:participantId/approve')
+  approveJoinRequest(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+  ) {
+    return this.service.approveJoinRequest(user, id, participantId);
+  }
+
+  @Post(':id/requests/:participantId/reject')
+  rejectJoinRequest(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+  ) {
+    return this.service.rejectJoinRequest(user, id, participantId);
+  }
+
+  @Delete(':id/requests/self')
+  withdrawJoinRequest(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.withdrawJoinRequest(user, id);
   }
 
   @Patch(':id')

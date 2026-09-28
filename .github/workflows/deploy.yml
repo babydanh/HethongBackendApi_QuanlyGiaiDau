@@ -164,5 +164,7 @@ jobs:
               exit 1
             fi
 
-            docker image prune -f
+            if ! docker image prune -f; then
+              echo \"WARNING: Docker image prune failed after smoke checks; continuing.\"
+            fi
           '"

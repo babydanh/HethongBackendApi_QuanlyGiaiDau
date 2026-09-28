@@ -264,6 +264,19 @@ export class TournamentLiteService {
         ),
       ) &&
       !(dto.genderRestriction && dto.genderRestriction !== 'MIXED');
+    const hasAdvancedSettings =
+      (dto.entryFee ?? 0) > 0 ||
+      dto.parentId !== undefined ||
+      dto.maxCombinedElo !== undefined ||
+      dto.maxTeammateGap !== undefined ||
+      dto.teamSizeOptions !== undefined ||
+      dto.minTeamSize !== undefined ||
+      dto.maxTeamSize !== undefined ||
+      dto.twoLegged !== undefined ||
+      dto.awayGoalsRule !== undefined ||
+      dto.penaltyShootout !== undefined ||
+      Boolean(dto.galleryImages?.length) ||
+      Boolean(dto.prizes?.length);
 
     const sportRules = {
       ...litePreset.sportRules,
@@ -329,16 +342,41 @@ export class TournamentLiteService {
         ? 'COMMUNITY'
         : 'PRIVATE_INVITE';
     const footballTeamSize =
-      sport === 'football' ? (dto.teamSize ?? 7) : undefined;
+      sport === 'football' ? (dto.teamSize ?? dto.minTeamSize ?? 7) : undefined;
     const footballMaxReserve =
       sport === 'football' ? (dto.maxReserve ?? 0) : undefined;
+    if (
+      sport !== 'football' &&
+      (dto.teamSize !== undefined ||
+        dto.maxReserve !== undefined ||
+        dto.footballHalvesCount !== undefined ||
+        dto.footballHalfDuration !== undefined ||
+        dto.footballAllowDraw !== undefined ||
+        dto.teamSizeOptions !== undefined ||
+        dto.minTeamSize !== undefined ||
+        dto.maxTeamSize !== undefined ||
+        dto.twoLegged !== undefined ||
+        dto.awayGoalsRule !== undefined ||
+        dto.penaltyShootout !== undefined)
+    ) {
+      throw new BadRequestException(
+        'Cấu hình bóng đá chỉ áp dụng cho môn bóng đá.',
+      );
+    }
     if (sport === 'football') {
       assertValidFootballTeamConfig(
         {
           teamSize: footballTeamSize,
-          minTeamSize: footballTeamSize,
+          minTeamSize: dto.minTeamSize ?? footballTeamSize,
+          teamSizeOptions: dto.teamSizeOptions,
           maxReserve: footballMaxReserve,
-          maxTeamSize: (footballTeamSize ?? 0) + (footballMaxReserve ?? 0),
+          maxTeamSize:
+            dto.maxTeamSize ??
+            (footballTeamSize ?? 0) + (footballMaxReserve ?? 0),
+          twoLegged: dto.twoLegged,
+          awayGoalsRule: dto.awayGoalsRule,
+          penaltyShootout: dto.penaltyShootout,
+          allowDraw: dto.footballAllowDraw,
         },
         { requireTeamSize: true },
       );
@@ -434,17 +472,39 @@ export class TournamentLiteService {
       allowPlayerReferee: true,
       // Only pure Super Lite hides advanced settings. Configured divisions or
       // restrictions belong to the standard management workspace.
-      hideAdvancedSettings: isSuperLite,
+      hideAdvancedSettings: isSuperLite && !hasAdvancedSettings,
 
       scoringMode: 'FREE',
       bracketType: finalBracketType,
       maxTeams,
       startTime: dto.startTime || undefined,
+      ...(dto.maxCombinedElo !== undefined
+        ? { maxCombinedElo: dto.maxCombinedElo }
+        : {}),
+      ...(dto.maxTeammateGap !== undefined
+        ? { maxTeammateGap: dto.maxTeammateGap }
+        : {}),
+      ...(dto.teamSizeOptions !== undefined
+        ? { teamSizeOptions: dto.teamSizeOptions }
+        : {}),
+      ...(dto.minTeamSize !== undefined
+        ? { minTeamSize: dto.minTeamSize }
+        : {}),
+      ...(dto.maxTeamSize !== undefined
+        ? { maxTeamSize: dto.maxTeamSize }
+        : {}),
+      ...(dto.twoLegged !== undefined ? { twoLegged: dto.twoLegged } : {}),
+      ...(dto.awayGoalsRule !== undefined
+        ? { awayGoalsRule: dto.awayGoalsRule }
+        : {}),
+      ...(dto.penaltyShootout !== undefined
+        ? { penaltyShootout: dto.penaltyShootout }
+        : {}),
       ...(recurringConfig ? { recurring: recurringConfig } : {}),
       ...(sport === 'football' && footballTeamSize
         ? {
             teamSize: footballTeamSize,
-            minTeamSize: footballTeamSize,
+            minTeamSize: dto.minTeamSize ?? footballTeamSize,
             maxReserve: footballMaxReserve ?? 0,
           }
         : {}),
@@ -695,14 +755,16 @@ export class TournamentLiteService {
       visibility: requestedPublic ? 'PUBLIC' : 'PRIVATE',
       ...(fallbackBannerUrl ? { bannerUrl: fallbackBannerUrl } : {}),
       ...(fallbackLogoUrl ? { logoUrl: fallbackLogoUrl } : {}),
+      ...(dto.galleryImages ? { galleryImages: dto.galleryImages } : {}),
       ...(dto.communityId ? { communityId: dto.communityId } : {}),
       ...(dto.venueId ? { venueId: dto.venueId } : {}),
+      ...(dto.parentId ? { parentId: dto.parentId } : {}),
       categoryId: category.id,
       matchType,
       genderRestriction: dto.genderRestriction ?? null,
       description: dto.description || '',
       maxParticipants: maxTeams,
-      entryFee: 0,
+      entryFee: dto.entryFee ?? 0,
       // Lite club tournaments are ranking tournaments by default;
       // creators can explicitly opt out with isRanked=false.
       isRanked: dto.isRanked ?? true,
@@ -716,8 +778,15 @@ export class TournamentLiteService {
       ...(dto.prizeDescription
         ? { prizeDescription: dto.prizeDescription }
         : {}),
+      ...(dto.prizes ? { prizes: dto.prizes } : {}),
       ...(dto.contactInfo ? { contactInfo: dto.contactInfo } : {}),
     });
+
+    await this.tournamentLifecycleService.assertLiteCreateAllowed(
+      userId,
+      fullDto,
+      systemRoles,
+    );
 
     // 9. Gọi repository.create() — dùng chung logic insert
     const record = await this.tournamentsRepository.create(userId, fullDto);

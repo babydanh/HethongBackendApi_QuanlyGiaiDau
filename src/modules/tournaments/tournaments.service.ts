@@ -1201,6 +1201,7 @@ export class TournamentsService {
     isEmailVerified?: boolean,
     isMock?: boolean,
   ) {
+    await this.assertEntryFeeAllowed(dto.entryFee);
     return this.tournamentLiteService.createLite(
       userId,
       dto,

@@ -12,6 +12,8 @@ import {
   Max,
   IsIn,
   ValidateNested,
+  IsInt,
+  IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -199,6 +201,78 @@ export class CreateLiteTournamentDto {
   @ValidateNested({ each: true })
   @Type(() => CreateLiteDivisionConfigDto)
   divisions?: CreateLiteDivisionConfigDto[];
+
+  @ApiPropertyOptional({ example: 20000, description: 'Phí tham gia PUBLIC bằng VND; giải CLUB luôn miễn phí' })
+  @IsNumber()
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  entryFee?: number;
+
+  @ApiPropertyOptional({ example: 'uuid-parent-tournament', description: 'Giải đấu cha (series)' })
+  @IsUUID()
+  @IsOptional()
+  parentId?: string;
+
+  @ApiPropertyOptional({ example: 3000, description: 'Tổng ELO tối đa của một đội' })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  maxCombinedElo?: number;
+
+  @ApiPropertyOptional({ example: 500, description: 'Chênh lệch ELO tối đa giữa đồng đội' })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  maxTeammateGap?: number;
+
+  @ApiPropertyOptional({ example: [5, 7, 11], enum: [5, 7, 11], isArray: true })
+  @IsArray()
+  @IsOptional()
+  @IsNumber({}, { each: true })
+  @IsIn([5, 7, 11], { each: true })
+  teamSizeOptions?: Array<5 | 7 | 11>;
+
+  @ApiPropertyOptional({ example: 7, enum: [5, 7, 11] })
+  @IsNumber()
+  @IsOptional()
+  @IsIn([5, 7, 11])
+  minTeamSize?: 5 | 7 | 11;
+
+  @ApiPropertyOptional({ example: 12, description: 'Kích thước đội tối đa gồm dự bị' })
+  @IsNumber()
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(31)
+  maxTeamSize?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Thi đấu hai lượt trong vòng loại trực tiếp' })
+  @IsBoolean()
+  @IsOptional()
+  twoLegged?: boolean;
+
+  @ApiPropertyOptional({ example: false, description: 'Áp dụng luật bàn thắng sân khách' })
+  @IsBoolean()
+  @IsOptional()
+  awayGoalsRule?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Phân định bằng luân lưu khi cần' })
+  @IsBoolean()
+  @IsOptional()
+  penaltyShootout?: boolean;
+
+  @ApiPropertyOptional({ example: ['https://cdn.example/image.jpg'], description: 'Ảnh gallery PUBLIC đã tải lên' })
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  galleryImages?: string[];
+
+  @ApiPropertyOptional({ example: [{ name: 'Giải nhất', value: 1000000 }] })
+  @IsArray()
+  @IsOptional()
+  @IsObject({ each: true })
+  prizes?: Record<string, unknown>[];
 
   @ApiPropertyOptional({ example: 7, enum: [5, 7, 11] })
   @IsNumber()

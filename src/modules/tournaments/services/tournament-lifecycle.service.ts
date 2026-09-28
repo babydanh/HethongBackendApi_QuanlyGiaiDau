@@ -232,6 +232,66 @@ export class TournamentLifecycleService {
     target.setHours(hours, minutes, 0, 0);
     return target;
   }
+  async assertLiteCreateAllowed(
+    userId: string,
+    createTournamentDto: CreateTournamentDto,
+    systemRoles: string[] = [],
+  ): Promise<void> {
+    await this.tournamentFeePolicyService.assertEntryFeeAllowed(
+      createTournamentDto.entryFee,
+    );
+
+    if (
+      createTournamentDto.tournamentType === 'CLUB' &&
+      (createTournamentDto.entryFee ?? 0) > 0
+    ) {
+      throw new BadRequestException('Giải đấu của câu lạc bộ phải miễn phí');
+    }
+    if (
+      createTournamentDto.tournamentType === 'CLUB' &&
+      createTournamentDto.galleryImages?.length
+    ) {
+      throw new BadRequestException(
+        'Giải đấu của câu lạc bộ không được có ảnh thư viện khi tạo',
+      );
+    }
+
+    if (!createTournamentDto.parentId) return;
+    // Parent series do not persist a community/category association, so only
+    // ownership and the existing sibling-format rule can be enforced here.
+
+    const parent = await this.tournamentsRepository.findParentById(
+      createTournamentDto.parentId,
+    );
+    if (!parent) {
+      throw new NotFoundException('Giải đấu cha không tồn tại');
+    }
+    if (
+      !(await this.tournamentAccessService.isManager(
+        parent,
+        userId,
+        systemRoles,
+      ))
+    ) {
+      throw new ForbiddenException(
+        'Bạn không có quyền tạo giải đấu thuộc chuỗi này.',
+      );
+    }
+
+    const siblings = await this.tournamentsRepository.findByParentId(
+      createTournamentDto.parentId,
+    );
+    if (
+      siblings.some(
+        (sibling) => sibling.matchType === createTournamentDto.matchType,
+      )
+    ) {
+      throw new BadRequestException(
+        'Hình thức thi đấu này đã tồn tại trong giải đấu',
+      );
+    }
+  }
+
   async create(
     userId: string,
     createTournamentDto: CreateTournamentDto,
@@ -550,6 +610,19 @@ export class TournamentLifecycleService {
     if (!canUpdate) {
       throw new ForbiddenException('Bạn không có quyền cập nhật giải đấu này');
     }
+    if (
+      incomingConfigPatch?.registrationMode !== undefined &&
+      !isDeepStrictEqual(
+        incomingConfigPatch.registrationMode,
+        existingConfig.registrationMode,
+      ) &&
+      (await this.tournamentsRepository.countActiveParticipants(id)) > 0
+    ) {
+      throw new BadRequestException(
+        'Không thể đổi chế độ xét duyệt sau khi đã có người đăng ký.',
+      );
+    }
+
 
     const isAdmin = systemRoles.includes('ADMIN');
     if (updateTournamentDto.status !== undefined && !isAdmin) {

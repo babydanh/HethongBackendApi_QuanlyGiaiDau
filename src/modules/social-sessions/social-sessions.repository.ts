@@ -1,5 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  exists,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -9,8 +23,40 @@ export type SocialParticipantRow =
   typeof schema.socialSessionParticipants.$inferSelect;
 
 export type JoinOutcome =
-  | { ok: true; participant: SocialParticipantRow; currentSlots: number; status: string }
-  | { ok: false; code: 'SESSION_NOT_FOUND' | 'SESSION_CLOSED' | 'SESSION_FULL' | 'ALREADY_JOINED' };
+  | {
+      ok: true;
+      participant: SocialParticipantRow;
+      currentSlots: number;
+      status: string;
+    }
+  | {
+      ok: false;
+      code:
+        | 'SESSION_NOT_FOUND'
+        | 'SESSION_CLOSED'
+        | 'SESSION_FULL'
+        | 'ALREADY_JOINED'
+        | 'REQUEST_NOT_PENDING';
+    };
+export type CreateWithHostOutcome =
+  | { ok: true; session: SocialSessionRow; replayed: boolean }
+  | { ok: false; code: 'CREATE_IDEMPOTENCY_KEY_REUSED' };
+
+export type JoinRequestOutcome =
+  | {
+      ok: true;
+      participant: SocialParticipantRow;
+      replayed: boolean;
+    }
+  | {
+      ok: false;
+      code:
+        | 'SESSION_NOT_FOUND'
+        | 'SESSION_CLOSED'
+        | 'SESSION_FULL'
+        | 'ALREADY_JOINED'
+        | 'REQUEST_NOT_PENDING';
+    };
 
 /** Bán kính mặc định khi client gửi lat/lng mà không kèm radiusKm (km). */
 export const DEFAULT_NEARBY_RADIUS_KM = 10;
@@ -46,7 +92,12 @@ export class SocialSessionsRepository {
     const [row] = await tx
       .select({ id: schema.communities.id, status: schema.communities.status })
       .from(schema.communities)
-      .where(and(eq(schema.communities.id, id), isNull(schema.communities.deletedAt)))
+      .where(
+        and(
+          eq(schema.communities.id, id),
+          isNull(schema.communities.deletedAt),
+        ),
+      )
       .limit(1);
     return row ?? null;
   }
@@ -59,18 +110,88 @@ export class SocialSessionsRepository {
       .limit(1);
     return row ?? null;
   }
-
-  async findCategoryBySlug(slug: string, tx: AppDbOrTx = this.db) {
+  async findVenueById(id: string, tx: AppDbOrTx = this.db) {
     const [row] = await tx
-      .select({ id: schema.categories.id, slug: schema.categories.slug })
-      .from(schema.categories)
-      .where(eq(schema.categories.slug, slug))
+      .select({
+        id: schema.tournamentVenues.id,
+        name: schema.tournamentVenues.name,
+        locationAddress: schema.tournamentVenues.locationAddress,
+      })
+      .from(schema.tournamentVenues)
+      .where(
+        and(
+          eq(schema.tournamentVenues.id, id),
+          isNull(schema.tournamentVenues.deletedAt),
+        ),
+      )
       .limit(1);
     return row ?? null;
   }
 
+  async findAvailableCourt(
+    venueId: string,
+    courtId: string,
+    tx: AppDbOrTx = this.db,
+  ) {
+    const [row] = await tx
+      .select({
+        id: schema.venueCourts.id,
+        venueId: schema.venueCourts.venueId,
+        courtName: schema.venueCourts.courtName,
+        status: schema.venueCourts.status,
+      })
+      .from(schema.venueCourts)
+      .where(
+        and(
+          eq(schema.venueCourts.id, courtId),
+          eq(schema.venueCourts.venueId, venueId),
+          eq(schema.venueCourts.status, 'AVAILABLE'),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findSessionByIdempotencyKey(
+    hostUserId: string,
+    key: string,
+    tx: AppDbOrTx = this.db,
+  ) {
+    const [row] = await tx
+      .select()
+      .from(schema.socialSessions)
+      .where(
+        and(
+          eq(schema.socialSessions.hostUserId, hostUserId),
+          eq(schema.socialSessions.creationIdempotencyKey, key),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findCategoryBySlug(slug: string, tx: AppDbOrTx = this.db) {
+    const [row] = await tx
+      .select({
+        id: schema.categories.id,
+        slug: schema.categories.slug,
+        categoryConfig: schema.categories.categoryConfig,
+      })
+      .from(schema.categories)
+      .where(eq(schema.categories.slug, slug))
+      .limit(1);
+    if (!row) return null;
+    const categoryConfig = row.categoryConfig as Record<string, unknown> | null;
+    if (categoryConfig?.isActive === false) return null;
+    return { id: row.id, slug: row.slug };
+  }
+
   /** Membership của user trong Club (null nếu không phải member). */
-  async findMember(communityId: string, userId: string, tx: AppDbOrTx = this.db) {
+  async findMember(
+    communityId: string,
+    userId: string,
+    tx: AppDbOrTx = this.db,
+  ) {
     const [row] = await tx
       .select({
         role: schema.communityMembers.role,
@@ -157,28 +278,37 @@ export class SocialSessionsRepository {
         sql`ST_DWithin(${schema.socialSessions.venueGeolocation}, ${userRefPoint(filters.lat!, filters.lng!)}, ${radiusMeters})`,
       );
     }
-    if (!filters.includePrivate) conditions.push(
-      filters.viewerId
-        ? or(
-            eq(schema.socialSessions.visibility, 'PUBLIC'),
-            eq(schema.socialSessions.hostUserId, filters.viewerId),
-            exists(
-              tx.select({ id: schema.communityMembers.id })
-                .from(schema.communityMembers)
-                .where(and(
-                  eq(schema.communityMembers.communityId, schema.socialSessions.communityId),
-                  eq(schema.communityMembers.userId, filters.viewerId),
-                  eq(schema.communityMembers.status, 'JOINED'),
-                )),
-            ),
-          )!
-        : eq(schema.socialSessions.visibility, 'PUBLIC'),
-    );
+    if (!filters.includePrivate)
+      conditions.push(
+        filters.viewerId
+          ? or(
+              eq(schema.socialSessions.visibility, 'PUBLIC'),
+              eq(schema.socialSessions.hostUserId, filters.viewerId),
+              exists(
+                tx
+                  .select({ id: schema.communityMembers.id })
+                  .from(schema.communityMembers)
+                  .where(
+                    and(
+                      eq(
+                        schema.communityMembers.communityId,
+                        schema.socialSessions.communityId,
+                      ),
+                      eq(schema.communityMembers.userId, filters.viewerId),
+                      eq(schema.communityMembers.status, 'JOINED'),
+                    ),
+                  ),
+              ),
+            )!
+          : eq(schema.socialSessions.visibility, 'PUBLIC'),
+      );
     if (filters.categoryId) {
       conditions.push(eq(schema.socialSessions.categoryId, filters.categoryId));
     }
     if (filters.communityId) {
-      conditions.push(eq(schema.socialSessions.communityId, filters.communityId));
+      conditions.push(
+        eq(schema.socialSessions.communityId, filters.communityId),
+      );
     }
     const keyword = filters.search?.trim();
     if (keyword) {
@@ -225,16 +355,17 @@ export class SocialSessionsRepository {
         .orderBy(...orderClauses)
         .limit(filters.limit)
         .offset(offset),
-      tx
-        .select({ total: count() })
-        .from(schema.socialSessions)
-        .where(where),
+      tx.select({ total: count() }).from(schema.socialSessions).where(where),
     ]);
     return { items, total: Number(totalRows[0]?.total ?? 0) };
   }
 
   /** true nếu user đang JOINED trong session (chưa tính host — caller tự check). */
-  async isParticipant(sessionId: string, userId: string, tx: AppDbOrTx = this.db) {
+  async isParticipant(
+    sessionId: string,
+    userId: string,
+    tx: AppDbOrTx = this.db,
+  ) {
     const [row] = await tx
       .select({ id: schema.socialSessionParticipants.id })
       .from(schema.socialSessionParticipants)
@@ -247,6 +378,72 @@ export class SocialSessionsRepository {
       )
       .limit(1);
     return !!row;
+  }
+  async findParticipant(
+    sessionId: string,
+    userId: string,
+    tx: AppDbOrTx = this.db,
+  ) {
+    const [row] = await tx
+      .select()
+      .from(schema.socialSessionParticipants)
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.userId, userId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async listJoinRequests(sessionId: string, page: number, limit: number) {
+    const where = and(
+      eq(schema.socialSessionParticipants.sessionId, sessionId),
+      eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+    );
+    const offset = (page - 1) * limit;
+    const [items, totalRows] = await Promise.all([
+      this.db
+        .select({
+          participant: schema.socialSessionParticipants,
+          fullName: schema.profiles.fullName,
+          avatarUrl: schema.profiles.avatarUrl,
+        })
+        .from(schema.socialSessionParticipants)
+        .leftJoin(
+          schema.profiles,
+          eq(schema.profiles.userId, schema.socialSessionParticipants.userId),
+        )
+        .where(where)
+        .orderBy(asc(schema.socialSessionParticipants.requestedAt))
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ total: count() })
+        .from(schema.socialSessionParticipants)
+        .where(where),
+    ]);
+    return { items, total: Number(totalRows[0]?.total ?? 0) };
+  }
+
+  async setJoinRequestStatus(
+    sessionId: string,
+    participantId: string,
+    status: 'REJECTED' | 'CANCELLED',
+  ) {
+    const [updated] = await this.db
+      .update(schema.socialSessionParticipants)
+      .set({ status })
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.id, participantId),
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+        ),
+      )
+      .returning();
+    return updated ?? null;
   }
 
   async listParticipants(sessionId: string, tx: AppDbOrTx = this.db) {
@@ -261,7 +458,12 @@ export class SocialSessionsRepository {
         schema.profiles,
         eq(schema.profiles.userId, schema.socialSessionParticipants.userId),
       )
-      .where(eq(schema.socialSessionParticipants.sessionId, sessionId))
+      .where(
+        and(
+          eq(schema.socialSessionParticipants.sessionId, sessionId),
+          eq(schema.socialSessionParticipants.status, 'JOINED'),
+        ),
+      )
       .orderBy(asc(schema.socialSessionParticipants.joinedAt));
   }
 
@@ -269,7 +471,7 @@ export class SocialSessionsRepository {
     values: typeof schema.socialSessions.$inferInsert,
     hostUserId: string,
     tx: AppDbOrTx = this.db,
-  ) {
+  ): Promise<CreateWithHostOutcome> {
     // Suy venueGeolocation từ lat/lng (pattern venues.repository) để query geo.
     const geoValue =
       values.latitude != null && values.longitude != null
@@ -278,27 +480,178 @@ export class SocialSessionsRepository {
     const insertValues = (
       geoValue ? { ...values, venueGeolocation: geoValue } : values
     ) as typeof schema.socialSessions.$inferInsert;
-    const runner = tx === this.db ? this.db.transaction(async (t) => run(t)) : run(tx);
-    return runner;
-
-    async function run(t: AppDbOrTx) {
-      const [session] = await t
+    const run = async (transaction: AppDbOrTx) => {
+      const [session] = await transaction
         .insert(schema.socialSessions)
         .values(insertValues)
         .returning();
-      const [host] = await t
+      await transaction.insert(schema.socialSessionParticipants).values({
+        sessionId: session.id,
+        userId: hostUserId,
+        role: 'HOST',
+        status: 'JOINED',
+        paymentStatus: 'UNPAID',
+        ticketCount: 1,
+      });
+      return { ok: true as const, session, replayed: false };
+    };
+
+    try {
+      return tx === this.db ? await this.db.transaction(run) : await run(tx);
+    } catch (error) {
+      const key = values.creationIdempotencyKey;
+      if (!key || tx !== this.db) throw error;
+
+      const existing = await this.findSessionByIdempotencyKey(hostUserId, key);
+      if (!existing) throw error;
+      if (existing.creationFingerprint !== values.creationFingerprint) {
+        return { ok: false, code: 'CREATE_IDEMPOTENCY_KEY_REUSED' };
+      }
+      return { ok: true, session: existing, replayed: true };
+    }
+  }
+  async requestToJoin(
+    sessionId: string,
+    userId: string,
+    ticketCount: number,
+  ): Promise<JoinRequestOutcome> {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        SELECT id, current_slots, max_slots, status
+        FROM social_sessions
+        WHERE id = ${sessionId} AND deleted_at IS NULL
+        FOR UPDATE
+      `)) as unknown as Array<{
+        id: string;
+        current_slots: number;
+        max_slots: number;
+        status: string;
+      }>;
+      const session = locked[0];
+      if (!session) return { ok: false, code: 'SESSION_NOT_FOUND' } as const;
+      if (session.status !== 'OPEN' && session.status !== 'FULL') {
+        return { ok: false, code: 'SESSION_CLOSED' } as const;
+      }
+
+      const existing = await this.findParticipant(sessionId, userId, tx);
+      if (existing?.status === 'JOINED') {
+        return { ok: false, code: 'ALREADY_JOINED' } as const;
+      }
+      if (
+        existing?.status === 'REQUESTED' &&
+        existing.ticketCount === ticketCount
+      ) {
+        return { ok: true, participant: existing, replayed: true } as const;
+      }
+      if (session.current_slots + ticketCount > session.max_slots) {
+        return { ok: false, code: 'SESSION_FULL' } as const;
+      }
+
+      const requestedAt = new Date();
+      if (existing?.status === 'REQUESTED') {
+        const [participant] = await tx
+          .update(schema.socialSessionParticipants)
+          .set({ ticketCount, requestedAt })
+          .where(
+            and(
+              eq(schema.socialSessionParticipants.id, existing.id),
+              eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+            ),
+          )
+          .returning();
+        if (!participant)
+          return { ok: false, code: 'REQUEST_NOT_PENDING' } as const;
+        return { ok: true, participant, replayed: false } as const;
+      }
+
+      if (existing) {
+        const [participant] = await tx
+          .update(schema.socialSessionParticipants)
+          .set({
+            status: 'REQUESTED',
+            role: 'PLAYER',
+            ticketCount,
+            requestedAt,
+          })
+          .where(eq(schema.socialSessionParticipants.id, existing.id))
+          .returning();
+        return { ok: true, participant, replayed: false } as const;
+      }
+
+      const [participant] = await tx
         .insert(schema.socialSessionParticipants)
         .values({
-          sessionId: session.id,
-          userId: hostUserId,
-          role: 'HOST',
-          status: 'JOINED',
+          sessionId,
+          userId,
+          role: 'PLAYER',
+          status: 'REQUESTED',
           paymentStatus: 'UNPAID',
-          ticketCount: 1,
+          ticketCount,
+          requestedAt,
         })
         .returning();
-      return { session, host };
-    }
+      return { ok: true, participant, replayed: false } as const;
+    });
+  }
+
+  async approveJoinRequest(
+    sessionId: string,
+    participantId: string,
+  ): Promise<JoinOutcome> {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        SELECT id, current_slots, max_slots, status
+        FROM social_sessions
+        WHERE id = ${sessionId} AND deleted_at IS NULL
+        FOR UPDATE
+      `)) as unknown as Array<{
+        id: string;
+        current_slots: number;
+        max_slots: number;
+        status: string;
+      }>;
+      const session = locked[0];
+      if (!session) return { ok: false, code: 'SESSION_NOT_FOUND' } as const;
+      if (session.status !== 'OPEN' && session.status !== 'FULL') {
+        return { ok: false, code: 'SESSION_CLOSED' } as const;
+      }
+
+      const [request] = await tx
+        .select()
+        .from(schema.socialSessionParticipants)
+        .where(
+          and(
+            eq(schema.socialSessionParticipants.id, participantId),
+            eq(schema.socialSessionParticipants.sessionId, sessionId),
+            eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+          ),
+        )
+        .limit(1);
+      if (!request) return { ok: false, code: 'REQUEST_NOT_PENDING' } as const;
+      if (session.current_slots + request.ticketCount > session.max_slots) {
+        return { ok: false, code: 'SESSION_FULL' } as const;
+      }
+
+      const [participant] = await tx
+        .update(schema.socialSessionParticipants)
+        .set({ status: 'JOINED', role: 'PLAYER' })
+        .where(
+          and(
+            eq(schema.socialSessionParticipants.id, participantId),
+            eq(schema.socialSessionParticipants.status, 'REQUESTED'),
+          ),
+        )
+        .returning();
+      if (!participant)
+        return { ok: false, code: 'REQUEST_NOT_PENDING' } as const;
+      const currentSlots = session.current_slots + request.ticketCount;
+      const status = currentSlots >= session.max_slots ? 'FULL' : 'OPEN';
+      await tx
+        .update(schema.socialSessions)
+        .set({ currentSlots, status, updatedAt: new Date() })
+        .where(eq(schema.socialSessions.id, sessionId));
+      return { ok: true, participant, currentSlots, status };
+    });
   }
 
   /**
@@ -456,7 +809,10 @@ export class SocialSessionsRepository {
         currentSlots: number;
         status: string;
       }
-    | { ok: false; code: 'SESSION_NOT_FOUND' | 'SESSION_CLOSED' | 'SESSION_FULL' }
+    | {
+        ok: false;
+        code: 'SESSION_NOT_FOUND' | 'SESSION_CLOSED' | 'SESSION_FULL';
+      }
   > {
     const uniqueIds = [...new Set(userIds.filter(Boolean))];
     if (uniqueIds.length === 0) {
@@ -495,7 +851,9 @@ export class SocialSessionsRepository {
         );
 
       const joinedSet = new Set(
-        existingRows.filter((r) => r.status === 'JOINED').map((r) => r.userId as string),
+        existingRows
+          .filter((r) => r.status === 'JOINED')
+          .map((r) => r.userId as string),
       );
       const reactivateMap = new Map(
         existingRows
@@ -533,7 +891,13 @@ export class SocialSessionsRepository {
         } else {
           const [created] = await tx
             .insert(schema.socialSessionParticipants)
-            .values({ sessionId, userId, role: 'PLAYER', status: 'JOINED', ticketCount })
+            .values({
+              sessionId,
+              userId,
+              role: 'PLAYER',
+              status: 'JOINED',
+              ticketCount,
+            })
             .onConflictDoNothing({
               target: [
                 schema.socialSessionParticipants.sessionId,
@@ -592,7 +956,11 @@ export class SocialSessionsRepository {
           ),
         )
         .limit(1);
-      if (!existing || existing.status !== 'JOINED' || existing.role === 'HOST') {
+      if (
+        !existing ||
+        existing.status !== 'JOINED' ||
+        existing.role === 'HOST'
+      ) {
         return null;
       }
 
@@ -602,7 +970,10 @@ export class SocialSessionsRepository {
         .where(eq(schema.socialSessionParticipants.id, existing.id))
         .returning();
 
-      const currentSlots = Math.max(1, locked[0].current_slots - existing.ticketCount);
+      const currentSlots = Math.max(
+        1,
+        locked[0].current_slots - existing.ticketCount,
+      );
       await tx
         .update(schema.socialSessions)
         .set({
@@ -787,10 +1158,7 @@ export class SocialSessionsRepository {
         .orderBy(...orderClauses)
         .limit(filters.limit)
         .offset(offset),
-      tx
-        .select({ total: count() })
-        .from(schema.socialSessions)
-        .where(where),
+      tx.select({ total: count() }).from(schema.socialSessions).where(where),
     ]);
     return { items, total: Number(totalRows[0]?.total ?? 0) };
   }

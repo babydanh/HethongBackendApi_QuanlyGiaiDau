@@ -1016,7 +1016,11 @@ export class TournamentParticipantRepository {
       return { count: 1 };
     });
   }
-  async updateParticipantStatus(participantId: string, status: string) {
+  async updateParticipantStatus(
+    participantId: string,
+    status: string,
+    expectedCurrentStatus?: string,
+  ) {
     return this.db.transaction(async (tx) => {
       const [existing] = await tx
         .select()
@@ -1040,8 +1044,21 @@ export class TournamentParticipantRepository {
       const [updated] = await tx
         .update(schema.tournamentParticipants)
         .set({ teamStatus: status })
-        .where(eq(schema.tournamentParticipants.id, participantId))
+        .where(
+          expectedCurrentStatus
+            ? and(
+                eq(schema.tournamentParticipants.id, participantId),
+                eq(
+                  schema.tournamentParticipants.teamStatus,
+                  expectedCurrentStatus,
+                ),
+              )
+            : eq(schema.tournamentParticipants.id, participantId),
+        )
         .returning();
+      if (!updated) {
+        return null;
+      }
 
       if (status === 'REJECTED') {
         await this.tournamentPaymentRepository.invalidatePendingParticipantPayments(
@@ -1052,7 +1069,7 @@ export class TournamentParticipantRepository {
         );
       }
 
-      return updated ?? null;
+      return updated;
     });
   }
   /**

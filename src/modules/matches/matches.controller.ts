@@ -60,6 +60,19 @@ export class MatchesController {
   ) {
     return this.matchesService.findOne(id, user);
   }
+  @Header('Cache-Control', 'private, no-store')
+  @Get(':id/score-access')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Kiểm tra quyền nhập điểm của người dùng hiện tại' })
+  async getScoreAccess(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.matchesService.getScoreAccess(id, user);
+  }
+
 
   @Public()
   @SkipThrottle()

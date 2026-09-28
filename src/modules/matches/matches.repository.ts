@@ -373,6 +373,17 @@ export class MatchesRepository {
           )
           or exists (
             select 1
+            from ${schema.tournamentRosters}
+            inner join ${schema.profiles}
+              on ${schema.profiles.userId} = ${schema.tournamentRosters.userId}
+            where (
+              ${schema.tournamentRosters.participantId} = ${schema.matches.participant1Id}
+              or ${schema.tournamentRosters.participantId} = ${schema.matches.participant2Id}
+            )
+            and ${schema.profiles.fullName} ilike ${searchPattern}
+          )
+          or exists (
+            select 1
             from ${schema.tournaments}
             where ${schema.tournaments.id} = ${schema.matches.tournamentId}
             and ${schema.tournaments.name} ilike ${searchPattern}
@@ -742,6 +753,7 @@ export class MatchesRepository {
         ? await this.db
             .select({
               tournamentId: schema.tournaments.id,
+              tournamentName: schema.tournaments.name,
               venueName: schema.tournamentVenues.name,
               venueAddress: schema.tournamentVenues.locationAddress,
             })
@@ -760,7 +772,11 @@ export class MatchesRepository {
     const tournamentVenueMap = new Map(
       tournamentVenues.map((venue) => [
         venue.tournamentId,
-        { name: venue.venueName, address: venue.venueAddress },
+        {
+          name: venue.venueName,
+          address: venue.venueAddress,
+          tournamentName: venue.tournamentName,
+        },
       ]),
     );
 
@@ -1042,7 +1058,10 @@ export class MatchesRepository {
             }
           : null,
         tournament: {
-          name: groupStage?.tournamentName || null,
+          name:
+            groupStage?.tournamentName ||
+            tournamentVenueMap.get(match.tournamentId)?.tournamentName ||
+            null,
           venueName:
             groupStage?.venueName ||
             tournamentVenueMap.get(match.tournamentId)?.name ||

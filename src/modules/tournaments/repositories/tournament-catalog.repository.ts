@@ -29,6 +29,7 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
+import { isDeepStrictEqual } from 'node:util';
 import { AuditService, Transaction } from '../../audit/audit.service';
 import { CreateTournamentDto } from '../dto/create-tournament.dto';
 import { UpdateTournamentDto } from '../dto/update-tournament.dto';
@@ -861,6 +862,41 @@ export class TournamentCatalogRepository {
 
       if (!oldRecord) {
         throw new NotFoundException('Giải đấu không tồn tại');
+      }
+      const incomingConfig = data.tournamentConfig as
+        | Record<string, unknown>
+        | undefined;
+      const currentConfig = (oldRecord.tournamentConfig || {}) as Record<
+        string,
+        unknown
+      >;
+      if (
+        incomingConfig?.registrationMode !== undefined &&
+        !isDeepStrictEqual(
+          incomingConfig.registrationMode,
+          currentConfig.registrationMode,
+        )
+      ) {
+        const [activeParticipants] = await tx
+          .select({ count: count() })
+          .from(schema.tournamentParticipants)
+          .where(
+            and(
+              eq(schema.tournamentParticipants.tournamentId, id),
+              notInArray(schema.tournamentParticipants.teamStatus, [
+                'REJECTED',
+                'WITHDRAWN',
+                'KICKED',
+                'EXPIRED',
+                'CANCELLED',
+              ]),
+            ),
+          );
+        if (Number(activeParticipants?.count ?? 0) > 0) {
+          throw new BadRequestException(
+            'Không thể đổi chế độ xét duyệt sau khi đã có người đăng ký.',
+          );
+        }
       }
 
       await this.tournamentPaymentRepository.assertEntryFeeChangeAllowed(
