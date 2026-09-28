@@ -753,6 +753,7 @@ export class MatchesRepository {
         ? await this.db
             .select({
               tournamentId: schema.tournaments.id,
+              tournamentName: schema.tournaments.name,
               venueName: schema.tournamentVenues.name,
               venueAddress: schema.tournamentVenues.locationAddress,
             })
@@ -771,7 +772,11 @@ export class MatchesRepository {
     const tournamentVenueMap = new Map(
       tournamentVenues.map((venue) => [
         venue.tournamentId,
-        { name: venue.venueName, address: venue.venueAddress },
+        {
+          name: venue.venueName,
+          address: venue.venueAddress,
+          tournamentName: venue.tournamentName,
+        },
       ]),
     );
 
@@ -1053,7 +1058,10 @@ export class MatchesRepository {
             }
           : null,
         tournament: {
-          name: groupStage?.tournamentName || null,
+          name:
+            groupStage?.tournamentName ||
+            tournamentVenueMap.get(match.tournamentId)?.tournamentName ||
+            null,
           venueName:
             groupStage?.venueName ||
             tournamentVenueMap.get(match.tournamentId)?.name ||
