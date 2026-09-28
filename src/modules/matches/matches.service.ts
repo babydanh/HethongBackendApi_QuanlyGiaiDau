@@ -165,6 +165,50 @@ export class MatchesService {
       user.sub,
     );
   }
+  private async getTournamentMatchScoreAccess(
+    match: NonNullable<
+      Awaited<ReturnType<MatchesRepository['findById']>>
+    >,
+    user: JwtPayload,
+  ) {
+    const tournamentConfig = match.tournament?.tournamentConfig as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    const isLiteTournament =
+      tournamentConfig?.isLite === true ||
+      (String(tournamentConfig?.mode || '').toUpperCase() === 'LITE' &&
+        tournamentConfig?.hideAdvancedSettings === true);
+    const isReferee = match.refereeId === user.sub;
+    const isTournamentManager = await this.isTournamentManager(match, user);
+    const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
+      match.tournamentId,
+      user.sub,
+    );
+    const canAccessSuperLiteMatch = isLiteTournament
+      ? await this.matchesRepository.canAccessLiveMatch(match.id, user.sub, [
+          ...(user.roles ?? []),
+          ...(user.role ? [user.role] : []),
+        ])
+      : false;
+    // Keep the existing Super Lite score policy identical for both reads
+    // and writes. The mutation still validates and authorizes independently.
+    const canScoreSuperLite =
+      isLiteTournament &&
+      (canAccessSuperLiteMatch ||
+        isTournamentManager ||
+        isReferee ||
+        acceptedReferee);
+
+    return {
+      isLiteTournament,
+      canScore:
+        isTournamentManager ||
+        isReferee ||
+        acceptedReferee ||
+        canScoreSuperLite,
+    };
+  }
 
   private resolveOperationalWinner(
     match: Awaited<ReturnType<MatchesRepository['findById']>>,
@@ -1283,6 +1327,17 @@ export class MatchesService {
     return match;
   }
 
+  async getScoreAccess(id: string, user: JwtPayload) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const { canScore } = await this.getTournamentMatchScoreAccess(
+      existing,
+      user,
+    );
+    return { canScore };
+  }
+
   async updateScore(
     id: string,
     user: JwtPayload,
@@ -1326,41 +1381,9 @@ export class MatchesService {
       );
     }
 
-    const tournamentConfig = existing.tournament?.tournamentConfig as
-      | Record<string, unknown>
-      | null
-      | undefined;
-    const isLiteTournament =
-      tournamentConfig?.isLite === true ||
-      (String(tournamentConfig?.mode || '').toUpperCase() === 'LITE' &&
-        tournamentConfig?.hideAdvancedSettings === true);
-    const isReferee = existing.refereeId === user.sub;
-    const isTournamentManager = await this.isTournamentManager(existing, user);
-    const acceptedReferee = await this.matchesRepository.isRefereeAccepted(
-      existing.tournamentId,
-      user.sub,
-    );
-    const canAccessSuperLiteMatch = isLiteTournament
-      ? await this.matchesRepository.canAccessLiveMatch(id, user.sub, [
-          ...(user.roles ?? []),
-          ...(user.role ? [user.role] : []),
-        ])
-      : false;
-    // Super Lite deliberately exposes the shared score board to any
-    // authenticated user who can access the match. Management, bracket and
-    // scheduling permissions remain protected by the checks above/below.
-    const canScoreSuperLite =
-      isLiteTournament &&
-      (canAccessSuperLiteMatch ||
-        isTournamentManager ||
-        isReferee ||
-        acceptedReferee);
-    if (
-      !isTournamentManager &&
-      !isReferee &&
-      !acceptedReferee &&
-      !canScoreSuperLite
-    ) {
+    const { canScore, isLiteTournament } =
+      await this.getTournamentMatchScoreAccess(existing, user);
+    if (!canScore) {
       throw new ForbiddenException(
         'Bạn không có quyền nhập điểm cho trận đấu này',
       );

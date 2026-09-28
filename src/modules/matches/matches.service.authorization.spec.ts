@@ -318,4 +318,86 @@ describe('MatchesService object-level football authority', () => {
       'ref-1',
     );
   });
+  describe('getScoreAccess', () => {
+    it('returns true for a tournament manager', async () => {
+      repository.isTournamentManager.mockResolvedValue(true);
+
+      await expect(
+        service.getScoreAccess('match-1', {
+          sub: 'organizer-1',
+          roles: ['ORGANIZER'],
+        } as never),
+      ).resolves.toEqual({ canScore: true });
+    });
+
+    it('returns true for the referee assigned to this match', async () => {
+      repository.findById.mockResolvedValue({
+        ...baseMatch,
+        refereeId: 'ref-1',
+      });
+
+      await expect(
+        service.getScoreAccess('match-1', {
+          sub: 'ref-1',
+          roles: ['PLAYER'],
+        } as never),
+      ).resolves.toEqual({ canScore: true });
+    });
+
+    it('returns true for an accepted tournament referee without a match assignment', async () => {
+      repository.isRefereeAccepted.mockResolvedValue(true);
+
+      await expect(
+        service.getScoreAccess('match-1', {
+          sub: 'ref-1',
+          roles: ['PLAYER'],
+        } as never),
+      ).resolves.toEqual({ canScore: true });
+    });
+
+    it('returns false for an unaccepted referee', async () => {
+      await expect(
+        service.getScoreAccess('match-1', {
+          sub: 'ref-1',
+          roles: ['REFEREE'],
+        } as never),
+      ).resolves.toEqual({ canScore: false });
+    });
+
+    it('preserves existing Super Lite accessible-user score policy', async () => {
+      repository.findById.mockResolvedValue({
+        ...baseMatch,
+        tournament: {
+          ...baseMatch.tournament,
+          tournamentConfig: { isLite: true },
+        },
+      });
+
+      await expect(
+        service.getScoreAccess('match-1', {
+          sub: 'viewer-1',
+          roles: ['PLAYER'],
+        } as never),
+      ).resolves.toEqual({ canScore: true });
+      expect(repository.canAccessLiveMatch).toHaveBeenCalledWith(
+        'match-1',
+        'viewer-1',
+        ['PLAYER'],
+      );
+      expect(repository.updateScore).not.toHaveBeenCalled();
+      expect(repository.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('returns not found for a missing match', async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await expect(
+        service.getScoreAccess('missing-match', {
+          sub: 'organizer-1',
+          roles: ['ORGANIZER'],
+        } as never),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
 });
