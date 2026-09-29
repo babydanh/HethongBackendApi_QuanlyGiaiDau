@@ -143,16 +143,36 @@ export class LiveScoreGateway
   private getViewerCount(matchId: string): number {
     const roomName = `match:${matchId}`;
     const adapterRoom = this.server?.sockets?.adapter?.rooms?.get(roomName);
+    const viewerIdentities = new Set<string>();
+
     if (adapterRoom && adapterRoom.size > 0) {
-      return adapterRoom.size;
+      adapterRoom.forEach((socketId) =>
+        this.addViewerIdentity(viewerIdentities, socketId),
+      );
+    } else {
+      this.clientMatchRooms.forEach((matches, socketId) => {
+        if (matches.has(matchId)) {
+          this.addViewerIdentity(viewerIdentities, socketId);
+        }
+      });
     }
-    let count = 0;
-    this.clientMatchRooms.forEach((matches) => {
-      if (matches.has(matchId)) {
-        count++;
-      }
-    });
-    return count;
+
+    return viewerIdentities.size;
+  }
+
+  private addViewerIdentity(
+    viewerIdentities: Set<string>,
+    socketId: string,
+  ) {
+    const socket = this.server?.sockets?.sockets?.get(socketId);
+    if (!socket?.connected) return;
+
+    const subject = (socket.data.user as JwtPayload | undefined)?.sub;
+    const identity =
+      typeof subject === 'string' && subject.length > 0
+        ? `user:${subject}`
+        : `socket:${socketId}`;
+    viewerIdentities.add(identity);
   }
 
   @SubscribeMessage('joinMatch')
@@ -461,13 +481,12 @@ export class LiveScoreGateway
   // chính xác — tự phục hồi nếu tin join/leave bị rớt.
   private broadcastAllViewerCounts() {
     if (!this.server) return;
-    const counts = new Map<string, number>();
+    const matchIds = new Set<string>();
     this.clientMatchRooms.forEach((matches) => {
-      matches.forEach((matchId) => {
-        counts.set(matchId, (counts.get(matchId) ?? 0) + 1);
-      });
+      matches.forEach((matchId) => matchIds.add(matchId));
     });
-    counts.forEach((viewerCount, matchId) => {
+    matchIds.forEach((matchId) => {
+      const viewerCount = this.getViewerCount(matchId);
       const payload = JSON.stringify({ matchId, viewerCount });
       this.server.to(`match:${matchId}`).emit('viewer:count', payload);
     });

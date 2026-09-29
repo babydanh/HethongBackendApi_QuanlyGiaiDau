@@ -168,3 +168,43 @@ jobs:
               echo \"WARNING: Docker image prune failed after smoke checks; continuing.\"
             fi
           '"
+
+      # Nạp dữ liệu địa giới: chạy SAU migration, trên VPS, trong chính
+      # container `migrate` mà bước trên vừa dùng.
+      #
+      # VÌ SAO KHÔNG CHẠY TRÊN RUNNER: Postgres production là service của
+      # compose trên VPS (DB_HOST=postgres — chỉ phân giải được trong docker
+      # network đó). Deploy job không có biến DB nào, repo cũng không có secret
+      # DB nào, nên runner không có đường nào tới production DB. Bước này phải
+      # đi qua SSH, và chạy `docker compose run` để mượn luôn network + DB_* của
+      # service `migrate` — không sửa thêm file nào trên VPS.
+      #
+      # VÌ SAO KHÔNG CHECKOUT Ở ĐÂY: code đã được checkout và đóng gói vào
+      # image bởi job build-and-push; job này chỉ kéo image theo tag nên không
+      # cần (và không dùng tới) bản source trên runner.
+      - name: Seed regions + ward boundaries on VPS
+        # Cây GeoJSON ~630 MB được tải lại từ đầu mỗi lần chạy (container --rm
+        # không giữ cache), rồi 3321 phường / 67 lô UPDATE. Con số 4-6 phút trong
+        # header script đo trên máy dev có cache sẵn; VPS tải chậm hơn nên để
+        # 45 phút — gấp ~8 lần worst case, vẫn rất xa trần 360 phút của job.
+        timeout-minutes: 45
+        env:
+          VPS_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$VPS_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p 36789 203.167.15.81 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -p 36789 -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@203.167.15.81 bash -c "'
+            set -euo pipefail
+            cd /usr/local/lsws/sporto.asia
+
+            echo \"== Nạp provinces/wards (thay bảng trong 1 transaction) ==\"
+            docker compose run --rm migrate node seed-regions-v2.js
+
+            # seed-ward-boundaries.js: thiếu ranh giới ở vài phường là BÌNH
+            # THƯỜNG (exit 0 + cảnh báo). exit khác 0 khi độ phủ tụt dưới 99%
+            # tức cây GeoJSON bị cắt cụt hoặc tên khớp hỏng — lúc đó phải đỏ.
+            echo \"== Nạp ranh giới phường (GeoJSON ~630 MB) ==\"
+            docker compose run --rm -e WARD_BOUNDARY_MIN_COVERAGE=99 migrate node seed-ward-boundaries.js
+          '"

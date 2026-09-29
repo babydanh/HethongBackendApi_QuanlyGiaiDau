@@ -4,8 +4,8 @@
 //   dataset-generation-scripts/resources/gis/geojson_11Mar2026/
 //     {maTinh}_{slugTenTinh}/wards/{maPhuong}_{slugTenPhuong}.geojson
 //
-// Cây GeoJSON được tải về sẵn dưới .cache/geojson_11Mar2026 và đọc thẳng từ
-// đĩa, nên script chạy hoàn toàn offline, không tốn quota API nào.
+// Cây GeoJSON nằm dưới .cache/geojson_11Mar2026 và được đọc thẳng từ đĩa.
+// Máy chưa có thì script tự tải bằng git sparse-checkout (xem ensureGeoJsonTree).
 
 // JOIN THEO TÊN, TUYỆT ĐỐI KHÔNG JOIN THEO MÃ — ba hệ mã độc lập nhau:
 //   TP.HCM      provinces v2 code = 79   | tên thư mục 29_ho_chi_minh | matinhxa "29.185"
@@ -23,14 +23,37 @@
 //      wardKeyCandidatesFromFileName) cho tới khi trúng một khoá.
 //   3. Khoá trùng (hai đơn vị chỉ khác dấu) thì CỐ TÌNH bỏ trống, không đoán.
 //
-// Dừng (exit 1) nếu còn đơn vị chưa khớp, in ra slug để đối chiếu và bổ sung
-// tay vào seed/region-boundary-overrides.json.
+// Trước hết: máy chưa có cây GeoJSON (thư mục .cache bị gitignore nên runner CI
+// không có) thì tự tải bằng git sparse-checkout — KHÔNG dùng file zip, lý do ở
+// downloadGeoJsonTree.
+//
+// ── HỢP ĐỒNG CHO JOB CI DEPLOY ──────────────────────────────────────────────
+// Chạy từ thư mục HethongBackendApi_QuanlyGiaiDau, SAU run-prod-migration.js:
+//   1) node seed-regions-v2.js        # thay provinces/wards trong 1 transaction
+//   2) node seed-ward-boundaries.js   # nạp ranh giới (tự tải GeoJSON ~630 MB)
+// Biến môi trường bắt buộc: DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD,
+// DB_DATABASE (hoặc thay cả bằng DATABASE_URL); thêm DB_SSL=true nếu Postgres
+// cần TLS. Job CI chạy hai script này trong container `migrate` trên VPS, nên
+// biến môi trường đến từ .env của compose chứ không phải từ secret CI.
+// Thời gian: ~4-6 phút (~630 MB tải về lần đầu + 3321 lệnh UPDATE theo lô 50).
+// Job CI phải để timeout >= 15 phút, nếu không sẽ chết giữa chừng.
+//
+// EXIT CODE — hai tín hiệu TÁCH BIỆT, cố ý không gộp:
+//   0  = xong. Kể cả khi còn phường chưa có ranh giới: 16/3321 phường
+//        (trùng tên chỉ khác dấu) là KHÔNG QUYẾT ĐỊNH ĐƯỢC, đoán bừa sẽ ghi
+//        nhầm polygon. Trạng thái đó chỉ làm /regions/resolve trả null ở đúng
+//        vài điểm đó, nên đỏ pipeline mỗi lần đẩy là vô nghĩa.
+//   ≠0 = hỏng thật: không tải/không đọc được GeoJSON, mất kết nối, cập nhật 0
+//        phường, hoặc ĐỘ PHỦ dưới WARD_BOUNDARY_MIN_COVERAGE (mặc định 99).
+//        Đây mới là chốt chặn cho cây GeoJSON bị cắt cụt hoặc tên khớp hỏng.
 
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const postgres = require('postgres');
+const { execFileSync } = require('child_process');
+const os = require('os');
 
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
@@ -40,23 +63,140 @@ const GEOJSON_ROOT = path.resolve(
   __dirname,
   process.env.WARD_BOUNDARY_GEOJSON_DIR || path.join('.cache', 'geojson_11Mar2026'),
 );
+// Nguồn để tự tải khi máy chưa có cây GeoJSON (xem downloadGeoJsonTree).
+const GEOJSON_REPO_URL =
+  process.env.WARD_BOUNDARY_GEOJSON_REPO
+  || 'https://github.com/thanglequoc/vietnamese-provinces-database.git';
+const GEOJSON_REPO_REF = process.env.WARD_BOUNDARY_GEOJSON_REF || 'master';
+const GEOJSON_REPO_SUBDIR = 'dataset-generation-scripts/resources/gis/geojson_11Mar2026';
 const OVERRIDES_FILE = path.resolve(__dirname, 'seed', 'region-boundary-overrides.json');
 const BATCH_SIZE = 50;
+// Ngưỡng độ phủ (%) — ĐÂY LÀ chốt chặn duy nhất, thay cho "còn phường chưa
+// khớp tên thì đỏ". Mặc định 99 vì trạng thái đã biết là 3305/3321 =
+// 99.52%: 16 phường trùng tên chỉ khác dấu là không quyết định được, nên 100
+// sẽ đỏ vĩnh viễn và làm mất tác dụng của cảnh báo.
+// 99 cho phép tối đa 33 phường thiếu ranh giới: 16 lệch sẵn + 17 để dư. Một
+// tỉnh nhỏ nhất cũng ~30 phường nên chỉ cần hụt trọn một tỉnh là tụt dưới
+// ngưỡng; cây GeoJSON bị cắt cụt (mất nhiều tỉnh) tụt rất xa. Ngưỡng 99.5 thì
+// quá sát 99.52 — chỉ cần thêm MỘT phường lệch là đỏ, tức biến CI thành
+// canh báo quá mức. Job deploy đặt WARD_BOUNDARY_MIN_COVERAGE tường minh.
+const MIN_COVERAGE = Number(process.env.WARD_BOUNDARY_MIN_COVERAGE ?? 99);
 
-function assertGeoJsonRoot() {
-  if (fs.existsSync(GEOJSON_ROOT) && fs.statSync(GEOJSON_ROOT).isDirectory()) return;
-  throw new Error(
-    [
-      `Không tìm thấy cây GeoJSON cục bộ tại ${GEOJSON_ROOT}.`,
-      'Tải một lần rồi chạy lại (script cố tình không tự tải để chạy được ngoài mạng):',
-      '  git clone --filter=blob:none --sparse --depth 1 https://github.com/thanglequoc/vietnamese-provinces-database.git .tmp/vpdb',
-      '  git -C .tmp/vpdb sparse-checkout set dataset-generation-scripts/resources/gis/geojson_11Mar2026',
-      '',
-      'Rồi chuyển .tmp/vpdb/dataset-generation-scripts/resources/gis/geojson_11Mar2026 sang:',
-      `  ${GEOJSON_ROOT}`,
-      'Hoặc trỏ thẳng một thư mục khác qua biến môi trường WARD_BOUNDARY_GEOJSON_DIR.',
-    ].join('\n'),
+/** Cây GeoJSON dùng được: có ít nhất một thư mục tỉnh chứa thư mục `wards`. */
+function hasGeoJsonTree(root) {
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return false;
+  return fs.readdirSync(root, { withFileTypes: true }).some(
+    (entry) => entry.isDirectory() && fs.existsSync(path.join(root, entry.name, 'wards')),
   );
+}
+
+/**
+ * Chạy git, để stdout/stderr ra log để job CI lưu lại được nguyên nhân hỏng.
+ * core.longpaths: đường dẫn tới file GeoJSON đã dài ~150 ký tự, cộng thư mục
+ * tạm trên Windows dễ vượt giới hạn 260 ký tự.
+ */
+function git(args, cwd) {
+  execFileSync('git', ['-c', 'core.longpaths=true', ...args], {
+    cwd,
+    stdio: ['ignore', 'inherit', 'inherit'],
+    timeout: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Tải cây GeoJSON bằng git sparse-checkout — KHÔNG dùng file zip.
+ *
+ * Lý do: tải zip của codeload rồi giải nén bằng `tar` trên Windows đã âm thầm
+ * bỏ dấu tên (`1_thu_đo_ha_noi` -> `1_thu_do_ha_noi`) và sinh 1031 file
+ * "sinh đôi" ASCII, làm hỏng cả lần khớp tên. Object store của git giữ nguyên
+ * byte tên nên checkout ra đúng y như trên nguồn, trên mọi OS.
+ *
+ * `--filter=blob:none --depth 1` chỉ tải cây thư mục (~400 KB) trước; blob
+ * GeoJSON (~630 MB) được tải riêng cho đúng nhánh sparse đang cần.
+ */
+function downloadGeoJsonTree() {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ward-geojson-'));
+  const cloneDir = path.join(workDir, 'r');
+  try {
+    git(
+      [
+        'clone', '--filter=blob:none', '--sparse', '--depth', '1',
+        '--branch', GEOJSON_REPO_REF, GEOJSON_REPO_URL, cloneDir,
+      ],
+      workDir,
+    );
+    git(['sparse-checkout', 'set', GEOJSON_REPO_SUBDIR], cloneDir);
+    git(['checkout'], cloneDir);
+
+    const checkedOut = path.join(cloneDir, ...GEOJSON_REPO_SUBDIR.split('/'));
+    if (!fs.existsSync(checkedOut)) {
+      throw new Error(
+        `${GEOJSON_REPO_SUBDIR} không tồn tại ở ref "${GEOJSON_REPO_REF}" của ${GEOJSON_REPO_URL}`,
+      );
+    }
+
+    fs.mkdirSync(path.dirname(GEOJSON_ROOT), { recursive: true });
+    if (fs.existsSync(GEOJSON_ROOT)) {
+      // Chỉ tới được khi thư mục không dùng được (thiếu hoặc hỏng), nhưng vẫn
+      // là lệnh xoá dữ liệu trên đường dẫn người dùng chỉ định — phải in ra.
+      console.warn(`🧹 Xoá thư mục cache cũ không dùng được: ${GEOJSON_ROOT}`);
+      fs.rmSync(GEOJSON_ROOT, { recursive: true, force: true });
+    }
+    try {
+      fs.renameSync(checkedOut, GEOJSON_ROOT);
+    } catch (error) {
+      // EXDEV: thư mục tạm và thư mục đích khác ổ đĩa (rất dễ xảy ra trên Windows).
+      if (error.code !== 'EXDEV') throw error;
+      fs.cpSync(checkedOut, GEOJSON_ROOT, { recursive: true });
+    }
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Chặn hỏng tên do bỏ dấu: hai thư mục tỉnh chỉ khác nhau ở dấu sẽ gộp thành
+ * một khoá. Cây giả (zip giải nén sai) tạo đúng loại "sinh đôi" này, nên
+ * phải chặn ngay khi tải xong thay vì để lần khớp tên chạy sai rồi mới báo.
+ */
+function assertNoTwinProvinceDirs(root) {
+  const seen = new Map();
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const key = provinceKeyFromDirName(entry.name);
+    const twin = seen.get(key);
+    if (twin) {
+      throw new Error(
+        `Cây GeoJSON bị hỏng tên: "${entry.name}" và "${twin}" gộp cùng khoá "${key}". `
+        + 'Tên trên đĩa đã mất dấu — tải lại bằng git, đừng giải nén file zip.',
+      );
+    }
+    seen.set(key, entry.name);
+  }
+}
+
+/** Bảo đảm cây GeoJSON có trên đĩa và tên không bị mất dấu; tải về nếu chưa có. */
+function ensureGeoJsonTree() {
+  // Kiểm tra cả cây ĐÃ CÓ SẴN: máy giải nén zip sai sẽ mang "sinh đôi" ASCII,
+  // và đó là nguyên nhân lần chạy trước khớp sai tên chứ không phải lỗi dữ liệu.
+  if (fs.existsSync(GEOJSON_ROOT)) assertNoTwinProvinceDirs(GEOJSON_ROOT);
+
+  if (hasGeoJsonTree(GEOJSON_ROOT)) {
+    console.log(`📂 Dùng cây GeoJSON có sẵn tại ${GEOJSON_ROOT}`);
+    return;
+  }
+
+  console.log(
+    `📥 Chưa có cây GeoJSON — đang tải ~630 MB từ ${GEOJSON_REPO_URL} `
+    + `(ref ${GEOJSON_REPO_REF}), có thể mất vài phút...`,
+  );
+  const startedAt = Date.now();
+  downloadGeoJsonTree();
+  assertNoTwinProvinceDirs(GEOJSON_ROOT);
+  if (!hasGeoJsonTree(GEOJSON_ROOT)) {
+    throw new Error(`Vừa tải xong nhưng ${GEOJSON_ROOT} vẫn không dùng được.`);
+  }
+  console.log(`✅ Đã tải cây GeoJSON trong ${Math.round((Date.now() - startedAt) / 1000)}s.`);
 }
 
 const sql = postgres({
@@ -206,7 +346,7 @@ function toMultiPolygonGeometry(geoJson) {
 }
 
 async function main() {
-  assertGeoJsonRoot();
+  ensureGeoJsonTree();
   const overrides = loadOverrides();
   const unmatchedProvinces = [];
   const unmatchedWards = [];
@@ -374,12 +514,54 @@ async function main() {
     `📊 DB: ${cov.with_boundary}/${cov.total} phường có ranh giới, ${cov.without_boundary} chưa có`,
   );
 
-  if (unmatchedProvinces.length > 0 || unmatchedWards.length > 0) {
-    console.error('\n❌ Còn đơn vị chưa khớp tên:');
-    for (const name of unmatchedProvinces) console.error(`  [tỉnh] ${name}`);
-    for (const name of unmatchedWards) console.error(`  [phường] ${name}`);
+  const unmatchedTotal = unmatchedProvinces.length + unmatchedWards.length;
+  const coveragePercent = cov.total > 0 ? (cov.with_boundary / cov.total) * 100 : 0;
+
+  // Tín hiệu MỘT, KHÔNG phải lỗi. Trùng tên chỉ khác dấu thì không thể khớp
+  // mà không đoán, và đoán sẽ ghi nhầm polygon cho cả một vùng. Vì vậy thiếu
+  // ranh giới chỉ in cảnh báo to rồi exit 0; muốn đỏ thì hạ
+  // WARD_BOUNDARY_MIN_COVERAGE chứ không phải để exit code theo số đơn vị lệch.
+  // Lưu ý: cảnh báo này KHÔNG tự khẳng định "exit 0" — lần chạy vẫn có thể đỏ
+  // vì độ phủ tụt dưới ngưỡng ở dưới, và nói trước "vẫn 0" rồi đỏ thì log
+  // tự mâu thuẫn.
+  if (cov.without_boundary > 0) {
+    console.warn(
+      `\n⚠️  ${cov.without_boundary}/${cov.total} phường chưa có ranh giới `
+      + `(${(100 - coveragePercent).toFixed(2)}% chưa phủ).`
+      + (coveragePercent < MIN_COVERAGE
+        ? ' Dưới ngưỡng — lần chạy này SẼ ĐỎ, xem nguyên nhân ở cuối.'
+        : ' Đây là trạng thái ĐÃ BIẾT VÀ ĐƯỢC CHẤP NHẬN — không phải lỗi, exit code vẫn 0.'),
+    );
+    console.warn(
+      '   /regions/resolve sẽ trả null ở đúng những điểm nằm trong các phường này.',
+    );
+  }
+  if (unmatchedTotal > 0) {
+    console.warn(`\n⚠️  ${unmatchedTotal} đơn vị chưa khớp tên:`);
+    for (const name of unmatchedProvinces) console.warn(`  [tỉnh] ${name}`);
+    for (const name of unmatchedWards) console.warn(`  [phường] ${name}`);
+    console.warn(
+      `\nMuốn phủ nốt: thêm ánh xạ tay vào ${path.relative(__dirname, OVERRIDES_FILE)} rồi chạy lại.`,
+    );
+  }
+
+  // Chốt chặn DUY NHẤT cho lần nhập hỏng: độ phủ tụt dưới ngưỡng thì hoặc cây
+  // GeoJSON bị cắt cụt, hoặc tên trong DB đã đổi. Hai nguyên nhân đó hậu quả
+  // giống nhau — hàng trăm phường mất polygon và ST_Contains trả sai tên cho
+  // điểm thật — nên phải đỏ, khác hẳn vài phường không quyết định được ở trên.
+  if (coveragePercent < MIN_COVERAGE) {
     console.error(
-      `\nThêm ánh xạ tay vào ${path.relative(__dirname, OVERRIDES_FILE)} rồi chạy lại.`,
+      '\n❌ ĐỘ PHỦ RANH GIỚI THẤP HƠN NGƯỠNG — coi như lần nhập đã hỏng, KHÔNG phải vài phường lệch.'
+      + `\n   Có ranh giới : ${cov.with_boundary}/${cov.total} (${coveragePercent.toFixed(2)}%)`
+      + `\n   Ngưỡng       : ${MIN_COVERAGE}% (WARD_BOUNDARY_MIN_COVERAGE)`
+      + `\n   Thiếu         : ${cov.without_boundary} phường`
+      + '\n   Hai nguyên nhân thường gặp:'
+      + '\n     1) Cây GeoJSON bị CẮT CỤT — sparse-checkout tải thiếu, ref trên nguồn đổi,'
+      + '\n        hoặc WARD_BOUNDARY_GEOJSON_DIR trỏ vào thư mục GeoJSON cũ/partial.'
+      + '\n        Cách kiểm: xoá cache (mặc định .cache/geojson_11Mar2026) rồi chạy lại.'
+      + `\n     2) TÊN KHỚP HỎNG — API provinces đổi tên hoặc đổi cấu trúc nên tên trong DB`
+      + `\n        không còn khớp tên file nữa, và ${path.relative(__dirname, OVERRIDES_FILE)}`
+      + '\n        không còn bám được. Danh sách đơn vị chưa khớp tên in ở trên là đầu mối.',
     );
     process.exitCode = 1;
     return;
@@ -391,7 +573,10 @@ async function main() {
     return;
   }
 
-  console.log(`✅ Hoàn tất. matched=${provinceWards.size} updated=${updatedWards} unmatched=0`);
+  console.log(
+    `✅ Hoàn tất. matched=${provinceWards.size} updated=${updatedWards} `
+    + `unmatched=${unmatchedTotal} coverage=${coveragePercent.toFixed(2)}%`,
+  );
 }
 
 main()
