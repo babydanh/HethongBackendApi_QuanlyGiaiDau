@@ -9,20 +9,28 @@ import {
   QueryRegionDto,
   QueryResolveDto,
   QueryWardDto,
+  ResolvedRegionDto,
 } from './dto/query-region.dto';
 import {
   findNearestWardCentroid,
   findWardCentroid,
 } from './ward-centroids';
 
-export type ResolvedRegion = {
-  wardCode: string;
-  wardName: string;
-  centerLat: number | null;
-  centerLng: number | null;
-  provinceCode: string;
-  provinceName: string;
-};
+/**
+ * Hình dạng trả về chỉ được định nghĩa một lần, ở `ResolvedRegionDto`, để
+ * Swagger mô tả đúng thứ client nhận. Ở đây giữ lại tên cũ cho các chữ ký
+ * bên dưới.
+ *
+ * Trường thêm vào sau là `isEstimated` — phân biệt "tìm thấy" với "đoán ra".
+ * Cả hai nhánh của `resolveByPoint` từng trả cùng một hình dạng, nên client
+ * không có cách nào biết mình đang nhìn phường nào. Điều đó nguy hiểm vì ghim
+ * tự đặt nằm đúng ở tâm phường: tra ngược lại, nhánh tâm gần nhất khớp thẳng
+ * về đúng phường đó (khoảng cách 0) — hệ thống "xác nhận" lại chính phỏng đoán
+ * của nó, nhìn thì tự nhất quán một cách hoàn hảo mà không có căn cứ. Và ở khu
+ * vực đông (phường HCM cách nhau ~500 m) một ghim sát ranh giới khớp sang phường
+ * kế bên mà không có tín hiệu nào cho biết.
+ */
+export type ResolvedRegion = ResolvedRegionDto;
 
 @Injectable()
 export class RegionsRepository {
@@ -96,6 +104,13 @@ export class RegionsRepository {
    *
    * Trả null khi điểm không khớp phường nào và cũng vượt trần 75 km — điểm ở
    * nước khác hay toạ độ rác không được gán bừa một phường Việt Nam.
+   *
+   * Hai nhánh đó trả về khác nhau đúng một trường: `isEstimated`. Nhánh 1
+   * trả `false` (đã xác nhận bằng chứa-hằm), nhánh 2 trả `true` (chỉ là đo
+   * khoảng cách tới tâm). Không có sự phân biệt này thì ghim tự đặt ở tâm
+   * phường N được nhánh 2 khớp thẳng về lại phường N, và endpoint trông như
+   * đang xác nhận kết quả trong khi thực ra chỉ đang lặp lại phỏng đoán của
+   * chính nó.
    */
   async resolveByPoint(query: QueryResolveDto): Promise<ResolvedRegion | null> {
     const rows = await this.db.execute(sql`
@@ -112,7 +127,10 @@ export class RegionsRepository {
       )
       LIMIT 1
     `);
-    const covered = (rows as unknown as Omit<ResolvedRegion, 'centerLat' | 'centerLng'>[])[0];
+    const covered = (rows as unknown as Omit<
+      ResolvedRegion,
+      'centerLat' | 'centerLng' | 'isEstimated'
+    >[])[0];
     if (covered) {
       // Tâm lấy từ file chứ không từ `wards.center_lat`: production có cột này
       // toàn NULL, lấy từ đó thì endpoint vẫn trả centerLat: null. 16 phường
@@ -125,6 +143,7 @@ export class RegionsRepository {
         ...covered,
         centerLat: centroid?.lat ?? null,
         centerLng: centroid?.lng ?? null,
+        isEstimated: false,
       };
     }
 
@@ -137,6 +156,7 @@ export class RegionsRepository {
       centerLng: nearest.lng,
       provinceCode: nearest.provinceCode,
       provinceName: nearest.provinceName,
+      isEstimated: true,
     };
   }
 
@@ -147,6 +167,11 @@ export class RegionsRepository {
    * nên một tra cứu Map trả về trạng thái đầy đủ — không bao giờ nửa vời
    * (tên có, tâm null). Phường mới thêm sau lần sinh file thì chưa có tâm, và
    * trả null là câu trả lời trung thực: chưa biết đặt ghim ở đâu.
+   *
+   * Luôn trả `isEstimated: true`: tâm phường là vị trí đại diện, không phải
+   * nơi thật của kèo. App vốn đã tự biết điều này — nó đặt ghim rồi gắn
+   * nhãn "ghim tự động" kèm nút sửa — nhưng cờ vẫn phải đúng cho bất kỳ
+   * client nào đọc chung kiểu với `resolveByPoint`.
    */
   async findCentroid(query: QueryCentroidDto): Promise<ResolvedRegion | null> {
     const ward = findWardCentroid(query.provinceCode, query.wardCode);
@@ -158,6 +183,7 @@ export class RegionsRepository {
       centerLng: ward.lng,
       provinceCode: ward.provinceCode,
       provinceName: ward.provinceName,
+      isEstimated: true,
     };
   }
 }
