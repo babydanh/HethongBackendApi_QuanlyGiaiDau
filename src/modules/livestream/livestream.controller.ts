@@ -47,24 +47,26 @@ export class LivestreamController {
     private readonly livestreamProxyService: LivestreamProxyService,
   ) {}
 
+  // Route cố định theo đuôi file thay vì `:file`/wildcard: param dạng wildcard trả
+  // về mảng các đoạn path, còn `:file` chỉ khớp một đoạn nên URL nhiều tầng của
+  // media server sẽ 404. Đuôi ở đây chỉ để player chọn đúng engine (mpegts.js hay
+  // hls.js); đường dẫn thật lấy từ `?url=` và được kiểm bằng PATH_PATTERN.
   @Public()
   @SkipAppKey()
-  // `:file` chỉ giữ đoạn cuối (cam1.flv) để player đọc đuôi file. Đường dẫn đầy đủ
-  // lấy từ `?url=`; dùng wildcard `{*file}` sẽ trả về mảng các đoạn path, không dùng được.
-  @Get('proxy/:file')
-  @ApiOperation({
-    summary: 'Proxy luồng http:// của media server qua HTTPS cho trang live',
-    description:
-      'Chỉ host nằm trong LIVESTREAM_PROXY_ALLOWED_HOSTS được phép. Cần khi media server ở sân chỉ có HTTP: trang live chạy HTTPS nên trình duyệt chặn mixed content. Đường dẫn phải giữ đuôi .flv/.m3u8 vì player phân biệt engine theo đuôi file.',
-  })
-  proxyStream(
-    @Req() req: Request,
-    @Res() res: Response,
-    @Param('file') file: string,
-    @Query('url') url?: string,
-  ) {
-    return this.livestreamProxyService.proxyStream(req, res, url, file);
+  @Get('proxy/stream.flv')
+  @ApiOperation({ summary: 'Proxy luồng HTTP-FLV của media server qua HTTPS cho trang live' })
+  proxyFlv(@Req() req: Request, @Res() res: Response, @Query('url') url?: string) {
+    return this.livestreamProxyService.proxyStream(req, res, url, 'stream.flv');
   }
+
+  @Public()
+  @SkipAppKey()
+  @Get('proxy/stream.m3u8')
+  @ApiOperation({ summary: 'Proxy playlist HLS của media server qua HTTPS cho trang live' })
+  proxyHls(@Req() req: Request, @Res() res: Response, @Query('url') url?: string) {
+    return this.livestreamProxyService.proxyStream(req, res, url, 'stream.m3u8');
+  }
+
 
   @Post('sessions/prepare')
   @Verified()
