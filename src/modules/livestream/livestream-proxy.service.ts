@@ -16,6 +16,9 @@ import { Readable } from 'node:stream';
  * `http://` không bao giờ hiện. Khách gọi endpoint này qua HTTPS, backend gọi nguồn
  * `http://` rồi chuyển tiếp — trình duyệt chỉ thấy HTTPS.
  *
+ * Vì sao route có `:file`: player phân biệt engine theo đuôi file (`.flv` → mpegts.js,
+ * `.m3u8` → hls.js). Nếu path không giữ đuôi, player sẽ đoán sai và hiện màn hình đen.
+ *
  * Bảo mật: chỉ host trong `LIVESTREAM_PROXY_ALLOWED_HOSTS` được phép. Không có
  * allowlist thì endpoint trả 403 thay vì mở, vì một proxy mở là SSRF vào mạng nội
  * bộ (metadata service, DB, admin panel nội bộ).
@@ -23,7 +26,9 @@ import { Readable } from 'node:stream';
 @Injectable()
 export class LivestreamProxyService {
   private readonly logger = new Logger(LivestreamProxyService.name);
-  /** Đường dẫn được phép; chặn ../ và URL không parse được. */
+  /** Chỉ chuyển tiếp file media có đuôi để player nhận đúng engine. */
+  private static readonly FILE_PATTERN = /\.(flv|m3u8|ts)$/i;
+  /** Đường dẫn upstream được phép; chặn `..` và ký tự lạ. */
   private static readonly PATH_PATTERN = /^\/live\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 
   constructor(private readonly configService: ConfigService) {}
@@ -49,7 +54,15 @@ export class LivestreamProxyService {
     return `http://${host}${streamPath}`;
   }
 
-  async proxyStream(req: Request, res: ExpressResponse, rawUrl: string | undefined) {
+  async proxyStream(
+    req: Request,
+    res: ExpressResponse,
+    rawUrl: string | undefined,
+    file: string,
+  ) {
+    if (!LivestreamProxyService.FILE_PATTERN.test(file)) {
+      throw new BadRequestException('Chỉ hỗ trợ file .flv, .m3u8 hoặc .ts.');
+    }
     if (!rawUrl) {
       throw new BadRequestException('Thiếu tham số url.');
     }
@@ -65,6 +78,7 @@ export class LivestreamProxyService {
       throw new BadRequestException('Chỉ proxy nguồn http://; nguồn https:// dùng trực tiếp.');
     }
 
+    // `file` là đuôi để client chọn engine; đường dẫn thật vẫn lấy từ `url`.
     const upstream = this.resolveUpstream(target.hostname, target.pathname);
     this.logger.log(`Proxying livestream from ${upstream}`);
 

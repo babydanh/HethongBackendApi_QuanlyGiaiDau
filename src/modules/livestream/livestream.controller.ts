@@ -49,18 +49,19 @@ export class LivestreamController {
 
   @Public()
   @SkipAppKey()
-  @Get('proxy')
+  @Get('proxy/:file')
   @ApiOperation({
     summary: 'Proxy luồng http:// của media server qua HTTPS cho trang live',
     description:
-      'Chỉ host nằm trong LIVESTREAM_PROXY_ALLOWED_HOSTS được phép. Cần khi media server ở sân chỉ có HTTP: trang live chạy HTTPS nên trình duyệt chặn mixed content.',
+      'Chỉ host nằm trong LIVESTREAM_PROXY_ALLOWED_HOSTS được phép. Cần khi media server ở sân chỉ có HTTP: trang live chạy HTTPS nên trình duyệt chặn mixed content. Đường dẫn phải giữ đuôi .flv/.m3u8 vì player phân biệt engine theo đuôi file.',
   })
   proxyStream(
     @Req() req: Request,
     @Res() res: Response,
+    @Param('file') file: string,
     @Query('url') url?: string,
   ) {
-    return this.livestreamProxyService.proxyStream(req, res, url);
+    return this.livestreamProxyService.proxyStream(req, res, url, file);
   }
 
   @Post('sessions/prepare')
