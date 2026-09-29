@@ -30,7 +30,6 @@ import { CreateDevicePairingTokenDto } from './dto/create-device-pairing-token.d
 import { HeartbeatCameraDeviceDto } from './dto/heartbeat-camera-device.dto';
 import { PairCameraDeviceDto } from './dto/pair-camera-device.dto';
 import { UpdateCameraDeviceDto } from './dto/update-camera-device.dto';
-import { LivestreamProxyService } from './livestream-proxy.service';
 import { SkipThrottle } from '@nestjs/throttler';
 import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
 import type { Request, Response } from 'express';
@@ -44,28 +43,8 @@ export class LivestreamController {
     private readonly liveSessionService: LiveSessionService,
     private readonly cameraDeviceService: CameraDeviceService,
     private readonly facebookPageConnectionService: FacebookPageConnectionService,
-    private readonly livestreamProxyService: LivestreamProxyService,
   ) {}
 
-  // Route cố định theo đuôi file thay vì `:file`/wildcard: param dạng wildcard trả
-  // về mảng các đoạn path, còn `:file` chỉ khớp một đoạn nên URL nhiều tầng của
-  // media server sẽ 404. Đuôi ở đây chỉ để player chọn đúng engine (mpegts.js hay
-  // hls.js); đường dẫn thật lấy từ `?url=` và được kiểm bằng PATH_PATTERN.
-  @Public()
-  @SkipAppKey()
-  @Get('proxy/stream.flv')
-  @ApiOperation({ summary: 'Proxy luồng HTTP-FLV của media server qua HTTPS cho trang live' })
-  proxyFlv(@Req() req: Request, @Res() res: Response, @Query('url') url?: string) {
-    return this.livestreamProxyService.proxyStream(req, res, url, 'stream.flv');
-  }
-
-  @Public()
-  @SkipAppKey()
-  @Get('proxy/stream.m3u8')
-  @ApiOperation({ summary: 'Proxy playlist HLS của media server qua HTTPS cho trang live' })
-  proxyHls(@Req() req: Request, @Res() res: Response, @Query('url') url?: string) {
-    return this.livestreamProxyService.proxyStream(req, res, url, 'stream.m3u8');
-  }
 
 
   @Post('sessions/prepare')

@@ -54,25 +54,6 @@ export class LivestreamService {
     return `${this.getHlsBaseUrl().replace(/\/$/, '')}/${streamKey}/index.m3u8`;
   }
 
-  private isProxyAllowedHost(hostname: string) {
-    return (this.configService.get<string>('LIVESTREAM_PROXY_ALLOWED_HOSTS') ?? '')
-      .split(',')
-      .map((host) => host.trim().toLowerCase())
-      .filter(Boolean)
-      .includes(hostname.toLowerCase());
-  }
-
-  /**
-   * Đuôi file quyết định engine phía web: `.m3u8` đi hls.js, còn lại đi mpegts.js.
-   * URL nhiều tầng hoặc không có đuôi vẫn mặc định `.flv` vì đây là dạng phổ biến
-   * của luồng HTTP-FLV; player sẽ báo lỗi rõ nếu sai.
-   */
-  private buildProxyPlaybackUrl(upstream: URL) {
-    const base = (this.configService.get<string>('FRONTEND_URL') ?? '').replace(/\/$/, '');
-    const suffix = /\.m3u8$/i.test(upstream.pathname) ? 'm3u8' : 'flv';
-    return `${base}/api/v1/livestream/proxy/stream.${suffix}?url=${encodeURIComponent(upstream.toString())}`;
-  }
-
   /**
    * MediaMTX serves HLS over plain HTTP on 8888. Public pages are HTTPS, so
    * production must use the reverse-proxied HTTPS path instead of exposing
@@ -83,13 +64,6 @@ export class LivestreamService {
 
     try {
       const parsed = new URL(url);
-
-      // Nguồn http:// không phát được trên trang HTTPS (trình duyệt chặn mixed
-      // content), nên đổi sang URL proxy cùng host đó. Chỉ host trong allowlist
-      // mới được phép; còn lại giữ nguyên để không che mất URL sai.
-      if (parsed.protocol === 'http:' && this.isProxyAllowedHost(parsed.hostname)) {
-        return this.buildProxyPlaybackUrl(parsed);
-      }
       if (
         (parsed.hostname === 'giaidau.vnvar.com' || parsed.hostname === 'sporto.asia') &&
         parsed.port === '8888'
