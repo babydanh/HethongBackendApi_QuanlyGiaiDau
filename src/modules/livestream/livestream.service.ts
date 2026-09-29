@@ -418,10 +418,21 @@ export class LivestreamService {
       throw new NotFoundException('Trận đấu không tồn tại');
     }
 
-    // Camera BTC gán tay cho trận này là lựa chọn cụ thể, nên nó thắng URL sân.
-    // Chỉ khi trận chưa gán camera mới rơi xuống URL khai ở setting sân.
+    // Camera của sân xếp vào trận, trận nào xếp vào sân đó tự dùng.
+    const courtCamera = match.courtId
+      ? await this.livestreamRepository.findPullCameraByCourt(match.courtId, match.tournamentId)
+      : null;
+
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
-    if (stream?.cameraId && stream.cameraName) {
+
+    // Camera BTC gán TAY (khác camera của sân) là lựa chọn cụ thể nên nó thắng.
+    // Riêng camera của sân thì phải rơi xuống nhánh sân bên dưới: nó được gán khi
+    // xếp lịch với streamStatus IDLE, nếu ở lại đây sẽ chặn URL sân và làm trận
+    // ONGOING mất video.
+    const isManualCamera = Boolean(
+      stream?.cameraId && stream.cameraName && stream.cameraId !== courtCamera?.id,
+    );
+    if (isManualCamera && stream) {
       const isLive = stream.streamStatus === 'LIVE';
       const playbackUrl = isLive ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null;
 
@@ -434,12 +445,6 @@ export class LivestreamService {
         endedAt: stream.endedAt,
       };
     }
-
-    // Trận chưa gán camera: lấy URL của sân. Đây là luồng mới — BTC khai URL một
-    // lần ở setting sân, mọi trận xếp vào sân đó tự phát, không cần gán tay.
-    const courtCamera = match.courtId
-      ? await this.livestreamRepository.findPullCameraByCourt(match.courtId, match.tournamentId)
-      : null;
 
     // Sân có URL KHÔNG có nghĩa là đang phát. Chỉ trận đã bắt đầu (ONGOING) mới
     // được trả playbackUrl, nếu không thì khán giả sẽ thấy video dù BTC chưa bấm
