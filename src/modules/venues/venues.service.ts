@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { LivestreamService } from '../livestream/livestream.service';
 import { VenuesRepository } from './venues.repository';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
@@ -7,7 +8,12 @@ import { CreateVenueCourtDto } from './dto/create-venue-court.dto';
 
 @Injectable()
 export class VenuesService {
-  constructor(private readonly venuesRepository: VenuesRepository) {}
+  private readonly logger = new Logger(VenuesService.name);
+
+  constructor(
+    private readonly venuesRepository: VenuesRepository,
+    @Optional() private readonly livestreamService?: LivestreamService,
+  ) {}
 
   async findAll(query: QueryVenueDto) {
     return this.venuesRepository.findAll(query);
@@ -52,8 +58,24 @@ export class VenuesService {
   }
 
   async removeCourt(venueId: string, courtId: string) {
-    const existing = await this.venuesRepository.findById(venueId);
-    if (!existing) throw new NotFoundException('Venue not found');
+    // Dọn camera của sân TRƯỚC khi xoá: `livestream_cameras.court_id` là
+    // ON DELETE SET NULL nên xoá xong sẽ không tìm lại được camera để gỡ.
+    // Lỗi dọn không được chặn việc xoá sân, nếu không BTC không xoá được sân.
+    if (this.livestreamService) {
+      try {
+        const detached = await this.livestreamService.detachCamerasForCourt(courtId);
+        if (detached > 0) {
+          this.logger.warn(
+            `Xoá sân ${courtId}: đã gỡ ${detached} camera livestream khỏi các trận dùng nó.`,
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Xoá sân ${courtId}: không dọn được camera livestream: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const deleted = await this.venuesRepository.removeCourt(courtId);
     if (!deleted) throw new NotFoundException('Court not found');
     return deleted;

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -116,6 +116,43 @@ export class LivestreamRepository {
       .update(schema.livestreamCameras)
       .set({ status: 'ARCHIVED', deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(schema.livestreamCameras.id, cameraId));
+  }
+
+  /**
+   * Ngắt camera của một sân khỏi các trận đang dùng nó, rồi archive camera.
+   *
+   * Gọi TRƯỚC khi xoá sân: `livestream_cameras.court_id` là `ON DELETE SET NULL`,
+   * nên xoá sân xong sẽ không còn cách nào tìm ra camera thuộc sân đó. Nếu không
+   * dọn, dòng `match_livestreams` còn trỏ camera mồ côi và trận sẽ phát nhầm
+   * camera của một sân đã bị xoá.
+   */
+  async detachCamerasForCourt(courtId: string) {
+    const cameras = await this.db
+      .select({ id: schema.livestreamCameras.id })
+      .from(schema.livestreamCameras)
+      .where(
+        and(
+          eq(schema.livestreamCameras.courtId, courtId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      );
+
+    if (cameras.length === 0) return 0;
+    const cameraIds = cameras.map((c) => c.id);
+    const now = new Date();
+
+    // Xoá hẳn dòng gán: nó chỉ là bản ghi "trận này dùng camera này", không giữ
+    // dữ liệu nghiệp vửu. Giữ lại sẽ làm playbackUrl cũ tiếp tục tồn tại.
+    await this.db
+      .delete(schema.matchLivestreams)
+      .where(inArray(schema.matchLivestreams.cameraId, cameraIds));
+
+    await this.db
+      .update(schema.livestreamCameras)
+      .set({ status: 'ARCHIVED', deletedAt: now, updatedAt: now })
+      .where(inArray(schema.livestreamCameras.id, cameraIds));
+
+    return cameraIds.length;
   }
 
   async updatePullCameraUrl(cameraId: string, name: string, playbackUrl: string) {

@@ -332,6 +332,17 @@ export class LivestreamService {
   }
 
   /**
+   * Dọn camera của sân trước khi sân bị xoá.
+   *
+   * `livestream_cameras.court_id` là `ON DELETE SET NULL`, nên phải gọi hàm này
+   * TRƯỚC khi xoá sân, không thể làm sau. Xoá dòng gán trong `match_livestreams`
+   * để trận không còn phát nhầm camera của sân đã bị xoá.
+   */
+  async detachCamerasForCourt(courtId: string) {
+    return this.livestreamRepository.detachCamerasForCourt(courtId);
+  }
+
+  /**
    * Gán camera PULL của sân cho trận khi BTC xếp trận vào sân đó.
    *
    * Sân có khai URL phát thì mọi trận xếp vào sân đó tự chạy, không cần BTC

@@ -3,9 +3,10 @@ import { VenuesService } from './venues.service';
 import { VenuesController } from './venues.controller';
 import { VenuesRepository } from './venues.repository';
 import { DatabaseModule } from '../../database/database.module';
+import { LivestreamModule } from '../livestream/livestream.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, LivestreamModule],
   controllers: [VenuesController],
   providers: [VenuesService, VenuesRepository],
   exports: [VenuesService],
