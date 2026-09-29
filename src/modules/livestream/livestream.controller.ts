@@ -49,7 +49,9 @@ export class LivestreamController {
 
   @Public()
   @SkipAppKey()
-  @Get('proxy/{*file}')
+  // `:file` chỉ giữ đoạn cuối (cam1.flv) để player đọc đuôi file. Đường dẫn đầy đủ
+  // lấy từ `?url=`; dùng wildcard `{*file}` sẽ trả về mảng các đoạn path, không dùng được.
+  @Get('proxy/:file')
   @ApiOperation({
     summary: 'Proxy luồng http:// của media server qua HTTPS cho trang live',
     description:
