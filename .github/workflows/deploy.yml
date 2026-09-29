@@ -182,11 +182,10 @@ jobs:
       # VÌ SAO KHÔNG CHECKOUT Ở ĐÂY: code đã được checkout và đóng gói vào
       # image bởi job build-and-push; job này chỉ kéo image theo tag nên không
       # cần (và không dùng tới) bản source trên runner.
-      - name: Seed regions + ward boundaries on VPS
-        # Cây GeoJSON ~630 MB được tải lại từ đầu mỗi lần chạy (container --rm
-        # không giữ cache), rồi 3321 phường / 67 lô UPDATE. Con số 4-6 phút trong
-        # header script đo trên máy dev có cache sẵn; VPS tải chậm hơn nên để
-        # 45 phút — gấp ~8 lần worst case, vẫn rất xa trần 360 phút của job.
+      - name: Seed provinces/wards (v2) on VPS
+        # Bước này giờ chỉ gọi API v2, không tải cây GeoJSON nữa (xem lý do bên
+        # dưới). 45 phút là trần của job, không phải ngân sách thời gian thực
+        # tế — lần chạy thật tính bằng phút.
         timeout-minutes: 45
         env:
           VPS_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -202,9 +201,20 @@ jobs:
             echo \"== Nạp provinces/wards (thay bảng trong 1 transaction) ==\"
             docker compose run --rm migrate node seed-regions-v2.js
 
-            # seed-ward-boundaries.js: thiếu ranh giới ở vài phường là BÌNH
-            # THƯỜNG (exit 0 + cảnh báo). exit khác 0 khi độ phủ tụt dưới 99%
-            # tức cây GeoJSON bị cắt cụt hoặc tên khớp hỏng — lúc đó phải đỏ.
-            echo \"== Nạp ranh giới phường (GeoJSON ~630 MB) ==\"
-            docker compose run --rm -e WARD_BOUNDARY_MIN_COVERAGE=99 migrate node seed-ward-boundaries.js
+            # KHÔNG chạy seed-ward-boundaries.js ở bước này.
+            #
+            # Nguồn ranh giới là repo thứ ba, snapshot 11Mar2026 với 3321 phường;
+            # danh mục v2 (provinces.open-api.vn/api/v2) nay đã có 3452 phường và
+            # tên khác. Chạy script trên danh mục v2 chỉ phủ 2778/3452 = 80,48%
+            # và đúng ra phải đỏ ở ngưỡng 99% — script đúng, dữ liệu sai. Hạ
+            # ngưỡng cho xanh là che lỗi: đa số phường sẽ không có polygon, còn
+            # chỗ nào khớp tên thì có thể gắn NHẦM polygon của phường khác —
+            # tệ hơn hẳn là không có polygon.
+            #
+            # Script và bước COPY trong Dockerfile GIỮ NGUYÊN; chỉ gỡ lời gọi ở
+            # CI. Bật lại khi nguồn ranh giới được đối chiếu khớp với v2.
+            # Hệ quả tới lúc đó: /regions/resolve và /regions/wards/centroid
+            # trả null ở production (app đã xử lý null: cảnh báo + nút thử lại,
+            # không chặn lưu kèo). Đường ĐỊA CHỈ -> vùng không đổi: app tự
+            # khớp trên danh mục v2 mà server vừa nạp.
           '"
