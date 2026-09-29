@@ -276,7 +276,8 @@ export class SocialSessionsRepository {
 
   async listByDate(
     filters: {
-      playDate: string;
+      /** Bỏ trống khi tìm kiếm toàn cục: lấy mọi ngày chơi đang mở. */
+      playDate?: string;
       categoryId?: string;
       communityId?: string;
       viewerId?: string;
@@ -288,10 +289,15 @@ export class SocialSessionsRepository {
     tx: AppDbOrTx = this.db,
   ) {
     const conditions = [
-      eq(schema.socialSessions.playDate, filters.playDate),
       sql`${schema.socialSessions.status} IN ('OPEN', 'FULL')`,
       isNull(schema.socialSessions.deletedAt),
     ];
+    // Không có `playDate` chỉ xảy ra khi DTO đã cho phép bỏ trống, tức là
+    // request mang `search`. Không có ngày thì khoá thời gian bị gỡ hẳn; trần
+    // phân trang vẫn do DTO/service áp (`limit` tối đa 50).
+    if (filters.playDate) {
+      conditions.unshift(eq(schema.socialSessions.playDate, filters.playDate));
+    }
     // Lọc gần tôi: chỉ venue đã có tọa độ + nằm trong bán kính (m).
     const withGeo = filters.lat !== undefined && filters.lng !== undefined;
     if (withGeo) {

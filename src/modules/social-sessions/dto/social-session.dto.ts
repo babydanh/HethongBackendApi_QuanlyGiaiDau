@@ -325,9 +325,25 @@ export class UpdateSocialSessionDto {
 }
 
 export class QuerySocialSessionsDto {
-  @ApiProperty({ example: '2026-09-17', description: 'Ngày chơi (YYYY-MM-DD)' })
+  /**
+   * Bắt buộc — trừ khi có `search`.
+   *
+   * Ô tìm kiếm toàn cục không có mốc ngày nào để neo; nếu bắt cứng `date` thì
+   * gõ "bóng đá" chỉ ra kèo của *hôm nay* và im lặng bỏ sót phần còn lại.
+   * Chỉ nới khi `search` có mặt để không biến endpoint thành "xuất cả bảng":
+   * thiếu cả hai thì vẫn 400 như cũ, và kết quả vẫn còn `page`/`limit`
+   * (tối đa 50/trang) cùng bộ lọc `status IN ('OPEN','FULL')` của trang kèo.
+   */
+  @ApiPropertyOptional({
+    example: '2026-09-17',
+    description: 'Ngày chơi (YYYY-MM-DD). Bắt buộc trừ khi có `search`',
+  })
+  @Transform(({ value }) =>
+    value === undefined || value === null || value === '' ? undefined : value,
+  )
+  @ValidateIf((object) => object.search !== undefined && object.search !== '')
   @IsString()
-  date: string;
+  date?: string;
 
   @ApiPropertyOptional({ type: String, example: 'football' })
   @IsString()

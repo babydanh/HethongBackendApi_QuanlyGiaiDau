@@ -456,7 +456,9 @@ export class SocialSessionsService {
   }
 
   async list(query: QuerySocialSessionsDto, viewerId?: string, viewerRoles?: string[]) {
-    if (!DATE_RE.test(query.date)) {
+    // `date` bỏ trống chỉ hợp lệ khi DTO đã chấp nhận trường hợp tìm kiếm
+    // toàn bộ lịch sử; có `date` thì sai định dạng vẫn phải chặn như cũ.
+    if (query.date !== undefined && !DATE_RE.test(query.date)) {
       apiError(BadRequestException, 'INVALID_DATE');
     }
     const categoryId = query.sport
