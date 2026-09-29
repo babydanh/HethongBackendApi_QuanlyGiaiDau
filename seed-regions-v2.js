@@ -187,18 +187,32 @@ async function fetchRegions() {
   return { provinces: provincesToInsert, wards: wardsToInsert };
 }
 
-// 3. Thay toàn bộ dữ liệu địa giới trong MỘT transaction: DELETE và INSERT
-//    cùng commit hoặc cùng rollback. Trước đây DELETE chạy rời ở connection
-//    riêng, nên giữa lúc xoá và lúc nạp production phục vụ bảng RỖNG, và
-//    một lần chạy hỏng giữa chừng để lại bảng rỗng vĩnh viễn.
+// 3. Nạp dữ liệu địa giới trong MỘT transaction, theo kiểu UPSERT theo `code`.
+//
+//    Cố ý KHÔNG DELETE rồi INSERT như các bản trước. `communities.ward_code`
+//    và `communities.province_code` trỏ vào `wards(code)` / `provinces(code)`
+//    bằng FK ON DELETE NO ACTION, nên DELETE sẽ bị Postgres từ chối khi
+//    production còn community nào đang gắn địa chỉ — và nếu né FK bằng cách
+//    UPDATE cột đó cho NULL thì xoá sạch liên kết thật của production, chỉ lộ
+//    ra sau này. Upsert theo `code` không xoá dòng nào nên FK không bao giờ
+//    bị đụng tới: `code` của cùng một bộ dữ liệu v2 là ỔN ĐỊNH giữa các lần
+//    chạy, chỉ uuid sinh tự động là đổi. Đơn vị nào biến mất khỏi bộ dữ liệu
+//    mới thì báo ở cuối, KHÔNG tự xoá — xoá là quyết định mất dữ liệu, không
+//    phải việc máy làm hộ.
+//
+//    Vẫn là MỘT transaction: hỏng giữa chừng thì rollback, database giữ nguyên.
 async function replaceRegions(provincesToInsert, wardsToInsert) {
   const BATCH_SIZE = 500;
 
   console.log(`📊 Chuẩn bị nạp: ${provincesToInsert.length} Tỉnh/Thành, ${wardsToInsert.length} Phường/Xã...`);
 
+  // Số community còn gắn địa chỉ, để chứng minh sau khi nạp là KHÔNG mất liên kết.
+  const [{ count: linkedBefore }] = await sql`
+    SELECT count(*)::int AS count FROM communities WHERE ward_code IS NOT NULL
+  `;
+  console.log(`🔗 Trước khi nạp: ${linkedBefore} community đang gắn phường (sẽ giữ nguyên liên kết).`);
+
   await sql.begin(async (tx) => {
-    await tx`DELETE FROM "wards"`;
-    await tx`DELETE FROM "provinces"`;
 
     for (let i = 0; i < provincesToInsert.length; i += BATCH_SIZE) {
       const chunk = provincesToInsert.slice(i, i + BATCH_SIZE);
@@ -228,11 +242,42 @@ async function replaceRegions(provincesToInsert, wardsToInsert) {
       `;
     }
     console.log(`✅ Đã nạp ${wardsToInsert.length} Phường/Xã trực thuộc Tỉnh/Thành vào database chính!`);
+
+    // Phường có trong DB nhưng KHÔNG có trong bộ dữ liệu v2 vừa tải về: báo
+    // tên để người vận hành quyết định, KHÔNG tự xoá. Xoá là việc chạm vào
+    // `communities.ward_code` qua FK, tức là quyết định mất dữ liệu.
+    const incomingWardCodes = wardsToInsert.map((w) => w.code);
+    const staleWards = await tx`
+      SELECT code, name FROM "wards"
+      WHERE NOT (code = ANY(${incomingWardCodes}::varchar[]))
+      ORDER BY code
+    `;
+    if (staleWards.length === 0) {
+      console.log('✅ Không có phường nào trong DB mà bộ dữ liệu v2 đã bỏ — không cần dọn gì.');
+    } else {
+      console.warn(
+        `\n⚠️  ${staleWards.length} phường có trong DB nhưng KHÔNG có trong bộ dữ liệu v2 vừa tải về.`,
+      );
+      console.warn('   Script KHÔNG tự xoá chúng (xoá sẽ đụng FK communities.ward_code).');
+      console.warn('   Nếu cần dọn, hãy xem lại từng mã rồi xoá thủ công:');
+      for (const w of staleWards) console.warn(`     [ward] ${w.code} — ${w.name}`);
+    }
+
+    // Liên kết community -> phường phải y nguyên sau khi nạp.
+    const [{ count: linkedAfter }] = await tx`
+      SELECT count(*)::int AS count FROM communities WHERE ward_code IS NOT NULL
+    `;
+    if (linkedAfter !== linkedBefore) {
+      throw new Error(
+        `Số community gắn phường đổi từ ${linkedBefore} xuống ${linkedAfter} — nạp đã làm mất liên kết, rollback.`,
+      );
+    }
+    console.log(`🔗 Sau khi nạp: ${linkedAfter} community vẫn gắn phường — không mất liên kết nào.`);
   });
 }
 
 async function main() {
-  console.log('🧹 Sẽ thay toàn bộ dữ liệu provinces/wards trong một transaction (hoặc không đổi gì cả).');
+  console.log('🧹 Sẽ nạp provinces/wards bằng UPSERT theo `code` trong một transaction (không xoá dòng nào, hoặc rollback trắng).');
   await ensureSchema();
   const { provinces, wards } = await fetchRegions();
   await replaceRegions(provinces, wards);
