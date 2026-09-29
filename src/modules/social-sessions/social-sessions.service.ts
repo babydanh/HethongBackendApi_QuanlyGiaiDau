@@ -33,6 +33,27 @@ type SessionRow = typeof schema.socialSessions.$inferSelect;
 const MANAGER_ROLES = new Set(['OWNER', 'MODERATOR']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * TẠM TẮT: không suy toạ độ từ tâm hình học phường nữa.
+ *
+ * LÝ DO: địa chỉ đã chuyển sang danh mục provinces.open-api.vn/api/v2 — vốn
+ * KHÔNG mang toạ độ — nên lớp hình học (GeoJSON/PostGIS) bị rút khỏi hệ
+ * thống. Ở production `wards.center_lat` / `center_lng` luôn NULL nên
+ * GET /regions/wards/centroid luôn trả null: lời gọi này chỉ tốn query mà
+ * không bao giờ ghi được toạ độ nào. Kèo không có toạ độ vẫn hợp lệ — host
+ * bấm ghim tay thì lưu đúng toạ độ đó, không ghim thì để NULL.
+ *
+ * BẬT LẠI cần đủ BA việc, không chỉ sửa dòng dưới:
+ *   1. Đặt hằng này thành true.
+ *   2. Nạp lại `wards.center_lat` / `wards.center_lng` — chỉ
+ *      seed-ward-boundaries.js mới điền 2 cột này (ST_PointOnSurface trên
+ *      polygon), và script cần bảng ranh giới khớp với danh mục v2.
+ *   3. Bật lại lời gọi `node seed-ward-boundaries.js` trong bước
+ *      "Seed provinces/wards (v2) on VPS" của .github/workflows/deploy.yml
+ *      (đang bị tắt vì snapshot ranh giới chỉ phủ ~80% danh mục v2).
+ */
+const DERIVE_LOCATION_FROM_WARD_CENTROID = false;
+
 function apiError(
   ExceptionType:
     | typeof BadRequestException
@@ -88,12 +109,17 @@ export class SocialSessionsService {
    *
    * Không bao giờ ghi đè tọa độ host đã ghim — ghim tay luôn chính xác hơn tâm
    * phường, và tâm phường có thể lệch km nếu phường bị kéo dài.
+   *
+   * Đang TẮT theo DERIVE_LOCATION_FROM_WARD_CENTROID (hằng đầu file): hàm trả
+   * về null ngay nên không có lời gọi nào tới RegionsService. Bật lại bằng cách
+   * sửa hằng, phần còn lại của hàm giữ nguyên.
    */
   private async deriveLocationFromRegion(
     provinceCode: string | null | undefined,
     wardCode: string | null | undefined,
     hasPinnedCoordinates: boolean,
   ): Promise<{ latitude: number | null; longitude: number | null }> {
+    if (!DERIVE_LOCATION_FROM_WARD_CENTROID) return { latitude: null, longitude: null };
     if (hasPinnedCoordinates) return { latitude: null, longitude: null };
     if (!provinceCode || !wardCode) {
       return { latitude: null, longitude: null };
@@ -214,6 +240,8 @@ export class SocialSessionsService {
     const categoryId = await this.resolveCategoryId(dto.sport);
     assertLocationPair(dto.latitude, dto.longitude);
     // Chiều địa chỉ → ghim: đủ tỉnh + phường mà host CHƯA ghim thì lấy tâm phường.
+    // TẠM KHÔNG CHẠY (DERIVE_LOCATION_FROM_WARD_CENTROID = false): xem hằng đầu
+    // file. Host ghim tay vẫn lưu đúng toạ độ, không ghim thì để null.
     const derived = await this.deriveLocationFromRegion(
       dto.provinceCode,
       dto.wardCode,
@@ -705,6 +733,8 @@ export class SocialSessionsService {
     if (dto.longitude !== undefined) patch.longitude = dto.longitude;
     // Chưa có pin nào trên bản ghi + payload không mang toạ độ: lấy tâm phường
     // để kèo vẫn hiện được trên bản đồ. Pin sẵn có thì không đụng.
+    // TẠM KHÔNG CHẠY (DERIVE_LOCATION_FROM_WARD_CENTROID = false): payload không
+    // mang toạ độ thì giữ nguyên null, đừng ghi đè pin cũ.
     if (
       dto.latitude === undefined &&
       dto.longitude === undefined &&
