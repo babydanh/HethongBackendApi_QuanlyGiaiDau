@@ -25,6 +25,7 @@ import {
   UpdateSocialSessionDto,
 } from './dto/social-session.dto';
 import { SocialSessionsRepository } from './social-sessions.repository';
+import { RegionsService } from '../regions/regions.service';
 
 type Actor = { id: string; roles?: string[] };
 type SessionRow = typeof schema.socialSessions.$inferSelect;
@@ -77,8 +78,32 @@ export class SocialSessionsService {
 
   constructor(
     private readonly repository: SocialSessionsRepository,
-    @Optional() private readonly chatService?: ChatService,
+    @Optional() private readonly chatService: ChatService | undefined,
+    private readonly regionsService: RegionsService,
   ) {}
+
+  /**
+   * Chiều địa chỉ → ghim: khi host đã chọn đủ tỉnh + phường mà CHƯA ghim tọa
+   * độ, lấy tâm hình học của phường làm điểm khởi tạo.
+   *
+   * Không bao giờ ghi đè tọa độ host đã ghim — ghim tay luôn chính xác hơn tâm
+   * phường, và tâm phường có thể lệch km nếu phường bị kéo dài.
+   */
+  private async deriveLocationFromRegion(
+    provinceCode: string | null | undefined,
+    wardCode: string | null | undefined,
+    hasPinnedCoordinates: boolean,
+  ): Promise<{ latitude: number | null; longitude: number | null }> {
+    if (hasPinnedCoordinates) return { latitude: null, longitude: null };
+    if (!provinceCode || !wardCode) {
+      return { latitude: null, longitude: null };
+    }
+    const centroid = await this.regionsService.getCentroid({ provinceCode, wardCode });
+    if (centroid?.centerLat == null || centroid.centerLng == null) {
+      return { latitude: null, longitude: null };
+    }
+    return { latitude: centroid.centerLat, longitude: centroid.centerLng };
+  }
 
   private isPlatformAdmin(actor: Actor): boolean {
     return Boolean(actor.roles?.some((role) => role === UserRole.ADMIN));
@@ -188,6 +213,12 @@ export class SocialSessionsService {
   async create(actor: Actor, dto: CreateSocialSessionDto, idempotencyKey?: string) {
     const categoryId = await this.resolveCategoryId(dto.sport);
     assertLocationPair(dto.latitude, dto.longitude);
+    // Chiều địa chỉ → ghim: đủ tỉnh + phường mà host CHƯA ghim thì lấy tâm phường.
+    const derived = await this.deriveLocationFromRegion(
+      dto.provinceCode,
+      dto.wardCode,
+      dto.latitude != null && dto.longitude != null,
+    );
     if (dto.communityId) {
       const community = await this.repository.findCommunityById(dto.communityId);
       if (!community) apiError(NotFoundException, 'COMMUNITY_NOT_FOUND');
@@ -271,8 +302,10 @@ export class SocialSessionsService {
       durationMinutes: dto.durationMinutes ?? 120,
       venueName: venue?.name ?? dto.venueName.trim(),
       venueAddress: venue?.locationAddress ?? dto.venueAddress.trim(),
-      latitude: dto.latitude ?? null,
-      longitude: dto.longitude ?? null,
+      latitude: dto.latitude ?? derived.latitude,
+      longitude: dto.longitude ?? derived.longitude,
+      provinceCode: dto.provinceCode ?? null,
+      wardCode: dto.wardCode ?? null,
       venueId: venue?.id ?? null,
       courtId: court?.id ?? null,
       genderRequirement: dto.genderRequirement ?? 'ANY',
@@ -666,8 +699,28 @@ export class SocialSessionsService {
       if (dto.venueName !== undefined) patch.venueName = dto.venueName.trim();
       if (dto.venueAddress !== undefined) patch.venueAddress = dto.venueAddress.trim();
     }
+    if (dto.provinceCode !== undefined) patch.provinceCode = dto.provinceCode;
+    if (dto.wardCode !== undefined) patch.wardCode = dto.wardCode;
     if (dto.latitude !== undefined) patch.latitude = dto.latitude;
     if (dto.longitude !== undefined) patch.longitude = dto.longitude;
+    // Chưa có pin nào trên bản ghi + payload không mang toạ độ: lấy tâm phường
+    // để kèo vẫn hiện được trên bản đồ. Pin sẵn có thì không đụng.
+    if (
+      dto.latitude === undefined &&
+      dto.longitude === undefined &&
+      session.latitude == null &&
+      session.longitude == null
+    ) {
+      const derivedUpdate = await this.deriveLocationFromRegion(
+        dto.provinceCode ?? session.provinceCode,
+        dto.wardCode ?? session.wardCode,
+        false,
+      );
+      if (derivedUpdate.latitude != null && derivedUpdate.longitude != null) {
+        patch.latitude = derivedUpdate.latitude;
+        patch.longitude = derivedUpdate.longitude;
+      }
+    }
     if (dto.maxSlots !== undefined) patch.maxSlots = dto.maxSlots;
     if (dto.feePerSlot !== undefined) patch.feePerSlot = dto.feePerSlot;
     if (dto.levelRequirement !== undefined) patch.levelRequirement = dto.levelRequirement;

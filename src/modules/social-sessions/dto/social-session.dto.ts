@@ -106,6 +106,24 @@ export class CreateSocialSessionDto {
   venueId?: string;
 
   @ApiPropertyOptional({
+    example: '79',
+    description: 'Mã tỉnh/thành phố (suy ra từ địa chỉ hoặc từ pin)',
+  })
+  @IsString()
+  @MaxLength(20)
+  @IsOptional()
+  provinceCode?: string;
+
+  @ApiPropertyOptional({
+    example: '27349',
+    description: 'Mã phường/xã (suy ra từ địa chỉ hoặc từ pin)',
+  })
+  @IsString()
+  @MaxLength(20)
+  @IsOptional()
+  wardCode?: string;
+
+  @ApiPropertyOptional({
     format: 'uuid',
     description: 'ID sân thuộc venueId đã chọn',
   })
@@ -228,6 +246,18 @@ export class UpdateSocialSessionDto {
   @IsUUID()
   @IsOptional()
   courtId?: string | null;
+
+  @ApiPropertyOptional({ maxLength: 20, nullable: true, description: 'Mã tỉnh/thành phố; null để xoá' })
+  @IsString()
+  @MaxLength(20)
+  @IsOptional()
+  provinceCode?: string | null;
+
+  @ApiPropertyOptional({ maxLength: 20, nullable: true, description: 'Mã phường/xã; null để xoá' })
+  @IsString()
+  @MaxLength(20)
+  @IsOptional()
+  wardCode?: string | null;
 
   @ApiPropertyOptional({ enum: SOCIAL_GENDER_REQUIREMENTS })
   @ValidateIf((_object, value) => value !== undefined)

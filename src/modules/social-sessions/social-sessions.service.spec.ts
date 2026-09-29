@@ -7,6 +7,7 @@ import {
 import { SocialSessionsService } from './social-sessions.service';
 import { SocialSessionsRepository } from './social-sessions.repository';
 import { ChatService } from '../chat/chat.service';
+import { RegionsService } from '../regions/regions.service';
 
 function makeRepositoryMock(): jest.Mocked<SocialSessionsRepository> {
   return {
@@ -43,6 +44,8 @@ function makeRepositoryMock(): jest.Mocked<SocialSessionsRepository> {
   } as unknown as jest.Mocked<SocialSessionsRepository>;
 }
 
+const regionsStub = { getCentroid: jest.fn() } as unknown as RegionsService;
+
 const CATEGORY_ID = '11111111-1111-4111-8111-111111111111';
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
 const HOST_ID = '33333333-3333-4333-8333-333333333333';
@@ -67,6 +70,8 @@ function baseSession(overrides = {}) {
     latitude: null,
     longitude: null,
     venueGeolocation: null,
+    provinceCode: null,
+    wardCode: null,
     venueId: null,
     courtId: null,
     genderRequirement: 'ANY',
@@ -105,7 +110,7 @@ describe('SocialSessionsService', () => {
 
   beforeEach(() => {
     repository = makeRepositoryMock();
-    service = new SocialSessionsService(repository);
+    service = new SocialSessionsService(repository, undefined, regionsStub);
     repository.findCategoryBySlug.mockResolvedValue({
       id: CATEGORY_ID,
       slug: 'pickleball',
@@ -887,6 +892,7 @@ describe('SocialSessionsService', () => {
       const svc = new SocialSessionsService(
         repository,
         chat as unknown as ChatService,
+        regionsStub,
       );
       return { svc, chat };
     }

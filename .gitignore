@@ -80,3 +80,6 @@ secrets/
 .svn/
 *.svn*
 
+# Boundary GeoJSON cache (seed-ward-boundaries.js input)
+.cache/
+

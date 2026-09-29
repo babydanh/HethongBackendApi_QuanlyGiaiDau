@@ -59,6 +59,10 @@ export const socialSessions = pgTable(
     latitude: doublePrecision('latitude'),
     longitude: doublePrecision('longitude'),
     venueGeolocation: geography('venue_geolocation'),
+    // Mã địa phương suy ra từ địa chỉ hoặc từ pin (nullable, không FK — xem
+    // migration 2026-09-29). Cho phép tái dựng vùng khi mở lại kèo cũ.
+    provinceCode: varchar('province_code', { length: 20 }),
+    wardCode: varchar('ward_code', { length: 20 }),
     venueId: uuid('venue_id').references(() => tournamentVenues.id, {
       onDelete: 'set null',
     }),
@@ -136,6 +140,7 @@ export const socialSessions = pgTable(
       'gist',
       table.venueGeolocation,
     ),
+    wardCodeIdx: index('social_session_ward_code_idx').on(table.wardCode),
     shortCodeIdx: uniqueIndex('social_session_short_code_idx').on(table.shortCode),
   }),
 );

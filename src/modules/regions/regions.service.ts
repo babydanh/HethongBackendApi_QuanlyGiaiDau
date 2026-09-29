@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { RegionsRepository } from './regions.repository';
-import { QueryRegionDto, QueryWardDto } from './dto/query-region.dto';
+import {
+  QueryCentroidDto,
+  QueryRegionDto,
+  QueryResolveDto,
+  QueryWardDto,
+} from './dto/query-region.dto';
 
 @Injectable()
 export class RegionsService {
@@ -12,5 +17,17 @@ export class RegionsService {
 
   async getWards(query: QueryWardDto) {
     return this.regionsRepository.findWards(query);
+  }
+
+  /**
+   * Cả hai tra cứu dưới đây trả null thay vì ném lỗi: điểm nằm ngoài vùng có
+   * ranh giới là nhánh bình thường, không phải 500.
+   */
+  async resolveByPoint(query: QueryResolveDto) {
+    return this.regionsRepository.resolveByPoint(query);
+  }
+
+  async getCentroid(query: QueryCentroidDto) {
+    return this.regionsRepository.findCentroid(query);
   }
 }

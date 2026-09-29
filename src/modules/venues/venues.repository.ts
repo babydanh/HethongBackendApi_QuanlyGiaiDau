@@ -91,7 +91,10 @@ export class VenuesRepository {
 
   async create(userId: string, data: CreateVenueDto) {
     let geographyValue: SQL | null = null;
-    if (data.longitude && data.latitude) {
+    // `!= null`, KHÔNG phải truthy: 0 là toạ độ hợp lệ (xích đạo / Greenwich)
+    // nhưng falsy, nên truthy check âm thầm vứt mất các sân nằm trên đường
+    // xích đạo hoặc kinh tuyến 0.
+    if (data.longitude != null && data.latitude != null) {
       geographyValue = sql`ST_SetSRID(ST_MakePoint(${data.longitude}, ${data.latitude}), 4326)`;
     }
 
@@ -114,7 +117,7 @@ export class VenuesRepository {
 
   async update(id: string, userId: string, data: UpdateVenueDto) {
     let geographyValue: SQL | undefined = undefined;
-    if (data.longitude && data.latitude) {
+    if (data.longitude != null && data.latitude != null) {
       geographyValue = sql`ST_SetSRID(ST_MakePoint(${data.longitude}, ${data.latitude}), 4326)`;
     }
 

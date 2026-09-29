@@ -1,4 +1,18 @@
-import { pgTable, uuid, varchar, timestamp } from 'drizzle-orm/pg-core';
+import {
+  customType,
+  doublePrecision,
+  index,
+  pgTable,
+  uuid,
+  varchar,
+  timestamp,
+} from 'drizzle-orm/pg-core';
+
+const geography = customType<{ data: string }>({
+  dataType() {
+    return 'geography(MultiPolygon, 4326)';
+  },
+});
 
 export const provinces = pgTable('provinces', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -13,18 +27,33 @@ export const provinces = pgTable('provinces', {
     .notNull(),
 });
 
-export const wards = pgTable('wards', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  code: varchar('code', { length: 20 }).notNull().unique(),
-  name: varchar('name', { length: 255 }).notNull(),
-  nameEn: varchar('name_en', { length: 255 }),
-  fullName: varchar('full_name', { length: 255 }),
-  fullNameEn: varchar('full_name_en', { length: 255 }),
-  codeName: varchar('code_name', { length: 255 }),
-  provinceCode: varchar('province_code', { length: 20 })
-    .references(() => provinces.code, { onDelete: 'cascade' })
-    .notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const wards = pgTable(
+  'wards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    code: varchar('code', { length: 20 }).notNull().unique(),
+    name: varchar('name', { length: 255 }).notNull(),
+    nameEn: varchar('name_en', { length: 255 }),
+    fullName: varchar('full_name', { length: 255 }),
+    fullNameEn: varchar('full_name_en', { length: 255 }),
+    codeName: varchar('code_name', { length: 255 }),
+    provinceCode: varchar('province_code', { length: 20 })
+      .references(() => provinces.code, { onDelete: 'cascade' })
+      .notNull(),
+    // Ranh giới hành chính (GeoJSON WGS84) + tâm hình học.
+    // `boundary` nullable: đơn vị chưa nạp được polygon vẫn dùng được cho
+    // picker tên/tỉnh; ST_Contains trên NULL trả NULL nên resolve chỉ trả null.
+    boundary: geography('boundary'),
+    centerLat: doublePrecision('center_lat'),
+    centerLng: doublePrecision('center_lng'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    boundaryGistIdx: index('wards_boundary_gist_idx').using(
+      'gist',
+      table.boundary,
+    ),
+  }),
+);

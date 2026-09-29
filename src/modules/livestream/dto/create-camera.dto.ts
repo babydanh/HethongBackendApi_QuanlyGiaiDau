@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -23,6 +24,15 @@ export class CreateCameraDto {
   })
   @IsIn(['PUSH', 'PULL'])
   mode!: 'PUSH' | 'PULL';
+
+  @ApiPropertyOptional({
+    example: '9f1c2b3a-0000-4000-8000-000000000001',
+    description:
+      'Sân mà camera phục vụ. Khi có courtId, hệ thống tự gán camera này cho mọi trận diễn tại sân đó.',
+  })
+  @IsOptional()
+  @IsUUID()
+  courtId?: string;
 
   @ApiProperty({
     example: 'RTMP',

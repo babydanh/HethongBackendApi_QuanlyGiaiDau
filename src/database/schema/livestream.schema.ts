@@ -22,6 +22,9 @@ export const livestreamCameras = pgTable(
     tournamentId: uuid('tournament_id')
       .references(() => tournaments.id, { onDelete: 'cascade' })
       .notNull(),
+    // Sân mà camera này phục vụ. NULL nghĩa là camera chưa gắn sân, hoặc sân đã bị xoá —
+    // URL vẫn giữ nguyên để BTC gán lại thay vì khai lại từ đầu.
+    courtId: uuid('court_id').references(() => venueCourts.id, { onDelete: 'set null' }),
     name: varchar('name', { length: 255 }).notNull(),
     mode: varchar('mode', { length: 20 }).default('PUSH').notNull(),
     protocol: varchar('protocol', { length: 20 }).default('RTMP').notNull(),
@@ -39,6 +42,7 @@ export const livestreamCameras = pgTable(
   },
   (table) => ({
     uniqueStreamName: uniqueIndex('livestream_cameras_stream_name_unique_idx').on(table.streamName),
+    idxLivestreamCamerasCourt: index('idx_livestream_cameras_court').on(table.courtId),
     idxLivestreamCamerasTournament: index('idx_livestream_cameras_tournament').on(table.tournamentId),
   }),
 );
