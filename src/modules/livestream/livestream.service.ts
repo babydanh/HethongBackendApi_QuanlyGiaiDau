@@ -188,7 +188,7 @@ export class LivestreamService {
     await this.assertCourtUsableByTournament(courtId, tournamentId);
 
     const trimmed = data.playbackUrl?.trim();
-    const existing = await this.livestreamRepository.findPullCameraByCourt(courtId);
+    const existing = await this.livestreamRepository.findPullCameraByCourt(courtId, tournamentId);
 
     if (!trimmed) {
       if (!existing) {
@@ -331,6 +331,36 @@ export class LivestreamService {
     );
   }
 
+  /**
+   * Gán camera PULL của sân cho trận khi BTC xếp trận vào sân đó.
+   *
+   * Sân có khai URL phát thì mọi trận xếp vào sân đó tự chạy, không cần BTC
+   * chọn camera tay. Trận đã được gán camera tay vẫn giữ nguyên, trừ khi BTC vừa
+   * đổi sân: lúc đó camera cũ không còn đúng nên phải gán lại camera của sân mới.
+   */
+  async autoAssignCourtCamera(
+    matchId: string,
+    tournamentId: string,
+    courtId: string | null,
+    options: { courtChanged: boolean },
+  ) {
+    if (!courtId) return null;
+
+    const camera = await this.livestreamRepository.findPullCameraByCourt(courtId, tournamentId);
+    if (!camera) return null;
+
+    if (!options.courtChanged) {
+      const current = await this.livestreamRepository.findMatchLivestream(matchId);
+      if (current?.cameraId) return null;
+    }
+
+    return this.livestreamRepository.assignCameraToMatch(
+      matchId,
+      camera.id,
+      this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '',
+    );
+  }
+
   async startMatchStream(matchId: string, user: JwtPayload) {
     const match = await this.assertCanControlMatchStream(matchId, user);
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
@@ -408,7 +438,7 @@ export class LivestreamService {
     // Trận chưa gán camera: lấy URL của sân. Đây là luồng mới — BTC khai URL một
     // lần ở setting sân, mọi trận xếp vào sân đó tự phát, không cần gán tay.
     const courtCamera = match.courtId
-      ? await this.livestreamRepository.findPullCameraByCourt(match.courtId)
+      ? await this.livestreamRepository.findPullCameraByCourt(match.courtId, match.tournamentId)
       : null;
 
     // Sân có URL KHÔNG có nghĩa là đang phát. Chỉ trận đã bắt đầu (ONGOING) mới

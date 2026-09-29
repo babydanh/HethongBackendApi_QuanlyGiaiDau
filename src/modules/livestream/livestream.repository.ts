@@ -129,13 +129,21 @@ export class LivestreamRepository {
   }
 
 
-  async findPullCameraByCourt(courtId: string) {
+  /**
+   * Tìm camera PULL gắn với sân trong đúng giải đấu.
+   *
+   * Một sân có thể dùng cho nhiều giải, mỗi giải một camera riêng, nên bắt buộc
+   * lọc theo tournamentId — lọc theo courtId một mình sẽ trả camera của giải
+   * khác và làm lộ URL phát sang giải không liên quan.
+   */
+  async findPullCameraByCourt(courtId: string, tournamentId: string) {
     const [camera] = await this.db
       .select()
       .from(schema.livestreamCameras)
       .where(
         and(
           eq(schema.livestreamCameras.courtId, courtId),
+          eq(schema.livestreamCameras.tournamentId, tournamentId),
           eq(schema.livestreamCameras.mode, 'PULL'),
           isNull(schema.livestreamCameras.deletedAt),
         ),
