@@ -49,7 +49,7 @@ export class CreateCameraDto {
       'Bắt buộc khi mode=PULL. URL phát do bên ngoài cung cấp (.live.flv hoặc /hls.m3u8).',
   })
   @IsOptional()
-  @IsUrl({ require_protocol: true, protocols: ['https'] })
+  @IsUrl({ require_protocol: true, protocols: ['http', 'https'] })
   @MaxLength(2000)
   playbackUrl?: string;
 

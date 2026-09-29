@@ -8,7 +8,7 @@ export class SetCourtPlaybackUrlDto {
       'URL phát trực tiếp của sân. Bỏ trống (hoặc gửi rỗng) để xoá URL và ngừng phát sân này.',
   })
   @IsOptional()
-  @IsUrl({ require_protocol: true, protocols: ['https'] })
+  @IsUrl({ require_protocol: true, protocols: ['http', 'https'] })
   @MaxLength(2000)
   playbackUrl?: string;
 

@@ -302,10 +302,12 @@ export class LivestreamService {
       throw new BadRequestException('URL phát trực tiếp không hợp lệ.');
     }
 
-    // Trang live chạy HTTPS nên URL http:// sẽ bị trình duyệt chặn mixed content
-    // và màn hình đen. Chỉ nhận https://.
-    if (parsed.protocol !== 'https:') {
-      throw new BadRequestException('URL phát phải dùng https:// để không bị chặn mixed content.');
+    // Cho phép http:// vì media server nội bộ ở sân thường chỉ có HTTP. Lưu ý: trang
+    // live chạy HTTPS nên trình duyệt vẫn chặn mixed content — video http:// sẽ không
+    // hiện cho tới khi URL đó được proxy qua HTTPS. Chặn protocol khác (rtmp, ftp,
+    // javascript, data) vì mpegts.js và hls.js đều từ chối.
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new BadRequestException('URL phát phải dùng http:// hoặc https://.');
     }
 
     return trimmed;
