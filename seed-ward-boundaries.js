@@ -330,13 +330,17 @@ async function main() {
       geometries.push(JSON.stringify(toMultiPolygonGeometry(geoJson)));
     }
     // ST_GeomFromGeoJSON mặc định SRID 4326 cho GeoJSON nên khớp cột
-    // geography(...,4326). ST_Multi chuẩn hoá Polygon -> MultiPolygon, và
-    // ST_Y/ST_X trên centroid geometry trả về tâm hình học.
+    // geography(...,4326). ST_Multi chuẩn hoá Polygon -> MultiPolygon.
+    // Điểm tâm lấy bằng hàm point-on-surface của PostGIS, KHÔNG dùng tâm
+    // hình học: với ward lõm / nhiều đảo / kéo dài, tâm ấy có thể nằm NGOÀI
+    // ranh giới, khiến pin tự đặt cho host rơi vào phường bên cạnh — pin vẫn
+    // lưu được và vẫn trông hợp lệ, nên lỗi này hoàn toàn im lặng.
+    // point-on-surface luôn trả về một điểm nằm bên trong ward.
     const rows = await sql`
       UPDATE wards AS w SET
         boundary = ST_Multi(ST_GeomFromGeoJSON(g.geojson))::geography,
-        center_lat = ST_Y(ST_Centroid(ST_Multi(ST_GeomFromGeoJSON(g.geojson))::geometry)),
-        center_lng = ST_X(ST_Centroid(ST_Multi(ST_GeomFromGeoJSON(g.geojson))::geometry))
+        center_lat = ST_Y(ST_PointOnSurface(ST_Multi(ST_GeomFromGeoJSON(g.geojson))::geometry)),
+        center_lng = ST_X(ST_PointOnSurface(ST_Multi(ST_GeomFromGeoJSON(g.geojson))::geometry))
       FROM (SELECT unnest(${geometries}::text[]) AS geojson, unnest(${chunk.map((e) => e.ward.code)}::varchar[]) AS code) AS g
       WHERE w.code = g.code
       RETURNING w.code
