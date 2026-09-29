@@ -72,6 +72,9 @@ export const envValidationSchema = Joi.object({
     .allow('')
     .optional()
     .default('srt://localhost:8890'),
+  // Danh sách host được phép proxy, phân tách bởi dấu phẩy. Rỗng = tắt proxy.
+  // Chặn mặc định để endpoint không bị dùng làm SSRF vào mạng nội bộ.
+  LIVESTREAM_PROXY_ALLOWED_HOSTS: Joi.string().allow('').optional().default(''),
   MEDIA_PUBLIC_BASE_URL: Joi.string().allow('').optional().default(''),
   MEDIA_RTMP_BASE_URL: Joi.string().allow('').optional().default(''),
   MEDIA_SRT_BASE_URL: Joi.string().allow('').optional().default(''),

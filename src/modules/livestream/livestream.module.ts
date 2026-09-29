@@ -12,6 +12,7 @@ import { LiveSessionService } from './live-session.service';
 import { CameraDeviceService } from './camera-device.service';
 import { LivestreamHealthProcessor } from './livestream-health.processor';
 import { LivestreamHealthQueue } from './livestream-health.queue';
+import { LivestreamProxyService } from './livestream-proxy.service';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { LivestreamHealthQueue } from './livestream-health.queue';
     FacebookPageConnectionService,
     LiveSessionService,
     CameraDeviceService,
+    LivestreamProxyService,
     LivestreamHealthProcessor,
     LivestreamHealthQueue,
   ],

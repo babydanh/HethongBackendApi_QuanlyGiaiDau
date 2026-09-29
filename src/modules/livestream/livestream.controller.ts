@@ -7,9 +7,10 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Query,
-  Res,
   Put,
+  Query,
+  Req,
+  Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FacebookPageConnectionService } from './facebook-page-connection.service';
@@ -29,10 +30,10 @@ import { CreateDevicePairingTokenDto } from './dto/create-device-pairing-token.d
 import { HeartbeatCameraDeviceDto } from './dto/heartbeat-camera-device.dto';
 import { PairCameraDeviceDto } from './dto/pair-camera-device.dto';
 import { UpdateCameraDeviceDto } from './dto/update-camera-device.dto';
-
+import { LivestreamProxyService } from './livestream-proxy.service';
 import { SkipThrottle } from '@nestjs/throttler';
 import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
 @ApiTags('livestream')
 @SkipThrottle()
@@ -43,7 +44,24 @@ export class LivestreamController {
     private readonly liveSessionService: LiveSessionService,
     private readonly cameraDeviceService: CameraDeviceService,
     private readonly facebookPageConnectionService: FacebookPageConnectionService,
+    private readonly livestreamProxyService: LivestreamProxyService,
   ) {}
+
+  @Public()
+  @SkipAppKey()
+  @Get('proxy')
+  @ApiOperation({
+    summary: 'Proxy luồng http:// của media server qua HTTPS cho trang live',
+    description:
+      'Chỉ host nằm trong LIVESTREAM_PROXY_ALLOWED_HOSTS được phép. Cần khi media server ở sân chỉ có HTTP: trang live chạy HTTPS nên trình duyệt chặn mixed content.',
+  })
+  proxyStream(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('url') url?: string,
+  ) {
+    return this.livestreamProxyService.proxyStream(req, res, url);
+  }
 
   @Post('sessions/prepare')
   @Verified()
