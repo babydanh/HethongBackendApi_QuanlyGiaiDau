@@ -49,7 +49,7 @@ export class LivestreamController {
 
   @Public()
   @SkipAppKey()
-  @Get('proxy/:file')
+  @Get('proxy/{*file}')
   @ApiOperation({
     summary: 'Proxy luồng http:// của media server qua HTTPS cho trang live',
     description:
