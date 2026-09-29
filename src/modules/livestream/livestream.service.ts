@@ -31,17 +31,6 @@ export class LivestreamService {
     return this.configService.get<string>('LIVESTREAM_MEDIA_SERVER_HOST') || 'media.aqvision.net';
   }
 
-  private buildPlaybackEndpoints(streamKey: string) {
-    const host = this.getMediaServerHost();
-    const cleanKey = streamKey.replace(/^\/+|\/+$/g, '');
-    return {
-      flv: `https://${host}/live/${cleanKey}.live.flv`,
-      hls: `https://${host}/live/${cleanKey}/hls.m3u8`,
-      webrtc: `https://${host}/index/api/webrtc?app=live&stream=${cleanKey}&type=play`,
-      rtsp: `rtsp://${host}:554/live/${cleanKey}`,
-    };
-  }
-
   private getRtmpBaseUrl() {
     return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://sporto.asia:1935/live';
   }
@@ -302,12 +291,11 @@ export class LivestreamService {
       throw new BadRequestException('URL phát trực tiếp không hợp lệ.');
     }
 
-    // Cho phép http:// vì media server nội bộ ở sân thường chỉ có HTTP. Lưu ý: trang
-    // live chạy HTTPS nên trình duyệt vẫn chặn mixed content — video http:// sẽ không
-    // hiện cho tới khi URL đó được proxy qua HTTPS. Chặn protocol khác (rtmp, ftp,
-    // javascript, data) vì mpegts.js và hls.js đều từ chối.
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new BadRequestException('URL phát phải dùng http:// hoặc https://.');
+    // Chỉ nhận https://. Trang live phục vụ qua HTTPS nên nguồn http:// bị trình
+    // duyệt chặn mixed content và khán giả chỉ thấy màn hình đen — từ chối ngay
+    // lúc lưu thay vì để BTC nhập xong mới phát hiện.
+    if (parsed.protocol !== 'https:') {
+      throw new BadRequestException('URL phát phải dùng https://.');
     }
 
     return trimmed;
@@ -406,19 +394,11 @@ export class LivestreamService {
     if (stream?.cameraId && stream.cameraName) {
       const isLive = stream.streamStatus === 'LIVE';
       const playbackUrl = isLive ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null;
-      const streamIdentifier = stream.streamName || stream.streamKey;
-      // PULL camera phát từ URL của bên ngoài nên endpoint phải bám theo URL đó,
-      // không dựng lại từ streamName (streamName lúc đó chỉ là mã sinh nội bộ).
-      const endpoints = isLive
-        ? this.resolvePlaybackEndpoints(streamIdentifier, stream.cameraMode, playbackUrl)
-        : null;
 
       return {
         matchId,
         streamStatus: stream.streamStatus,
         playbackUrl,
-        streamId: streamIdentifier ?? null,
-        endpoints,
         cameraName: stream.cameraName,
         startedAt: stream.startedAt,
         endedAt: stream.endedAt,
@@ -440,8 +420,6 @@ export class LivestreamService {
         matchId,
         streamStatus: 'LIVE',
         playbackUrl: courtUrl,
-        streamId: courtCamera.streamName,
-        endpoints: this.deriveEndpointsFromPlaybackUrl(courtUrl!),
         cameraName: courtCamera.name,
         startedAt: null,
         endedAt: null,
@@ -452,32 +430,4 @@ export class LivestreamService {
   }
 
 
-  private resolvePlaybackEndpoints(
-    streamIdentifier: string | null,
-    cameraMode: string | null | undefined,
-    playbackUrl: string | null,
-  ) {
-    if (cameraMode !== 'PULL') {
-      return streamIdentifier ? this.buildPlaybackEndpoints(streamIdentifier) : null;
-    }
-
-    if (!playbackUrl) return null;
-    return this.deriveEndpointsFromPlaybackUrl(playbackUrl);
-  }
-  private deriveEndpointsFromPlaybackUrl(playbackUrl: string) {
-    // Chỉ dịch được khi URL theo đúng dialect của media server. URL lạ (ví dụ
-    // /{stream}/index.m3u8 của MediaMTX) không suy ra được biến thể FLV.
-    const isAqvisionFlv = playbackUrl.includes('.live.flv');
-    const isAqvisionHls = playbackUrl.includes('/hls.m3u8');
-    if (!isAqvisionFlv && !isAqvisionHls) {
-      return { flv: null, hls: playbackUrl, webrtc: null, rtsp: null };
-    }
-
-    return {
-      flv: isAqvisionFlv ? playbackUrl : playbackUrl.replace('/hls.m3u8', '.live.flv'),
-      hls: isAqvisionHls ? playbackUrl : playbackUrl.replace('.live.flv', '/hls.m3u8'),
-      webrtc: null,
-      rtsp: null,
-    };
-  }
 }
