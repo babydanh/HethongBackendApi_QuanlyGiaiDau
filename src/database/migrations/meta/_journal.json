@@ -281,6 +281,13 @@
       "when": 1790588281238,
       "tag": "2026-09-29_livestream_camera_court",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790688825554,
+      "tag": "2026-09-29_enable_unaccent",
+      "breakpoints": true
     }
   ]
 }

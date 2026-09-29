@@ -7,7 +7,6 @@ import {
   eq,
   exists,
   gte,
-  ilike,
   inArray,
   isNull,
   lte,
@@ -71,6 +70,31 @@ function distanceKmExpr(lat: number, lng: number) {
   return sql<
     number | null
   >`(ST_Distance(${schema.socialSessions.venueGeolocation}, ${userRefPoint(lat, lng)}) / 1000)`;
+}
+
+/**
+ * Điều kiện lọc theo từ khoá tìm kiếm kèo (tiêu đề / tên sân / địa chỉ sân).
+ *
+ * VÌ SAO BỎ DẤU CẢ HAI VẾ: người dùng gõ trên bàn phím điện thoại không bấm
+ * dấu ("bong da") vẫn phải ra "Bóng đá". ILIKE thẳng trên cột gốc sẽ trả 0
+ * kết quả — ô tìm kiếm luôn rỗng còn tệ hơn không có ô tìm kiếm. unaccent()
+ * chỉ cần extension, đã bật ở migration 2026-09-29_enable_unaccent.sql.
+ *
+ * ĐÁNH ĐỔI: unaccent() là hàm nên không dùng được btree index, truy vấn thành
+ * sequential scan. Chấp nhận vì bảng social_sessions nhỏ; KHÔNG thêm
+ * GIN/tsvector ở đây — lý do đã ghi trong file migration.
+ *
+ * Một `sql.param` dùng chung cho cả 3 nhánh: cùng một tham số, drizzle bind
+ * thành $1/$2/$3 cùng giá trị. NULL vẫn ra NULL nên cột NULL không khớp,
+ * y như ILIKE cũ.
+ */
+function sessionSearchMatch(keyword: string) {
+  const pattern = sql.param(`%${keyword}%`);
+  return or(
+    sql`unaccent(${schema.socialSessions.title}) ILIKE unaccent(${pattern})`,
+    sql`unaccent(${schema.socialSessions.venueName}) ILIKE unaccent(${pattern})`,
+    sql`unaccent(${schema.socialSessions.venueAddress}) ILIKE unaccent(${pattern})`,
+  )!;
 }
 
 export interface GeoQueryFilters {
@@ -312,14 +336,7 @@ export class SocialSessionsRepository {
     }
     const keyword = filters.search?.trim();
     if (keyword) {
-      const like = `%${keyword}%`;
-      conditions.push(
-        or(
-          ilike(schema.socialSessions.title, like),
-          ilike(schema.socialSessions.venueName, like),
-          ilike(schema.socialSessions.venueAddress, like),
-        )!,
-      );
+      conditions.push(sessionSearchMatch(keyword));
     }
     const where = and(...conditions);
     const offset = (filters.page - 1) * filters.limit;
@@ -1108,14 +1125,7 @@ export class SocialSessionsRepository {
     }
     const keyword = filters.search?.trim();
     if (keyword) {
-      const like = `%${keyword}%`;
-      conditions.push(
-        or(
-          ilike(schema.socialSessions.title, like),
-          ilike(schema.socialSessions.venueName, like),
-          ilike(schema.socialSessions.venueAddress, like),
-        )!,
-      );
+      conditions.push(sessionSearchMatch(keyword));
     }
     const withGeo = filters.lat !== undefined && filters.lng !== undefined;
     if (withGeo) {

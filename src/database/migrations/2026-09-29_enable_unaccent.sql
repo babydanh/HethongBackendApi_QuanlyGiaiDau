@@ -1,0 +1,26 @@
+-- Bật extension unaccent để tìm kiếm kèo không dấu.
+--
+-- VÌ SAO CẦN FILE NÀY
+-- `GET /social-sessions?search=` đối chiếu ILIKE thẳng với tiêu đề / tên sân /
+-- địa chỉ sân. Người dùng Việt gõ trên bàn phím điện thoại không bấm dấu
+-- ("bong da") sẽ không khớp "Bóng đá" — có ô tìm kiếm mà luôn trả về 0 kết quả
+-- còn tệ hơn không có ô tìm kiếm. unaccent() bỏ dấu cả hai vế nên "bong da"
+-- khớp "Bóng đá", còn "Bóng đá" vẫn khớp y như cũ.
+--
+-- VÌ SAO CHẤP NHẬN MẤT INDEX (ĐỪNG "TỐI ƯU" LẠI)
+-- unaccent() là hàm, không phải toán tử: btree index trên cột gốc KHÔNG dùng
+-- được cho biểu thức unaccent(col). Truy vấn tìm kiếm kèo vì vậy thành
+-- sequential scan + filter, không index nào dùng được.
+-- Đây là cái giá được chấp nhận CỐ Ý: bảng social_sessions nhỏ (vài nghìn
+-- dòng), quét tuần tự trên cột này là chuyện mili-giây, còn index GIN/tsvector
+-- phải trả giá bằng một trigger đồng bộ + index nặng hơn nhiều lần so với phần
+-- tăng tốc thu được. Nếu sau này bảng lớn tới mức scan chậm thật sự, khi đó mới
+-- cân nhắc expression index trên unaccent(col) hoặc tsvector — đừng sửa vội
+-- ở tầng này.
+--
+-- unaccent đã có sẵn trong image postgis/postgis:15-3.3-alpine (contrib) nên
+-- không cần đổi image hay cài thêm package.
+--
+-- Idempotent: CREATE EXTENSION IF NOT EXISTS, chạy lại nhiều lần vẫn an toàn.
+--> statement-breakpoint
+CREATE EXTENSION IF NOT EXISTS unaccent;
