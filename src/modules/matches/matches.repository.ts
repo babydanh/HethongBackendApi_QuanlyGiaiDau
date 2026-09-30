@@ -633,14 +633,9 @@ export class MatchesRepository {
       const stages = await stagesQuery;
       const stageIds = stages.map((s) => s.id);
 
-      // Giải tạo mà không chọn division sẽ sinh stage có
-      // `tournament_division_id = NULL` (bracket-generator.service.ts), nên truy
-      // vấn theo division không khớp stage nào và `stages` rỗng. Trả rỗng ở đây
-      // khiến trang chi tiết mất sạch nhánh lịch trong khi tab quản lý vẫn thấy
-      // đủ. Lùi về phạm vi giải thay vì cắt dữ liệu.
-      //
-      // Nguồn đáng tin là `tId` do caller truyền vào, không phải danh sách giải suy
-      // ra từ `stages`: danh sách đó rỗng đúng lúc cần fallback.
+      // Brackets generated without a division store NULL stage assignments.
+      // Preserve their tournament fallback; Ops disables fallback only when an
+      // active stage in this tournament is explicitly mapped to a division.
       const fallbackTournamentIds = tId
         ? [tId]
         : Array.from(new Set(stages.map((s) => s.tournamentId).filter(Boolean)));
@@ -675,10 +670,38 @@ export class MatchesRepository {
       if (groupIds.length > 0) {
         matchScope.push(inArray(schema.matches.groupId, groupIds));
       }
-      // Chỉ thêm phạm vi cấp giải khi không lọc theo division cụ thể, HOẶC khi
-      // division không khớp stage nào (matchScope rỗng) thì lùi về cấp giải.
       if (matchScope.length > 0) {
         conditions.push(or(...matchScope) as SQL);
+      } else if (divisionId && query.strictDivisionScope && tId) {
+        const assignedStages = await this.db
+          .select({ id: schema.tournamentStages.id })
+          .from(schema.tournamentStages)
+          .where(
+            and(
+              eq(schema.tournamentStages.tournamentId, tId),
+              isNull(schema.tournamentStages.deletedAt),
+              sql`${schema.tournamentStages.tournamentDivisionId} IS NOT NULL`,
+            ),
+          )
+          .limit(1);
+
+        if (assignedStages.length > 0) {
+          return {
+            data: [],
+            meta: {
+              total: 0,
+              page,
+              limit,
+              totalPages: 0,
+              nextCursor: null,
+              hasMore: false,
+            },
+          };
+        }
+
+        conditions.push(
+          inArray(schema.matches.tournamentId, fallbackTournamentIds),
+        );
       } else if (hasTournamentScope) {
         conditions.push(
           inArray(schema.matches.tournamentId, fallbackTournamentIds),
