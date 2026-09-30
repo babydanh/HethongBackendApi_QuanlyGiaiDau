@@ -1,7 +1,11 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { RegionsService } from './regions.service';
-import { QueryRegionDto, QueryWardDto } from './dto/query-region.dto';
+import {
+  QueryRegionDto,
+  QueryWardDto,
+  SearchRegionsDto,
+} from './dto/query-region.dto';
 import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('regions')
@@ -24,5 +28,13 @@ export class RegionsController {
   @ApiResponse({ status: 200, description: 'Danh sách phường/xã' })
   async getWards(@Query() query: QueryWardDto) {
     return this.regionsService.getWards(query);
+  }
+
+  @Public()
+  @Get('search')
+  @ApiOperation({ summary: 'Tìm kiếm kết hợp tỉnh/thành và phường/xã' })
+  @ApiResponse({ status: 200, description: 'Kết quả khu vực hành chính' })
+  async search(@Query() query: SearchRegionsDto) {
+    return this.regionsService.search(query);
   }
 }
