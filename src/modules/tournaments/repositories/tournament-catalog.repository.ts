@@ -1805,9 +1805,24 @@ export class TournamentCatalogRepository {
       },
     };
   }
-  async findMyWorkspace(userId: string, includeRefereeMatches = true) {
+  /**
+   * Workspace của người dùng.
+   *
+   * Ba nhóm (chủ / đồng chủ / tham gia) được GỘP thành MỘT danh sách có
+   * cursor chung. Lý do: nếu phân trang từng nhóm riêng thì dedupe chồng nhau
+   * (`loại trùng với organizedIds`) chỉ nhìn thấy trang hiện tại, nên trang sau
+   * có thể lọt lại giải đã bị loại ở trang trước. Một luồng duy nhất dedupe đúng
+   * một lần và cursor luôn nhất quán.
+   */
+  async findMyWorkspace(
+    userId: string,
+    includeRefereeMatches = true,
+    options: { limit?: number; cursor?: string } = {},
+  ) {
     const tournamentSummarySelect = {
       id: schema.tournaments.id,
+      // Khoá sắp xếp cho cursor: không có nó thì keyset pagination không chạy được.
+      updatedAt: schema.tournaments.updatedAt,
       name: schema.tournaments.name,
       status: schema.tournaments.status,
       startDate: schema.tournaments.startDate,
@@ -2036,18 +2051,60 @@ export class TournamentCatalogRepository {
         : Promise.resolve([]),
     ]);
 
-    const organizedIds = new Set(
-      organizedRaw.map((tournament) => tournament.id),
-    );
-    const dedupeByTournamentId = <T extends { id: string }>(items: T[]) => {
-      const map = new Map<string, T>();
-      for (const item of items) {
-        if (!map.has(item.id)) {
-          map.set(item.id, item);
-        }
+    // Gộp 3 nhóm thành 1 luồng, mỗi phần tử mang `role` (ưu tiên chủ > đồng chủ >
+    // tham gia). Dedupe đúng một lần — trước đây `organizedIds` chỉ chứa trang
+    // hiện tại nên khi phân trang, giải đã bị loại ở trang 1 có thể lọt lại ở
+    // trang 2.
+    type WorkspaceRole = 'ORGANIZER' | 'CO_ORGANIZER' | 'PARTICIPANT';
+    const merged = new Map<
+      string,
+      { tournament: (typeof organizedRaw)[number]; role: WorkspaceRole }
+    >();
+    for (const tournament of organizedRaw) {
+      merged.set(tournament.id, { tournament, role: 'ORGANIZER' });
+    }
+    for (const tournament of coOrganizerRaw) {
+      if (!merged.has(tournament.id)) {
+        merged.set(tournament.id, { tournament, role: 'CO_ORGANIZER' });
       }
-      return Array.from(map.values());
-    };
+    }
+    for (const tournament of participatingRaw) {
+      if (!merged.has(tournament.id)) {
+        merged.set(tournament.id, { tournament, role: 'PARTICIPANT' });
+      }
+    }
+    // Mới nhất lên đầu — client cũng sắp theo createdAt giảm dần nên hai bên
+    // không lệch nhau khi phân trang.
+    const allEntries = Array.from(merged.values()).sort(
+      (a, b) =>
+        b.tournament.updatedAt.getTime() - a.tournament.updatedAt.getTime(),
+    );
+
+    // Giới hạn trang: bám trần 100 của CursorPaginationDto.
+    const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+    // Cursor mang cả id lẫn updatedAt: `updatedAt` làm khoá chính, id chốt tie
+    // khi nhiều giải cùng giây — thiếu id sẽ hoặc bỏ sót, hoặc lặp thẻ.
+    const cursorPayload = options.cursor
+      ? CursorPaginationHelper.decodeCursor<{ id: string; updatedAt: string }>(
+          options.cursor,
+        )
+      : null;
+    const cursorTime = cursorPayload?.updatedAt
+      ? new Date(cursorPayload.updatedAt).getTime()
+      : null;
+    // Keyset: lấy những bản ghi cũ hơn mốc cursor. `updatedAt` có thể trùng
+    // nên chốt bằng (updatedAt, id) để không bỏ sót hoặc lặp phần tử.
+    const pagedEntries = cursorTime === null
+      ? allEntries
+      : allEntries.filter(
+          (entry) =>
+            entry.tournament.updatedAt.getTime() < cursorTime ||
+            (entry.tournament.updatedAt.getTime() === cursorTime &&
+              entry.tournament.id < (cursorPayload?.id ?? '')),
+        );
+    const pageEntries = pagedEntries.slice(0, limit);
+    const lastEntry = pageEntries[pageEntries.length - 1];
+    const hasMore = pagedEntries.length > limit;
 
     const participantIds = includeRefereeMatches
       ? Array.from(
@@ -2077,15 +2134,33 @@ export class TournamentCatalogRepository {
     );
 
     return {
-      organizedTournaments: dedupeByTournamentId(organizedRaw),
-      participatingTournaments: dedupeByTournamentId(
-        participatingRaw.filter(
-          (tournament) => !organizedIds.has(tournament.id),
-        ),
-      ),
-      coOrganizerTournaments: dedupeByTournamentId(
-        coOrganizerRaw.filter((tournament) => !organizedIds.has(tournament.id)),
-      ),
+      // Vẫn trả 3 field cũ (lấp từ trang hiện tại) để client cũ không vỡ, kèm
+      // `items` + `meta` cho luồng phân trang mới. Client mới chỉ dùng `items`.
+      organizedTournaments: pageEntries
+        .filter((entry) => entry.role === 'ORGANIZER')
+        .map((entry) => entry.tournament),
+      coOrganizerTournaments: pageEntries
+        .filter((entry) => entry.role === 'CO_ORGANIZER')
+        .map((entry) => entry.tournament),
+      participatingTournaments: pageEntries
+        .filter((entry) => entry.role === 'PARTICIPANT')
+        .map((entry) => entry.tournament),
+      // Danh sách hợp nhất: giải + vai trò, đã dedupe và đã cắt trang.
+      items: pageEntries.map((entry) => ({
+        ...entry.tournament,
+        workspaceRole: entry.role,
+      })),
+      meta: {
+        limit,
+        hasMore,
+        nextCursor:
+          hasMore && lastEntry
+            ? CursorPaginationHelper.encodeCursor({
+                id: lastEntry.tournament.id,
+                updatedAt: lastEntry.tournament.updatedAt.toISOString(),
+              })
+            : null,
+      },
       refereeInvites,
       refereeTournaments,
       refereeMatches: refereeMatchesRaw.map((match) => ({

@@ -41,6 +41,12 @@ export const tournamentDivisions = pgTable(
     registrationEndDate: timestamp('registration_end_date', {
       withTimezone: true,
     }),
+  // Khoá đăng ký riêng cho nội dung này. NOT NULL DEFAULT false nên các bản
+  // ghi cũ không cần backfill. Cờ khoá cấp giải vẫn mạnh hơn: khoá cả giải thì
+  // mọi nội dung đều bị coi là đã khoá.
+  isRegistrationLocked: boolean('is_registration_locked')
+    .default(false)
+    .notNull(),
     minElo: integer('min_elo'),
     maxElo: integer('max_elo'),
     prizeDescription: text('prize_description'),

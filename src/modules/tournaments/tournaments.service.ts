@@ -502,10 +502,15 @@ export class TournamentsService {
     return this.tournamentDiscoveryService.findMyManagement(userId, query);
   }
 
-  async getMyWorkspace(userId: string, includeRefereeMatches = true) {
+  async getMyWorkspace(
+    userId: string,
+    includeRefereeMatches = true,
+    options: { limit?: number; cursor?: string } = {},
+  ) {
     return this.tournamentDiscoveryService.getMyWorkspace(
       userId,
       includeRefereeMatches,
+      options,
     );
   }
 

@@ -1,8 +1,14 @@
 import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsOptional } from 'class-validator';
+import { CursorPaginationDto } from '../../../common/dto/cursor-pagination.dto';
 
-export class QueryMyWorkspaceDto {
+/**
+ * Danh sách giải của workspace: lọc theo vai trò + phân trang cursor.
+ * Kế thừa CursorPaginationDto để dùng chung limit/cursor/direction với các
+ * endpoint khác thay vì tự định nghĩa lại.
+ */
+export class QueryMyWorkspaceDto extends CursorPaginationDto {
   @ApiPropertyOptional({
     default: true,
     description:

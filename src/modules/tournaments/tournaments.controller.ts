@@ -133,6 +133,7 @@ export class TournamentsController {
     return this.tournamentsService.getMyWorkspace(
       user.sub,
       query.includeRefereeMatches,
+      { limit: query.limit, cursor: query.cursor },
     );
   }
 

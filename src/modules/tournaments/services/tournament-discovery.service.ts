@@ -155,10 +155,15 @@ export class TournamentDiscoveryService {
     };
   }
 
-  async getMyWorkspace(userId: string, includeRefereeMatches = true) {
+  async getMyWorkspace(
+    userId: string,
+    includeRefereeMatches = true,
+    options: { limit?: number; cursor?: string } = {},
+  ) {
     const workspace = await this.tournamentsRepository.findMyWorkspace(
       userId,
       includeRefereeMatches,
+      options,
     );
 
     return {
@@ -172,6 +177,11 @@ export class TournamentDiscoveryService {
       coOrganizerTournaments: workspace.coOrganizerTournaments.map(
         (tournament) => mapTournamentFormat(tournament),
       ),
+      // `items` là luồng hợp nhất cho phân trang; map format để khớp 3 field cũ.
+      items: workspace.items.map((tournament) => ({
+        ...mapTournamentFormat(tournament),
+        workspaceRole: tournament.workspaceRole,
+      })),
     };
   }
 

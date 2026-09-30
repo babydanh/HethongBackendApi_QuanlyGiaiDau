@@ -712,6 +712,18 @@ export class TournamentRegistrationRepository {
         (a, b) => a.getTime() - b.getTime(),
       )[0];
 
+      // Cờ khoá đăng ký chặn trước cả kiểm tra hạn: BTC bấm "Khoá đăng ký" thì
+      // phải chặn ngay, không đợi tới hạn. Khoá cấp giải mạnh hơn cờ của nội
+      // dung nên được so trước.
+      const registrationLocked =
+        tournament.isRegistrationLocked === true ||
+        selectedDivision?.isRegistrationLocked === true;
+      if (registrationLocked) {
+        throw new BadRequestException(
+          'Đăng ký nội dung thi đấu này đã khoá.',
+        );
+      }
+
       if (registrationDeadline && now >= registrationDeadline) {
         throw new BadRequestException(
           'Hạn đăng ký của nội dung thi đấu này đã kết thúc.',
@@ -1308,6 +1320,7 @@ export class TournamentRegistrationRepository {
         .select({
           tournamentConfig: schema.tournaments.tournamentConfig,
           registrationEndDate: schema.tournaments.registrationEndDate,
+          isRegistrationLocked: schema.tournaments.isRegistrationLocked,
         })
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, participant.tournamentId))
@@ -1319,6 +1332,7 @@ export class TournamentRegistrationRepository {
                 schema.tournamentDivisions.registrationEndDate,
               matchType: schema.tournamentDivisions.matchType,
               genderRestriction: schema.tournamentDivisions.genderRestriction,
+              isRegistrationLocked: schema.tournamentDivisions.isRegistrationLocked,
             })
             .from(schema.tournamentDivisions)
             .where(

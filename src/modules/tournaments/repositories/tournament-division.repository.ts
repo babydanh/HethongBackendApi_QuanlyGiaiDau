@@ -68,6 +68,10 @@ export class TournamentDivisionRepository {
         .select({
           entryFee: schema.tournaments.entryFee,
           registrationEndDate: schema.tournaments.registrationEndDate,
+          // Cần cho effectiveIsRegistrationLocked: nếu thiếu cột này thì
+          // tournament.isRegistrationLocked luôn undefined và khoá cấp giải
+          // không bao giờ được phản ánh xuống nội dung.
+          isRegistrationLocked: schema.tournaments.isRegistrationLocked,
         })
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
@@ -118,6 +122,12 @@ export class TournamentDivisionRepository {
               deadlines.length > 0
                 ? new Date(Math.min(...deadlines))
                 : null,
+            // Cùng lý do effectiveRegistrationEndDate: client đọc một nguồn
+            // duy nhất thay vì tự dựng lại phép OR. Khoá cấp giải mạnh hơn nên
+            // khoá giải thì mọi nội dung đều báo đã khoá.
+            effectiveIsRegistrationLocked:
+              division.isRegistrationLocked ||
+              tournament?.isRegistrationLocked === true,
             // API consumers receive the effective fee. The nullable raw fee
             // remains available as entryFeeOverride for organizer controls.
             entryFee: division.entryFeeOverrideEnabled
@@ -357,6 +367,9 @@ export class TournamentDivisionRepository {
               registrationEndDate: dto.registrationEndDate
                 ? new Date(dto.registrationEndDate)
                 : null,
+            }),
+            ...(dto.isRegistrationLocked !== undefined && {
+              isRegistrationLocked: dto.isRegistrationLocked,
             }),
             ...(dto.minElo !== undefined && { minElo: dto.minElo }),
             ...(dto.maxElo !== undefined && { maxElo: dto.maxElo }),

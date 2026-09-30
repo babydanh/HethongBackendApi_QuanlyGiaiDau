@@ -71,6 +71,16 @@ export class UpdateDivisionDto {
   @IsOptional()
   isConfigOverride?: boolean;
 
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'TRUE để khoá đăng ký riêng nội dung này, FALSE để mở lại. Cờ khoá ' +
+      'cấp giải mạnh hơn: khoá cả giải thì nội dung này vẫn bị chặn.',
+  })
+  @IsBoolean()
+  @IsOptional()
+  isRegistrationLocked?: boolean;
+
   @ApiPropertyOptional({ nullable: true })
   @IsUUID()
   @IsOptional()
