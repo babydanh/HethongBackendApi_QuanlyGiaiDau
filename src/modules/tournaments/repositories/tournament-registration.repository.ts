@@ -712,13 +712,10 @@ export class TournamentRegistrationRepository {
         (a, b) => a.getTime() - b.getTime(),
       )[0];
 
-      // Cờ khoá đăng ký chặn trước cả kiểm tra hạn: BTC bấm "Khoá đăng ký" thì
-      // phải chặn ngay, không đợi tới hạn. Khoá cấp giải mạnh hơn cờ của nội
-      // dung nên được so trước.
-      const registrationLocked =
-        tournament.isRegistrationLocked === true ||
-        selectedDivision?.isRegistrationLocked === true;
-      if (registrationLocked) {
+      // Chỉ khoá CẤP NỘI DUNG ở đây. Khoá cấp giải đã bị chặn sẵn từ trước ở
+      // đầu hàm (kiểm isRegistrationOpenStatus + isRegistrationLocked) — so lại
+      // lần nữa là thừa và làm TypeScript hẹp kiểu thành false nên === true thành lỗi.
+      if (selectedDivision?.isRegistrationLocked === true) {
         throw new BadRequestException(
           'Đăng ký nội dung thi đấu này đã khoá.',
         );
@@ -1352,6 +1349,15 @@ export class TournamentRegistrationRepository {
       const registrationDeadline = registrationDeadlines.sort(
         (a, b) => a.getTime() - b.getTime(),
       )[0];
+      // Đồng đội mời cũng phải bị chặn khi nội dung đã khoá, nếu không nút
+      // "Khoá đăng ký" trên web là vô nghĩa với đúng case này. Chỉ kiểm cờ khoá
+      // ở đây; nhánh hạn bên dưới giữ nguyên hành vi cũ (hết hạn thì set EXPIRED,
+      // không throw) vì đó là hành vi đã có.
+      if (division?.isRegistrationLocked === true) {
+        throw new BadRequestException(
+          'Đăng ký nội dung thi đấu này đã khoá.',
+        );
+      }
       if (registrationDeadline && new Date() >= registrationDeadline) {
         await tx
           .update(schema.tournamentParticipants)
@@ -1670,6 +1676,15 @@ export class TournamentRegistrationRepository {
       const registrationDeadline = registrationDeadlines.sort(
         (a, b) => a.getTime() - b.getTime(),
       )[0];
+      // Đồng đội mời cũng phải bị chặn khi nội dung đã khoá, nếu không nút
+      // "Khoá đăng ký" trên web là vô nghĩa với đúng case này. Chỉ kiểm cờ khoá
+      // ở đây; nhánh hạn bên dưới giữ nguyên hành vi cũ (hết hạn thì set EXPIRED,
+      // không throw) vì đó là hành vi đã có.
+      if (division?.isRegistrationLocked === true) {
+        throw new BadRequestException(
+          'Đăng ký nội dung thi đấu này đã khoá.',
+        );
+      }
       if (registrationDeadline && new Date() >= registrationDeadline) {
         await tx
           .update(schema.tournamentParticipants)
