@@ -632,11 +632,20 @@ export class MatchesRepository {
 
       const stages = await stagesQuery;
       const stageIds = stages.map((s) => s.id);
-      const tournamentIds = Array.from(
-        new Set(stages.map((s) => s.tournamentId).filter(Boolean)),
-      );
 
-      if (stageIds.length === 0 && tournamentIds.length === 0) {
+      // Giải tạo mà không chọn division sẽ sinh stage có
+      // `tournament_division_id = NULL` (bracket-generator.service.ts), nên truy
+      // vấn theo division không khớp stage nào và `stages` rỗng. Trả rỗng ở đây
+      // khiến trang chi tiết mất sạch nhánh lịch trong khi tab quản lý vẫn thấy
+      // đủ. Lùi về phạm vi giải thay vì cắt dữ liệu.
+      //
+      // Nguồn đáng tin là `tId` do caller truyền vào, không phải danh sách giải suy
+      // ra từ `stages`: danh sách đó rỗng đúng lúc cần fallback.
+      const fallbackTournamentIds = tId
+        ? [tId]
+        : Array.from(new Set(stages.map((s) => s.tournamentId).filter(Boolean)));
+      const hasTournamentScope = fallbackTournamentIds.length > 0;
+      if (stageIds.length === 0 && !hasTournamentScope) {
         return {
           data: [],
           meta: {
@@ -666,15 +675,16 @@ export class MatchesRepository {
       if (groupIds.length > 0) {
         matchScope.push(inArray(schema.matches.groupId, groupIds));
       }
-      // Only include tournament-level matches if not filtering by a specific division
-      if (!divisionId && tournamentIds.length > 0) {
-        matchScope.push(inArray(schema.matches.tournamentId, tournamentIds));
-      }
-
+      // Chỉ thêm phạm vi cấp giải khi không lọc theo division cụ thể, HOẶC khi
+      // division không khớp stage nào (matchScope rỗng) thì lùi về cấp giải.
       if (matchScope.length > 0) {
         conditions.push(or(...matchScope) as SQL);
+      } else if (hasTournamentScope) {
+        conditions.push(
+          inArray(schema.matches.tournamentId, fallbackTournamentIds),
+        );
       } else if (divisionId) {
-        // If division has no groups/matches, return empty immediately
+        // Division thật sự không thuộc giải này: không có gì để hiển thị.
         return {
           data: [],
           meta: {
@@ -695,7 +705,6 @@ export class MatchesRepository {
       : conditions;
     const queryWhereClause =
       queryConditions.length > 0 ? and(...queryConditions) : undefined;
-
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.matches)
