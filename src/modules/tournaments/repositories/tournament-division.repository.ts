@@ -65,7 +65,10 @@ export class TournamentDivisionRepository {
   async getDivisionsByTournament(tournamentId: string) {
     try {
       const [tournament] = await this.db
-        .select({ entryFee: schema.tournaments.entryFee })
+        .select({
+          entryFee: schema.tournaments.entryFee,
+          registrationEndDate: schema.tournaments.registrationEndDate,
+        })
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
@@ -96,8 +99,25 @@ export class TournamentDivisionRepository {
               ),
             );
 
+          // Hạn chót hiệu lực, đúng bằng luật server dùng khi ghi đăng ký
+          // (tournament-registration.repository.ts:705-712): lấy mốc sớm
+          // nhất trong hạn của nội dung và hạn của giải. Cả hai đều null thì
+          // không có hạn — trả null, KHÔNG gán 0 để tránh chặn oạt những giải
+          // vốn không đặt hạn. Client đọc trường này để tự chặn nút thay vì
+          // phải tự dựng lại phép min(), vốn dễ lệch với server.
+          const deadlines = [
+            division.registrationEndDate,
+            tournament?.registrationEndDate ?? null,
+          ]
+            .filter(Boolean)
+            .map((value) => new Date(value as Date).getTime());
+
           return {
             ...division,
+            effectiveRegistrationEndDate:
+              deadlines.length > 0
+                ? new Date(Math.min(...deadlines))
+                : null,
             // API consumers receive the effective fee. The nullable raw fee
             // remains available as entryFeeOverride for organizer controls.
             entryFee: division.entryFeeOverrideEnabled

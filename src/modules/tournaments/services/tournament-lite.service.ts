@@ -852,6 +852,35 @@ export class TournamentLiteService {
     const createdDivisionIds: string[] = [];
     for (const divInfo of formatsToCreate) {
       try {
+        // Hạn chót cấp nội dung được kiểm tra như hạn cấp giải. Trước đây giá
+        // trị này được lưu thẳng, nên tạo nhanh có thể sinh ra một nội dung đã
+        // đóng hạn từ trước khi giải tồn tại: web quảng cáo giải đang mở đăng
+        // ký nhưng mọi lần bấm đều bị chặn ở tầng transaction
+        // (tournament-registration.repository.ts:705-719). Chặn ngay lúc tạo để
+        // dữ liệu không sinh ra sai.
+        if (divInfo.registrationEndDate) {
+          const divisionDeadline = new Date(divInfo.registrationEndDate);
+          if (Number.isNaN(divisionDeadline.getTime())) {
+            throw new BadRequestException(
+              'Hạn chót đăng ký của nội dung thi đấu không hợp lệ.',
+            );
+          }
+          if (divisionDeadline <= now) {
+            throw new BadRequestException(
+              'Hạn chót đăng ký của nội dung thi đấu phải ở tương lai khi tạo giải.',
+            );
+          }
+          // startDateTime là chuỗi ISO hoặc undefined; chỉ so khi nó có thật.
+          if (
+            startDateTime &&
+            divisionDeadline.getTime() >= new Date(startDateTime).getTime()
+          ) {
+            throw new BadRequestException(
+              'Hạn chót đăng ký của nội dung thi đấu phải trước giờ bắt đầu giải.',
+            );
+          }
+        }
+
         const createdDivision = await this.tournamentsRepository.createDivision(
           {
             tournamentId: record.id,

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { Inject } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
@@ -142,7 +142,7 @@ export class FriendshipsRepository {
     const rows = await this.db
       .select({ id: schema.profiles.userId, name: schema.profiles.fullName, avatar: schema.profiles.avatarUrl })
       .from(schema.profiles)
-      .where(sql`${schema.profiles.userId} = ANY(${userIds})`);
+      .where(inArray(schema.profiles.userId, userIds));
     return new Map(rows.map((row) => [row.id, { name: row.name, avatar: row.avatar }]));
   }
 }
