@@ -2,8 +2,17 @@
 -- Chỉ chứa diff geo; file baseline do drizzle-kit sinh đã được thay thế để
 -- runner production không tạo lại toàn bộ schema.
 -- Runner (run-prod-migration.js) chịu được chạy lặp (IF NOT EXISTS).
-ALTER TABLE "social_sessions" ADD COLUMN IF NOT EXISTS "latitude" double precision;--> statement-breakpoint
-ALTER TABLE "social_sessions" ADD COLUMN IF NOT EXISTS "longitude" double precision;--> statement-breakpoint
-ALTER TABLE "social_sessions" ADD COLUMN IF NOT EXISTS "venue_geolocation" geography(Point, 4326);--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "social_session_geo_idx" ON "social_sessions" USING gist ("venue_geolocation");--> statement-breakpoint
-COMMENT ON COLUMN "social_sessions"."venue_geolocation" IS 'Toa do san (PostGIS geography) do host ghim map - dung ST_Distance/ST_DWithin de loc gan nhat';
+--
+-- NO-OP: the five DDL statements below now live in
+--   2026-09-27_add_social_session_geolocation.sql
+-- They must run as a standalone file, not a journal entry. run-prod-migration.js:198
+-- returns journalEntries.concat(standalone), so this journal entry ran before
+-- 2026-09-22_add_social_sessions.sql created the table and every fresh database
+-- died with 42P01 "relation social_sessions does not exist".
+--
+-- This entry and meta/0038_snapshot.json are deliberately kept. That snapshot is
+-- full-schema state, not a delta: it carries 13 tables no journal migration
+-- creates (court_bookings, venue_pricing_rules, club_match_*, zalo_notification_outbox,
+-- social_session_participants, ...). Removing it would make the next
+-- `drizzle-kit generate` re-emit all of them against existing tables.
+SELECT 1;

@@ -9,3 +9,4 @@ dist
 drizzle-push.log
 *.err.log
 *.tsbuildinfo
+.cache

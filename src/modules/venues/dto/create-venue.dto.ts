@@ -7,6 +7,7 @@ import {
   IsNumber,
   Min,
   Max,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateVenueDto {
@@ -26,21 +27,26 @@ export class CreateVenueDto {
   @IsNotEmpty()
   locationAddress: string;
 
-  @ApiPropertyOptional({ example: 10.7769, description: 'Vĩ độ (Latitude)' })
-  @IsOptional()
+  // lat/lng luôn đi cặp: chỉ có một nửa là payload sai, và im lặng bỏ qua nửa
+  // còn lại sẽ tạo sân không có toạ độ mà không ai biết vì sao. ValidateIf chặn
+  // ở tầng validation thay vì để repository tự quyết.
+  @ApiPropertyOptional({ example: 10.7769, description: 'Vĩ độ (Latitude). Đi cặp với longitude' })
+  @ValidateIf((o: CreateVenueDto) => o.longitude !== undefined)
   @IsNumber()
   @Min(-90)
   @Max(90)
+  @IsOptional()
   latitude?: number;
 
   @ApiPropertyOptional({
     example: 106.7009,
-    description: 'Kinh độ (Longitude)',
+    description: 'Kinh độ (Longitude). Đi cặp với latitude',
   })
-  @IsOptional()
+  @ValidateIf((o: CreateVenueDto) => o.latitude !== undefined)
   @IsNumber()
   @Min(-180)
   @Max(180)
+  @IsOptional()
   longitude?: number;
 
   @ApiPropertyOptional({

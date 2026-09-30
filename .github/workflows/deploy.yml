@@ -168,3 +168,53 @@ jobs:
               echo \"WARNING: Docker image prune failed after smoke checks; continuing.\"
             fi
           '"
+
+      # Nạp dữ liệu địa giới: chạy SAU migration, trên VPS, trong chính
+      # container `migrate` mà bước trên vừa dùng.
+      #
+      # VÌ SAO KHÔNG CHẠY TRÊN RUNNER: Postgres production là service của
+      # compose trên VPS (DB_HOST=postgres — chỉ phân giải được trong docker
+      # network đó). Deploy job không có biến DB nào, repo cũng không có secret
+      # DB nào, nên runner không có đường nào tới production DB. Bước này phải
+      # đi qua SSH, và chạy `docker compose run` để mượn luôn network + DB_* của
+      # service `migrate` — không sửa thêm file nào trên VPS.
+      #
+      # VÌ SAO KHÔNG CHECKOUT Ở ĐÂY: code đã được checkout và đóng gói vào
+      # image bởi job build-and-push; job này chỉ kéo image theo tag nên không
+      # cần (và không dùng tới) bản source trên runner.
+      - name: Seed provinces/wards (v2) on VPS
+        # Bước này giờ chỉ gọi API v2, không tải cây GeoJSON nữa (xem lý do bên
+        # dưới). 45 phút là trần của job, không phải ngân sách thời gian thực
+        # tế — lần chạy thật tính bằng phút.
+        timeout-minutes: 45
+        env:
+          VPS_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$VPS_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p 36789 203.167.15.81 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -p 36789 -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no root@203.167.15.81 bash -c "'
+            set -euo pipefail
+            cd /usr/local/lsws/sporto.asia
+
+            echo \"== Nạp provinces/wards (thay bảng trong 1 transaction) ==\"
+            docker compose run --rm migrate node seed-regions-v2.js
+
+            # KHÔNG chạy seed-ward-boundaries.js ở bước này.
+            #
+            # Nguồn ranh giới là repo thứ ba, snapshot 11Mar2026 với 3321 phường;
+            # danh mục v2 (provinces.open-api.vn/api/v2) nay đã có 3452 phường và
+            # tên khác. Chạy script trên danh mục v2 chỉ phủ 2778/3452 = 80,48%
+            # và đúng ra phải đỏ ở ngưỡng 99% — script đúng, dữ liệu sai. Hạ
+            # ngưỡng cho xanh là che lỗi: đa số phường sẽ không có polygon, còn
+            # chỗ nào khớp tên thì có thể gắn NHẦM polygon của phường khác —
+            # tệ hơn hẳn là không có polygon.
+            #
+            # Script và bước COPY trong Dockerfile GIỮ NGUYÊN; chỉ gỡ lời gọi ở
+            # CI. Bật lại khi nguồn ranh giới được đối chiếu khớp với v2.
+            # Hệ quả tới lúc đó: /regions/resolve và /regions/wards/centroid
+            # trả null ở production (app đã xử lý null: cảnh báo + nút thử lại,
+            # không chặn lưu kèo). Đường ĐỊA CHỈ -> vùng không đổi: app tự
+            # khớp trên danh mục v2 mà server vừa nạp.
+          '"

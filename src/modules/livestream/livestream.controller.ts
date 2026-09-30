@@ -7,7 +7,9 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
+  Req,
   Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -18,6 +20,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
+import { SetCourtPlaybackUrlDto } from './dto/set-court-playback-url.dto';
 import { LivestreamService } from './livestream.service';
 import { LiveSessionService } from './live-session.service';
 import { PrepareLiveSessionDto } from './dto/prepare-live-session.dto';
@@ -27,10 +30,9 @@ import { CreateDevicePairingTokenDto } from './dto/create-device-pairing-token.d
 import { HeartbeatCameraDeviceDto } from './dto/heartbeat-camera-device.dto';
 import { PairCameraDeviceDto } from './dto/pair-camera-device.dto';
 import { UpdateCameraDeviceDto } from './dto/update-camera-device.dto';
-
 import { SkipThrottle } from '@nestjs/throttler';
 import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
 @ApiTags('livestream')
 @SkipThrottle()
@@ -42,6 +44,8 @@ export class LivestreamController {
     private readonly cameraDeviceService: CameraDeviceService,
     private readonly facebookPageConnectionService: FacebookPageConnectionService,
   ) {}
+
+
 
   @Post('sessions/prepare')
   @Verified()
@@ -309,6 +313,24 @@ export class LivestreamController {
   ) {
     return this.livestreamService.listMatchLivestreams(tournamentId, user);
   }
+
+  @Put('tournaments/:tournamentId/courts/:courtId/playback-url')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Khai URL phát trực tiếp cho một sân (đặt trong setting sân)',
+    description:
+      'Gửi playbackUrl rỗng để xoá URL và ngừng phát sân này. Mọi trận diễn tại sân sẽ tự dùng URL này.',
+  })
+  setCourtPlaybackUrl(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Param('courtId', ParseUUIDPipe) courtId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() data: SetCourtPlaybackUrlDto,
+  ) {
+    return this.livestreamService.setCourtPlaybackUrl(tournamentId, courtId, user, data);
+  }
+
 
   @Post('tournaments/:tournamentId/cameras')
   @Verified()

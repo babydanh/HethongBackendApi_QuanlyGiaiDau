@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Inject,
+  Logger,
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -54,6 +55,7 @@ import {
 } from '../../common/helpers/role.helper';
 import { MatchContextAdapter } from './match-context.adapter';
 import { ClubMatchSessionsService } from '../club-match-sessions/club-match-sessions.service';
+import { LivestreamService } from '../livestream/livestream.service';
 
 // Bump when the read-scope contract changes so an old Redis list response
 // cannot survive a deployment and reintroduce stale live rows.
@@ -61,6 +63,7 @@ const MATCH_LIST_CACHE_VERSION = 'v2';
 
 @Injectable()
 export class MatchesService {
+  private readonly logger = new Logger(MatchesService.name);
   constructor(
     private readonly matchesRepository: MatchesRepository,
     private readonly liveScoreGateway: LiveScoreGateway,
@@ -72,6 +75,7 @@ export class MatchesService {
     @Inject(forwardRef(() => ClubMatchSessionsService))
     private readonly clubMatchSessionsService?: ClubMatchSessionsService,
     @Optional() private readonly eloOutboxProcessor?: EloOutboxProcessor,
+    @Optional() private readonly livestreamService?: LivestreamService,
   ) {}
 
   @Cron('*/10 * * * *')
@@ -2343,6 +2347,28 @@ export class MatchesService {
         this.withBroadcastContext(updatedMatch, existing),
         existing.tournamentId,
       );
+    }
+
+    // Sân đã khai URL phát thì trận xếp vào sân đó tự dùng camera của sân.
+    // Lỗi gán camera không được làm hỏng việc lưu lịch, nên nuốt lỗi ở đây.
+    if (updatedMatch?.courtId && this.livestreamService) {
+      // `courtId` là tuỳ chọn: lần lưu chỉ đổi giờ sẽ gửi `undefined`. Chỉ coi là
+      // đổi sân khi BTC thật sự gửi courtId khác — nếu không, mỗi lần sửa lịch sẽ
+      // ghi đè camera BTC đã gán tay.
+      const courtChanged =
+        data.courtId !== undefined && (data.courtId || null) !== (existing.courtId || null);
+      try {
+        await this.livestreamService.autoAssignCourtCamera(
+          id,
+          existing.tournamentId,
+          updatedMatch.courtId,
+          { courtChanged },
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[updateSchedule] Không tự gán camera cho trận ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     if (data.refereeId && data.refereeId !== existing.refereeId) {

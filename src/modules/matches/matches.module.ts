@@ -10,6 +10,7 @@ import { RankingsModule } from '../rankings/rankings.module';
 import { RedisModule } from '../../providers/redis/redis.module';
 import { MatchContextAdapter } from './match-context.adapter';
 import { ClubMatchSessionsModule } from '../club-match-sessions/club-match-sessions.module';
+import { LivestreamModule } from '../livestream/livestream.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ClubMatchSessionsModule } from '../club-match-sessions/club-match-sessi
     RankingsModule,
     RedisModule,
     forwardRef(() => ClubMatchSessionsModule),
+    LivestreamModule,
   ],
   controllers: [MatchesController, TournamentScheduleController],
   providers: [

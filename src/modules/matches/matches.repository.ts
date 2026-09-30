@@ -632,11 +632,15 @@ export class MatchesRepository {
 
       const stages = await stagesQuery;
       const stageIds = stages.map((s) => s.id);
-      const tournamentIds = Array.from(
-        new Set(stages.map((s) => s.tournamentId).filter(Boolean)),
-      );
 
-      if (stageIds.length === 0 && tournamentIds.length === 0) {
+      // Brackets generated without a division store NULL stage assignments.
+      // Preserve their tournament fallback; Ops disables fallback only when an
+      // active stage in this tournament is explicitly mapped to a division.
+      const fallbackTournamentIds = tId
+        ? [tId]
+        : Array.from(new Set(stages.map((s) => s.tournamentId).filter(Boolean)));
+      const hasTournamentScope = fallbackTournamentIds.length > 0;
+      if (stageIds.length === 0 && !hasTournamentScope) {
         return {
           data: [],
           meta: {
@@ -666,15 +670,44 @@ export class MatchesRepository {
       if (groupIds.length > 0) {
         matchScope.push(inArray(schema.matches.groupId, groupIds));
       }
-      // Only include tournament-level matches if not filtering by a specific division
-      if (!divisionId && tournamentIds.length > 0) {
-        matchScope.push(inArray(schema.matches.tournamentId, tournamentIds));
-      }
-
       if (matchScope.length > 0) {
         conditions.push(or(...matchScope) as SQL);
+      } else if (divisionId && query.strictDivisionScope && tId) {
+        const assignedStages = await this.db
+          .select({ id: schema.tournamentStages.id })
+          .from(schema.tournamentStages)
+          .where(
+            and(
+              eq(schema.tournamentStages.tournamentId, tId),
+              isNull(schema.tournamentStages.deletedAt),
+              sql`${schema.tournamentStages.tournamentDivisionId} IS NOT NULL`,
+            ),
+          )
+          .limit(1);
+
+        if (assignedStages.length > 0) {
+          return {
+            data: [],
+            meta: {
+              total: 0,
+              page,
+              limit,
+              totalPages: 0,
+              nextCursor: null,
+              hasMore: false,
+            },
+          };
+        }
+
+        conditions.push(
+          inArray(schema.matches.tournamentId, fallbackTournamentIds),
+        );
+      } else if (hasTournamentScope) {
+        conditions.push(
+          inArray(schema.matches.tournamentId, fallbackTournamentIds),
+        );
       } else if (divisionId) {
-        // If division has no groups/matches, return empty immediately
+        // Division thật sự không thuộc giải này: không có gì để hiển thị.
         return {
           data: [],
           meta: {
@@ -695,7 +728,6 @@ export class MatchesRepository {
       : conditions;
     const queryWhereClause =
       queryConditions.length > 0 ? and(...queryConditions) : undefined;
-
     const [totalRecord] = await this.db
       .select({ count: count() })
       .from(schema.matches)

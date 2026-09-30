@@ -2,8 +2,11 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { RegionsService } from './regions.service';
 import {
+  QueryCentroidDto,
   QueryRegionDto,
+  QueryResolveDto,
   QueryWardDto,
+  ResolvedRegionDto,
   SearchRegionsDto,
 } from './dto/query-region.dto';
 import { Public } from '../../common/decorators/public.decorator';
@@ -36,5 +39,35 @@ export class RegionsController {
   @ApiResponse({ status: 200, description: 'Kết quả khu vực hành chính' })
   async search(@Query() query: SearchRegionsDto) {
     return this.regionsService.search(query);
+  }
+
+  @Public()
+  @Get('resolve')
+  @ApiOperation({ summary: 'Tra phường chứa một điểm toạ độ' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Phường chứa điểm, hoặc null khi điểm nằm ngoài vùng có ranh giới. ' +
+      'isEstimated=true nghĩa là phường tìm bằng khoảng cách tới tâm gần ' +
+      'nhất, không phải phường chứa điểm — client không nên tự điền ' +
+      'tỉnh/phường từ kết quả đó.',
+    type: ResolvedRegionDto,
+  })
+  async resolve(@Query() query: QueryResolveDto) {
+    return this.regionsService.resolveByPoint(query);
+  }
+
+  @Public()
+  @Get('wards/centroid')
+  @ApiOperation({ summary: 'Lấy tâm hình học của một phường' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Thông tin phường kèm toạ độ tâm (luôn là ước lượng, isEstimated=true), ' +
+      'hoặc null khi mã không tồn tại',
+    type: ResolvedRegionDto,
+  })
+  async getCentroid(@Query() query: QueryCentroidDto) {
+    return this.regionsService.getCentroid(query);
   }
 }

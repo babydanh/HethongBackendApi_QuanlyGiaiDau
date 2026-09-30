@@ -9,7 +9,12 @@ import { randomUUID } from 'crypto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
-import { LivestreamRepository } from './livestream.repository';
+import { SetCourtPlaybackUrlDto } from './dto/set-court-playback-url.dto';
+import {
+  LivestreamMode,
+  LivestreamProtocol,
+  LivestreamRepository,
+} from './livestream.repository';
 
 @Injectable()
 export class LivestreamService {
@@ -24,17 +29,6 @@ export class LivestreamService {
 
   private getMediaServerHost() {
     return this.configService.get<string>('LIVESTREAM_MEDIA_SERVER_HOST') || 'media.aqvision.net';
-  }
-
-  private buildPlaybackEndpoints(streamKey: string) {
-    const host = this.getMediaServerHost();
-    const cleanKey = streamKey.replace(/^\/+|\/+$/g, '');
-    return {
-      flv: `https://${host}/live/${cleanKey}.live.flv`,
-      hls: `https://${host}/live/${cleanKey}/hls.m3u8`,
-      webrtc: `https://${host}/index/api/webrtc?app=live&stream=${cleanKey}&type=play`,
-      rtsp: `rtsp://${host}:554/live/${cleanKey}`,
-    };
   }
 
   private getRtmpBaseUrl() {
@@ -177,16 +171,86 @@ export class LivestreamService {
     });
   }
 
+  /**
+   * Lưu (hoặc xoá) URL phát của một sân. Đây là đường BTC khai URL một lần trong
+   * setting sân; mọi trận diễn tại sân đó tự dùng URL này, không cần tạo camera.
+   *
+   * Xoá URL không xoá camera: set deleted_at để URL cũ còn truy vết được thay vì
+   * biến mất vĩnh viễn, đúng quy ước soft delete của các bảng chính.
+   */
+  async setCourtPlaybackUrl(
+    tournamentId: string,
+    courtId: string,
+    user: JwtPayload,
+    data: SetCourtPlaybackUrlDto,
+  ) {
+    await this.assertTournamentOperator(tournamentId, user);
+    await this.assertCourtUsableByTournament(courtId, tournamentId);
+
+    const trimmed = data.playbackUrl?.trim();
+    const existing = await this.livestreamRepository.findPullCameraByCourt(courtId, tournamentId);
+
+    if (!trimmed) {
+      if (!existing) {
+        return { courtId, playbackUrl: null, cameraId: null };
+      }
+      await this.livestreamRepository.archiveCamera(existing.id);
+      return { courtId, playbackUrl: null, cameraId: null };
+    }
+
+    const playbackUrl = this.assertPullPlaybackUrl(trimmed);
+    const name = data.name?.trim() || existing?.name || 'Camera sân';
+
+    if (existing) {
+      const updated = await this.livestreamRepository.updatePullCameraUrl(
+        existing.id,
+        name,
+        this.normalizePublicPlaybackUrl(playbackUrl)!,
+      );
+      return { courtId, playbackUrl: updated.playbackUrl, cameraId: updated.id };
+    }
+
+    const created = await this.livestreamRepository.createCamera({
+      tournamentId,
+      courtId,
+      name,
+      mode: 'PULL',
+      protocol: 'RTMP',
+      streamName: `court_${courtId.replace(/-/g, '')}_${randomUUID().replace(/-/g, '').slice(0, 8)}`,
+      streamKey: randomUUID().replace(/-/g, ''),
+      playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
+      createdBy: user.sub,
+    });
+
+    return { courtId, playbackUrl: created.playbackUrl, cameraId: created.id };
+  }
+
+
   async createCamera(tournamentId: string, user: JwtPayload, data: CreateCameraDto) {
     await this.assertTournamentOperator(tournamentId, user);
     const streamName = `camera_${randomUUID().replace(/-/g, '')}`;
     const streamKey = randomUUID().replace(/-/g, '');
-    const playbackUrl = this.buildPlaybackUrl(streamName);
+    const mode: LivestreamMode = data.mode === 'PULL' ? 'PULL' : 'PUSH';
+    const protocol: LivestreamProtocol = data.protocol ?? 'RTMP';
+    const courtId = data.courtId ?? null;
+    if (courtId) {
+      await this.assertCourtUsableByTournament(courtId, tournamentId);
+    }
+
+
+    // PULL: luồng đã được phát sẵn từ bên ngoài, BTC dán URL phát vào.
+    // Không sinh và không chuẩn hoá lại URL đó — mọi hình dạng đều phải giữ nguyên.
+    const playbackUrl =
+      mode === 'PULL'
+        ? this.assertPullPlaybackUrl(data.playbackUrl)
+        : this.buildPlaybackUrl(streamName);
 
     const camera = await this.livestreamRepository.createCamera({
       tournamentId,
+      courtId,
       name: data.name.trim(),
-      protocol: data.protocol ?? 'RTMP',
+      mode,
+      protocol,
       streamName,
       streamKey,
       playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
@@ -195,8 +259,46 @@ export class LivestreamService {
 
     return {
       ...camera,
-      publish: this.buildPublishInfo(data.protocol ?? 'RTMP', streamName),
+      // PULL không có URL ingest để BTC cấu hình ở OBS/Camera Station.
+      publish: mode === 'PULL' ? null : this.buildPublishInfo(protocol, streamName),
     };
+  }
+
+  /**
+   * Sân phải thuộc địa điểm mà giải này dùng — qua cả venue mặc định lẫn venue
+   * theo vòng — nếu không thì khai URL cho sân của giải khác sẽ lọt vào đây.
+   */
+  private async assertCourtUsableByTournament(courtId: string, tournamentId: string) {
+    const tournamentIds = await this.livestreamRepository.findTournamentIdsUsingCourt(courtId);
+    if (tournamentIds.length === 0) {
+      throw new NotFoundException('Sân không tồn tại');
+    }
+    if (!tournamentIds.includes(tournamentId)) {
+      throw new BadRequestException('Sân không thuộc giải đấu này.');
+    }
+  }
+
+  private assertPullPlaybackUrl(playbackUrl: string | undefined) {
+    const trimmed = playbackUrl?.trim();
+    if (!trimmed) {
+      throw new BadRequestException('Chế độ PULL cần URL phát trực tiếp của sân.');
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new BadRequestException('URL phát trực tiếp không hợp lệ.');
+    }
+
+    // Chỉ nhận https://. Trang live phục vụ qua HTTPS nên nguồn http:// bị trình
+    // duyệt chặn mixed content và khán giả chỉ thấy màn hình đen — từ chối ngay
+    // lúc lưu thay vì để BTC nhập xong mới phát hiện.
+    if (parsed.protocol !== 'https:') {
+      throw new BadRequestException('URL phát phải dùng https://.');
+    }
+
+    return trimmed;
   }
 
   async deleteCamera(cameraId: string, user: JwtPayload) {
@@ -229,6 +331,47 @@ export class LivestreamService {
     );
   }
 
+  /**
+   * Dọn camera của sân trước khi sân bị xoá.
+   *
+   * `livestream_cameras.court_id` là `ON DELETE SET NULL`, nên phải gọi hàm này
+   * TRƯỚC khi xoá sân, không thể làm sau. Xoá dòng gán trong `match_livestreams`
+   * để trận không còn phát nhầm camera của sân đã bị xoá.
+   */
+  async detachCamerasForCourt(courtId: string) {
+    return this.livestreamRepository.detachCamerasForCourt(courtId);
+  }
+
+  /**
+   * Gán camera PULL của sân cho trận khi BTC xếp trận vào sân đó.
+   *
+   * Sân có khai URL phát thì mọi trận xếp vào sân đó tự chạy, không cần BTC
+   * chọn camera tay. Trận đã được gán camera tay vẫn giữ nguyên, trừ khi BTC vừa
+   * đổi sân: lúc đó camera cũ không còn đúng nên phải gán lại camera của sân mới.
+   */
+  async autoAssignCourtCamera(
+    matchId: string,
+    tournamentId: string,
+    courtId: string | null,
+    options: { courtChanged: boolean },
+  ) {
+    if (!courtId) return null;
+
+    const camera = await this.livestreamRepository.findPullCameraByCourt(courtId, tournamentId);
+    if (!camera) return null;
+
+    if (!options.courtChanged) {
+      const current = await this.livestreamRepository.findMatchLivestream(matchId);
+      if (current?.cameraId) return null;
+    }
+
+    return this.livestreamRepository.assignCameraToMatch(
+      matchId,
+      camera.id,
+      this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '',
+    );
+  }
+
   async startMatchStream(matchId: string, user: JwtPayload) {
     const match = await this.assertCanControlMatchStream(matchId, user);
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
@@ -250,7 +393,12 @@ export class LivestreamService {
 
     return {
       livestream,
-      publish: this.buildPublishInfo(protocol, stream.streamName ?? stream.streamKey),
+      // PULL: luồng đã phát sẵn từ URL của sân, không có URL ingest để BTC dán
+      // vào OBS — trả null để không sinh ra link RTMP gây hiểu nhầm.
+      publish:
+        stream.cameraMode === 'PULL'
+          ? null
+          : this.buildPublishInfo(protocol, stream.streamName ?? stream.streamKey),
       playbackUrl,
     };
   }
@@ -281,30 +429,51 @@ export class LivestreamService {
       throw new NotFoundException('Trận đấu không tồn tại');
     }
 
+    // Camera của sân xếp vào trận, trận nào xếp vào sân đó tự dùng.
+    const courtCamera = match.courtId
+      ? await this.livestreamRepository.findPullCameraByCourt(match.courtId, match.tournamentId)
+      : null;
+
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
-    if (!stream?.cameraId || !stream.cameraName) {
+
+    // Camera BTC gán TAY (khác camera của sân) là lựa chọn cụ thể nên nó thắng.
+    // Riêng camera của sân thì phải rơi xuống nhánh sân bên dưới: nó được gán khi
+    // xếp lịch với streamStatus IDLE, nếu ở lại đây sẽ chặn URL sân và làm trận
+    // ONGOING mất video.
+    const isManualCamera = Boolean(
+      stream?.cameraId && stream.cameraName && stream.cameraId !== courtCamera?.id,
+    );
+    if (isManualCamera && stream) {
+      const isLive = stream.streamStatus === 'LIVE';
+      const playbackUrl = isLive ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null;
+
       return {
         matchId,
-        streamStatus: 'OFFLINE',
-        playbackUrl: null,
+        streamStatus: stream.streamStatus,
+        playbackUrl,
+        cameraName: stream.cameraName,
+        startedAt: stream.startedAt,
+        endedAt: stream.endedAt,
       };
     }
 
-    const playbackUrl =
-      stream.streamStatus === 'LIVE' ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null;
-    const streamIdentifier = stream.streamName || stream.streamKey;
+    // Sân có URL KHÔNG có nghĩa là đang phát. Chỉ trận đã bắt đầu (ONGOING) mới
+    // được trả playbackUrl, nếu không thì khán giả sẽ thấy video dù BTC chưa bấm
+    // "Bắt đầu" — đúng triệu chứng "có URL nhưng màn hình đen/ảo" khó chẩn đoán.
+    if (courtCamera?.playbackUrl && match.status === 'ONGOING') {
+      const courtUrl = this.normalizePublicPlaybackUrl(courtCamera.playbackUrl);
+      return {
+        matchId,
+        streamStatus: 'LIVE',
+        playbackUrl: courtUrl,
+        cameraName: courtCamera.name,
+        startedAt: null,
+        endedAt: null,
+      };
+    }
 
-    return {
-      matchId,
-      streamStatus: stream.streamStatus,
-      playbackUrl,
-      streamId: streamIdentifier ?? null,
-      endpoints: streamIdentifier && stream.streamStatus === 'LIVE'
-        ? this.buildPlaybackEndpoints(streamIdentifier)
-        : null,
-      cameraName: stream.cameraName,
-      startedAt: stream.startedAt,
-      endedAt: stream.endedAt,
-    };
+    return { matchId, streamStatus: 'OFFLINE', playbackUrl: null };
   }
+
+
 }

@@ -127,6 +127,20 @@ export class QueryMatchDto extends CursorPaginationDto {
   activeStageOnly?: boolean;
 
   @ApiPropertyOptional({
+    description:
+      'When true, do not fall back to tournament-wide matches if active stages are division-mapped.',
+    example: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean()
+  strictDivisionScope?: boolean;
+
+  @ApiPropertyOptional({
     example: 'GROUP_STAGE_KNOCKOUT',
     description: 'Lọc theo thể thức thi đấu: SINGLE_ELIMINATION, DOUBLE_ELIMINATION, ROUND_ROBIN, GROUP_STAGE_KNOCKOUT',
     enum: ['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ROUND_ROBIN', 'GROUP_STAGE_KNOCKOUT'],

@@ -1,14 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 
 export type LivestreamProtocol = 'RTMP' | 'SRT';
+export type LivestreamMode = 'PUSH' | 'PULL';
 
 export interface CreateCameraInput {
   tournamentId: string;
+  courtId: string | null;
   name: string;
+  mode: LivestreamMode;
   protocol: LivestreamProtocol;
   streamName: string;
   streamKey: string;
@@ -70,6 +73,124 @@ export class LivestreamRepository {
     return camera;
   }
 
+  /**
+   * Camera PULL đang phục vụ một sân trong một giải. Cùng một sân có thể được khai
+   * URL khác ở giải khác, nên phải lọc cả tournamentId chứ không chỉ courtId.
+   */
+  /** Giải sở hữu sân, để chặn việc gán camera của giải này sang sân của giải khác. */
+  /**
+   * Camera PULL đang phục vụ một sân. Không lọc theo giải: `venue_courts` thuộc về
+   * địa điểm dùng chung, và `matches.courtId` đã xác định sân nên giải không cần
+   * tham gia. Sân dùng lại ở giải khác sẽ dùng đúng URL này.
+   */
+  /**
+   * Các giải có thể dùng sân này. Giải nối với địa điểm qua HAI đường:
+   * `tournaments.venueId` (địa điểm mặc định) và `tournament_stages.venueId`
+   * (địa điểm theo vòng). Thiếu một trong hai sẽ chặn nhầm sân hợp lệ.
+   */
+  async findTournamentIdsUsingCourt(courtId: string) {
+    const [court] = await this.db
+      .select({ venueId: schema.venueCourts.venueId })
+      .from(schema.venueCourts)
+      .where(eq(schema.venueCourts.id, courtId))
+      .limit(1);
+    if (!court) return [];
+
+    const mainRows = await this.db
+      .select({ tournamentId: schema.tournaments.id })
+      .from(schema.tournaments)
+      .where(eq(schema.tournaments.venueId, court.venueId));
+
+    const stageRows = await this.db
+      .select({ tournamentId: schema.tournamentStages.tournamentId })
+      .from(schema.tournamentStages)
+      .where(eq(schema.tournamentStages.venueId, court.venueId));
+
+    return [...new Set([...mainRows, ...stageRows].map((r) => r.tournamentId))];
+  }
+
+
+  /** Xoá mềm camera: giữ dòng dữ liệu để URL cũ còn truy vết được. */
+  async archiveCamera(cameraId: string) {
+    await this.db
+      .update(schema.livestreamCameras)
+      .set({ status: 'ARCHIVED', deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(schema.livestreamCameras.id, cameraId));
+  }
+
+  /**
+   * Ngắt camera của một sân khỏi các trận đang dùng nó, rồi archive camera.
+   *
+   * Gọi TRƯỚC khi xoá sân: `livestream_cameras.court_id` là `ON DELETE SET NULL`,
+   * nên xoá sân xong sẽ không còn cách nào tìm ra camera thuộc sân đó. Nếu không
+   * dọn, dòng `match_livestreams` còn trỏ camera mồ côi và trận sẽ phát nhầm
+   * camera của một sân đã bị xoá.
+   */
+  async detachCamerasForCourt(courtId: string) {
+    const cameras = await this.db
+      .select({ id: schema.livestreamCameras.id })
+      .from(schema.livestreamCameras)
+      .where(
+        and(
+          eq(schema.livestreamCameras.courtId, courtId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      );
+
+    if (cameras.length === 0) return 0;
+    const cameraIds = cameras.map((c) => c.id);
+    const now = new Date();
+
+    // Xoá hẳn dòng gán: nó chỉ là bản ghi "trận này dùng camera này", không giữ
+    // dữ liệu nghiệp vửu. Giữ lại sẽ làm playbackUrl cũ tiếp tục tồn tại.
+    await this.db
+      .delete(schema.matchLivestreams)
+      .where(inArray(schema.matchLivestreams.cameraId, cameraIds));
+
+    await this.db
+      .update(schema.livestreamCameras)
+      .set({ status: 'ARCHIVED', deletedAt: now, updatedAt: now })
+      .where(inArray(schema.livestreamCameras.id, cameraIds));
+
+    return cameraIds.length;
+  }
+
+  async updatePullCameraUrl(cameraId: string, name: string, playbackUrl: string) {
+    const [camera] = await this.db
+      .update(schema.livestreamCameras)
+      .set({ name, playbackUrl, status: 'IDLE', updatedAt: new Date() })
+      .where(eq(schema.livestreamCameras.id, cameraId))
+      .returning();
+
+    return camera ?? null;
+  }
+
+
+  /**
+   * Tìm camera PULL gắn với sân trong đúng giải đấu.
+   *
+   * Một sân có thể dùng cho nhiều giải, mỗi giải một camera riêng, nên bắt buộc
+   * lọc theo tournamentId — lọc theo courtId một mình sẽ trả camera của giải
+   * khác và làm lộ URL phát sang giải không liên quan.
+   */
+  async findPullCameraByCourt(courtId: string, tournamentId: string) {
+    const [camera] = await this.db
+      .select()
+      .from(schema.livestreamCameras)
+      .where(
+        and(
+          eq(schema.livestreamCameras.courtId, courtId),
+          eq(schema.livestreamCameras.tournamentId, tournamentId),
+          eq(schema.livestreamCameras.mode, 'PULL'),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .orderBy(desc(schema.livestreamCameras.updatedAt))
+      .limit(1);
+
+    return camera ?? null;
+  }
+
   async findCameraById(cameraId: string) {
     const [camera] = await this.db
       .select()
@@ -114,6 +235,7 @@ export class LivestreamRepository {
         refereeId: schema.matches.refereeId,
         participant1Id: schema.matches.participant1Id,
         participant2Id: schema.matches.participant2Id,
+        courtId: schema.matches.courtId,
         tournamentCreatedBy: schema.tournaments.createdBy,
         tournamentName: schema.tournaments.name,
         tournamentStatus: schema.tournaments.status,
@@ -147,6 +269,7 @@ export class LivestreamRepository {
         cameraProtocol: schema.livestreamCameras.protocol,
         streamName: schema.livestreamCameras.streamName,
         streamKey: schema.livestreamCameras.streamKey,
+        cameraMode: schema.livestreamCameras.mode,
       })
       .from(schema.matchLivestreams)
       .leftJoin(
