@@ -41,7 +41,7 @@ export class SocialLocationsService {
 
   // Legacy response shape remains unchanged for deployed clients.
   async search(query: string, limit = 8): Promise<SocialPlace[]> {
-    return (await this.autocomplete(query, limit)).map(this.legacyPlace);
+    return (await this.provider.autocomplete(query, limit)).map(this.legacyPlace);
   }
 
   async resolve(text: string): Promise<SocialPlace> {
