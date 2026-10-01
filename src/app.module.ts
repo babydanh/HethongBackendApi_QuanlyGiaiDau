@@ -47,6 +47,7 @@ import { SponsorsModule } from './modules/sponsors/sponsors.module';
 import { AdvertisementsModule } from './modules/advertisements/advertisements.module';
 import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-match-sessions.module';
 import { SocialSessionsModule } from './modules/social-sessions/social-sessions.module';
+import { SocialLocationsModule } from './modules/social-locations/social-locations.module';
 import { FriendshipsModule } from './modules/friendships/friendships.module';
 import { ZaloModule } from './providers/zalo/zalo.module';
 
@@ -76,9 +77,17 @@ import { ZaloModule } from './providers/zalo/zalo.module';
       // Dev: 50000 req/60s; Production: 50000 req/60s (loại bỏ hoàn toàn bẫy 429 rate limit khi cuộn trang)
       { name: 'default', ttl: 60000, limit: 50000 },
       // Endpoint nhạy cảm (auth, payment)
-      { name: 'sensitive', ttl: 30000, limit: process.env.NODE_ENV === 'production' ? 60 : 300 },
+      {
+        name: 'sensitive',
+        ttl: 30000,
+        limit: process.env.NODE_ENV === 'production' ? 60 : 300,
+      },
       // Endpoint cực nhạy (login, register) — chống brute force
-      { name: 'strict', ttl: 60000, limit: process.env.NODE_ENV === 'production' ? 20 : 150 },
+      {
+        name: 'strict',
+        ttl: 60000,
+        limit: process.env.NODE_ENV === 'production' ? 20 : 150,
+      },
     ]),
     ScheduleModule.forRoot(),
     DatabaseModule,
@@ -107,6 +116,7 @@ import { ZaloModule } from './providers/zalo/zalo.module';
     AdvertisementsModule,
     ClubMatchSessionsModule,
     SocialSessionsModule,
+    SocialLocationsModule,
     FriendshipsModule,
     ZaloModule,
   ],
