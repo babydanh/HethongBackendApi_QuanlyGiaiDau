@@ -19,13 +19,14 @@ describe('SocialLocationsService', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
-    const provider = new PhotonProvider({
-      get: (key: string) => key === 'PHOTON_BASE_URL' ? 'http://photon.internal:2322' : undefined,
-    } as unknown as ConfigService);
-    service = new SocialLocationsService(provider, {
-      resolveByPoint: jest.fn().mockResolvedValue(null),
-    } as unknown as RegionsService);
-  });
+  const provider = new PhotonProvider({
+    get: (key: string) => key === 'PHOTON_BASE_URL' ? 'http://photon.internal:2322' : undefined,
+  } as unknown as ConfigService);
+  service = new SocialLocationsService(provider, {
+    resolveByPoint: jest.fn().mockResolvedValue(null),
+    matchProviderNames: jest.fn().mockResolvedValue({ provinceCode: null, wardCode: null }),
+  } as unknown as RegionsService);
+});
 
   afterEach(() => {
     global.fetch = originalFetch;
