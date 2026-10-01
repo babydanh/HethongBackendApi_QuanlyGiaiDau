@@ -43,6 +43,10 @@ import {
   normalizeGenderRestriction,
   normalizeProfileGender,
 } from '../../../common/helpers/gender.helper';
+import {
+  readCapacitiesForDivisions,
+  readTournamentCapacities,
+} from '../services/tournament-capacity.service';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 
 @Injectable()
@@ -326,13 +330,16 @@ export class TournamentCatalogRepository {
           );
 
         const divisions: DivisionInfo[] = await Promise.all(
-          rawDivs.map(async (d) => {
-            const [dCount] = await this.db
+          rawDivs.map(async (division) => {
+            const [divisionParticipantCount] = await this.db
               .select({ count: count() })
               .from(schema.tournamentParticipants)
               .where(
                 and(
-                  eq(schema.tournamentParticipants.tournamentDivisionId, d.id),
+                  eq(
+                    schema.tournamentParticipants.tournamentDivisionId,
+                    division.id,
+                  ),
                   ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
                   ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
                   ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
@@ -340,28 +347,33 @@ export class TournamentCatalogRepository {
                   ne(schema.tournamentParticipants.teamStatus, 'CANCELLED'),
                 ),
               );
-            const division = {
-              ...d,
+            const result = {
+              ...division,
               categoryId: row.tournament.categoryId,
-              entryFee: d.entryFeeOverrideEnabled
-                ? d.entryFee
+              entryFee: division.entryFeeOverrideEnabled
+                ? division.entryFee
                 : row.tournament.entryFee,
-              entryFeeOverride: d.entryFeeOverrideEnabled ? d.entryFee : null,
-              effectiveEntryFee: d.entryFeeOverrideEnabled
-                ? d.entryFee
+              entryFeeOverride: division.entryFeeOverrideEnabled
+                ? division.entryFee
+                : null,
+              effectiveEntryFee: division.entryFeeOverrideEnabled
+                ? division.entryFee
                 : row.tournament.entryFee,
               _count: {
-                participants: dCount.count,
+                participants: divisionParticipantCount.count,
               },
             };
             return {
-              ...division,
-              inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
+              ...result,
+              inviteCode: includeInviteCode
+                ? row.tournament.inviteCode
+                : null,
             };
           }),
         );
 
-        const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
+        const { inviteCode: _inviteCode, ...safeTournament } =
+          row.tournament;
         return {
           ...safeTournament,
           inviteCode: includeInviteCode ? _inviteCode : null,
@@ -374,19 +386,41 @@ export class TournamentCatalogRepository {
         };
       }),
     );
+    const [divisionCapacities, tournamentCapacities] = await Promise.all([
+      readCapacitiesForDivisions(
+        this.db,
+        data.flatMap(
+          (tournament) =>
+            tournament.divisions?.map((division) => division.id) ?? [],
+        ),
+      ),
+      readTournamentCapacities(
+        this.db,
+        rowData.map((row) => row.tournament.id),
+      ),
+    ]);
+    const dataWithCapacity = data.map((tournament) => ({
+      ...tournament,
+      capacity: tournamentCapacities[tournament.id],
+      divisions:
+        tournament.divisions?.map((division) => ({
+          ...division,
+          capacity: divisionCapacities[division.id],
+        })) ?? null,
+    }));
 
     return {
-      data,
+      data: dataWithCapacity,
       meta: {
         total: totalRecord.count,
         page,
         limit,
         totalPages: Math.ceil(totalRecord.count / limit),
         nextCursor:
-          hasMore && data.length > 0
+          hasMore && dataWithCapacity.length > 0
             ? CursorPaginationHelper.encodeCursor({
-                id: data[data.length - 1].id,
-                createdAt: data[data.length - 1].createdAt,
+                id: dataWithCapacity[dataWithCapacity.length - 1].id,
+                createdAt: dataWithCapacity[dataWithCapacity.length - 1].createdAt,
               })
             : null,
         hasMore,
@@ -613,6 +647,14 @@ export class TournamentCatalogRepository {
       .from(schema.tournamentDivisions)
       .where(eq(schema.tournamentDivisions.tournamentId, id));
 
+    const [divisionCapacities, tournamentCapacities] = await Promise.all([
+      readCapacitiesForDivisions(
+        this.db,
+        rawDivisions.map((division) => division.id),
+      ),
+      readTournamentCapacities(this.db, [id]),
+    ]);
+
     divisions = await Promise.all(
       rawDivisions.map(async (division) => {
         const [participantCountByDivision] = await this.db
@@ -649,6 +691,9 @@ export class TournamentCatalogRepository {
           effectiveEntryFee: division.entryFeeOverrideEnabled
             ? division.entryFee
             : row.tournament.entryFee,
+          // Roster-weighted occupancy, batched for the whole tournament so the
+          // detail page never issues one capacity read per division.
+          capacity: divisionCapacities[division.id],
           _count: {
             participants: participantCountByDivision.count,
             matches: matchCountByDivision.count,
@@ -660,6 +705,13 @@ export class TournamentCatalogRepository {
         };
       }),
     );
+
+    // A tournament with no configured divisions is itself the only division;
+    // expose the same aggregate projection for that branch instead of leaving
+    // clients to infer occupancy from the participant row count.
+    const capacity = divisions.length
+      ? undefined
+      : tournamentCapacities[id];
 
     const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
     return {
@@ -677,6 +729,7 @@ export class TournamentCatalogRepository {
             isTrusted,
           }
         : null,
+      capacity,
       _summary: {
         participantCount: participantCount.count,
         matchesTotal,
@@ -1741,6 +1794,17 @@ export class TournamentCatalogRepository {
       divisionsByTournamentId.set(tournamentId, divisions);
     }
 
+    // One batched occupancy pass for the whole page. `_count.participants` and
+    // `_summary.participantCount` stay raw row counts; `capacity` is the
+    // roster-weighted projection clients should render.
+    const [divisionCapacities, tournamentCapacities] = await Promise.all([
+      readCapacitiesForDivisions(this.db, standaloneDivisionIds),
+      readTournamentCapacities(this.db, [
+        ...parentChildIds,
+        ...pageItems.map((item) => item.id),
+      ]),
+    ]);
+
     const data = pageItems.map((item) => {
       if (item.itemType === 'PARENT') {
         const divisions = (childrenByParentId.get(item.id) ?? []).map((row) => {
@@ -1750,6 +1814,7 @@ export class TournamentCatalogRepository {
             ...row.tournament,
             category: row.category?.id ? row.category : null,
             participantCount,
+            capacity: tournamentCapacities[row.tournament.id],
             _count: { participants: participantCount },
             _summary: { participantCount },
           };
@@ -1766,6 +1831,7 @@ export class TournamentCatalogRepository {
         return {
           ...division,
           participantCount: divisionParticipantCount,
+          capacity: divisionCapacities[division.id],
           _count: { participants: divisionParticipantCount, matches: 0 },
           _summary: { participantCount: divisionParticipantCount },
         };
@@ -1774,6 +1840,7 @@ export class TournamentCatalogRepository {
       return {
         ...item,
         participantCount,
+        capacity: tournamentCapacities[item.id],
         _count: { participants: participantCount },
         _summary: { participantCount },
         // A standalone tournament without configured sub-divisions is itself
@@ -1781,7 +1848,14 @@ export class TournamentCatalogRepository {
         // a follow-up GET /divisions request.
         divisions: divisions.length
           ? divisions
-          : [{ ...item, participantCount, _summary: { participantCount } }],
+          : [
+              {
+                ...item,
+                participantCount,
+                capacity: tournamentCapacities[item.id],
+                _summary: { participantCount },
+              },
+            ],
       };
     });
     const lastItem = data[data.length - 1];

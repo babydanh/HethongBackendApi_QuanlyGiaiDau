@@ -27,9 +27,11 @@ import {
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 import { TournamentRatingRepository } from './tournament-rating.repository';
 import {
+  CAPACITY_RESERVING_TEAM_STATUSES,
   isDoublesParticipantPairable,
   resolveDoublesParticipantStatus,
 } from '../utils/tournament-participant-status';
+import { lockCapacityOwner } from '../services/tournament-capacity.service';
 
 @Injectable()
 export class TournamentLiteRepository {
@@ -55,9 +57,10 @@ export class TournamentLiteRepository {
       .where(
         and(
           eq(schema.tournamentParticipants.tournamentId, tournamentId),
-          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-          ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-          ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+          inArray(
+            schema.tournamentParticipants.teamStatus,
+            [...CAPACITY_RESERVING_TEAM_STATUSES],
+          ),
         ),
       );
     return Number(result?.count ?? 0);
@@ -156,6 +159,12 @@ export class TournamentLiteRepository {
     registrationMode: string,
     teamName: string,
   ) {
+    // Organizer pairing is capacity-neutral: p1 grows from one athlete to two
+    // (+half a team) exactly as p2 is withdrawn (-half a team). It still takes
+    // the tournament owner lock so it can never deadlock against a concurrent
+    // registration, which locks tournament -> division -> participant.
+    await lockCapacityOwner(tx, { tournamentId });
+
     // Lock participants in sorted order to prevent deadlocks
     const sortedIds = [p1Id, p2Id].sort();
     const lockedRows: Record<

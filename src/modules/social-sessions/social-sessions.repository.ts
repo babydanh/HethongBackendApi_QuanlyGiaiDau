@@ -65,11 +65,37 @@ function userRefPoint(lat: number, lng: number) {
   return sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`;
 }
 
-/** Biểu thức khoảng cách (km) từ venue tới user — NULL khi venue chưa có tọa độ. */
+/**
+ * Toạ độ dùng cho bộ lọc "gần tôi" của 1 social session.
+ *
+ * VÌ SAO COALESCE: host có 2 nguồn toạ độ — ghim tay trên chính session
+ * (`venue_geolocation`) hoặc để session trỏ về sân đã đăng ký
+ * (`social_sessions.venue_id -> tournament_venues.id`, cột `location_geolocation`).
+ * Trước đây bộ lọc chỉ đọc `venue_geolocation`, nên mọi session không ghim tay
+ * (rất phổ biến: tạo kèo theo sân có sẵn) rơi khỏi danh sách "gần tôi" — người
+ * dùng đứng ngay trước sân mà không thấy kèo nào.
+ *
+ * VÌ SAO ĐẶT TOẠ ĐỘ GHIM TAY TRƯỚC: ghim của host là vị trí cụ thể (bàn sân,
+ * sân nhà dân), luôn chính xác hơn toạ độ tổng quát của venue. Đảo thứ tự sẽ làm
+ * khoảng cách lệch và kèo gần bị đẩy ra xa. Cả hai vế cùng kiểu
+ * geography(Point, 4326) nên COALESCE an toàn về kiểu.
+ *
+ * Không có vế nào -> NULL: session không xác định vị trí, ST_DWithin loại khỏi
+ * danh sách gần tôi và ORDER BY distance đẩy xuống cuối. KHÔNG dùng mốc 0.0 vì
+ * 0 là "đứng đúng chỗ", sẽ đẩy kèo không rõ vị trí lên đầu danh sách.
+ */
+function sessionLocationExpr() {
+  return sql`COALESCE(${schema.socialSessions.venueGeolocation}, ${schema.tournamentVenues.locationGeolocation})`;
+}
+
+/**
+ * Biểu thức khoảng cách (km) từ session tới user — NULL khi session không có
+ * toạ độ nào (chưa ghim tay và không gắn venue có toạ độ).
+ */
 function distanceKmExpr(lat: number, lng: number) {
   return sql<
     number | null
-  >`(ST_Distance(${schema.socialSessions.venueGeolocation}, ${userRefPoint(lat, lng)}) / 1000)`;
+  >`(ST_Distance(${sessionLocationExpr()}, ${userRefPoint(lat, lng)}) / 1000)`;
 }
 
 /**
@@ -298,14 +324,17 @@ export class SocialSessionsRepository {
     if (filters.playDate) {
       conditions.unshift(eq(schema.socialSessions.playDate, filters.playDate));
     }
-    // Lọc gần tôi: chỉ venue đã có tọa độ + nằm trong bán kính (m).
+    // Lọc gần tôi: session đã có toạ độ (ghim tay HOẶC mượn từ venue) + nằm
+    // trong bán kính (m). Cột join venue nằm ở cả 2 nhánh truy vấn bên dưới
+    // (items + đếm tổng) vì `where` dùng chung — thiếu join ở nhánh đếm là
+    // lỗi SQL "missing FROM-clause entry", không phải chỉ lệch số liệu.
     const withGeo = filters.lat !== undefined && filters.lng !== undefined;
     if (withGeo) {
       const radiusMeters = Math.round(
         (filters.radiusKm ?? DEFAULT_NEARBY_RADIUS_KM) * 1000,
       );
       conditions.push(
-        sql`ST_DWithin(${schema.socialSessions.venueGeolocation}, ${userRefPoint(filters.lat!, filters.lng!)}, ${radiusMeters})`,
+        sql`ST_DWithin(${sessionLocationExpr()}, ${userRefPoint(filters.lat!, filters.lng!)}, ${radiusMeters})`,
       );
     }
     if (!filters.includePrivate)
@@ -346,14 +375,21 @@ export class SocialSessionsRepository {
     }
     const where = and(...conditions);
     const offset = (filters.page - 1) * filters.limit;
-    // Luôn select distanceKm (NULL khi không có lat/lng hoặc venue chưa ghim).
+    // Luôn select distanceKm (NULL khi không có lat/lng, hoặc session không có
+    // toạ độ nào: chưa ghim tay và cũng không gắn venue nào có toạ độ).
     const distanceKm = withGeo
       ? distanceKmExpr(filters.lat!, filters.lng!)
       : sql<number | null>`NULL`;
-    // DISTANCE = gần lên trước, venue chưa ghim (NULL) xếp cuối; mặc định theo giờ.
+    // DISTANCE = gần lên trước; session không có toạ độ nào (distance NULL) xếp
+    // CUỐI, không phải đầu. `NULLS LAST` viết tường minh thay vì trông chờ mặc
+    // định của Postgres — tránh đổi hành vi khi ai đó đụng vào biểu thức này.
+    // Khoá thứ hai (startAt) giữ nguyên thứ tự khi khoảng cách bằng nhau.
     const orderClauses =
       withGeo && filters.sortBy === 'DISTANCE'
-        ? [asc(distanceKm), asc(schema.socialSessions.startAt)]
+        ? [
+            sql`${distanceKm} ASC NULLS LAST`,
+            asc(schema.socialSessions.startAt),
+          ]
         : [asc(schema.socialSessions.startAt)];
 
     const [items, totalRows] = await Promise.all([
@@ -374,11 +410,22 @@ export class SocialSessionsRepository {
           schema.categories,
           eq(schema.categories.id, schema.socialSessions.categoryId),
         )
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournamentVenues.id, schema.socialSessions.venueId),
+        )
         .where(where)
         .orderBy(...orderClauses)
         .limit(filters.limit)
         .offset(offset),
-      tx.select({ total: count() }).from(schema.socialSessions).where(where),
+      tx
+        .select({ total: count() })
+        .from(schema.socialSessions)
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournamentVenues.id, schema.socialSessions.venueId),
+        )
+        .where(where),
     ]);
     return { items, total: Number(totalRows[0]?.total ?? 0) };
   }
@@ -1134,12 +1181,16 @@ export class SocialSessionsRepository {
       conditions.push(sessionSearchMatch(keyword));
     }
     const withGeo = filters.lat !== undefined && filters.lng !== undefined;
+    // Giống listByDate: toạ độ = ghim tay của host, thiếu thì mượn toạ độ venue
+    // (`social_sessions.venue_id` -> `tournament_venues.location_geolocation`).
+    // Join venue phải có ở CẢ 2 nhánh (items + đếm tổng) vì chúng dùng chung
+    // `where`; thiếu một bên là lỗi SQL chứ không phải lệch số liệu.
     if (withGeo) {
       const radiusMeters = Math.round(
         (filters.radiusKm ?? DEFAULT_NEARBY_RADIUS_KM) * 1000,
       );
       conditions.push(
-        sql`ST_DWithin(${schema.socialSessions.venueGeolocation}, ${userRefPoint(filters.lat!, filters.lng!)}, ${radiusMeters})`,
+        sql`ST_DWithin(${sessionLocationExpr()}, ${userRefPoint(filters.lat!, filters.lng!)}, ${radiusMeters})`,
       );
     }
     const where = and(...conditions);
@@ -1147,9 +1198,14 @@ export class SocialSessionsRepository {
     const distanceKm = withGeo
       ? distanceKmExpr(filters.lat!, filters.lng!)
       : sql<number | null>`NULL`;
+    // NULLS LAST tường minh: session không có toạ độ nào (distance NULL) xếp
+    // cuối thay vì đầu. startAt là khoá phụ, giữ thứ tự khi khoảng cách bằng nhau.
     const orderClauses =
       withGeo && filters.sortBy === 'DISTANCE'
-        ? [asc(distanceKm), desc(schema.socialSessions.startAt)]
+        ? [
+            sql`${distanceKm} ASC NULLS LAST`,
+            desc(schema.socialSessions.startAt),
+          ]
         : [desc(schema.socialSessions.startAt)];
 
     const [items, totalRows] = await Promise.all([
@@ -1170,11 +1226,22 @@ export class SocialSessionsRepository {
           schema.categories,
           eq(schema.categories.id, schema.socialSessions.categoryId),
         )
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournamentVenues.id, schema.socialSessions.venueId),
+        )
         .where(where)
         .orderBy(...orderClauses)
         .limit(filters.limit)
         .offset(offset),
-      tx.select({ total: count() }).from(schema.socialSessions).where(where),
+      tx
+        .select({ total: count() })
+        .from(schema.socialSessions)
+        .leftJoin(
+          schema.tournamentVenues,
+          eq(schema.tournamentVenues.id, schema.socialSessions.venueId),
+        )
+        .where(where),
     ]);
     return { items, total: Number(totalRows[0]?.total ?? 0) };
   }

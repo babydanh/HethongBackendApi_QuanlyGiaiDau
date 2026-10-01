@@ -16,6 +16,19 @@ import {
   LivestreamRepository,
 } from './livestream.repository';
 
+type MatchStreamControlStatus = 'IDLE' | 'LIVE' | 'OFFLINE' | 'ERROR' | null;
+
+// Only the statuses the toggle understands are published. `hasCamera` stays
+// true so the client knows a camera is assigned even if a row carries a status
+// this contract does not cover.
+function isMatchStreamControlStatus(
+  status: string | null | undefined,
+): status is Exclude<MatchStreamControlStatus, null> {
+  return (
+    status === 'IDLE' || status === 'LIVE' || status === 'OFFLINE' || status === 'ERROR'
+  );
+}
+
 @Injectable()
 export class LivestreamService {
   constructor(
@@ -370,6 +383,23 @@ export class LivestreamService {
       camera.id,
       this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '',
     );
+  }
+
+  async getMatchStreamControlState(
+    matchId: string,
+    user: JwtPayload,
+  ): Promise<{
+    matchId: string;
+    hasCamera: boolean;
+    streamStatus: MatchStreamControlStatus;
+  }> {
+    await this.assertCanControlMatchStream(matchId, user);
+    const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
+    const hasCamera = Boolean(stream?.cameraId);
+    const status = stream?.streamStatus;
+    const streamStatus = hasCamera && isMatchStreamControlStatus(status) ? status : null;
+
+    return { matchId, hasCamera, streamStatus };
   }
 
   async startMatchStream(matchId: string, user: JwtPayload) {

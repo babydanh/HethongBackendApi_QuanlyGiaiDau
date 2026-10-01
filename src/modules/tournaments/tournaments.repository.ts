@@ -819,16 +819,6 @@ export class TournamentsRepository {
     return this.tournamentRegistrationRepository.myRegistration(...args);
   }
 
-  cancelPendingRegistrationsIfFull(
-    ...args: Parameters<
-      TournamentRegistrationRepository['cancelPendingRegistrationsIfFull']
-    >
-  ) {
-    return this.tournamentRegistrationRepository.cancelPendingRegistrationsIfFull(
-      ...args,
-    );
-  }
-
   processPendingRegistrationsTimeout(
     ...args: Parameters<
       TournamentRegistrationRepository['processPendingRegistrationsTimeout']

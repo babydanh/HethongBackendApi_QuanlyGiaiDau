@@ -12,6 +12,7 @@ import { UpdateDivisionDto } from '../dto/update-division.dto';
 import type { CategoryConfig } from '../interfaces/tournament-config.interface';
 import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentAccessService } from './tournament-access.service';
+import { TournamentCapacityService } from './tournament-capacity.service';
 import { TournamentFeePolicyService } from './tournament-fee-policy.service';
 import {
   validateMatchTypeAgainstCategory,
@@ -29,6 +30,7 @@ export class TournamentDivisionService {
     private readonly tournamentsRepository: TournamentsRepository,
     private readonly tournamentAccessService: TournamentAccessService,
     private readonly tournamentFeePolicyService: TournamentFeePolicyService,
+    private readonly tournamentCapacityService: TournamentCapacityService,
   ) {}
   async createDivision(
     tournamentId: string,
@@ -150,9 +152,20 @@ export class TournamentDivisionService {
         throw new NotFoundException('Giải đấu không tồn tại');
       }
 
-      return await this.tournamentsRepository.getDivisionsByTournament(
-        tournamentId,
-      );
+      const divisions =
+        await this.tournamentsRepository.getDivisionsByTournament(
+          tournamentId,
+        );
+
+      // One aggregate pass for the whole tournament; the projection must not
+      // fan out into a capacity read per division.
+      const capacities =
+        await this.tournamentCapacityService.getDivisionCapacities(tournamentId);
+
+      return divisions.map((division) => ({
+        ...division,
+        capacity: capacities[division.id],
+      }));
     } catch (error) {
       if (
         error instanceof NotFoundException ||

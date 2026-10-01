@@ -527,20 +527,6 @@ export const buildParticipantKickedNotification = (params: {
   }),
 });
 
-export const buildRegistrationCancelledFullNotification = (params: {
-  tournamentId: string;
-  receiverId: string;
-  divisionId?: string | null;
-}): CreateNotificationDto => ({
-  receiverId: params.receiverId,
-  type: NOTIFICATION_TYPES.TOURNAMENT_FULL_CANCELLED,
-  title: 'Hủy đăng ký do giải đấu đã đầy',
-  content: 'Đơn đăng ký Đôi của bạn đã bị hủy vì giải đấu đã đạt số lượng slot tối đa. Nếu đã thanh toán, bạn được hoàn toàn bộ khoản đã trả, không trừ phí; yêu cầu đang chờ Ban tổ chức xác nhận và chuyển tiền.',
-  redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
-    divisionId: params.divisionId ?? undefined,
-  }),
-});
-
 export const buildRegistrationTimeoutNotification = (params: {
   tournamentId: string;
   tournamentName: string;

@@ -7,6 +7,7 @@ import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.h
 import { locationRegionCondition, type LocationRegion } from '../../common/helpers/location-region.helper';
 import type { CreateCommunityPostDto } from './dto/create-community-post.dto';
 import { buildCommunityPostFingerprint, getCommunityDuplicateWindowMinutes } from './community-content-fingerprint';
+import { readTournamentCapacities } from '../tournaments/services/tournament-capacity.service';
 
 const PUBLIC_TOURNAMENT_ACTIVITY_STATUSES = [
   'UPCOMING',
@@ -223,10 +224,27 @@ export class CommunitySocialRepository {
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
-    const initialData = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    // Roster-weighted occupancy for the tournaments on this page, in one
+    // aggregate pass. Row counts stay row counts; `capacity` is the value a
+    // client should render, because four unpaired doubles rows are half full.
+    const capacityByTournament = await readTournamentCapacities(
+      this.db,
+      pageRows
+        .map((row) => row.tournament?.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    const initialData = pageRows.map((row) => ({
       ...row.post,
       author: row.author?.id ? row.author : null,
-      tournament: row.tournament?.id ? row.tournament : null,
+      tournament: row.tournament?.id
+        ? {
+            ...row.tournament,
+            capacity: capacityByTournament[row.tournament.id],
+          }
+        : null,
       viewerReaction: row.viewerReaction,
     }));
 
@@ -570,6 +588,14 @@ export class CommunitySocialRepository {
       participantsBySession.set(participant.sessionId, current);
     }
 
+    // One aggregate occupancy pass for the tournaments on this page. Session
+    // cards keep their own distinct-user counter; only tournament cards switch
+    // to the roster-weighted projection.
+    const tournamentCapacityById = await readTournamentCapacities(
+      this.db,
+      items.map((row) => row.tournament?.id).filter((id): id is string => Boolean(id)),
+    );
+
     const data = items.map((row) => {
       const sessionConfig = row.session?.sessionConfig;
       const locationFromConfig = sessionConfig && typeof sessionConfig === 'object'
@@ -581,10 +607,18 @@ export class CommunitySocialRepository {
       const title = row.session?.name || row.tournament?.name || row.post.body || 'Hoạt động CLB';
       const description = row.session?.description || row.tournament?.description || row.post.body || null;
       const eventDate = row.session?.startAt ?? row.tournament?.registrationStartDate ?? row.tournament?.startDate ?? row.post.createdAt;
+      // Session cards keep their distinct-user counter. Tournament cards use
+      // the roster-weighted projection: four unpaired doubles rows are two
+      // teams, so counting rows alone would report a false full.
+      const tournamentCapacity = row.tournament?.id
+        ? tournamentCapacityById[row.tournament.id]
+        : undefined;
       const max = row.cardType === 'TOURNAMENT_OPENED'
-        ? (row.tournament?.maxParticipants ?? 0)
+        ? (tournamentCapacity?.maxTeamSlots ?? row.tournament?.maxParticipants ?? 0)
         : (row.session?.maxParticipants ?? 0);
-      const current = Number(row.participantCount ?? 0);
+      const current = row.cardType === 'TOURNAMENT_OPENED'
+        ? (tournamentCapacity?.occupiedTeamSlots ?? Number(row.participantCount ?? 0))
+        : Number(row.participantCount ?? 0);
       return {
         id: row.post.id,
         type: row.cardType,
@@ -624,8 +658,9 @@ export class CommunitySocialRepository {
               id: row.tournament.id,
               logoUrl: row.tournament.logoUrl,
               status: row.tournament.status,
-              remainingSlots: Math.max((row.tournament.maxParticipants ?? 0) - current - (row.tournament.reservedSlotsCount ?? 0), 0),
-              totalSlots: row.tournament.maxParticipants ?? 0,
+              capacity: tournamentCapacity,
+              remainingSlots: Math.max(max - current - (row.tournament.reservedSlotsCount ?? 0), 0),
+              totalSlots: max,
               bannerUrl: row.tournament.bannerUrl,
             }
           : null,

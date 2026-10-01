@@ -301,6 +301,23 @@ export class PaymentsRepository {
     providerTransactionId?: string,
   ) {
     return this.db.transaction(async (tx) => {
+      if (newStatus === 'COMPLETED') {
+        const [paymentScope] = await tx
+          .select({ tournamentId: schema.payments.tournamentId })
+          .from(schema.payments)
+          .where(eq(schema.payments.id, paymentId))
+          .limit(1);
+        if (paymentScope) {
+          // Ledger inserts take KEY SHARE on tournaments; acquire it before
+          // payment/participant row locks to preserve capacity lock ordering.
+          await tx
+            .select({ id: schema.tournaments.id })
+            .from(schema.tournaments)
+            .where(eq(schema.tournaments.id, paymentScope.tournamentId))
+            .for('key share')
+            .limit(1);
+        }
+      }
       const [updated] = await tx
         .update(schema.payments)
         .set({

@@ -10,6 +10,7 @@ import { TournamentDiscoveryService } from '../services/tournament-discovery.ser
 import type { RedisService } from '../../../providers/redis/redis.service';
 import { TournamentLifecycleService } from '../services/tournament-lifecycle.service';
 import { TournamentFeePolicyService } from '../services/tournament-fee-policy.service';
+import { TournamentCapacityService } from '../services/tournament-capacity.service';
 import { TournamentStaffService } from '../services/tournament-staff.service';
 import { TournamentRefereeService } from '../services/tournament-referee.service';
 import { TournamentFollowService } from '../services/tournament-follow.service';
@@ -168,6 +169,9 @@ describe('TournamentsService registration lifecycle', () => {
         ),
         new TournamentFeePolicyService(
           repository as unknown as TournamentsRepository,
+        ),
+        new TournamentCapacityService(
+          {} as never,
         ),
       ),
       new TournamentParticipantAdminService(

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -365,6 +366,22 @@ export class LivestreamController {
     @Body() data: AssignCameraDto,
   ) {
     return this.livestreamService.assignCamera(matchId, user, data);
+  }
+
+  @Header('Cache-Control', 'private, no-store')
+  @Get('matches/:matchId/control-state')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Kiểm tra trạng thái livestream có thể điều khiển của trận',
+    description:
+      'Chỉ trả trạng thái điều khiển tối thiểu; không bao gồm mã camera, stream key hoặc URL phát.',
+  })
+  getMatchStreamControlState(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.getMatchStreamControlState(matchId, user);
   }
 
   @Post('matches/:matchId/start')

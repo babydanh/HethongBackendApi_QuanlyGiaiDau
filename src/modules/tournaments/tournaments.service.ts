@@ -99,7 +99,6 @@ import {
   buildRefereeInviteNotification,
   buildRefereeInviteRevokedNotification,
   buildReservedSlotAssignedNotification,
-  buildRegistrationCancelledFullNotification,
   buildStaffAddedNotification,
   buildTournamentCancelledNotification,
   buildCommunityPostNewNotification,

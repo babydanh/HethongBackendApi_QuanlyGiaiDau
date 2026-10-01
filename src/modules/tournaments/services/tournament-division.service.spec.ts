@@ -2,6 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CreateDivisionDto, MatchType } from '../dto/create-division.dto';
 import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentAccessService } from './tournament-access.service';
+import { TournamentCapacityService } from './tournament-capacity.service';
 import { TournamentFeePolicyService } from './tournament-fee-policy.service';
 import { TournamentDivisionService } from './tournament-division.service';
 
@@ -17,7 +18,12 @@ describe('TournamentDivisionService', () => {
   const repository = repositoryMock as unknown as TournamentsRepository;
   const access = accessMock as unknown as TournamentAccessService;
   const fees = new TournamentFeePolicyService(repository);
-  const divisions = new TournamentDivisionService(repository, access, fees);
+  const divisions = new TournamentDivisionService(
+    repository,
+    access,
+    fees,
+    new TournamentCapacityService({} as never),
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();

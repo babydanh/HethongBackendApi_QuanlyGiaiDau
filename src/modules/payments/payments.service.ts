@@ -25,7 +25,6 @@ import { PayoutRequestDto } from './dto/payout-request.dto';
 import type { PayoutReviewStatus } from './dto/review-payout.dto';
 import { WebhookDto } from './dto/webhook.dto';
 import { PaymentsRepository } from './payments.repository';
-import { RegistrationLockService } from '../tournaments/registration-lock.service';
 import { resolveFootballTeamConfig } from '../tournaments/utils/football-team-config';
 import {
   isLiteRegistrationTournament,
@@ -56,7 +55,6 @@ export class PaymentsService {
     private readonly paymentsRepository: PaymentsRepository,
     private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
-    private readonly registrationLockService: RegistrationLockService,
   ) {
     const clientId = this.configService.get<string>('PAYOS_CLIENT_ID');
     const apiKey = this.configService.get<string>('PAYOS_API_KEY');
@@ -129,12 +127,6 @@ export class PaymentsService {
         // Bỏ qua lỗi nếu PayOS không lấy được thông tin link cũ
       }
 
-      if (reusable.purpose === 'REGISTRATION_FEE') {
-        await this.registrationLockService.releaseSlot(
-          reusable.tournamentId,
-          reusable.divisionId ?? undefined,
-        );
-      }
       await this.paymentsRepository.transitionPayment(
         reusable.id,
         'PENDING',
@@ -151,14 +143,8 @@ export class PaymentsService {
       );
     }
 
-    // Giữ chỗ slot trên Redis trước khi tạo giao dịch thanh toán
-    if (data.purpose === PaymentPurpose.REGISTRATION_FEE) {
-      await this.registrationLockService.reserveSlot(
-        data.tournamentId,
-        calculated.divisionId,
-      );
-    }
-
+    // Capacity is reserved by the persisted registration/roster rows, not by
+    // a transient Redis counter, so checkout must not decrement a second slot.
     let payment;
     try {
       payment = await this.paymentsRepository.createPaymentIntent(userId, {
@@ -173,13 +159,6 @@ export class PaymentsService {
         serviceName: tournament.name,
       });
     } catch (error: unknown) {
-      // Hoàn trả slot nếu tạo hóa đơn lỗi
-      if (data.purpose === PaymentPurpose.REGISTRATION_FEE) {
-        await this.registrationLockService.releaseSlot(
-          data.tournamentId,
-          calculated.divisionId,
-        );
-      }
       throw new BadRequestException(
         this.errorMessage(
           error,
@@ -228,12 +207,6 @@ export class PaymentsService {
         expiresAt,
       };
     } catch (error: unknown) {
-      if (data.purpose === PaymentPurpose.REGISTRATION_FEE) {
-        await this.registrationLockService.releaseSlot(
-          data.tournamentId,
-          calculated.divisionId,
-        );
-      }
       await this.paymentsRepository.transitionPayment(
         payment.id,
         'PENDING',
@@ -301,12 +274,6 @@ export class PaymentsService {
         webhookData,
         verified.reference,
       );
-      if (payment.purpose === 'REGISTRATION_FEE') {
-        await this.registrationLockService.releaseSlot(
-          payment.tournamentId,
-          payment.divisionId ?? undefined,
-        );
-      }
       return { accepted: true, completed: false, invalidated: true };
     }
 
@@ -329,12 +296,6 @@ export class PaymentsService {
       );
     }
 
-    if (payment.purpose === 'REGISTRATION_FEE') {
-      await this.registrationLockService.confirmSlot(
-        payment.tournamentId,
-        payment.divisionId ?? undefined,
-      );
-    }
     await this.paymentsRepository.finalizeReceipt(
       result.payment.id,
       result.payment,
@@ -382,12 +343,6 @@ export class PaymentsService {
         { mock: true },
         `MOCK_CANCEL_${Date.now()}`,
       );
-      if (payment.purpose === 'REGISTRATION_FEE') {
-        await this.registrationLockService.releaseSlot(
-          payment.tournamentId,
-          payment.divisionId ?? undefined,
-        );
-      }
       throw new BadRequestException(
         'Giao dịch không còn hợp lệ để hoàn tất thanh toán.',
       );
@@ -404,12 +359,6 @@ export class PaymentsService {
     if (!result.transitioned && result.payment?.status !== 'COMPLETED') {
       throw new BadRequestException(
         'Giao dịch không còn ở trạng thái chờ thanh toán.',
-      );
-    }
-    if (payment.purpose === 'REGISTRATION_FEE') {
-      await this.registrationLockService.confirmSlot(
-        payment.tournamentId,
-        payment.divisionId ?? undefined,
       );
     }
     return { completed: true, idempotent: !result.transitioned };
