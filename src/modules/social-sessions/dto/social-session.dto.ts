@@ -5,6 +5,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsDefined,
   IsIn,
   IsInt,
   IsNumber,
@@ -136,21 +137,21 @@ export class CreateSocialSessionDto {
   @IsIn([...SOCIAL_GENDER_REQUIREMENTS])
   genderRequirement?: SocialGenderRequirement;
 
-  @ApiPropertyOptional({ example: 10.7769, description: 'Vĩ độ sân (do host ghim map). Đi cặp với longitude' })
-  @Type(() => Number)
+  @ApiProperty({ example: 10.7769, description: 'Vĩ độ sân do host xác nhận; bắt buộc cho Social mới' })
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? value : Number(value)))
+  @IsDefined()
   @IsNumber()
   @Min(-90)
   @Max(90)
-  @IsOptional()
-  latitude?: number;
+  latitude!: number;
 
-  @ApiPropertyOptional({ example: 106.7009, description: 'Kinh độ sân (do host ghim map). Đi cặp với latitude' })
-  @Type(() => Number)
+  @ApiProperty({ example: 106.7009, description: 'Kinh độ sân do host xác nhận; bắt buộc cho Social mới' })
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? value : Number(value)))
+  @IsDefined()
   @IsNumber()
   @Min(-180)
   @Max(180)
-  @IsOptional()
-  longitude?: number;
+  longitude!: number;
 
   @ApiPropertyOptional({ example: 6, minimum: 2, maximum: 64 })
   @Type(() => Number)

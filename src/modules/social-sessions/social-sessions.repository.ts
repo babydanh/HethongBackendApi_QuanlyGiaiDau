@@ -112,6 +112,35 @@ export class SocialSessionsRepository {
     return this.db;
   }
 
+  async listNearby(filters: {
+    lat: number; lng: number; radius: number; today: string; limit: number;
+    after?: { distanceM: number; id: string };
+  }) {
+    const point = userRefPoint(filters.lat, filters.lng);
+    const distance = sql<number>`ST_Distance(${schema.socialSessions.venueGeolocation}, ${point})`;
+    const conditions = [
+      eq(schema.socialSessions.visibility, 'PUBLIC'),
+      eq(schema.socialSessions.status, 'OPEN'),
+      isNull(schema.socialSessions.deletedAt),
+      gte(schema.socialSessions.playDate, filters.today),
+      sql`${schema.socialSessions.latitude} IS NOT NULL`,
+      sql`${schema.socialSessions.longitude} IS NOT NULL`,
+      sql`${schema.socialSessions.venueGeolocation} IS NOT NULL`,
+      sql`ST_DWithin(${schema.socialSessions.venueGeolocation}, ${point}, ${filters.radius})`,
+    ];
+    if (filters.after) {
+      conditions.push(sql`(${distance} > ${filters.after.distanceM} OR (${distance} = ${filters.after.distanceM} AND ${schema.socialSessions.id} > ${filters.after.id}::uuid))`);
+    }
+    return this.db.select({ session: schema.socialSessions, distanceM: distance,
+      sport: schema.categories.slug, sportName: schema.categories.name,
+    })
+      .from(schema.socialSessions)
+      .leftJoin(schema.categories, eq(schema.categories.id, schema.socialSessions.categoryId))
+      .where(and(...conditions))
+      .orderBy(asc(distance), asc(schema.socialSessions.id))
+      .limit(filters.limit + 1);
+  }
+
   async findCommunityById(id: string, tx: AppDbOrTx = this.db) {
     const [row] = await tx
       .select({ id: schema.communities.id, status: schema.communities.status })

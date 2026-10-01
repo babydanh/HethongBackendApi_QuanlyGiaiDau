@@ -26,6 +26,7 @@ import {
 } from './dto/social-session.dto';
 import { SocialSessionsRepository } from './social-sessions.repository';
 import { RegionsService } from '../regions/regions.service';
+import { NearbySocialsQueryDto } from './dto/nearby-socials.dto';
 
 type Actor = { id: string; roles?: string[] };
 type SessionRow = typeof schema.socialSessions.$inferSelect;
@@ -91,6 +92,12 @@ function assertLocationPair(lat?: number | null, lng?: number | null): void {
   if ((lat == null) !== (lng == null)) {
     apiError(BadRequestException, 'LOCATION_PAIR_REQUIRED');
   }
+  if (lat != null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) {
+    apiError(BadRequestException, 'INVALID_LATITUDE');
+  }
+  if (lng != null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) {
+    apiError(BadRequestException, 'INVALID_LONGITUDE');
+  }
 }
 
 @Injectable()
@@ -102,6 +109,46 @@ export class SocialSessionsService {
     @Optional() private readonly chatService: ChatService | undefined,
     private readonly regionsService: RegionsService,
   ) {}
+
+  async nearby(query: NearbySocialsQueryDto) {
+    const dateParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const part = (type: string) => dateParts.find((item) => item.type === type)!.value;
+    const today = `${part('year')}-${part('month')}-${part('day')}`;
+    let after: { distanceM: number; id: string } | undefined;
+    if (query.cursor) {
+      try {
+        const value = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8')) as Record<string, unknown>;
+        if (value.lat !== query.lat || value.lng !== query.lng || value.radius !== query.radius ||
+          value.today !== today || typeof value.distanceM !== 'number' ||
+          !Number.isFinite(value.distanceM) || value.distanceM < 0 ||
+          typeof value.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.id)) {
+          throw new Error('invalid cursor');
+        }
+        after = { distanceM: value.distanceM, id: value.id };
+      } catch {
+        apiError(BadRequestException, 'INVALID_NEARBY_CURSOR');
+      }
+    }
+    const rows = await this.repository.listNearby({
+      lat: query.lat, lng: query.lng, radius: query.radius,
+      today, limit: query.limit, after,
+    });
+    const page = rows.slice(0, query.limit);
+    const last = page.at(-1);
+    const nextCursor = rows.length > query.limit && last
+      ? Buffer.from(JSON.stringify({ lat: query.lat, lng: query.lng,
+          radius: query.radius, today, distanceM: Number(last.distanceM), id: last.session.id,
+        })).toString('base64url') : null;
+    return {
+      items: page.map(({ session, distanceM, sport, sportName }) => {
+        const { creationIdempotencyKey: _key, creationFingerprint: _fingerprint, ...publicSession } = session;
+        return { ...publicSession, sport, sportName, distance_m: Number(distanceM) };
+      }),
+      nextCursor,
+    };
+  }
 
   /**
    * Chiều địa chỉ → ghim: khi host đã chọn đủ tỉnh + phường mà CHƯA ghim tọa
@@ -239,6 +286,9 @@ export class SocialSessionsService {
   async create(actor: Actor, dto: CreateSocialSessionDto, idempotencyKey?: string) {
     const categoryId = await this.resolveCategoryId(dto.sport);
     assertLocationPair(dto.latitude, dto.longitude);
+    if (dto.latitude == null || dto.longitude == null) {
+      apiError(BadRequestException, 'LOCATION_REQUIRED');
+    }
     // Chiều địa chỉ → ghim: đủ tỉnh + phường mà host CHƯA ghim thì lấy tâm phường.
     // TẠM KHÔNG CHẠY (DERIVE_LOCATION_FROM_WARD_CENTROID = false): xem hằng đầu
     // file. Host ghim tay vẫn lưu đúng toạ độ, không ghim thì để null.
@@ -247,6 +297,12 @@ export class SocialSessionsService {
       dto.wardCode,
       dto.latitude != null && dto.longitude != null,
     );
+    const pointRegion = await this.regionsService.resolveByPoint({ lat: dto.latitude, lng: dto.longitude });
+    const regionCodes = pointRegion && !pointRegion.isEstimated
+      ? { provinceCode: pointRegion.provinceCode, wardCode: pointRegion.wardCode }
+      : dto.provinceCode || dto.wardCode
+        ? await this.regionsService.validateCodes(dto.provinceCode, dto.wardCode)
+        : { provinceCode: null, wardCode: null };
     if (dto.communityId) {
       const community = await this.repository.findCommunityById(dto.communityId);
       if (!community) apiError(NotFoundException, 'COMMUNITY_NOT_FOUND');
@@ -332,8 +388,8 @@ export class SocialSessionsService {
       venueAddress: venue?.locationAddress ?? dto.venueAddress.trim(),
       latitude: dto.latitude ?? derived.latitude,
       longitude: dto.longitude ?? derived.longitude,
-      provinceCode: dto.provinceCode ?? null,
-      wardCode: dto.wardCode ?? null,
+      provinceCode: regionCodes.provinceCode,
+      wardCode: regionCodes.wardCode,
       venueId: venue?.id ?? null,
       courtId: court?.id ?? null,
       genderRequirement: dto.genderRequirement ?? 'ANY',
@@ -722,15 +778,30 @@ export class SocialSessionsService {
     if (dto.genderRequirement !== undefined) {
       patch.genderRequirement = dto.genderRequirement;
     }
-    if (
-      dto.venueId === null ||
-      (dto.venueId === undefined && !session.venueId)
-    ) {
+    if (dto.venueId === null || (dto.venueId === undefined && !session.venueId)) {
       if (dto.venueName !== undefined) patch.venueName = dto.venueName.trim();
       if (dto.venueAddress !== undefined) patch.venueAddress = dto.venueAddress.trim();
     }
-    if (dto.provinceCode !== undefined) patch.provinceCode = dto.provinceCode;
-    if (dto.wardCode !== undefined) patch.wardCode = dto.wardCode;
+    if (dto.latitude != null && dto.longitude != null) {
+      const pointRegion = await this.regionsService.resolveByPoint({ lat: dto.latitude, lng: dto.longitude });
+      const codes = pointRegion && !pointRegion.isEstimated
+        ? { provinceCode: pointRegion.provinceCode, wardCode: pointRegion.wardCode }
+        : dto.provinceCode || dto.wardCode
+          ? await this.regionsService.validateCodes(dto.provinceCode, dto.wardCode)
+          : { provinceCode: null, wardCode: null };
+      patch.provinceCode = codes.provinceCode;
+      patch.wardCode = codes.wardCode;
+    } else if (dto.latitude === null && dto.longitude === null) {
+      patch.provinceCode = null;
+      patch.wardCode = null;
+    } else if (dto.provinceCode !== undefined || dto.wardCode !== undefined) {
+      const codes = await this.regionsService.validateCodes(
+        dto.provinceCode === undefined ? session.provinceCode : dto.provinceCode,
+        dto.wardCode === undefined ? session.wardCode : dto.wardCode,
+      );
+      patch.provinceCode = codes.provinceCode;
+      patch.wardCode = codes.wardCode;
+    }
     if (dto.latitude !== undefined) patch.latitude = dto.latitude;
     if (dto.longitude !== undefined) patch.longitude = dto.longitude;
     // Chưa có pin nào trên bản ghi + payload không mang toạ độ: lấy tâm phường

@@ -50,10 +50,14 @@ export class UserAwareThrottlerGuard extends ThrottlerGuard {
     if (authenticatedUserId) return Promise.resolve(`user:${authenticatedUserId}`);
 
     const authorization = req.headers?.authorization;
-    if (typeof authorization === 'string' && authorization.startsWith('Bearer ')) {
-      const payload = jwt.decode(authorization.slice(7)) as { sub?: string; id?: string } | null;
-      const tokenUserId = payload?.sub || payload?.id;
-      if (tokenUserId) return Promise.resolve(`user:${tokenUserId}`);
+    if (typeof authorization === 'string' && authorization.startsWith('Bearer ') && process.env.JWT_ACCESS_SECRET) {
+      try {
+        const payload = jwt.verify(authorization.slice(7), process.env.JWT_ACCESS_SECRET) as { sub?: string; id?: string };
+        const tokenUserId = payload?.sub || payload?.id;
+        if (tokenUserId) return Promise.resolve(`user:${tokenUserId}`);
+      } catch {
+        // An invalid token must not choose a fresh rate-limit bucket.
+      }
     }
 
     const forwardedFor = req.headers?.['x-forwarded-for'] || req.headers?.['x-real-ip'];

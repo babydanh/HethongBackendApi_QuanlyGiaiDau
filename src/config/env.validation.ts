@@ -62,6 +62,7 @@ export const envValidationSchema = Joi.object({
       .uri({ scheme: ['http', 'https'] })
       .default('http://localhost:2322'),
   }),
+  PHOTON_TIMEOUT_MS: Joi.number().integer().min(500).max(30000).default(5000),
   OPENROUTER_API_KEY: Joi.string().allow('').optional().default(''),
   OPENROUTER_BASE_URL: Joi.string()
     .uri()

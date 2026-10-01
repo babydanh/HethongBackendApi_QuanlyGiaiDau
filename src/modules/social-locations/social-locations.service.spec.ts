@@ -1,5 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { SocialLocationsService } from './social-locations.service';
+import { PhotonProvider } from './photon.provider';
+import { RegionsService } from '../regions/regions.service';
 
 const feature = {
   properties: {
@@ -17,9 +19,12 @@ describe('SocialLocationsService', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
-    service = new SocialLocationsService({
-      get: () => 'http://photon.internal:2322',
+    const provider = new PhotonProvider({
+      get: (key: string) => key === 'PHOTON_BASE_URL' ? 'http://photon.internal:2322' : undefined,
     } as unknown as ConfigService);
+    service = new SocialLocationsService(provider, {
+      resolveByPoint: jest.fn().mockResolvedValue(null),
+    } as unknown as RegionsService);
   });
 
   afterEach(() => {

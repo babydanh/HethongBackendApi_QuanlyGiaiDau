@@ -35,4 +35,12 @@ export class RegionsService {
   async getCentroid(query: QueryCentroidDto) {
     return this.regionsRepository.findCentroid(query);
   }
+
+  async validateCodes(provinceCode?: string | null, wardCode?: string | null) {
+    return this.regionsRepository.validateCodes(provinceCode, wardCode);
+  }
+
+  async matchProviderNames(provinceName?: string | null, wardName?: string | null) {
+    return this.regionsRepository.matchProviderNames(provinceName, wardName);
+  }
 }

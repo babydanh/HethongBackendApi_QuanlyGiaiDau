@@ -57,6 +57,33 @@ export class RegionsRepository {
     @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
+  async validateCodes(provinceCode?: string | null, wardCode?: string | null) {
+    const [province] = provinceCode ? await this.db.select({ code: schema.provinces.code })
+      .from(schema.provinces).where(eq(schema.provinces.code, provinceCode)).limit(1) : [];
+    const [ward] = province && wardCode ? await this.db.select({ code: schema.wards.code })
+      .from(schema.wards).where(and(eq(schema.wards.code, wardCode), eq(schema.wards.provinceCode, province.code))).limit(1) : [];
+    return { provinceCode: province?.code ?? null, wardCode: ward?.code ?? null };
+  }
+
+  async matchProviderNames(provinceName?: string | null, wardName?: string | null) {
+    if (!provinceName?.trim()) return { provinceCode: null, wardCode: null };
+    const provinceText = provinceName.trim();
+    const provinceMatches = await this.db.select({ code: schema.provinces.code })
+      .from(schema.provinces)
+      .where(sql`lower(unaccent(${schema.provinces.name})) = lower(unaccent(${provinceText})) OR lower(unaccent(${schema.provinces.fullName})) = lower(unaccent(${provinceText}))`)
+      .limit(2);
+    if (provinceMatches.length !== 1) return { provinceCode: null, wardCode: null };
+    const provinceCode = provinceMatches[0].code;
+    if (!wardName?.trim()) return { provinceCode, wardCode: null };
+    const wardText = wardName.trim();
+    const wardMatches = await this.db.select({ code: schema.wards.code })
+      .from(schema.wards)
+      .where(and(eq(schema.wards.provinceCode, provinceCode),
+        sql`(lower(unaccent(${schema.wards.name})) = lower(unaccent(${wardText})) OR lower(unaccent(${schema.wards.fullName})) = lower(unaccent(${wardText})))`))
+      .limit(2);
+    return { provinceCode, wardCode: wardMatches.length === 1 ? wardMatches[0].code : null };
+  }
+
   async findProvinces(query: QueryRegionDto) {
     let conditions: SQL | undefined = undefined;
     const keyword = query.search?.trim();
