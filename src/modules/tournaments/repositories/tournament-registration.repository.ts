@@ -1013,6 +1013,13 @@ export class TournamentRegistrationRepository {
         finalTeamName = leaderProfile?.fullName || 'Vận động viên';
       }
 
+      // The importer alone may set this marker; it makes contact metadata count
+      // as a second roster member when no linked account exists.
+      const registrationResponses = data.customResponses
+        ? { ...data.customResponses }
+        : null;
+      if (registrationResponses) delete registrationResponses.importedFrom;
+
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
         .values({
@@ -1023,7 +1030,7 @@ export class TournamentRegistrationRepository {
           footballTeamId: isTeamSport ? (data.footballTeamId ?? null) : null,
           footballTeamLogoUrl: isTeamSport ? footballTeamLogoUrl : null,
           rankingConsent: data.rankingConsent === true,
-          customResponses: data.customResponses ?? null,
+          customResponses: registrationResponses,
           isPaid,
           entryFeeAtRegistration: payableEntryFeeAmount.toFixed(2),
           // Keep the invite token even when a known partner was selected so the
