@@ -47,7 +47,6 @@ import { SponsorsModule } from './modules/sponsors/sponsors.module';
 import { AdvertisementsModule } from './modules/advertisements/advertisements.module';
 import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-match-sessions.module';
 import { SocialSessionsModule } from './modules/social-sessions/social-sessions.module';
-import { SocialLocationsModule } from './modules/social-locations/social-locations.module';
 import { FriendshipsModule } from './modules/friendships/friendships.module';
 import { ZaloModule } from './providers/zalo/zalo.module';
 
@@ -116,7 +115,6 @@ import { ZaloModule } from './providers/zalo/zalo.module';
     AdvertisementsModule,
     ClubMatchSessionsModule,
     SocialSessionsModule,
-    SocialLocationsModule,
     FriendshipsModule,
     ZaloModule,
   ],

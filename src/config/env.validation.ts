@@ -53,16 +53,6 @@ export const envValidationSchema = Joi.object({
     then: Joi.string().min(16).required(),
     otherwise: Joi.string().allow('').optional().default(''),
   }),
-  PHOTON_BASE_URL: Joi.when('NODE_ENV', {
-    is: 'production',
-    then: Joi.string()
-      .uri({ scheme: ['http', 'https'] })
-      .required(),
-    otherwise: Joi.string()
-      .uri({ scheme: ['http', 'https'] })
-      .default('http://localhost:2322'),
-  }),
-  PHOTON_TIMEOUT_MS: Joi.number().integer().min(500).max(30000).default(5000),
   OPENROUTER_API_KEY: Joi.string().allow('').optional().default(''),
   OPENROUTER_BASE_URL: Joi.string()
     .uri()
