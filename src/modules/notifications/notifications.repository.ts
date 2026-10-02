@@ -4,6 +4,7 @@ import type { AppDb } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { CreateNotificationDto } from './dto/create-notification.dto';
+import { NOTIFICATION_TYPES } from './notification-types';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 
@@ -54,6 +55,23 @@ export class NotificationsRepository {
     return record;
   }
 
+  /**
+   * Display identity of a notification sender, used to enrich the realtime
+   * payload so it matches what the recipient read endpoint returns.
+   */
+  async findSenderProfile(userId: string) {
+    const [profile] = await this.db
+      .select({
+        fullName: schema.profiles.fullName,
+        avatarUrl: schema.profiles.avatarUrl,
+      })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    return profile ?? null;
+  }
+
   async getNotificationsByUser(userId: string, query: QueryNotificationsDto) {
     const { page = 1, limit = 10, cursor, isRead, scope = 'player' } = query;
     const conditions: SQL[] = [eq(schema.notifications.receiverId, userId)];
@@ -85,9 +103,32 @@ export class NotificationsRepository {
       .from(schema.notifications)
       .where(baseWhereClause);
 
+    // A referee invitation carries the identity of the manager who sent it. The
+    // join is limited to that type so no other notification starts publishing a
+    // sender profile. Only the receiver's own rows are selected, and no sender
+    // contact detail is projected.
     const notificationsQuery = this.db
-      .select()
+      .select({
+        id: schema.notifications.id,
+        receiverId: schema.notifications.receiverId,
+        senderId: schema.notifications.senderId,
+        type: schema.notifications.type,
+        title: schema.notifications.title,
+        content: schema.notifications.content,
+        redirectUrl: schema.notifications.redirectUrl,
+        isRead: schema.notifications.isRead,
+        createdAt: schema.notifications.createdAt,
+        senderName: schema.profiles.fullName,
+        senderAvatarUrl: schema.profiles.avatarUrl,
+      })
       .from(schema.notifications)
+      .leftJoin(
+        schema.profiles,
+        and(
+          eq(schema.notifications.senderId, schema.profiles.userId),
+          eq(schema.notifications.type, NOTIFICATION_TYPES.REFEREE_INVITED),
+        ),
+      )
       .where(whereClause)
       .orderBy(desc(schema.notifications.createdAt), desc(schema.notifications.id))
       .limit(limit + 1)

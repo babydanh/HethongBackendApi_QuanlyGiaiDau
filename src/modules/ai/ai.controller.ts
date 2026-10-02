@@ -1,4 +1,15 @@
-import { Controller, Post, Body, Req, Res, UseGuards, Param, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Req,
+  Res,
+  UseGuards,
+  Param,
+  ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { AiService } from './ai.service';
@@ -119,11 +130,13 @@ export class AiController {
     return this.aiService.previewScheduleFromCommand(tournamentId, user, dto);
   }
 
-  @Public()
   @Post('parse-tournament-source')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
   @UseGuards(new RateLimitGuard(15, 60000))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Phân tích Link Google Form / Điều lệ giải đấu để trích xuất thông tin tự động' })
+  @ApiOperation({ summary: 'Dựng hoặc tinh chỉnh bản nháp giải đấu từ mô tả của ban tổ chức và một nguồn công khai giới hạn' })
   async parseTournamentSource(@Body() dto: ParseTournamentSourceDto) {
     const data = await this.aiService.parseTournamentSource(dto);
 

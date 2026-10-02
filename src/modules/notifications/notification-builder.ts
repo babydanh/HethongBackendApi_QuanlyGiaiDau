@@ -882,8 +882,12 @@ export const buildRefereeInviteNotification = (params: {
   tournamentName: string;
   receiverId: string;
   refereeId: string;
+  // The manager who actually pressed "send invitation", so the receiver can be
+  // shown who invited them. Never the tournament owner unless they invited.
+  senderId: string;
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
+  senderId: params.senderId,
   type: NOTIFICATION_TYPES.REFEREE_INVITED,
   title: 'Bạn có lời mời làm trọng tài',
   content: `Ban tổ chức vừa mời bạn tham gia điều hành giải ${params.tournamentName} với vai trò trọng tài.`,

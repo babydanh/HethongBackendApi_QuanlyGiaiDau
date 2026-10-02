@@ -93,6 +93,7 @@ export class TournamentRefereeService {
           tournamentName: tournament.name,
           receiverId: userToInvite.id,
           refereeId: invite.id,
+          senderId: userId,
         }),
       );
     } catch (error) {
