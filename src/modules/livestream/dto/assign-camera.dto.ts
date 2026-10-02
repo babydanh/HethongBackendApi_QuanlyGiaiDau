@@ -1,8 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { IsOptional, IsUUID } from 'class-validator';
 
 export class AssignCameraDto {
-  @ApiProperty({ example: 'uuid-camera' })
+  @ApiProperty({
+    example: 'uuid-camera',
+    description:
+      'Camera gán riêng cho trận này. Gửi null để bỏ gán tay và trả trận về camera của sân.',
+    nullable: true,
+  })
+  @IsOptional()
   @IsUUID()
-  cameraId!: string;
+  cameraId!: string | null;
 }

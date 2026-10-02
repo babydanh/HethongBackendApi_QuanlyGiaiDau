@@ -3,6 +3,7 @@ import { CreateParentTournamentDto } from '../dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from '../dto/update-parent-tournament.dto';
 import { TournamentsRepository } from '../tournaments.repository';
 import { CreateTournamentDto } from '../dto/create-tournament.dto';
+import { UpdateTournamentDto } from '../dto/update-tournament.dto';
 
 import { TournamentAccessService } from './tournament-access.service';
 import { TournamentLifecycleService } from './tournament-lifecycle.service';
@@ -99,4 +100,204 @@ describe('TournamentLifecycleService parent operations', () => {
       dto,
     );
   });
+});
+
+interface ClosedTournamentFixture {
+  id: string;
+  createdBy: string;
+  status: string;
+  isRegistrationLocked: boolean;
+  registrationStartDate: Date;
+  registrationEndDate: Date;
+  startDate: Date;
+  endDate: Date;
+  categoryId: string;
+  tournamentConfig: {
+    registrationMode: string;
+    doublesPairingMode: string;
+  };
+  matchType: string;
+  genderRestriction: string;
+  entryFee: number;
+  tournamentType: string;
+  visibility: string;
+  platformFeePercentage: number;
+  isRanked: boolean;
+}
+
+describe('TournamentLifecycleService registration deadline extensions', () => {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const repositoryMock = {
+    findById: jest.fn(),
+    findByParentId: jest.fn(),
+    findCategory: jest.fn(),
+    update: jest.fn(),
+    getFollowerUserIds: jest.fn(),
+  };
+  const accessMock = { isManager: jest.fn() };
+  const feePolicyMock = { assertEntryFeeAllowed: jest.fn() };
+  const lifecycle = new TournamentLifecycleService(
+    repositoryMock as unknown as TournamentsRepository,
+    accessMock as unknown as TournamentAccessService,
+    null as unknown as NotificationsService,
+    null as unknown as CommunitySocialRepository,
+    null as unknown as RedisService,
+    null as unknown as TournamentMediaService,
+    feePolicyMock as unknown as TournamentFeePolicyService,
+  );
+
+  function makeClosedTournament(): ClosedTournamentFixture {
+    const now = Date.now();
+    return {
+      id: 'tournament-1',
+      createdBy: 'organizer-1',
+      status: 'REGISTRATION_CLOSED',
+      isRegistrationLocked: false,
+      registrationStartDate: new Date(now - 10 * dayMs),
+      registrationEndDate: new Date(now - dayMs),
+      startDate: new Date(now + 10 * dayMs),
+      endDate: new Date(now + 12 * dayMs),
+      categoryId: 'category-1',
+      tournamentConfig: {
+        registrationMode: 'OPEN',
+        doublesPairingMode: 'ORGANIZER',
+      },
+      matchType: 'SINGLES',
+      genderRestriction: 'MALE',
+      entryFee: 0,
+      tournamentType: 'PUBLIC',
+      visibility: 'PUBLIC',
+      platformFeePercentage: 0,
+      isRanked: true,
+    };
+  }
+
+  function prepareUpdate(existing: ClosedTournamentFixture) {
+    repositoryMock.findById.mockResolvedValue(existing);
+    repositoryMock.findCategory.mockResolvedValue({
+      id: 'category-1',
+      name: 'Badminton',
+      slug: 'badminton',
+      categoryConfig: null,
+    });
+    repositoryMock.getFollowerUserIds.mockResolvedValue([]);
+    accessMock.isManager.mockResolvedValue(true);
+    feePolicyMock.assertEntryFeeAllowed.mockResolvedValue(undefined);
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('extends an expired deadline without reopening registration', async () => {
+    const existing = makeClosedTournament();
+    const extendedDeadline = new Date(Date.now() + 5 * dayMs);
+    prepareUpdate(existing);
+    repositoryMock.update.mockResolvedValue({
+      ...existing,
+      registrationEndDate: extendedDeadline,
+    });
+
+    await lifecycle.update(
+      existing.id,
+      'organizer-1',
+      {
+        registrationEndDate: extendedDeadline.toISOString(),
+      } as UpdateTournamentDto,
+    );
+
+    expect(repositoryMock.update).toHaveBeenCalledWith(
+      existing.id,
+      'organizer-1',
+      { registrationEndDate: extendedDeadline.toISOString() },
+    );
+  });
+
+  it('does not accept a non-extension or other locked registration changes', async () => {
+    const existing = makeClosedTournament();
+    prepareUpdate(existing);
+
+    await expect(
+      lifecycle.update(
+        existing.id,
+        'organizer-1',
+        {
+          registrationEndDate: new Date(Date.now() - 2 * dayMs).toISOString(),
+          maxParticipants: 20,
+        } as UpdateTournamentDto,
+      ),
+    ).rejects.toThrow();
+    expect(repositoryMock.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps a manual registration lock closed even for a later deadline', async () => {
+    const existing = {
+      ...makeClosedTournament(),
+      isRegistrationLocked: true,
+    };
+    const laterDeadline = new Date(Date.now() + 5 * dayMs);
+    prepareUpdate(existing);
+
+    await expect(
+      lifecycle.update(
+        existing.id,
+        'organizer-1',
+        {
+          registrationEndDate: laterDeadline.toISOString(),
+        } as UpdateTournamentDto,
+      ),
+    ).rejects.toThrow();
+    expect(repositoryMock.update).not.toHaveBeenCalled();
+  });
+  it('rejects deadline propagation when a sibling registration is manually locked', async () => {
+    const existing = { ...makeClosedTournament(), parentId: 'parent-1' };
+    const lockedSibling = {
+      ...makeClosedTournament(),
+      id: 'tournament-2',
+      parentId: 'parent-1',
+      isRegistrationLocked: true,
+    };
+    const extendedDeadline = new Date(Date.now() + 5 * dayMs);
+    prepareUpdate(existing);
+    repositoryMock.findByParentId.mockResolvedValue([existing, lockedSibling]);
+
+    await expect(
+      lifecycle.update(
+        existing.id,
+        'organizer-1',
+        {
+          registrationEndDate: extendedDeadline.toISOString(),
+        } as UpdateTournamentDto,
+      ),
+    ).rejects.toThrow();
+
+    expect(repositoryMock.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects deadline propagation that would shorten a closed sibling deadline', async () => {
+    const existing = { ...makeClosedTournament(), parentId: 'parent-1' };
+    const siblingDeadline = new Date(Date.now() + 2 * dayMs);
+    const closedSibling = {
+      ...makeClosedTournament(),
+      id: 'tournament-2',
+      parentId: 'parent-1',
+      registrationEndDate: siblingDeadline,
+    };
+    const requestedDeadline = new Date(Date.now() + dayMs);
+    prepareUpdate(existing);
+    repositoryMock.findByParentId.mockResolvedValue([existing, closedSibling]);
+
+    await expect(
+      lifecycle.update(
+        existing.id,
+        'organizer-1',
+        {
+          registrationEndDate: requestedDeadline.toISOString(),
+        } as UpdateTournamentDto,
+      ),
+    ).rejects.toThrow();
+
+    expect(repositoryMock.update).not.toHaveBeenCalled();
+  });
+
 });

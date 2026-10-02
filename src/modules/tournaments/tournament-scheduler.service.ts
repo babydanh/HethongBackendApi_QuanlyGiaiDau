@@ -108,7 +108,8 @@ export class TournamentSchedulerService {
         .where(
           and(
             eq(schema.tournaments.status, 'UPCOMING'),
-            lte(schema.tournaments.registrationStartDate, now)
+            lte(schema.tournaments.registrationStartDate, now),
+            eq(schema.tournaments.isRegistrationLocked, false),
           )
         );
 

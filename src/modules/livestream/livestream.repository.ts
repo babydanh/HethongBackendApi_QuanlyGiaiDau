@@ -191,6 +191,30 @@ export class LivestreamRepository {
     return camera ?? null;
   }
 
+  /**
+   * Tìm camera đang hoạt động của sân, PUSH hay PULL đều nhận.
+   *
+   * Chỉ dùng cho đường đọc (gán sẵn cho trận, dựng URL phát). Đường ghi của
+   * PULL vẫn phải dùng `findPullCameraByCourt`, nếu không thì việc BTC dán URL
+   * PULL sẽ nhảy vào camera PUSH của sân và đè mất playbackUrl của nó.
+   */
+  async findActiveCameraByCourt(courtId: string, tournamentId: string) {
+    const [camera] = await this.db
+      .select()
+      .from(schema.livestreamCameras)
+      .where(
+        and(
+          eq(schema.livestreamCameras.courtId, courtId),
+          eq(schema.livestreamCameras.tournamentId, tournamentId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .orderBy(desc(schema.livestreamCameras.updatedAt))
+      .limit(1);
+
+    return camera ?? null;
+  }
+
   async findCameraById(cameraId: string) {
     const [camera] = await this.db
       .select()
@@ -347,6 +371,39 @@ export class LivestreamRepository {
     }
 
     return stream;
+  }
+
+  /**
+   * Bỏ camera gán tay của một trận, đưa nó về trạng thái chưa gán.
+   *
+   * Dùng khi trận không nằm trên sân nào có camera: giữ nguyên dòng để các
+   * trường stream khác không mất, chỉ xoá liên kết camera.
+   */
+  async clearMatchCamera(matchId: string) {
+    const [existing] = await this.db
+      .select({ cameraId: schema.matchLivestreams.cameraId })
+      .from(schema.matchLivestreams)
+      .where(eq(schema.matchLivestreams.matchId, matchId))
+      .limit(1);
+
+    const [stream] = await this.db
+      .update(schema.matchLivestreams)
+      .set({
+        cameraId: null,
+        streamStatus: 'IDLE',
+        playbackUrl: null,
+        startedAt: null,
+        endedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.matchLivestreams.matchId, matchId))
+      .returning();
+
+    if (existing?.cameraId) {
+      await this.syncCameraStatus(existing.cameraId);
+    }
+
+    return stream ?? null;
   }
 
   async updateStreamStatus(

@@ -332,6 +332,22 @@ export class LivestreamService {
 
     await this.assertTournamentOperator(match.tournamentId, user);
 
+    // Gửi null nghĩa là "bỏ gán tay": trận quay về camera của sân. Nếu sân
+    // không có camera thì trận trở lại chưa gán, đúng như lúc chưa chọn gì.
+    if (data.cameraId === null) {
+      const courtCamera = match.courtId
+        ? await this.livestreamRepository.findActiveCameraByCourt(match.courtId, match.tournamentId)
+        : null;
+      if (courtCamera) {
+        return this.livestreamRepository.assignCameraToMatch(
+          matchId,
+          courtCamera.id,
+          this.normalizePublicPlaybackUrl(courtCamera.playbackUrl) ?? '',
+        );
+      }
+      return this.livestreamRepository.clearMatchCamera(matchId);
+    }
+
     const camera = await this.livestreamRepository.findCameraById(data.cameraId);
     if (!camera || camera.tournamentId !== match.tournamentId) {
       throw new BadRequestException('Camera không thuộc giải đấu của trận này.');
@@ -370,7 +386,7 @@ export class LivestreamService {
   ) {
     if (!courtId) return null;
 
-    const camera = await this.livestreamRepository.findPullCameraByCourt(courtId, tournamentId);
+    const camera = await this.livestreamRepository.findActiveCameraByCourt(courtId, tournamentId);
     if (!camera) return null;
 
     if (!options.courtChanged) {
@@ -461,7 +477,7 @@ export class LivestreamService {
 
     // Camera của sân xếp vào trận, trận nào xếp vào sân đó tự dùng.
     const courtCamera = match.courtId
-      ? await this.livestreamRepository.findPullCameraByCourt(match.courtId, match.tournamentId)
+      ? await this.livestreamRepository.findActiveCameraByCourt(match.courtId, match.tournamentId)
       : null;
 
     const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
