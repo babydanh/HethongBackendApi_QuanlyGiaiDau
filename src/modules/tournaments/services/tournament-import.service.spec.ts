@@ -33,7 +33,6 @@ describe('TournamentImportService', () => {
     const dto = Object.assign(new ImportParticipantsDto(), {
       participants: [],
       notifyLinkedAccounts: false,
-      sendInvitationEmail: false,
     });
 
     await expect(
