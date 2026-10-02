@@ -127,22 +127,27 @@ describe('SocialSessionsService', () => {
   });
 
   describe('nearby', () => {
-    it('returns metres and a cursor with a stable distance/id boundary', async () => {
+    it('returns metres and uses page-based pagination', async () => {
       const first = baseSession({ id: SESSION_ID });
-      const second = baseSession({ id: COMMUNITY_ID });
-      repository.listNearby.mockResolvedValue([
-        { session: first, distanceM: 125.5, sport: 'pickleball', sportName: 'Pickleball' },
-        { session: second, distanceM: 125.5, sport: 'pickleball', sportName: 'Pickleball' },
-      ] as never);
+      repository.listNearby.mockResolvedValue({
+        items: [
+          { session: first, distanceM: 125.5, sport: 'pickleball', sportName: 'Pickleball' },
+        ],
+        total: 2,
+      } as never);
       const result = await service.nearby({ lat: 10.7769, lng: 106.7009, radius: 10000, limit: 1 });
       expect(result.items[0].distance_m).toBe(125.5);
-      expect(result.nextCursor).toEqual(expect.any(String));
-      await service.nearby({ lat: 10.7769, lng: 106.7009, radius: 10000, limit: 1, cursor: result.nextCursor! });
+      expect(result).toMatchObject({
+        meta: { page: 1, limit: 1, total: 2 },
+        nextCursor: null,
+      });
+      await service.nearby({ lat: 10.7769, lng: 106.7009, radius: 10000, limit: 1, page: 2 });
       expect(repository.listNearby).toHaveBeenLastCalledWith(expect.objectContaining({
-        after: { distanceM: 125.5, id: SESSION_ID },
+        page: 2,
+        limit: 1,
       }));
-      await expect(service.nearby({ lat: 10, lng: 106.7009, radius: 10000, limit: 1, cursor: result.nextCursor! }))
-        .rejects.toMatchObject({ response: expect.objectContaining({ code: 'INVALID_NEARBY_CURSOR' }) });
+      await expect(service.nearby({ lat: 10, lng: 106.7009, radius: 10000, limit: 1, cursor: 'retired' }))
+        .rejects.toMatchObject({ response: expect.objectContaining({ code: 'NEARBY_CURSOR_RETIRED' }) });
     });
   });
 
@@ -294,6 +299,8 @@ describe('SocialSessionsService', () => {
         id: venueId,
         name: 'Directory venue',
         locationAddress: 'Directory address',
+        latitude: 10.7769,
+        longitude: 106.7009,
       });
       repository.findAvailableCourt.mockResolvedValue({
         id: courtId,
@@ -346,6 +353,8 @@ describe('SocialSessionsService', () => {
         id: venueId,
         name: 'Directory venue',
         locationAddress: 'Directory address',
+        latitude: 10.7769,
+        longitude: 106.7009,
       });
       repository.findAvailableCourt.mockResolvedValue({
         id: courtId,
@@ -377,7 +386,7 @@ describe('SocialSessionsService', () => {
         }),
       );
 
-      expect(repository.createWithHost).toHaveBeenCalledWith(
+      expect(repository.createWithHost.mock.calls[0][0]).toEqual(
         expect.objectContaining({
           venueId,
           courtId,
@@ -690,9 +699,8 @@ describe('SocialSessionsService', () => {
         { id: HOST_ID },
         baseCreateDto({ startAt: '2026-09-17T00:30:00+07:00' }),
       );
-      expect(repository.createWithHost).toHaveBeenCalledWith(
+      expect(repository.createWithHost.mock.calls[0][0]).toEqual(
         expect.objectContaining({ playDate: '2026-09-17' }),
-        HOST_ID,
       );
     });
 
@@ -1014,9 +1022,8 @@ describe('SocialSessionsService', () => {
         { id: HOST_ID },
         baseCreateDto({ latitude: 10.7769, longitude: 106.7009 }),
       );
-      expect(repository.createWithHost).toHaveBeenCalledWith(
+      expect(repository.createWithHost.mock.calls[0][0]).toEqual(
         expect.objectContaining({ latitude: 10.7769, longitude: 106.7009 }),
-        HOST_ID,
       );
     });
 

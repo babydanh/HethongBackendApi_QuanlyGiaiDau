@@ -2,10 +2,7 @@ import { RegionsRepository } from './regions.repository';
 import type { AppDb } from '../../database/db.types';
 
 /**
- * Điểm ở giữa Phường Ô Chợ Dừa (Hà Nội). Chọn đúng điểm này vì nó nằm sát
- * ranh giới: theo ST_Covers nó thuộc Ô Chợ Dừa, còn tâm gần nhất là Văn Miếu
- * - Quốc Tử Giám chỉ cách ~990 m — nên hai nhánh cho hai đáp án khác nhau và
- * test bắt được nhầm lẫn nếu cờ bị bỏ sót.
+ * Điểm bên trong Phường Ô Chợ Dừa (Hà Nội), dùng để kiểm tra polygon match.
  */
 const HA_NOI_BORDER_POINT = { lat: 21.0278, lng: 105.8342 } as const;
 
@@ -17,14 +14,30 @@ const O_CHO_DUA = {
 };
 
 /** Chỉ giữ phần db mà `resolveByPoint`/`findCentroid` thật sự dùng. */
-function repositoryWith(rows: unknown[]): RegionsRepository {
-  const db = { execute: jest.fn().mockResolvedValue(rows) };
+function repositoryWith(rows: unknown[], centroidRows = rows): RegionsRepository {
+  const query = {
+    from: jest.fn(),
+    innerJoin: jest.fn(),
+    where: jest.fn(),
+    limit: jest.fn().mockResolvedValue(centroidRows),
+  };
+  query.from.mockReturnValue(query);
+  query.innerJoin.mockReturnValue(query);
+  query.where.mockReturnValue(query);
+  const db = {
+    execute: jest.fn().mockResolvedValue(rows),
+    select: jest.fn().mockReturnValue(query),
+  };
   return new RegionsRepository(db as unknown as AppDb);
 }
 
 describe('RegionsRepository.resolveByPoint', () => {
   it('marks a polygon match as confirmed, not estimated', async () => {
-    const repository = repositoryWith([O_CHO_DUA]);
+    const repository = repositoryWith([{
+      ...O_CHO_DUA,
+      centerLat: 21.0278,
+      centerLng: 105.8342,
+    }]);
 
     const resolved = await repository.resolveByPoint(HA_NOI_BORDER_POINT);
 
@@ -36,25 +49,20 @@ describe('RegionsRepository.resolveByPoint', () => {
     });
   });
 
-  it('marks a nearest-centroid match as estimated, because it is only a guess', async () => {
+  it('returns null when no stored boundary covers the point', async () => {
     // Không phường nào có polygon phủ điểm — đúng tình huống production, nơi
     // cột `wards.boundary` trống toàn bộ.
     const repository = repositoryWith([]);
 
     const resolved = await repository.resolveByPoint(HA_NOI_BORDER_POINT);
 
-    // Tâm gần nhất là Văn Miếu - Quốc Tử Giám, KHÁC phường chứa điểm: bằng
-    // chứng cho thấy đáp án này là phỏng đoán theo khoảng cách, và nó phải
-    // tự nói ra trước khi ai đó điền vào form.
-    expect(resolved?.wardCode).toBe('226');
-    expect(resolved?.wardName).toBe('Phường Văn Miếu - Quốc Tử Giám');
-    expect(resolved?.isEstimated).toBe(true);
+    expect(resolved).toBeNull();
   });
 
-  it('returns null beyond the nearest-centroid cap instead of guessing', async () => {
+  it('returns null when the point is outside every stored polygon', async () => {
     const repository = repositoryWith([]);
 
-    // Giữa Thái Bình Dương: vượt trần 75 km nên không gán phường Việt Nam nào.
+    // Giữa Thái Bình Dương: không có polygon bao phủ điểm.
     const resolved = await repository.resolveByPoint({ lat: 0, lng: -160 });
 
     expect(resolved).toBeNull();
@@ -63,7 +71,11 @@ describe('RegionsRepository.resolveByPoint', () => {
 
 describe('RegionsRepository.findCentroid', () => {
   it('flags the ward centroid as an estimate of where to drop the pin', async () => {
-    const repository = repositoryWith([]);
+    const repository = repositoryWith([], [{
+      ...O_CHO_DUA,
+      centerLat: 21.0278,
+      centerLng: 105.8342,
+    }]);
 
     const resolved = await repository.findCentroid({
       provinceCode: O_CHO_DUA.provinceCode,

@@ -229,6 +229,12 @@ export class SocialSessionsService {
 
   async create(actor: Actor, dto: CreateSocialSessionDto, idempotencyKey?: string) {
     const categoryId = await this.resolveCategoryId(dto.sport);
+    if (!dto.venueId && !dto.newVenue) {
+      assertLocationPair(dto.latitude, dto.longitude);
+      if (dto.latitude == null && dto.longitude == null) {
+        apiError(BadRequestException, 'LOCATION_REQUIRED');
+      }
+    }
     const legacyNewVenue = !dto.venueId && !dto.newVenue
       && dto.latitude != null && dto.longitude != null
       && dto.venueName?.trim() && dto.venueAddress?.trim()
@@ -360,8 +366,8 @@ export class SocialSessionsService {
       playDate: toPlayDate(dto.startAt),
       startAt,
       durationMinutes: dto.durationMinutes ?? 120,
-      venueName: dto.venueName?.trim() || venue?.name || newVenue!.name.trim(),
-      venueAddress: dto.venueAddress?.trim() || venue?.locationAddress || newVenue!.locationAddress.trim(),
+      venueName: venue?.name || dto.venueName?.trim() || newVenue!.name.trim(),
+      venueAddress: venue?.locationAddress || dto.venueAddress?.trim() || newVenue!.locationAddress.trim(),
       latitude,
       longitude,
       provinceCode: null,

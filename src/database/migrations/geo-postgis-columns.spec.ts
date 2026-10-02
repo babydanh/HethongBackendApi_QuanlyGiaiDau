@@ -132,8 +132,14 @@ describe('PostGIS geolocation columns', () => {
       ),
       'utf8',
     );
-    expect(source).toMatch(
-      /ST_SetSRID\(ST_MakePoint\(\$\{query\.lng\}, \$\{query\.lat\}\), 4326\)::geography/,
+    expect(source).toContain('geoPoint(query.lng, query.lat)');
+
+    const geoPointSource = readFileSync(
+      join(MIGRATIONS_DIR, '..', '..', 'common', 'utils', 'geo-point.ts'),
+      'utf8',
+    );
+    expect(geoPointSource).toMatch(
+      /ST_SetSRID\(ST_MakePoint\(\$\{longitude\}::float8, \$\{latitude\}::float8\), 4326\)::geography/,
     );
   });
 });
