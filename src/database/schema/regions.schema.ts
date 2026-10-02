@@ -40,9 +40,8 @@ export const wards = pgTable(
     provinceCode: varchar('province_code', { length: 20 })
       .references(() => provinces.code, { onDelete: 'cascade' })
       .notNull(),
-    // Ranh giới hành chính (GeoJSON WGS84) + tâm hình học.
-    // `boundary` nullable: đơn vị chưa nạp được polygon vẫn dùng được cho
-    // picker tên/tỉnh; ST_Contains trên NULL trả NULL nên resolve chỉ trả null.
+    // Nullable authoritative polygon and nullable reference center. Resolve
+    // assigns codes only through ST_Covers; a center never infers a region.
     boundary: geography('boundary'),
     centerLat: doublePrecision('center_lat'),
     centerLng: doublePrecision('center_lng'),

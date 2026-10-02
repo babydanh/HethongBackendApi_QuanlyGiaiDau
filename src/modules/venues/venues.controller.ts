@@ -15,10 +15,7 @@ import { UpdateVenueDto } from './dto/update-venue.dto';
 import { QueryVenueDto } from './dto/query-venue.dto';
 import { CreateVenueCourtDto } from './dto/create-venue-court.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { UserRole } from '../../common/constants/enums';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
@@ -66,10 +63,9 @@ export class VenuesController {
 
   @Delete(':id')
   @ApiBearerAuth()
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Xóa địa điểm thi đấu' })
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.venuesService.remove(id);
+  @ApiOperation({ summary: 'Xóa địa điểm thi đấu (chỉ owner)' })
+  async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+    return this.venuesService.remove(id, user.sub);
   }
 
   // --- COURTS ---
@@ -80,8 +76,9 @@ export class VenuesController {
   async addCourt(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() createVenueCourtDto: CreateVenueCourtDto,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.venuesService.addCourt(id, createVenueCourtDto);
+    return this.venuesService.addCourt(id, user.sub, createVenueCourtDto);
   }
 
   @Delete(':id/courts/:courtId')
@@ -90,7 +87,8 @@ export class VenuesController {
   async removeCourt(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('courtId', ParseUUIDPipe) courtId: string,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.venuesService.removeCourt(id, courtId);
+    return this.venuesService.removeCourt(id, user.sub, courtId);
   }
 }

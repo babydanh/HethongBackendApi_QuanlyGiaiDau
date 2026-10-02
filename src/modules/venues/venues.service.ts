@@ -1,10 +1,12 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { LivestreamService } from '../livestream/livestream.service';
 import { VenuesRepository } from './venues.repository';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
 import { QueryVenueDto } from './dto/query-venue.dto';
 import { CreateVenueCourtDto } from './dto/create-venue-court.dto';
+import { RegionsService } from '../regions/regions.service';
+import { validateCoordinatePair } from '../../common/utils/geo-point';
 
 @Injectable()
 export class VenuesService {
@@ -12,6 +14,7 @@ export class VenuesService {
 
   constructor(
     private readonly venuesRepository: VenuesRepository,
+    private readonly regionsService: RegionsService,
     @Optional() private readonly livestreamService?: LivestreamService,
   ) {}
 
@@ -20,7 +23,7 @@ export class VenuesService {
   }
 
   async findOne(id: string) {
-    const venue = await this.venuesRepository.findById(id);
+    const venue = await this.venuesRepository.findByIdWithCoordinates(id);
     if (!venue) {
       throw new NotFoundException('Venue not found');
     }
@@ -29,35 +32,59 @@ export class VenuesService {
   }
 
   async create(userId: string, createVenueDto: CreateVenueDto) {
-    return this.venuesRepository.create(userId, createVenueDto);
+    const pair = validateCoordinatePair(createVenueDto.latitude, createVenueDto.longitude);
+    const region = pair
+      ? await this.regionsService.resolveByPoint({ lat: pair.latitude, lng: pair.longitude })
+      : null;
+    const result = await this.venuesRepository.create(userId, createVenueDto, undefined, {
+      provinceCode: region?.provinceCode ?? null,
+      wardCode: region?.wardCode ?? null,
+    });
+    if ('duplicateCandidates' in result) {
+      throw new ConflictException({ code: 'VENUE_DUPLICATE_CANDIDATES', details: { candidates: result.duplicateCandidates } });
+    }
+    return result;
   }
 
   async update(id: string, userId: string, updateVenueDto: UpdateVenueDto) {
     const existing = await this.venuesRepository.findById(id);
     if (!existing) throw new NotFoundException('Venue not found');
-    return this.venuesRepository.update(id, userId, updateVenueDto);
+    if (existing.ownerUserId !== userId) throw new ForbiddenException({ code: 'VENUE_OWNER_REQUIRED' });
+    const updated = await this.venuesRepository.update(id, userId, updateVenueDto);
+    if (!updated) throw new ForbiddenException({ code: 'VENUE_OWNER_REQUIRED' });
+    return updated;
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId: string) {
     const existing = await this.venuesRepository.findById(id);
     if (!existing) throw new NotFoundException('Venue not found');
-    return this.venuesRepository.delete(id);
+    if (existing.ownerUserId !== userId) throw new ForbiddenException({ code: 'VENUE_OWNER_REQUIRED' });
+    const deleted = await this.venuesRepository.delete(id, userId);
+    if (!deleted) throw new ForbiddenException({ code: 'VENUE_OWNER_REQUIRED' });
+    return deleted;
   }
 
   // --- COURTS ---
-  async addCourt(venueId: string, createVenueCourtDto: CreateVenueCourtDto) {
+  private async requireOwner(venueId: string, userId: string) {
     const existing = await this.venuesRepository.findById(venueId);
     if (!existing) throw new NotFoundException('Venue not found');
+    if (existing.ownerUserId !== userId) throw new ForbiddenException({ code: 'VENUE_OWNER_REQUIRED' });
+  }
+
+  async addCourt(venueId: string, userId: string, createVenueCourtDto: CreateVenueCourtDto) {
+    await this.requireOwner(venueId, userId);
     return this.venuesRepository.addCourt(venueId, createVenueCourtDto);
   }
 
-  async addCourtsBatch(venueId: string, courtCount: number, namePrefix = 'Sân') {
-    const existing = await this.venuesRepository.findById(venueId);
-    if (!existing) throw new NotFoundException('Venue not found');
+  async addCourtsBatch(venueId: string, userId: string, courtCount: number, namePrefix = 'Sân') {
+    await this.requireOwner(venueId, userId);
     return this.venuesRepository.addCourtsBatch(venueId, courtCount, namePrefix);
   }
 
-  async removeCourt(venueId: string, courtId: string) {
+  async removeCourt(venueId: string, userId: string, courtId: string) {
+    await this.requireOwner(venueId, userId);
+    const court = await this.venuesRepository.findCourtByVenue(venueId, courtId);
+    if (!court) throw new NotFoundException('Court not found');
     // Dọn camera của sân TRƯỚC khi xoá: `livestream_cameras.court_id` là
     // ON DELETE SET NULL nên xoá xong sẽ không tìm lại được camera để gỡ.
     // Lỗi dọn không được chặn việc xoá sân, nếu không BTC không xoá được sân.
@@ -76,7 +103,7 @@ export class VenuesService {
       }
     }
 
-    const deleted = await this.venuesRepository.removeCourt(courtId);
+    const deleted = await this.venuesRepository.removeCourt(venueId, courtId);
     if (!deleted) throw new NotFoundException('Court not found');
     return deleted;
   }

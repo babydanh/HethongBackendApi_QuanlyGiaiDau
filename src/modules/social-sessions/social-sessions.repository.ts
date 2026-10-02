@@ -15,6 +15,7 @@ import {
 } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../database/db.types';
+import { geoPoint, geoSnapshot, validateCoordinatePair } from '../../common/utils/geo-point';
 import * as schema from '../../database/schema';
 
 export type SocialSessionRow = typeof schema.socialSessions.$inferSelect;
@@ -62,7 +63,7 @@ export const DEFAULT_NEARBY_RADIUS_KM = 10;
 
 /** Điểm tham chiếu PostGIS geography từ tọa độ user. */
 function userRefPoint(lat: number, lng: number) {
-  return sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`;
+  return geoPoint(lng, lat);
 }
 
 /**
@@ -85,7 +86,7 @@ function userRefPoint(lat: number, lng: number) {
  * 0 là "đứng đúng chỗ", sẽ đẩy kèo không rõ vị trí lên đầu danh sách.
  */
 function sessionLocationExpr() {
-  return sql`COALESCE(${schema.socialSessions.venueGeolocation}, ${schema.tournamentVenues.locationGeolocation})`;
+  return schema.socialSessions.venueGeolocation;
 }
 
 /**
@@ -139,7 +140,7 @@ export class SocialSessionsRepository {
   }
 
   async listNearby(filters: {
-    lat: number; lng: number; radius: number; today: string; limit: number;
+    lat: number; lng: number; radius: number; today: string; limit: number; page: number;
     after?: { distanceM: number; id: string };
   }) {
     const point = userRefPoint(filters.lat, filters.lng);
@@ -148,7 +149,7 @@ export class SocialSessionsRepository {
       eq(schema.socialSessions.visibility, 'PUBLIC'),
       eq(schema.socialSessions.status, 'OPEN'),
       isNull(schema.socialSessions.deletedAt),
-      gte(schema.socialSessions.playDate, filters.today),
+      sql`${schema.socialSessions.startAt} > now()`,
       sql`${schema.socialSessions.latitude} IS NOT NULL`,
       sql`${schema.socialSessions.longitude} IS NOT NULL`,
       sql`${schema.socialSessions.venueGeolocation} IS NOT NULL`,
@@ -157,14 +158,17 @@ export class SocialSessionsRepository {
     if (filters.after) {
       conditions.push(sql`(${distance} > ${filters.after.distanceM} OR (${distance} = ${filters.after.distanceM} AND ${schema.socialSessions.id} > ${filters.after.id}::uuid))`);
     }
-    return this.db.select({ session: schema.socialSessions, distanceM: distance,
+    const where = and(...conditions);
+    const [items, totalRows] = await Promise.all([this.db.select({ session: schema.socialSessions, distanceM: distance,
       sport: schema.categories.slug, sportName: schema.categories.name,
     })
       .from(schema.socialSessions)
       .leftJoin(schema.categories, eq(schema.categories.id, schema.socialSessions.categoryId))
-      .where(and(...conditions))
-      .orderBy(asc(distance), asc(schema.socialSessions.id))
-      .limit(filters.limit + 1);
+      .where(where)
+      .orderBy(sql`${schema.socialSessions.venueGeolocation} <-> ${point}`, asc(schema.socialSessions.startAt), asc(schema.socialSessions.id))
+      .limit(filters.after ? filters.limit + 1 : filters.limit).offset((filters.page - 1) * filters.limit),
+      this.db.select({ total: count() }).from(schema.socialSessions).where(where)]);
+    return { items, total: Number(totalRows[0]?.total ?? 0) };
   }
 
   async findCommunityById(id: string, tx: AppDbOrTx = this.db) {
@@ -189,12 +193,17 @@ export class SocialSessionsRepository {
       .limit(1);
     return row ?? null;
   }
-  async findVenueById(id: string, tx: AppDbOrTx = this.db) {
+  async findVenueById(id: string, tx: AppDbOrTx = this.db): Promise<{
+    id: string; name: string; locationAddress: string;
+    latitude?: number | null; longitude?: number | null;
+  } | null> {
     const [row] = await tx
       .select({
         id: schema.tournamentVenues.id,
         name: schema.tournamentVenues.name,
         locationAddress: schema.tournamentVenues.locationAddress,
+        latitude: sql<number | null>`ST_Y(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+        longitude: sql<number | null>`ST_X(${schema.tournamentVenues.locationGeolocation}::geometry)`,
       })
       .from(schema.tournamentVenues)
       .where(
@@ -570,19 +579,17 @@ export class SocialSessionsRepository {
     values: typeof schema.socialSessions.$inferInsert,
     hostUserId: string,
     tx: AppDbOrTx = this.db,
+    prepareValues?: (executor: AppDbOrTx) => Promise<typeof schema.socialSessions.$inferInsert>,
   ): Promise<CreateWithHostOutcome> {
-    // Suy venueGeolocation từ lat/lng (pattern venues.repository) để query geo.
-    const geoValue =
-      values.latitude != null && values.longitude != null
-        ? sql`ST_SetSRID(ST_MakePoint(${values.longitude}, ${values.latitude}), 4326)`
-        : undefined;
-    const insertValues = (
-      geoValue ? { ...values, venueGeolocation: geoValue } : values
-    ) as typeof schema.socialSessions.$inferInsert;
+    const pair = validateCoordinatePair(values.latitude, values.longitude);
+    const insertValues = (pair
+      ? { ...values, ...geoSnapshot(pair.latitude, pair.longitude) }
+      : values) as typeof schema.socialSessions.$inferInsert;
     const run = async (transaction: AppDbOrTx) => {
+      const finalValues = prepareValues ? await prepareValues(transaction) : insertValues;
       const [session] = await transaction
         .insert(schema.socialSessions)
-        .values(insertValues)
+        .values(finalValues)
         .returning();
       await transaction.insert(schema.socialSessionParticipants).values({
         sessionId: session.id,
@@ -1090,21 +1097,22 @@ export class SocialSessionsRepository {
   async updateSession(
     id: string,
     patch: Partial<typeof schema.socialSessions.$inferInsert>,
+    executor: AppDbOrTx = this.db,
   ) {
     const geoPatch: Record<string, unknown> = {};
     if (patch.latitude !== undefined || patch.longitude !== undefined) {
-      const lat = patch.latitude ?? null;
-      const lng = patch.longitude ?? null;
-      if (lat != null && lng != null) {
-        geoPatch.venueGeolocation = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`;
-      } else {
-        // Xóa vị trí: clear cả 3 cột để không lệch nguồn.
+      if (patch.latitude === null && patch.longitude === null) {
         geoPatch.venueGeolocation = null;
         geoPatch.latitude = null;
         geoPatch.longitude = null;
+      } else {
+        const pair = validateCoordinatePair(patch.latitude, patch.longitude, { required: true })!;
+        geoPatch.venueGeolocation = geoPoint(pair.longitude, pair.latitude);
+        geoPatch.latitude = pair.latitude;
+        geoPatch.longitude = pair.longitude;
       }
     }
-    const [updated] = await this.db
+    const [updated] = await executor
       .update(schema.socialSessions)
       .set({ ...patch, ...geoPatch, updatedAt: new Date() } as Partial<
         typeof schema.socialSessions.$inferInsert

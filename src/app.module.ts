@@ -49,6 +49,7 @@ import { ClubMatchSessionsModule } from './modules/club-match-sessions/club-matc
 import { SocialSessionsModule } from './modules/social-sessions/social-sessions.module';
 import { FriendshipsModule } from './modules/friendships/friendships.module';
 import { ZaloModule } from './providers/zalo/zalo.module';
+import { SocialLocationsModule } from './modules/social-locations/social-locations.module';
 
 @Module({
   imports: [
@@ -115,6 +116,7 @@ import { ZaloModule } from './providers/zalo/zalo.module';
     AdvertisementsModule,
     ClubMatchSessionsModule,
     SocialSessionsModule,
+    SocialLocationsModule,
     FriendshipsModule,
     ZaloModule,
   ],

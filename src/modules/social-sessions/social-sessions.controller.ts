@@ -11,7 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
@@ -29,6 +29,7 @@ import {
 } from './dto/social-session.dto';
 import { QueryChatMessagesDto } from '../chat/dto/query-chat-messages.dto';
 import { SocialSessionsService } from './social-sessions.service';
+import { NearbySocialsQueryDto } from './dto/nearby-socials.dto';
 
 type RequestUser = { id: string; roles?: string[] };
 
@@ -55,6 +56,16 @@ export class SocialSessionsController {
     @CurrentUser() user?: RequestUser,
   ) {
     return this.service.list(query, user?.id, user?.roles);
+  }
+
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Get('nearby')
+  @ApiOperation({ summary: 'Social công khai sắp bắt đầu gần điểm tham chiếu (phân trang page/limit)' })
+  @ApiResponse({ status: 200, description: 'data.items có distanceMeters theo mét; radiusKm theo km' })
+  @ApiResponse({ status: 400, description: 'Cursor đã retire; dùng page/limit' })
+  nearby(@Query() query: NearbySocialsQueryDto) {
+    return this.service.nearby(query);
   }
 
   // Khai báo trước ':id' để không bị ParseUUIDPipe của route param nuốt.

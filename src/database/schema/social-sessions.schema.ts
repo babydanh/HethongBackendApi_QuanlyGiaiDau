@@ -121,6 +121,16 @@ export const socialSessions = pgTable(
       'social_session_create_idempotency_pair_check',
       sql`(${table.creationIdempotencyKey} IS NULL) = (${table.creationFingerprint} IS NULL)`,
     ),
+    geoConsistencyCheck: check(
+      'social_session_geo_consistency_check',
+      sql`(
+        (${table.venueGeolocation} IS NULL AND ${table.latitude} IS NULL AND ${table.longitude} IS NULL)
+        OR (${table.venueGeolocation} IS NOT NULL AND ${table.latitude} IS NOT NULL AND ${table.longitude} IS NOT NULL
+          AND ${table.latitude} BETWEEN -90 AND 90 AND ${table.longitude} BETWEEN -180 AND 180
+          AND abs(${table.latitude} - ST_Y(${table.venueGeolocation}::geometry)) <= 1e-7
+          AND abs(${table.longitude} - ST_X(${table.venueGeolocation}::geometry)) <= 1e-7)
+      )`,
+    ),
     createIdempotencyUnique: uniqueIndex(
       'social_session_create_idempotency_idx',
     )

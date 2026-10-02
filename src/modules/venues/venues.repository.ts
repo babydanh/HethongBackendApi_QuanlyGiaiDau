@@ -8,6 +8,8 @@ import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
 import { QueryVenueDto } from './dto/query-venue.dto';
 import { CreateVenueCourtDto } from './dto/create-venue-court.dto';
+import type { AppDbOrTx, AppTx } from '../../database/db.types';
+import { geoPoint, validateCoordinatePair } from '../../common/utils/geo-point';
 
 @Injectable()
 export class VenuesRepository {
@@ -51,7 +53,18 @@ export class VenuesRepository {
       .where(baseConditions);
 
     let venuesQuery = this.db
-      .select()
+      .select({
+        id: schema.tournamentVenues.id,
+        ownerUserId: schema.tournamentVenues.ownerUserId,
+        name: schema.tournamentVenues.name,
+        locationAddress: schema.tournamentVenues.locationAddress,
+        locationGeolocation: schema.tournamentVenues.locationGeolocation,
+        imagesUrls: schema.tournamentVenues.imagesUrls,
+        createdAt: schema.tournamentVenues.createdAt,
+        deletedAt: schema.tournamentVenues.deletedAt,
+        latitude: sql<number | null>`ST_Y(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+        longitude: sql<number | null>`ST_X(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      })
       .from(schema.tournamentVenues)
       .where(whereClause)
       .orderBy(desc(schema.tournamentVenues.createdAt), desc(schema.tournamentVenues.id))
@@ -89,61 +102,126 @@ export class VenuesRepository {
     return result[0];
   }
 
-  async create(userId: string, data: CreateVenueDto) {
-    let geographyValue: SQL | null = null;
-    // `!= null`, KHÔNG phải truthy: 0 là toạ độ hợp lệ (xích đạo / Greenwich)
-    // nhưng falsy, nên truthy check âm thầm vứt mất các sân nằm trên đường
-    // xích đạo hoặc kinh tuyến 0.
-    if (data.longitude != null && data.latitude != null) {
-      geographyValue = sql`ST_SetSRID(ST_MakePoint(${data.longitude}, ${data.latitude}), 4326)`;
-    }
+  async findByIdWithCoordinates(id: string) {
+    const [row] = await this.db.select({
+      id: schema.tournamentVenues.id,
+      ownerUserId: schema.tournamentVenues.ownerUserId,
+      name: schema.tournamentVenues.name,
+      locationAddress: schema.tournamentVenues.locationAddress,
+      locationGeolocation: schema.tournamentVenues.locationGeolocation,
+      imagesUrls: schema.tournamentVenues.imagesUrls,
+      createdAt: schema.tournamentVenues.createdAt,
+      deletedAt: schema.tournamentVenues.deletedAt,
+      latitude: sql<number | null>`ST_Y(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      longitude: sql<number | null>`ST_X(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+    }).from(schema.tournamentVenues).where(eq(schema.tournamentVenues.id, id)).limit(1);
+    return row ?? null;
+  }
 
-    return await this.db.transaction(async (tx) => {
+  async searchSocialVenues(query: string, limit = 10) {
+    const normalized = query.trim();
+    const escaped = normalized.replace(/[\\%_]/g, '\\$&');
+    const pattern = `%${escaped}%`;
+    return this.db.select({
+      venueId: schema.tournamentVenues.id,
+      name: schema.tournamentVenues.name,
+      formattedAddress: schema.tournamentVenues.locationAddress,
+      latitude: sql<number>`ST_Y(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      longitude: sql<number>`ST_X(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      provinceCode: schema.tournamentVenues.provinceCode,
+      wardCode: schema.tournamentVenues.wardCode,
+      score: sql<number>`similarity(${schema.tournamentVenues.searchText}, public.f_unaccent(lower(${normalized})))`,
+    }).from(schema.tournamentVenues).where(and(
+      sql`${schema.tournamentVenues.deletedAt} IS NULL`,
+      sql`${schema.tournamentVenues.locationGeolocation} IS NOT NULL`,
+      sql`(${schema.tournamentVenues.searchText} % public.f_unaccent(lower(${normalized})) OR ${schema.tournamentVenues.searchText} ILIKE ${pattern} ESCAPE E'\\\\')`,
+    )).orderBy(desc(sql`similarity(${schema.tournamentVenues.searchText}, public.f_unaccent(lower(${normalized})))`), asc(schema.tournamentVenues.id)).limit(Math.min(10, Math.max(1, limit)));
+  }
+
+  async findMatchingPinnedVenues(data: CreateVenueDto, tx: AppDbOrTx = this.db) {
+    const pair = validateCoordinatePair(data.latitude, data.longitude, { required: true })!;
+    return tx.select({
+      id: schema.tournamentVenues.id,
+      name: schema.tournamentVenues.name,
+      locationAddress: schema.tournamentVenues.locationAddress,
+      latitude: sql<number | null>`ST_Y(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      longitude: sql<number | null>`ST_X(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      distanceMeters: sql<number>`ST_Distance(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)})`,
+    }).from(schema.tournamentVenues).where(and(
+      sql`similarity(public.f_unaccent(lower(${schema.tournamentVenues.name})), public.f_unaccent(lower(${data.name.trim()}))) > 0.5`,
+      sql`${schema.tournamentVenues.locationGeolocation} IS NOT NULL`,
+      sql`ST_DWithin(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)}, 50)`,
+      sql`${schema.tournamentVenues.deletedAt} IS NULL`,
+    )).orderBy(asc(sql`ST_Distance(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)})`), asc(schema.tournamentVenues.id)).limit(10);
+  }
+
+  async create(
+    userId: string,
+    data: CreateVenueDto,
+    executor: AppDbOrTx | undefined = this.db,
+    regionCodes?: { provinceCode: string | null; wardCode: string | null },
+  ) {
+    const pair = validateCoordinatePair(data.latitude, data.longitude);
+    const write = async (tx: AppTx) => {
+      if (pair) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(731904, 1)`);
+        const candidates = await this.findMatchingPinnedVenues({ ...data, ...pair }, tx);
+        if (candidates.length) return { duplicateCandidates: candidates } as const;
+      }
       const [record] = await tx
         .insert(schema.tournamentVenues)
         .values({
           ownerUserId: userId,
           name: data.name,
           locationAddress: data.locationAddress,
-          ...(geographyValue !== null && { locationGeolocation: geographyValue }),
+          provinceCode: regionCodes?.provinceCode ?? null,
+          wardCode: regionCodes?.wardCode ?? null,
+          ...(pair && { locationGeolocation: geoPoint(pair.longitude, pair.latitude) }),
           imagesUrls: data.imagesUrls,
         } as typeof schema.tournamentVenues.$inferInsert)
         .returning();
 
       await this.auditService.logCreate(tx, userId, 'tournament_venues', record.id, record);
-      return record;
-    });
+      return { record } as const;
+    };
+    const activeExecutor = executor ?? this.db;
+    const outcome = activeExecutor === this.db
+      ? await this.db.transaction(write)
+      : await write(activeExecutor as AppTx);
+    return 'record' in outcome ? outcome.record : outcome;
   }
 
   async update(id: string, userId: string, data: UpdateVenueDto) {
-    let geographyValue: SQL | undefined = undefined;
-    if (data.longitude != null && data.latitude != null) {
-      geographyValue = sql`ST_SetSRID(ST_MakePoint(${data.longitude}, ${data.latitude}), 4326)`;
-    }
+    const hasLat = data.latitude !== undefined;
+    const hasLng = data.longitude !== undefined;
+    if (hasLat !== hasLng) validateCoordinatePair(data.latitude, data.longitude, { required: true });
+    const pair = hasLat && hasLng ? validateCoordinatePair(data.latitude, data.longitude, { required: true }) : null;
 
     return await this.db.transaction(async (tx) => {
-      const [oldRecord] = await tx.select().from(schema.tournamentVenues).where(eq(schema.tournamentVenues.id, id)).limit(1);
+      const [oldRecord] = await tx.select().from(schema.tournamentVenues).where(and(eq(schema.tournamentVenues.id, id), eq(schema.tournamentVenues.ownerUserId, userId), sql`${schema.tournamentVenues.deletedAt} IS NULL`)).limit(1);
+      if (!oldRecord) return null;
 
       const [updated] = await tx
         .update(schema.tournamentVenues)
         .set({
           ...(data.name && { name: data.name }),
           ...(data.locationAddress && { locationAddress: data.locationAddress }),
-          ...(geographyValue !== undefined && { locationGeolocation: geographyValue }),
+          ...(pair && { locationGeolocation: geoPoint(pair.longitude, pair.latitude) }),
           ...(data.imagesUrls && { imagesUrls: data.imagesUrls }),
         })
-        .where(eq(schema.tournamentVenues.id, id))
+        .where(and(eq(schema.tournamentVenues.id, id), eq(schema.tournamentVenues.ownerUserId, userId), sql`${schema.tournamentVenues.deletedAt} IS NULL`))
         .returning();
 
+      if (!updated) return null;
       await this.auditService.logUpdate(tx, userId, 'tournament_venues', id, oldRecord, updated);
       return updated;
     });
   }
 
-  async delete(id: string) {
+  async delete(id: string, userId: string) {
     const [deleted] = await this.db
       .delete(schema.tournamentVenues)
-      .where(eq(schema.tournamentVenues.id, id))
+      .where(and(eq(schema.tournamentVenues.id, id), eq(schema.tournamentVenues.ownerUserId, userId), sql`${schema.tournamentVenues.deletedAt} IS NULL`))
       .returning();
     return deleted;
   }
@@ -185,10 +263,18 @@ export class VenuesRepository {
       .returning();
   }
 
-  async removeCourt(courtId: string) {
+  async findCourtByVenue(venueId: string, courtId: string) {
+    const [court] = await this.db.select().from(schema.venueCourts).where(and(
+      eq(schema.venueCourts.id, courtId),
+      eq(schema.venueCourts.venueId, venueId),
+    )).limit(1);
+    return court ?? null;
+  }
+
+  async removeCourt(venueId: string, courtId: string) {
     const [deleted] = await this.db
       .delete(schema.venueCourts)
-      .where(eq(schema.venueCourts.id, courtId))
+      .where(and(eq(schema.venueCourts.id, courtId), eq(schema.venueCourts.venueId, venueId)))
       .returning();
     return deleted;
   }

@@ -93,7 +93,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
         );
       }
     } else {
-      console.error('[Unhandled Exception]:', exception);
+      // Avoid logging raw database/client exceptions, which may contain bound
+      // location parameters or complete request URLs.
       // Che giấu chi tiết câu lệnh SQL/Internal error khỏi phía client để thân thiện và an toàn hơn
       message = 'Đã có lỗi hệ thống xảy ra. Vui lòng thử lại sau hoặc liên hệ ban quản trị.';
       code = 'INTERNAL_SERVER_ERROR';
@@ -105,7 +106,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message,
       details,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: request.route?.path
+        ? `${request.baseUrl ?? ''}${request.route.path}`
+        : request.path,
       ...extensions,
     });
   }
