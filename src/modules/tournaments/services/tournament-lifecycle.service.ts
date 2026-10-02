@@ -545,26 +545,42 @@ export class TournamentLifecycleService {
     >;
     const incomingConfigPatch = updateTournamentDto.tournamentConfig;
 
-    // Once registration is closed or explicitly locked, registration controls
-    // must not be changed as an accidental way to reopen or extend the roster.
+    // A closed, unlocked tournament may extend its deadline without reopening.
+    // An explicit registration lock remains a hard stop for every registration change.
     if (
       existing.status === 'REGISTRATION_CLOSED' ||
       existing.isRegistrationLocked
     ) {
+      const requestedDeadline =
+        updateTournamentDto.registrationEndDate !== undefined
+          ? new Date(updateTournamentDto.registrationEndDate).getTime()
+          : Number.NaN;
+      const currentDeadline = existing.registrationEndDate
+        ? new Date(existing.registrationEndDate).getTime()
+        : Number.NaN;
+      const canExtendClosedDeadline =
+        existing.status === 'REGISTRATION_CLOSED' &&
+        !existing.isRegistrationLocked &&
+        Number.isFinite(requestedDeadline) &&
+        Number.isFinite(currentDeadline) &&
+        requestedDeadline > Date.now() &&
+        requestedDeadline > currentDeadline;
       const lockedRegistrationFields: (keyof UpdateTournamentDto)[] = [
         'registrationStartDate',
         'registrationEndDate',
         'maxParticipants',
         'visibility',
+        'isRegistrationLocked',
       ];
       for (const field of lockedRegistrationFields) {
         if (
           updateTournamentDto[field] !== undefined &&
           updateTournamentDto[field] !==
-            (existing as Record<string, unknown>)[field]
+            (existing as Record<string, unknown>)[field] &&
+          !(field === 'registrationEndDate' && canExtendClosedDeadline)
         ) {
           throw new BadRequestException(
-            'Đăng ký đã được khóa. Hãy dùng thao tác mở lại đăng ký được kiểm soát trước khi thay đổi thời gian hoặc số lượng.',
+            'Đăng ký đã đóng hoặc bị khóa. Chỉ có thể gia hạn hạn chót khi chưa bị khóa thủ công; các thay đổi khác cần thao tác mở lại đăng ký.',
           );
         }
       }
