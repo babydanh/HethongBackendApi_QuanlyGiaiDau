@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { RegionsRepository } from './regions.repository';
+import type { AppDbOrTx } from '../../database/db.types';
 import {
   QueryCentroidDto,
   QueryRegionDto,
@@ -28,11 +29,12 @@ export class RegionsService {
    * Cả hai tra cứu dưới đây trả null thay vì ném lỗi: điểm nằm ngoài vùng có
    * ranh giới là nhánh bình thường, không phải 500.
    */
-  async resolveByPoint(query: QueryResolveDto) {
-    return this.regionsRepository.resolveByPoint(query);
+  async resolveByPoint(query: QueryResolveDto, executor?: AppDbOrTx) {
+    return this.regionsRepository.resolveByPoint(query, executor);
   }
 
   async getCentroid(query: QueryCentroidDto) {
     return this.regionsRepository.findCentroid(query);
   }
+
 }

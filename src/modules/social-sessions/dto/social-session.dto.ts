@@ -5,9 +5,11 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsDefined,
   IsIn,
   IsInt,
   IsNumber,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUrl,
@@ -16,6 +18,7 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 
 export const SOCIAL_VISIBILITIES = ['PUBLIC', 'CLUB_ONLY'] as const;
@@ -35,6 +38,26 @@ export const SOCIAL_PLAY_FORMATS = [
   'Đánh đơn',
   'Đánh đôi',
 ] as const;
+
+export class NewSocialVenueDto {
+  @ApiProperty({ maxLength: 255 })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString() @MaxLength(255) @IsNotEmpty()
+  name!: string;
+
+  @ApiProperty({ maxLength: 500 })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString() @MaxLength(500) @IsNotEmpty()
+  locationAddress!: string;
+
+  @ApiProperty({ example: 10.7769 })
+  @Type(() => Number) @IsNumber({ allowNaN: false, allowInfinity: false }) @Min(-90) @Max(90)
+  latitude!: number;
+
+  @ApiProperty({ example: 106.7009 })
+  @Type(() => Number) @IsNumber({ allowNaN: false, allowInfinity: false }) @Min(-180) @Max(180)
+  longitude!: number;
+}
 
 export class CreateSocialSessionDto {
   @ApiPropertyOptional({
@@ -85,18 +108,21 @@ export class CreateSocialSessionDto {
   @IsOptional()
   durationMinutes?: number;
 
-  @ApiProperty({ example: '22 Cộng Hòa', maxLength: 255 })
+  @ApiPropertyOptional({ example: '22 Cộng Hòa', maxLength: 255, deprecated: true })
   @IsString()
   @MaxLength(255)
-  venueName: string;
+  @IsOptional()
+  venueName?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '22 Cộng Hòa, Tân Bình, TP. Hồ Chí Minh',
     maxLength: 500,
+    deprecated: true,
   })
   @IsString()
   @MaxLength(500)
-  venueAddress: string;
+  @IsOptional()
+  venueAddress?: string;
   @ApiPropertyOptional({
     format: 'uuid',
     description: 'ID địa điểm lấy từ GET /venues',
@@ -104,6 +130,12 @@ export class CreateSocialSessionDto {
   @IsUUID()
   @IsOptional()
   venueId?: string;
+
+  @ApiPropertyOptional({ type: NewSocialVenueDto, description: 'Sân mới do host ghim; được tạo cùng transaction với Social' })
+  @ValidateNested()
+  @Type(() => NewSocialVenueDto)
+  @IsOptional()
+  newVenue?: NewSocialVenueDto;
 
   @ApiPropertyOptional({
     example: '79',
@@ -123,6 +155,18 @@ export class CreateSocialSessionDto {
   @IsOptional()
   wardCode?: string;
 
+  @ApiPropertyOptional({ description: 'Tên tỉnh từ địa điểm được chọn; dùng đối chiếu với danh mục nội bộ' })
+  @IsString()
+  @MaxLength(120)
+  @IsOptional()
+  provinceName?: string;
+
+  @ApiPropertyOptional({ description: 'Tên phường từ địa điểm được chọn; dùng đối chiếu trong tỉnh đã khớp' })
+  @IsString()
+  @MaxLength(120)
+  @IsOptional()
+  wardName?: string;
+
   @ApiPropertyOptional({
     format: 'uuid',
     description: 'ID sân thuộc venueId đã chọn',
@@ -136,20 +180,20 @@ export class CreateSocialSessionDto {
   @IsIn([...SOCIAL_GENDER_REQUIREMENTS])
   genderRequirement?: SocialGenderRequirement;
 
-  @ApiPropertyOptional({ example: 10.7769, description: 'Vĩ độ sân (do host ghim map). Đi cặp với longitude' })
-  @Type(() => Number)
+  @ApiPropertyOptional({ example: 10.7769, deprecated: true, description: 'Legacy pin fields; use newVenue or venueId' })
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? value : Number(value)))
+  @IsOptional()
   @IsNumber()
   @Min(-90)
   @Max(90)
-  @IsOptional()
   latitude?: number;
 
-  @ApiPropertyOptional({ example: 106.7009, description: 'Kinh độ sân (do host ghim map). Đi cặp với latitude' })
-  @Type(() => Number)
+  @ApiPropertyOptional({ example: 106.7009, deprecated: true, description: 'Legacy pin fields; use newVenue or venueId' })
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? value : Number(value)))
+  @IsOptional()
   @IsNumber()
   @Min(-180)
   @Max(180)
-  @IsOptional()
   longitude?: number;
 
   @ApiPropertyOptional({ example: 6, minimum: 2, maximum: 64 })
@@ -242,6 +286,12 @@ export class UpdateSocialSessionDto {
   @IsOptional()
   venueId?: string | null;
 
+  @ApiPropertyOptional({ type: NewSocialVenueDto, description: 'Replace Social snapshot with a newly pinned venue' })
+  @ValidateNested()
+  @Type(() => NewSocialVenueDto)
+  @IsOptional()
+  newVenue?: NewSocialVenueDto;
+
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   @IsUUID()
   @IsOptional()
@@ -258,6 +308,18 @@ export class UpdateSocialSessionDto {
   @MaxLength(20)
   @IsOptional()
   wardCode?: string | null;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @IsString()
+  @MaxLength(120)
+  @IsOptional()
+  provinceName?: string;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @IsString()
+  @MaxLength(120)
+  @IsOptional()
+  wardName?: string;
 
   @ApiPropertyOptional({ enum: SOCIAL_GENDER_REQUIREMENTS })
   @ValidateIf((_object, value) => value !== undefined)

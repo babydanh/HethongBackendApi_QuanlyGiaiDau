@@ -195,7 +195,22 @@ function discoverMigrationFiles(migrationsDir) {
       hash: tag,
     }));
 
-  return migrationFiles.concat(standaloneMigrations);
+  // These hand-authored files form one dependency chain. Keep the journal and
+  // historical standalone order intact; only impose order on the new social
+  // location migrations which depend on one another.
+  const socialLocationOrder = new Map([
+    ['2026-10-02_social_location_prerequisites', 0],
+    ['2026-10-02_social_location_venues', 1],
+    ['2026-10-02_social_location_backfill', 2],
+  ]);
+  const orderedStandalone = standaloneMigrations.filter(
+    (migration) => !socialLocationOrder.has(migration.tag),
+  );
+  for (const tag of socialLocationOrder.keys()) {
+    const migration = standaloneMigrations.find((item) => item.tag === tag);
+    if (migration) orderedStandalone.push(migration);
+  }
+  return migrationFiles.concat(orderedStandalone);
 }
 
 function runDryRun(migrationsDir) {

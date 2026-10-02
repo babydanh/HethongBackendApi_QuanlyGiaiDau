@@ -51,14 +51,14 @@ export class SearchRegionsDto {
 export class QueryResolveDto {
   @ApiProperty({ description: 'Vĩ độ', example: 10.7607 })
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(-90)
   @Max(90)
   lat!: number;
 
   @ApiProperty({ description: 'Kinh độ', example: 106.6247 })
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(-180)
   @Max(180)
   lng!: number;
@@ -123,9 +123,7 @@ export class ResolvedRegionDto {
 
   @ApiProperty({
     description:
-      'true = KHỚP BẰNG KHOẢNG CÁCH tới tâm phường gần nhất, đây là ước lượng ' +
-      'chứ không phải phường chứa điểm; false = phường thật sự bao phủ điểm. ' +
-      'Client chỉ nên tự điền tỉnh/phường vào form khi cờ này là false.',
+      'true = center tham chiếu; false = polygon bao phủ điểm.',
     example: false,
   })
   isEstimated!: boolean;

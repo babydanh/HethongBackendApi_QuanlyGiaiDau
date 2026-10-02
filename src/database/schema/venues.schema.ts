@@ -9,6 +9,7 @@ import {
   date,
   index,
   check,
+  text as pgText,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
@@ -19,23 +20,41 @@ const geography = customType<{ data: string }>({
   },
 });
 
-export const tournamentVenues = pgTable('tournament_venues', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  ownerUserId: uuid('owner_user_id').references(() => users.id, {
-    onDelete: 'set null',
+export const tournamentVenues = pgTable(
+  'tournament_venues',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: uuid('owner_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    name: varchar('name', { length: 255 }).notNull(),
+    locationAddress: text('location_address').notNull(),
+    locationGeolocation: geography('location_geolocation'),
+    provinceCode: varchar('province_code', { length: 20 }),
+    wardCode: varchar('ward_code', { length: 20 }),
+    searchText: pgText('search_text').generatedAlwaysAs(
+      sql`public.f_unaccent(lower(${sql.identifier('name')} || ' ' || ${sql.identifier('location_address')}))`,
+    ),
+    imagesUrls: text('images_urls')
+      .array()
+      .default(sql`'{}'::text[]`)
+      .notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => ({
+    geoIdx: index('tournament_venues_geo_idx').using(
+      'gist',
+      table.locationGeolocation,
+    ),
+    searchIdx: index('tournament_venues_search_idx').using(
+      'gin',
+      table.searchText.op('gin_trgm_ops'),
+    ),
   }),
-  name: varchar('name', { length: 255 }).notNull(),
-  locationAddress: text('location_address').notNull(),
-  locationGeolocation: geography('location_geolocation'),
-  imagesUrls: text('images_urls')
-    .array()
-    .default(sql`'{}'::text[]`)
-    .notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-});
+);
 
 export const venueCourts = pgTable('venue_courts', {
   id: uuid('id').primaryKey().defaultRandom(),

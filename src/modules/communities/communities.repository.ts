@@ -21,6 +21,7 @@ import * as schema from '../../database/schema';
 import { AuditService } from '../audit/audit.service';
 import { QueryCommunityDto } from './dto/query-community.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
+import { geoPoint, validateCoordinatePair } from '../../common/utils/geo-point';
 
 const VIETNAMESE_DIACRITIC_CHARACTERS =
   'ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴàáạảãâầấậẩẫăằắặẳẵÈÉẸẺẼÊỀẾỆỂỄèéẹẻẽêềếệểễÌÍỊỈĨìíịỉĩÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠòóọỏõôồốộổỗơờớợởỡÙÚỤỦŨƯỪỨỰỬỮùúụủũưừứựửữỲÝỴỶỸỳýỵỷỹĐđ';
@@ -97,7 +98,7 @@ export class CommunitiesRepository {
       // DEGREES — so a metre radius was compared against degrees and the result
       // was off by ~111000x. With geography, the third argument is metres.
       // Same helper shape as social-sessions.repository.ts:66.
-      const point = sql`ST_SetSRID(ST_MakePoint(${query.lng}, ${query.lat}), 4326)::geography`;
+      const point = geoPoint(query.lng, query.lat);
       conditions.push(
         sql`ST_DWithin(${schema.communities.locationGeolocation}, ${point}, ${radiusMeters})`,
       );
@@ -471,8 +472,9 @@ export class CommunitiesRepository {
       // but Drizzle allows sql`` in .values(). Wait, actually we can if we cast or use sql.
       // Let's use a dynamic approach.
       const valuesToInsert: Record<string, unknown> = { ...data };
-      if (lat !== undefined && lng !== undefined) {
-        valuesToInsert.locationGeolocation = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`;
+      const pair = validateCoordinatePair(lat, lng);
+      if (pair) {
+        valuesToInsert.locationGeolocation = geoPoint(pair.longitude, pair.latitude);
       }
 
       const [community] = await tx
@@ -523,8 +525,11 @@ export class CommunitiesRepository {
         updatedAt: new Date(),
       };
 
-      if (lat !== undefined && lng !== undefined) {
-        updateData.locationGeolocation = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`;
+      const pair = lat !== undefined || lng !== undefined
+        ? validateCoordinatePair(lat, lng, { required: true })
+        : null;
+      if (pair) {
+        updateData.locationGeolocation = geoPoint(pair.longitude, pair.latitude);
       }
 
       if (Object.keys(updateData).length > 1) {

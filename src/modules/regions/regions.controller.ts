@@ -43,14 +43,10 @@ export class RegionsController {
 
   @Public()
   @Get('resolve')
-  @ApiOperation({ summary: 'Tra phường chứa một điểm toạ độ' })
+  @ApiOperation({ summary: 'Tra phường có polygon bao phủ điểm; trả null nếu chưa có polygon phù hợp' })
   @ApiResponse({
     status: 200,
-    description:
-      'Phường chứa điểm, hoặc null khi điểm nằm ngoài vùng có ranh giới. ' +
-      'isEstimated=true nghĩa là phường tìm bằng khoảng cách tới tâm gần ' +
-      'nhất, không phải phường chứa điểm — client không nên tự điền ' +
-      'tỉnh/phường từ kết quả đó.',
+    description: 'Chỉ polygon được ST_Covers trả về region; ngoài polygon hoặc boundary chưa nạp thì trả null.',
     type: ResolvedRegionDto,
   })
   async resolve(@Query() query: QueryResolveDto) {
@@ -59,12 +55,10 @@ export class RegionsController {
 
   @Public()
   @Get('wards/centroid')
-  @ApiOperation({ summary: 'Lấy tâm hình học của một phường' })
+  @ApiOperation({ summary: 'Lấy tâm tham chiếu nullable từ danh mục wards' })
   @ApiResponse({
     status: 200,
-    description:
-      'Thông tin phường kèm toạ độ tâm (luôn là ước lượng, isEstimated=true), ' +
-      'hoặc null khi mã không tồn tại',
+    description: 'Center lấy từ wards.center_lat/center_lng; trả null nếu mã không khớp hoặc thiếu center.',
     type: ResolvedRegionDto,
   })
   async getCentroid(@Query() query: QueryCentroidDto) {

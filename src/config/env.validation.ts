@@ -36,7 +36,10 @@ export const envValidationSchema = Joi.object({
   SMTP_FROM: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().min(3).required(),
-    otherwise: Joi.string().allow('').optional().default('"Noreply" <noreply@sporto.asia>'),
+    otherwise: Joi.string()
+      .allow('')
+      .optional()
+      .default('"Noreply" <noreply@sporto.asia>'),
   }),
   FRONTEND_URL: Joi.when('NODE_ENV', {
     is: 'production',
@@ -56,7 +59,11 @@ export const envValidationSchema = Joi.object({
     .default('https://openrouter.ai/api/v1'),
   AI_MODEL: Joi.string().default('meta-llama/llama-3-8b-instruct:free'),
   AI_VISION_MODEL: Joi.string().allow('').optional().default(''),
-  COMMUNITY_DUPLICATE_WINDOW_MINUTES: Joi.number().integer().min(1).max(10080).default(1440),
+  COMMUNITY_DUPLICATE_WINDOW_MINUTES: Joi.number()
+    .integer()
+    .min(1)
+    .max(10080)
+    .default(1440),
   PAYOS_CLIENT_ID: Joi.string().allow('').optional().default(''),
   PAYOS_API_KEY: Joi.string().allow('').optional().default(''),
   PAYOS_CHECKSUM_KEY: Joi.string().allow('').optional().default(''),
@@ -114,5 +121,9 @@ export const envValidationSchema = Joi.object({
   ZALO_BUSINESS_API_URL: Joi.string()
     .uri({ scheme: ['https'] })
     .default('https://business.openapi.zalo.me/message/template'),
-  ZALO_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).max(30000).default(10000),
+  ZALO_REQUEST_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .max(30000)
+    .default(10000),
 });

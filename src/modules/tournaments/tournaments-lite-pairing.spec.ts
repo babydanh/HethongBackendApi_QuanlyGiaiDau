@@ -391,7 +391,11 @@ describe('TournamentsService — Lite pairing guards', () => {
           ['PLAYER'],
         ),
       ).resolves.toEqual(venue.courts[0]);
-      expect(mockVenues.addCourt).toHaveBeenCalledWith('venue-1', { courtName: 'Sân 2' });
+      expect(mockVenues.addCourt).toHaveBeenCalledWith(
+        'venue-1',
+        'co-organizer-1',
+        { courtName: 'Sân 2' },
+      );
     });
 
     it('rejects an unrelated player before court mutation', async () => {

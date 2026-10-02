@@ -21,6 +21,7 @@ function makeRepositoryMock(): jest.Mocked<SocialSessionsRepository> {
     findSessionById: jest.fn(),
     findSessionIdByShortCode: jest.fn(),
     listByDate: jest.fn(),
+    listNearby: jest.fn(),
     listByCommunity: jest.fn(),
     isParticipant: jest.fn(),
     findParticipant: jest.fn(),
@@ -44,7 +45,11 @@ function makeRepositoryMock(): jest.Mocked<SocialSessionsRepository> {
   } as unknown as jest.Mocked<SocialSessionsRepository>;
 }
 
-const regionsStub = { getCentroid: jest.fn() } as unknown as RegionsService;
+const regionsStub = {
+  getCentroid: jest.fn(),
+  resolveByPoint: jest.fn().mockResolvedValue(null),
+  validateCodes: jest.fn().mockResolvedValue({ provinceCode: null, wardCode: null }),
+} as unknown as RegionsService;
 
 const CATEGORY_ID = '11111111-1111-4111-8111-111111111111';
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
@@ -98,6 +103,8 @@ function baseCreateDto(overrides = {}) {
     sport: 'pickleball' as const,
     title: 'Pickleball Giao hữu',
     startAt: '2026-09-17T14:45:00+07:00',
+    latitude: 10.7769,
+    longitude: 106.7009,
     venueName: '22 Cộng Hòa',
     venueAddress: '22 Cộng Hòa, Tân Bình',
     ...overrides,
@@ -117,6 +124,31 @@ describe('SocialSessionsService', () => {
     });
     repository.closeExpiredSessions.mockResolvedValue([]);
     repository.isParticipant.mockResolvedValue(false);
+  });
+
+  describe('nearby', () => {
+    it('returns metres and uses page-based pagination', async () => {
+      const first = baseSession({ id: SESSION_ID });
+      repository.listNearby.mockResolvedValue({
+        items: [
+          { session: first, distanceM: 125.5, sport: 'pickleball', sportName: 'Pickleball' },
+        ],
+        total: 2,
+      } as never);
+      const result = await service.nearby({ lat: 10.7769, lng: 106.7009, radius: 10000, limit: 1 });
+      expect(result.items[0].distance_m).toBe(125.5);
+      expect(result).toMatchObject({
+        meta: { page: 1, limit: 1, total: 2 },
+        nextCursor: null,
+      });
+      await service.nearby({ lat: 10.7769, lng: 106.7009, radius: 10000, limit: 1, page: 2 });
+      expect(repository.listNearby).toHaveBeenLastCalledWith(expect.objectContaining({
+        page: 2,
+        limit: 1,
+      }));
+      await expect(service.nearby({ lat: 10, lng: 106.7009, radius: 10000, limit: 1, cursor: 'retired' }))
+        .rejects.toMatchObject({ response: expect.objectContaining({ code: 'NEARBY_CURSOR_RETIRED' }) });
+    });
   });
 
   describe('create', () => {
@@ -267,6 +299,8 @@ describe('SocialSessionsService', () => {
         id: venueId,
         name: 'Directory venue',
         locationAddress: 'Directory address',
+        latitude: 10.7769,
+        longitude: 106.7009,
       });
       repository.findAvailableCourt.mockResolvedValue({
         id: courtId,
@@ -319,6 +353,8 @@ describe('SocialSessionsService', () => {
         id: venueId,
         name: 'Directory venue',
         locationAddress: 'Directory address',
+        latitude: 10.7769,
+        longitude: 106.7009,
       });
       repository.findAvailableCourt.mockResolvedValue({
         id: courtId,
@@ -350,7 +386,7 @@ describe('SocialSessionsService', () => {
         }),
       );
 
-      expect(repository.createWithHost).toHaveBeenCalledWith(
+      expect(repository.createWithHost.mock.calls[0][0]).toEqual(
         expect.objectContaining({
           venueId,
           courtId,
@@ -663,9 +699,8 @@ describe('SocialSessionsService', () => {
         { id: HOST_ID },
         baseCreateDto({ startAt: '2026-09-17T00:30:00+07:00' }),
       );
-      expect(repository.createWithHost).toHaveBeenCalledWith(
+      expect(repository.createWithHost.mock.calls[0][0]).toEqual(
         expect.objectContaining({ playDate: '2026-09-17' }),
-        HOST_ID,
       );
     });
 
@@ -954,9 +989,14 @@ describe('SocialSessionsService', () => {
   });
 
   describe('geolocation', () => {
+    it('requires a pin for new Social sessions', async () => {
+      await expect(service.create({ id: HOST_ID }, baseCreateDto({ latitude: undefined, longitude: undefined })))
+        .rejects.toMatchObject({ response: expect.objectContaining({ code: 'LOCATION_REQUIRED' }) });
+      expect(repository.createWithHost).not.toHaveBeenCalled();
+    });
     it('create từ chối khi chỉ có latitude (LOCATION_PAIR_REQUIRED)', async () => {
       await expect(
-        service.create({ id: HOST_ID }, baseCreateDto({ latitude: 10.7769 })),
+        service.create({ id: HOST_ID }, baseCreateDto({ latitude: 10.7769, longitude: undefined })),
       ).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'LOCATION_PAIR_REQUIRED' }),
       });
@@ -982,9 +1022,8 @@ describe('SocialSessionsService', () => {
         { id: HOST_ID },
         baseCreateDto({ latitude: 10.7769, longitude: 106.7009 }),
       );
-      expect(repository.createWithHost).toHaveBeenCalledWith(
+      expect(repository.createWithHost.mock.calls[0][0]).toEqual(
         expect.objectContaining({ latitude: 10.7769, longitude: 106.7009 }),
-        HOST_ID,
       );
     });
 

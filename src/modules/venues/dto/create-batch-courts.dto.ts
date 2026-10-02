@@ -9,7 +9,7 @@ export class CreateBatchCourtsDto {
   @Min(1)
   @Max(50)
   @IsNotEmpty()
-  courtCount: number;
+  courtCount!: number;
 
   @ApiPropertyOptional({ example: 'Sân', description: 'Tiền tố tên sân (mặc định: Sân)' })
   @IsOptional()

@@ -128,6 +128,7 @@ export class TournamentVenueService {
     if (!dto.venueId && dto.initialCourtCount && dto.initialCourtCount > 0) {
       await this.venuesService.addCourtsBatch(
         venue.id,
+        user.sub,
         dto.initialCourtCount,
         dto.courtPrefix || 'Sân',
       );
@@ -269,7 +270,7 @@ export class TournamentVenueService {
         'Giải đấu cần lưu địa điểm trước khi thêm sân.',
       );
     }
-    return this.venuesService.addCourt(tournament.venueId, dto);
+    return this.venuesService.addCourt(tournament.venueId, user.sub, dto);
   }
 
   async addTournamentCourtsBatch(
@@ -290,6 +291,7 @@ export class TournamentVenueService {
     }
     return this.venuesService.addCourtsBatch(
       tournament.venueId,
+      user.sub,
       dto.courtCount,
       dto.namePrefix,
     );
@@ -313,7 +315,7 @@ export class TournamentVenueService {
     if (!venue.courts?.some((court) => court.id === courtId)) {
       throw new NotFoundException('Court not found in this tournament venue');
     }
-    return this.venuesService.removeCourt(tournament.venueId, courtId);
+    return this.venuesService.removeCourt(tournament.venueId, user.sub, courtId);
   }
 
   async addVenueCourtDirect(
@@ -328,7 +330,7 @@ export class TournamentVenueService {
       user.sub,
       systemRoles,
     );
-    return this.venuesService.addCourt(venueId, dto);
+    return this.venuesService.addCourt(venueId, user.sub, dto);
   }
 
   async addVenueCourtsBatchDirect(
@@ -345,6 +347,7 @@ export class TournamentVenueService {
     );
     return this.venuesService.addCourtsBatch(
       venueId,
+      user.sub,
       dto.courtCount,
       dto.namePrefix,
     );
@@ -362,6 +365,6 @@ export class TournamentVenueService {
       user.sub,
       systemRoles,
     );
-    return this.venuesService.removeCourt(venueId, courtId);
+    return this.venuesService.removeCourt(venueId, user.sub, courtId);
   }
 }
