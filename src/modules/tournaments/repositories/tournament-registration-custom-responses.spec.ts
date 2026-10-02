@@ -65,9 +65,12 @@ function createRepository() {
     query.orderBy = () => query;
     query.limit = () => query;
     query.for = () => query;
-    query.then = (resolve, reject) => {
+    query.then = (
+      resolve: (value: Row[]) => unknown,
+      reject?: (reason: unknown) => unknown,
+    ) => {
       const key = [...new Set(tables)].sort().join('+');
-      const result =
+      const result: Row[] =
         key === 'tournaments'
           ? [tournament]
           : key === 'tournamentDivisions'
