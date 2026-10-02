@@ -2,8 +2,14 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { PG_CONNECTION } from '../../../database/database.module';
 import type { AppDb } from '../../../database/db.types';
 import * as schema from '../../../database/schema';
-import { and, count, eq, ne } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
+import {
+  assertCapacityHasRoom,
+  lockCapacityOwner,
+  readEffectiveCapacity,
+} from '../services/tournament-capacity.service';
+import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
 
 @Injectable()
 export class TournamentImportRepository {
@@ -69,43 +75,32 @@ export class TournamentImportRepository {
         throw new BadRequestException('Danh sách nhập không có dữ liệu hợp lệ');
       }
 
-      const [existingCount] = await tx
-        .select({ count: count() })
-        .from(schema.tournamentParticipants)
-        .where(
-          and(
-            eq(schema.tournamentParticipants.tournamentId, tournamentId),
-            ...(divisionId
-              ? [
-                  eq(
-                    schema.tournamentParticipants.tournamentDivisionId,
-                    divisionId,
-                  ),
-                ]
-              : []),
-            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-          ),
-        );
-      const maxParticipants = divisionId
-        ? await tx
-            .select({
-              maxParticipants: schema.tournamentDivisions.maxParticipants,
-            })
-            .from(schema.tournamentDivisions)
-            .where(eq(schema.tournamentDivisions.id, divisionId))
-            .limit(1)
-            .then((rows) => rows[0]?.maxParticipants ?? null)
-        : tournament.maxParticipants;
-      if (
-        maxParticipants != null &&
-        existingCount.count + items.length > maxParticipants
-      ) {
-        throw new BadRequestException(
-          `Số lượng nhập vượt quá giới hạn nội dung thi đấu (${maxParticipants})`,
-        );
-      }
+      // Serialize the bulk import on the rows that own the limit, then judge
+      // it with the same weighted policy every registration path uses. Demand
+      // is summed row by row — one slot for a singles/team row, a whole pair
+      // or a lone athlete for a doubles row — so a multi-row batch can never
+      // collapse into a single claim.
+      await lockCapacityOwner(tx, { tournamentId, divisionId });
+      const limitCapacity = await readEffectiveCapacity(tx, {
+        tournamentId,
+        divisionId,
+      });
+      const capacityContext = {
+        tournamentConfig: tournament.tournamentConfig,
+      };
+      assertCapacityHasRoom(
+        limitCapacity,
+        items.reduce(
+          (requestedTeamSlots, item) =>
+            requestedTeamSlots +
+            calculateRequestedTeamSlots(
+              divisionMatchType,
+              item.player2Name?.trim() ? 2 : 1,
+              capacityContext,
+            ),
+          0,
+        ),
+      );
 
       const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       const results: (typeof schema.tournamentParticipants.$inferSelect)[] = [];
@@ -229,6 +224,17 @@ export class TournamentImportRepository {
             ? 'COMPLETE'
             : 'PENDING_APPROVAL';
 
+        // Only facts this row actually declares, so a missing optional field
+        // never overwrites a same-named key the caller supplied.
+        const importMetadata: Record<string, unknown> = {
+          importedFrom: 'GOOGLE_FORM',
+        };
+        if (item.player1Email) importMetadata.player1Email = item.player1Email;
+        if (item.player1Phone) importMetadata.player1Phone = item.player1Phone;
+        if (player2Name) importMetadata.player2Name = player2Name;
+        if (p2Email) importMetadata.player2Email = p2Email;
+        if (p2Phone) importMetadata.player2Phone = p2Phone;
+
         const [participant] = await tx
           .insert(schema.tournamentParticipants)
           .values({
@@ -247,13 +253,14 @@ export class TournamentImportRepository {
             teamStatus,
             partnerUserId: user2Id || null,
             seed: item.elo ? Math.round(item.elo) : null,
-            customResponses: item.customResponses || {
-              importedFrom: 'GOOGLE_FORM',
-              player1Email: item.player1Email,
-              player1Phone: item.player1Phone,
-              player2Name: player2Name || undefined,
-              player2Email: p2Email,
-              player2Phone: p2Phone,
+            // Keep the validated import metadata even when the caller already
+            // supplied form answers: the capacity projection recognises an
+            // imported pair by `importedFrom` + `player2Name`, and both linked
+            // roster rows can be absent when neither contact has an account.
+            // Unrelated form answers survive; the importer's own facts win.
+            customResponses: {
+              ...(item.customResponses ?? {}),
+              ...importMetadata,
             },
           })
           .returning();

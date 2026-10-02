@@ -527,20 +527,6 @@ export const buildParticipantKickedNotification = (params: {
   }),
 });
 
-export const buildRegistrationCancelledFullNotification = (params: {
-  tournamentId: string;
-  receiverId: string;
-  divisionId?: string | null;
-}): CreateNotificationDto => ({
-  receiverId: params.receiverId,
-  type: NOTIFICATION_TYPES.TOURNAMENT_FULL_CANCELLED,
-  title: 'Hủy đăng ký do giải đấu đã đầy',
-  content: 'Đơn đăng ký Đôi của bạn đã bị hủy vì giải đấu đã đạt số lượng slot tối đa. Nếu đã thanh toán, bạn được hoàn toàn bộ khoản đã trả, không trừ phí; yêu cầu đang chờ Ban tổ chức xác nhận và chuyển tiền.',
-  redirectUrl: getParticipantTournamentRedirect(params.tournamentId, {
-    divisionId: params.divisionId ?? undefined,
-  }),
-});
-
 export const buildRegistrationTimeoutNotification = (params: {
   tournamentId: string;
   tournamentName: string;
@@ -896,8 +882,12 @@ export const buildRefereeInviteNotification = (params: {
   tournamentName: string;
   receiverId: string;
   refereeId: string;
+  // The manager who actually pressed "send invitation", so the receiver can be
+  // shown who invited them. Never the tournament owner unless they invited.
+  senderId: string;
 }): CreateNotificationDto => ({
   receiverId: params.receiverId,
+  senderId: params.senderId,
   type: NOTIFICATION_TYPES.REFEREE_INVITED,
   title: 'Bạn có lời mời làm trọng tài',
   content: `Ban tổ chức vừa mời bạn tham gia điều hành giải ${params.tournamentName} với vai trò trọng tài.`,

@@ -18,7 +18,6 @@ const makeService = (
     repository as never,
     { sendNotification: jest.fn() } as never,
     { get: jest.fn().mockReturnValue(undefined) } as never,
-    { reserveSlot: jest.fn(), releaseSlot: jest.fn() } as never,
   );
   return service as unknown as {
     calculatePayment: (
@@ -203,7 +202,6 @@ describe('registration payment eligibility', () => {
       repository as never,
       { sendNotification: jest.fn() } as never,
       { get: jest.fn().mockReturnValue(undefined) } as never,
-      { reserveSlot: jest.fn(), releaseSlot: jest.fn() } as never,
     ) as unknown as {
       calculatePayment: (
         userId: string,
@@ -260,7 +258,6 @@ describe('payment sandbox verification', () => {
       repository as never,
       { sendNotification: jest.fn() } as never,
       { get: jest.fn((key: string) => config[key]) } as never,
-      { confirmSlot: jest.fn(), releaseSlot: jest.fn() } as never,
     );
     return { service, repository };
   };
@@ -340,7 +337,6 @@ describe('registration platform-fee authority', () => {
       repository as never,
       { sendNotification: jest.fn() } as never,
       { get: jest.fn().mockReturnValue(undefined) } as never,
-      { reserveSlot: jest.fn(), releaseSlot: jest.fn() } as never,
     ) as unknown as {
       calculatePayment: (
         userId: string,

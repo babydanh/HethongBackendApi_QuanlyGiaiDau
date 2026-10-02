@@ -7,7 +7,6 @@ import { TournamentSchedulerService } from './tournament-scheduler.service';
 import { DatabaseModule } from '../../database/database.module';
 import { SeriesModule } from '../series/series.module';
 import { RedisModule } from '../../providers/redis/redis.module';
-import { RegistrationLockService } from './registration-lock.service';
 import { StorageModule } from '../../providers/storage/storage.module';
 import { AuthModule } from '../auth/auth.module';
 import { CommunitiesModule } from '../communities/communities.module';
@@ -31,6 +30,7 @@ import { TournamentImportService } from './services/tournament-import.service';
 import { TournamentBracketService } from './services/tournament-bracket.service';
 import { TournamentRealtimeService } from './services/tournament-realtime.service';
 import { TournamentRegistrationService } from './services/tournament-registration.service';
+import { TournamentCapacityService } from './services/tournament-capacity.service';
 import { TournamentLiteService } from './services/tournament-lite.service';
 import { TournamentFootballRosterService } from './services/tournament-football-roster.service';
 import { TournamentPaymentRepository } from './repositories/tournament-payment.repository';
@@ -89,16 +89,15 @@ import { TournamentRegistrationRepository } from './repositories/tournament-regi
     TournamentBracketService,
     TournamentRealtimeService,
     TournamentRegistrationService,
+    TournamentCapacityService,
     TournamentLiteService,
     TournamentFootballRosterService,
     BracketGeneratorService,
     TournamentSchedulerService,
-    RegistrationLockService,
   ],
   exports: [
     TournamentsService,
     BracketGeneratorService,
-    RegistrationLockService,
     TournamentsRepository,
   ],
 })

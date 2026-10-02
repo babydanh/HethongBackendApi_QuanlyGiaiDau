@@ -16,6 +16,13 @@ import { corsOptions } from '../../config/cors.config';
 import * as schema from '../../database/schema';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
+export type NotificationSocketPayload = InferSelectModel<
+  typeof schema.notifications
+> & {
+  senderName: string | null;
+  senderAvatarUrl: string | null;
+};
+
 @WebSocketGateway({
   cors: corsOptions,
   namespace: '/notifications',
@@ -49,10 +56,7 @@ export class NotificationsGateway implements OnGatewayConnection {
     return { event: 'subscribed', data: room };
   }
 
-  pushNotification(
-    userId: string,
-    notification: InferSelectModel<typeof schema.notifications>,
-  ) {
+  pushNotification(userId: string, notification: NotificationSocketPayload) {
     this.server.to(this.getUserRoom(userId)).emit('notification:new', notification);
   }
 

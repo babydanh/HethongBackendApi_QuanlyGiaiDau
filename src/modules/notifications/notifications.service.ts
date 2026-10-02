@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { CreateNotificationDto } from './dto/create-notification.dto';
+import { NOTIFICATION_TYPES } from './notification-types';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { RegisterDeviceTokenDto, RemoveDeviceTokenDto } from './dto/register-device-token.dto';
 import { NotificationsGateway } from './notifications.gateway';
@@ -31,9 +32,22 @@ export class NotificationsService {
 
   async sendNotification(data: CreateNotificationDto) {
     const notification = await this.notificationsRepository.createNotification(data);
+    // A referee invitation shows who invited the referee. Every other type keeps
+    // its existing payload, so nothing new is published beyond that invitation.
+    const isRefereeInvitation = data.type === NOTIFICATION_TYPES.REFEREE_INVITED;
+    const senderProfile =
+      isRefereeInvitation && data.senderId
+        ? await this.notificationsRepository.findSenderProfile(data.senderId)
+        : null;
 
     // 1. Socket.IO (In-app real-time notification)
-    this.notificationsGateway.pushNotification(data.receiverId, notification);
+    // The payload carries the same sender identity the recipient read endpoint
+    // returns, so a live item is attributed exactly like a fetched one.
+    this.notificationsGateway.pushNotification(data.receiverId, {
+      ...notification,
+      senderName: senderProfile?.fullName ?? null,
+      senderAvatarUrl: senderProfile?.avatarUrl ?? null,
+    });
 
     // 2. Firebase Cloud Messaging (OS Push Notification to lockscreen / system tray)
     try {

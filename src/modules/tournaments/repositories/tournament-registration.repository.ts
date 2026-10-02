@@ -49,9 +49,15 @@ import {
 } from '../utils/registration-payment-eligibility';
 import { isRegistrationOpenStatus } from '../utils/registration-lifecycle';
 import {
+  isRosterWeightedCapacity,
   resolveDoublesParticipantStatus,
   resolveNonDoublesParticipantStatus,
 } from '../utils/tournament-participant-status';
+import {
+  assertDivisionHasRoom,
+  lockCapacityOwner,
+  readEffectiveCapacity,
+} from '../services/tournament-capacity.service';
 import { validateFootballRosterSelection } from '../utils/football-roster-validation';
 import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
 import {
@@ -397,25 +403,27 @@ export class TournamentRegistrationRepository {
           );
         }
 
-        if (selectedDivision.maxParticipants) {
-          const [participantCount] = await tx
-            .select({ count: count() })
-            .from(schema.tournamentParticipants)
-            .where(
-              and(
-                eq(
-                  schema.tournamentParticipants.tournamentDivisionId,
-                  selectedDivision.id,
-                ),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
-              ),
-            );
-
-          if (participantCount.count >= selectedDivision.maxParticipants) {
-            return { division: selectedDivision, isWaitlisted: true };
-          }
-        }
+        // Serialize every claim on the rows that own this limit (tournament
+        // first, then division) before reading occupancy, so two concurrent
+        // registrations cannot both observe the same free slot. A tournament
+        // can hold several independent divisions: the division limit stays
+        // authoritative and the tournament limit is only the fallback for a
+        // division that sets none (otherwise an empty division would show
+        // 0/16 while registration is rejected because another one is full).
+        await lockCapacityOwner(tx, {
+          tournamentId,
+          divisionId: selectedDivision.id,
+        });
+        const limitCapacity = await readEffectiveCapacity(tx, {
+          tournamentId,
+          divisionId: selectedDivision.id,
+        });
+        assertDivisionHasRoom(
+          limitCapacity,
+          selectedDivision.matchType,
+          partnerId ? 2 : 1,
+          { tournamentConfig: tConfig },
+        );
 
         return { division: selectedDivision, isWaitlisted: false };
       };
@@ -610,68 +618,6 @@ export class TournamentRegistrationRepository {
       const resolvedDivision = await resolveMatchingDivision(partnerId);
       const selectedDivision = resolvedDivision?.division ?? null;
       const isWaitlisted = resolvedDivision?.isWaitlisted === true;
-
-      // A tournament can contain several independent divisions. In that
-      // shape, the division limit is authoritative and must not be blocked by
-      // the legacy tournament-level limit (otherwise an empty division shows
-      // 0/16 but registration is rejected because another division is full).
-      // Keep the tournament-level check only as a fallback for tournaments
-      // without a configured division limit.
-      if (tournament.maxParticipants && !selectedDivision?.maxParticipants) {
-        const tournamentConfig = (tournament.tournamentConfig || {}) as Record<
-          string,
-          unknown
-        >;
-        if (tournamentConfig.isLite === true) {
-          const isDoublesTournament =
-            tournament.matchType === 'DOUBLES' ||
-            tournament.matchType === 'MIXED_DOUBLES';
-          const maxSlots = isDoublesTournament
-            ? tournament.maxParticipants * 2
-            : tournament.maxParticipants;
-          const [{ count: activeRosterUsers }] = await tx
-            .select({
-              count: sql<number>`count(distinct ${schema.tournamentRosters.userId})`,
-            })
-            .from(schema.tournamentRosters)
-            .innerJoin(
-              schema.tournamentParticipants,
-              eq(
-                schema.tournamentRosters.participantId,
-                schema.tournamentParticipants.id,
-              ),
-            )
-            .where(
-              and(
-                eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-                ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-                ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-              ),
-            );
-
-          if (Number(activeRosterUsers) >= maxSlots) {
-            throw new BadRequestException(
-              'Giải đấu đã đủ số lượng người tham gia.',
-            );
-          }
-        } else {
-          const [participantCount] = await tx
-            .select({ count: count() })
-            .from(schema.tournamentParticipants)
-            .where(
-              and(
-                eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                eq(schema.tournamentParticipants.isPaid, true),
-              ),
-            );
-
-          if (participantCount.count >= tournament.maxParticipants) {
-            throw new BadRequestException('Giải đấu đã đầy.');
-          }
-        }
-      }
 
       // 7. Add participant
       const effectiveMatchType =
@@ -1067,6 +1013,13 @@ export class TournamentRegistrationRepository {
         finalTeamName = leaderProfile?.fullName || 'Vận động viên';
       }
 
+      // The importer alone may set this marker; it makes contact metadata count
+      // as a second roster member when no linked account exists.
+      const registrationResponses = data.customResponses
+        ? { ...data.customResponses }
+        : null;
+      if (registrationResponses) delete registrationResponses.importedFrom;
+
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
         .values({
@@ -1077,7 +1030,7 @@ export class TournamentRegistrationRepository {
           footballTeamId: isTeamSport ? (data.footballTeamId ?? null) : null,
           footballTeamLogoUrl: isTeamSport ? footballTeamLogoUrl : null,
           rankingConsent: data.rankingConsent === true,
-          customResponses: data.customResponses ?? null,
+          customResponses: registrationResponses,
           isPaid,
           entryFeeAtRegistration: payableEntryFeeAmount.toFixed(2),
           // Keep the invite token even when a known partner was selected so the
@@ -1272,6 +1225,29 @@ export class TournamentRegistrationRepository {
   }
   async acceptPartnerInvite(participantId: string, partnerUserId: string) {
     return await this.db.transaction(async (tx) => {
+      // Resolve the owner rows before taking the participant lock: capacity
+      // claims always serialize tournament -> division -> participant.
+      const [participantOwner] = await tx
+        .select({
+          tournamentId: schema.tournamentParticipants.tournamentId,
+          tournamentDivisionId:
+            schema.tournamentParticipants.tournamentDivisionId,
+        })
+        .from(schema.tournamentParticipants)
+        .where(eq(schema.tournamentParticipants.id, participantId))
+        .limit(1);
+
+      if (!participantOwner) {
+        throw new NotFoundException(
+          'Lời mời ghép đôi không tồn tại hoặc đã bị hủy.',
+        );
+      }
+
+      await lockCapacityOwner(tx, {
+        tournamentId: participantOwner.tournamentId,
+        divisionId: participantOwner.tournamentDivisionId,
+      });
+
       const [participant] = await tx
         .select()
         .from(schema.tournamentParticipants)
@@ -1316,6 +1292,8 @@ export class TournamentRegistrationRepository {
       const [tournament] = await tx
         .select({
           tournamentConfig: schema.tournaments.tournamentConfig,
+          matchType: schema.tournaments.matchType,
+          maxParticipants: schema.tournaments.maxParticipants,
           registrationEndDate: schema.tournaments.registrationEndDate,
           isRegistrationLocked: schema.tournaments.isRegistrationLocked,
         })
@@ -1423,6 +1401,27 @@ export class TournamentRegistrationRepository {
         );
 
       if (existingRosters.length === 0) {
+        // Confirming a partner grows the row from one athlete to two, so the
+        // division gains its second half team slot. Reject before any roster
+        // row is written so a full division never persists the partner.
+        const partnerContext = {
+          tournamentConfig: tournament?.tournamentConfig,
+        };
+        const effectiveMatchType =
+          division?.matchType ?? tournament?.matchType ?? undefined;
+        if (isRosterWeightedCapacity(effectiveMatchType, partnerContext)) {
+          const limitCapacity = await readEffectiveCapacity(tx, {
+            tournamentId: participant.tournamentId,
+            divisionId: participant.tournamentDivisionId,
+          });
+          assertDivisionHasRoom(
+            limitCapacity,
+            effectiveMatchType,
+            1,
+            partnerContext,
+          );
+        }
+
         await tx.insert(schema.tournamentRosters).values({
           participantId,
           userId: partnerUserId,
@@ -1511,13 +1510,34 @@ export class TournamentRegistrationRepository {
     teamInviteToken: string,
   ) {
     return await this.db.transaction(async (tx) => {
-      // 1. Kiểm tra giải đấu
-      const [tournament] = await tx
+      // Team-sport joins do not claim tournament capacity; a shared lock keeps
+      // the format stable without serializing open squad joins against each other.
+      const [tournamentPreview] = await tx
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
         .limit(1);
+      if (!tournamentPreview)
+        throw new NotFoundException('Giải đấu không tồn tại');
+
+      const previewIsTeamSport = resolveFootballTeamConfig(
+        tournamentPreview.tournamentConfig,
+      ).isTeamSport;
+      const [tournament] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .for(previewIsTeamSport ? 'share' : 'update')
+        .limit(1);
       if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+      if (
+        resolveFootballTeamConfig(tournament.tournamentConfig).isTeamSport !==
+        previewIsTeamSport
+      ) {
+        throw new BadRequestException(
+          'Cấu hình giải đấu vừa thay đổi. Vui lòng thử lại.',
+        );
+      }
 
       // 1.5 Kiểm tra Exclusion Rule cho đồng đội (partner)
       const [seriesEvent] = await tx
@@ -1809,6 +1829,36 @@ export class TournamentRegistrationRepository {
         }
       }
 
+      // Joining a doubles pair grows the row from one athlete to two, so the
+      // division gains its second half team slot. Team-sport squads are already
+      // counted as one whole team, so they skip the check. Reject before the
+      // roster row is written so a full division never persists the athlete.
+      const joinContext = { tournamentConfig: tournament.tournamentConfig };
+      const effectiveMatchType =
+        division?.matchType ?? tournament.matchType ?? undefined;
+      if (
+        !isTeamSport &&
+        isRosterWeightedCapacity(effectiveMatchType, joinContext)
+      ) {
+        // A pair that belongs to the tournament only is limited by the
+        // tournament row, so it still has to lock that owner before reading
+        // occupancy — every capacity claim serializes on its limit owner.
+        await lockCapacityOwner(tx, {
+          tournamentId,
+          divisionId: participant.tournamentDivisionId,
+        });
+        const limitCapacity = await readEffectiveCapacity(tx, {
+          tournamentId,
+          divisionId: participant.tournamentDivisionId,
+        });
+        assertDivisionHasRoom(
+          limitCapacity,
+          effectiveMatchType,
+          1,
+          joinContext,
+        );
+      }
+
       // 5. Thêm roster cho Partner (team sport: role MAIN, người join qua link)
       await tx.insert(schema.tournamentRosters).values({
         participantId: participant.id,
@@ -1877,6 +1927,10 @@ export class TournamentRegistrationRepository {
     divisionId?: string,
   ) {
     return await this.db.transaction(async (tx) => {
+      // The withdrawal frees capacity that the waitlist promotion below may
+      // hand out, so serialize both on the capacity owner from the start.
+      await lockCapacityOwner(tx, { tournamentId, divisionId });
+
       // 1. Tìm participant mà user đang tham gia
       const userRoster = await tx
         .select({ participantId: schema.tournamentRosters.participantId })
@@ -2462,124 +2516,6 @@ export class TournamentRegistrationRepository {
       },
     };
   }
-  async cancelPendingRegistrationsIfFull(
-    tournamentId: string,
-  ): Promise<Array<{ leaderId: string; divisionId: string | null }>> {
-    return await this.db.transaction(async (tx) => {
-      const [tournament] = await tx
-        .select({
-          maxParticipants: schema.tournaments.maxParticipants,
-          entryFee: schema.tournaments.entryFee,
-        })
-        .from(schema.tournaments)
-        .where(eq(schema.tournaments.id, tournamentId))
-        .limit(1);
-
-      if (!tournament || !tournament.maxParticipants) return [];
-
-      const [completedCount] = await tx
-        .select({ count: count() })
-        .from(schema.tournamentParticipants)
-        .where(
-          and(
-            eq(schema.tournamentParticipants.tournamentId, tournamentId),
-            eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-            eq(schema.tournamentParticipants.isPaid, true),
-          ),
-        );
-
-      if (completedCount.count >= tournament.maxParticipants) {
-        const pendingParts = await tx
-          .select()
-          .from(schema.tournamentParticipants)
-          .where(
-            and(
-              eq(schema.tournamentParticipants.tournamentId, tournamentId),
-              eq(schema.tournamentParticipants.teamStatus, 'PENDING_APPROVAL'),
-            ),
-          );
-
-        if (pendingParts.length === 0) return [];
-
-        const canceledLeaders: Array<{
-          leaderId: string;
-          divisionId: string | null;
-        }> = [];
-
-        for (const p of pendingParts) {
-          const [kicked] = await tx
-            .update(schema.tournamentParticipants)
-            .set({ teamStatus: 'KICKED', teamInviteToken: null })
-            .where(
-              and(
-                eq(schema.tournamentParticipants.id, p.id),
-                eq(
-                  schema.tournamentParticipants.teamStatus,
-                  'PENDING_APPROVAL',
-                ),
-              ),
-            )
-            .returning({ id: schema.tournamentParticipants.id });
-          if (!kicked) continue;
-
-          await this.tournamentPaymentRepository.invalidatePendingParticipantPayments(
-            tx,
-            tournamentId,
-            p.id,
-            'REGISTRATION_CANCELLED_TOURNAMENT_FULL',
-          );
-
-          const completedPayment =
-            await this.tournamentPaymentRepository.findCompletedParticipantPaymentInTx(
-              tx,
-              tournamentId,
-              p.id,
-            );
-          if (
-            completedPayment &&
-            completedPayment.refundStatus === null &&
-            Number(completedPayment.refundableAmount) > 0
-          ) {
-            const refundQuote = calculateTournamentRefundQuote({
-              amount: completedPayment.amount,
-              platformFeeAmount: completedPayment.platformFeeAmount,
-              refundedAmount: completedPayment.refundedAmount,
-              registeredAt: p.registeredAt,
-              requestedAt: new Date(),
-              trigger: 'KICKED',
-            });
-            if (Number(refundQuote.refundAmount) > 0) {
-              const [profile] = await tx
-                .select({
-                  bankName: schema.profiles.bankName,
-                  bankAccountNumber: schema.profiles.bankAccountNumber,
-                  bankAccountName: schema.profiles.bankAccountName,
-                })
-                .from(schema.profiles)
-                .where(eq(schema.profiles.userId, completedPayment.userId))
-                .limit(1);
-              await this.tournamentPaymentRepository.createPendingRefund(tx, {
-                paymentId: completedPayment.id,
-                amount: refundQuote.refundAmount,
-                reason: refundQuote.reason,
-                requestedBy: null,
-                bankName: profile?.bankName ?? undefined,
-                bankAccountNumber: profile?.bankAccountNumber ?? undefined,
-                bankAccountName: profile?.bankAccountName ?? undefined,
-              });
-            }
-          }
-
-          canceledLeaders.push({
-            leaderId: p.registeredBy,
-            divisionId: p.tournamentDivisionId,
-          });
-        }
-        return canceledLeaders;
-      }
-      return [];
-    });
-  }
   async processPendingRegistrationsTimeout(): Promise<
     Array<{
       leaderId: string;
@@ -2724,6 +2660,7 @@ export class TournamentRegistrationRepository {
         .select({
           id: schema.tournaments.id,
           matchType: schema.tournaments.matchType,
+          maxParticipants: schema.tournaments.maxParticipants,
           entryFee: schema.tournaments.entryFee,
           tournamentConfig: schema.tournaments.tournamentConfig,
         })
@@ -2749,12 +2686,39 @@ export class TournamentRegistrationRepository {
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, nextWaitlisted.id));
 
+      const promotionContext = {
+        tournamentConfig: tournament?.tournamentConfig,
+      };
       const matchType = division?.matchType ?? tournament?.matchType ?? null;
       const isDoubles = this.isDoublesMatchType(matchType);
       const isDoublesPairing =
         isDoubles &&
         !nextWaitlisted.footballTeamId &&
         !resolveFootballTeamConfig(tournament?.tournamentConfig).isTeamSport;
+
+      // A waitlisted row reserves nothing, so promoting it is a fresh
+      // capacity claim. Serialize it on the same owner rows a registration
+      // uses and leave the row waitlisted when the freed slot is not enough.
+      await lockCapacityOwner(tx, {
+        tournamentId,
+        divisionId: nextWaitlisted.tournamentDivisionId,
+      });
+      const promotionCapacity = await readEffectiveCapacity(tx, {
+        tournamentId,
+        divisionId: nextWaitlisted.tournamentDivisionId,
+      });
+      try {
+        assertDivisionHasRoom(
+          promotionCapacity,
+          matchType,
+          Math.max(1, Number(rosterCount.count) || 1),
+          promotionContext,
+        );
+      } catch {
+        // Division is still full: keep the row waitlisted instead of
+        // overfilling. An explicit rejection or withdrawal frees it later.
+        return null;
+      }
       const entryFeeAmount =
         nextWaitlisted.entryFeeAtRegistration !== null &&
         nextWaitlisted.entryFeeAtRegistration !== undefined

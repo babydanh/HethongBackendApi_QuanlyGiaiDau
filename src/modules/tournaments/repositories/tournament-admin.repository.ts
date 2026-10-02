@@ -3,6 +3,15 @@ import { PG_CONNECTION } from '../../../database/database.module';
 import type { AppDb } from '../../../database/db.types';
 import * as schema from '../../../database/schema';
 import { and, eq, SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+
+// One query carries both identities of an invitation: the invited referee
+// (`user_id`) and the manager recorded in `assigned_by`. The inviter link is
+// cleared when that account is deleted, so the inviter profile is an optional
+// LEFT JOIN and the invited referee keeps the existing INNER JOINs. Both come
+// from `profiles`, so the referee side is reached through an alias. Only the
+// inviter's display name and avatar are projected; the inviter's email is not.
+const refereeProfile = alias(schema.profiles, 'invited_referee_profile');
 
 @Injectable()
 export class TournamentAdminRepository {
@@ -13,16 +22,25 @@ export class TournamentAdminRepository {
         id: schema.tournamentReferees.id,
         userId: schema.tournamentReferees.userId,
         status: schema.tournamentReferees.status,
-        fullName: schema.profiles.fullName,
+        fullName: refereeProfile.fullName,
         email: schema.users.email,
-        avatarUrl: schema.profiles.avatarUrl,
+        avatarUrl: refereeProfile.avatarUrl,
+        invitedByName: schema.profiles.fullName,
+        invitedByAvatarUrl: schema.profiles.avatarUrl,
       })
       .from(schema.tournamentReferees)
+      .leftJoin(
+        schema.profiles,
+        eq(schema.tournamentReferees.assignedBy, schema.profiles.userId),
+      )
       .innerJoin(
         schema.users,
         eq(schema.tournamentReferees.userId, schema.users.id),
       )
-      .innerJoin(schema.profiles, eq(schema.users.id, schema.profiles.userId))
+      .innerJoin(
+        refereeProfile,
+        eq(schema.users.id, refereeProfile.userId),
+      )
       .where(eq(schema.tournamentReferees.tournamentId, tournamentId));
   }
   async addStaffMember(

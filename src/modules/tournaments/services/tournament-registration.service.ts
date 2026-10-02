@@ -27,7 +27,6 @@ import {
   buildPartnerInviteCancelledNotification,
   buildPartnerInviteReceivedNotification,
   buildPartnerInviteRejectedNotification,
-  buildRegistrationCancelledFullNotification,
   buildRegistrationTimeoutNotification,
 } from '../../notifications/notification-builder';
 import {
@@ -480,22 +479,6 @@ export class TournamentRegistrationService {
     }
 
     try {
-      const canceledLeaders =
-        await this.tournamentsRepository.cancelPendingRegistrationsIfFull(id);
-      for (const canceledLeader of canceledLeaders) {
-        await this.notificationsService.sendNotification(
-          buildRegistrationCancelledFullNotification({
-            receiverId: canceledLeader.leaderId,
-            tournamentId: id,
-            divisionId: canceledLeader.divisionId,
-          }),
-        );
-      }
-    } catch (err) {
-      console.error('Failed to cancel pending registrations on full:', err);
-    }
-
-    try {
       const notifications: Array<Promise<unknown>> = [];
 
       if (tournament.createdBy !== userId) {
@@ -657,24 +640,6 @@ export class TournamentRegistrationService {
       participantId,
       teamInviteToken,
     );
-
-    try {
-      const canceledLeaders =
-        await this.tournamentsRepository.cancelPendingRegistrationsIfFull(
-          tournamentId,
-        );
-      for (const canceledLeader of canceledLeaders) {
-        await this.notificationsService.sendNotification(
-          buildRegistrationCancelledFullNotification({
-            receiverId: canceledLeader.leaderId,
-            tournamentId,
-            divisionId: canceledLeader.divisionId,
-          }),
-        );
-      }
-    } catch (err) {
-      console.error('Failed to cancel pending registrations on full:', err);
-    }
 
     try {
       const participantRosters =
