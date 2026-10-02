@@ -1,13 +1,28 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsEmail,
+  IsIn,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
+
+export const IMPORT_SOURCES = [
+  'MANUAL_EMAIL',
+  'EXCEL',
+  'AI_EXCEL',
+  'GOOGLE_FORM',
+] as const;
+export type ImportSource = (typeof IMPORT_SOURCES)[number];
+
+export const ROSTER_ENTRY_TYPES = ['REGULAR', 'WILD_CARD_REQUEST'] as const;
+export type RosterEntryType = (typeof ROSTER_ENTRY_TYPES)[number];
 
 export class ParticipantImportItemDto {
   @ApiProperty({ description: 'Tên đội / cặp đấu hoặc tên VĐV' })
@@ -18,10 +33,9 @@ export class ParticipantImportItemDto {
   @IsString()
   player1Name: string;
 
-  @ApiPropertyOptional({ description: 'Email VĐV 1' })
-  @IsOptional()
-  @IsString()
-  player1Email?: string;
+  @ApiProperty({ description: 'Email VĐV 1 (bắt buộc)' })
+  @IsEmail()
+  player1Email: string;
 
   @ApiPropertyOptional({ description: 'SĐT VĐV 1' })
   @IsOptional()
@@ -35,7 +49,7 @@ export class ParticipantImportItemDto {
 
   @ApiPropertyOptional({ description: 'Email VĐV 2' })
   @IsOptional()
-  @IsString()
+  @IsEmail()
   player2Email?: string;
 
   @ApiPropertyOptional({ description: 'SĐT VĐV 2' })
@@ -58,9 +72,27 @@ export class ParticipantImportItemDto {
   @IsBoolean()
   autoApprove?: boolean;
 
+  @ApiPropertyOptional({ description: 'Loại nhập, không cấp quyền wildcard' })
+  @IsOptional()
+  @IsIn(ROSTER_ENTRY_TYPES)
+  entryType?: RosterEntryType;
+
+  @ApiProperty({
+    description: 'Nguồn nhập dữ liệu',
+    enum: IMPORT_SOURCES,
+  })
+  @IsIn(IMPORT_SOURCES)
+  source: ImportSource;
+
+  @ApiPropertyOptional({ description: 'Tên nội dung thi đấu trên file' })
+  @IsOptional()
+  @IsString()
+  divisionName?: string;
+
   @ApiPropertyOptional({ description: 'Ghi chú / câu trả lời custom form' })
   @IsOptional()
-  customResponses?: Record<string, any>;
+  @IsObject()
+  customResponses?: Record<string, unknown>;
 }
 
 export class ImportParticipantsDto {
@@ -69,16 +101,12 @@ export class ImportParticipantsDto {
   @IsString()
   divisionId?: string;
 
-  @ApiProperty({ description: 'Danh sách VĐV / Đội cần nhập', type: [ParticipantImportItemDto] })
+  @ApiProperty({ description: 'Danh sách VĐV / Đội cần nhập', type: [ParticipantImportItemDto], maxItems: 200 })
   @IsArray()
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => ParticipantImportItemDto)
   participants: ParticipantImportItemDto[];
-
-  @ApiPropertyOptional({ description: 'Tự động gửi email thư mời kích hoạt tài khoản' })
-  @IsOptional()
-  @IsBoolean()
-  sendInvitationEmail?: boolean;
 
   @ApiPropertyOptional({ description: 'Gửi thông báo trong SportO cho các VĐV đã có tài khoản' })
   @IsOptional()

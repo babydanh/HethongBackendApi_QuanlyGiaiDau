@@ -196,6 +196,7 @@ function importScopes(matchType: 'SINGLES' | 'DOUBLES') {
       ],
     ],
     'participants+rosters': [[]],
+    'participants+rosters+users': [[]],
   };
 }
 
@@ -218,6 +219,7 @@ describe('importing a participant by email links only an existing account', () =
           player1Name: 'Nguyen Van A',
           player1Email: LINKED_EMAIL,
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
       ],
       DIVISION_ID,
@@ -257,6 +259,7 @@ describe('importing a participant by email links only an existing account', () =
           player1Name: 'Nguyen Van A',
           player1Email: LINKED_EMAIL,
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
       ],
       DIVISION_ID,
@@ -278,7 +281,9 @@ describe('importing a participant by email links only an existing account', () =
           teamName: 'VĐV Chưa Có Tài Khoản',
           player1Name: 'VĐV Chưa Có Tài Khoản',
           player1Email: UNKNOWN_CONTACT_EMAIL,
+          isPaid: false,
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
       ],
       DIVISION_ID,
@@ -297,16 +302,15 @@ describe('importing a participant by email links only an existing account', () =
     // Without a linked account the importing manager owns the registration, so
     // an unmatched contact never borrows another athlete's identity.
     expect(participant.values.registeredBy).toBe(MANAGER_ID);
+    expect(participant.values.isPaid).toBe(false);
+    expect(participant.values.teamStatus).toBe('PENDING_APPROVAL');
     expect(participant.values.customResponses).toMatchObject({
       player1Email: UNKNOWN_CONTACT_EMAIL,
     });
   });
 
   it('links only the matched athlete of a doubles row and keeps the other contact', async () => {
-    const harness = createHarness(importScopes('DOUBLES'), [
-      [LINKED_ACCOUNT],
-      [],
-    ]);
+    const harness = createHarness(importScopes('DOUBLES'), [[LINKED_ACCOUNT]]);
 
     const result = await createRepository(harness.tx).importParticipants(
       TOURNAMENT_ID,
@@ -319,6 +323,7 @@ describe('importing a participant by email links only an existing account', () =
           player2Name: 'VĐV Chưa Có Tài Khoản',
           player2Email: UNKNOWN_CONTACT_EMAIL,
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
       ],
       DIVISION_ID,
@@ -339,10 +344,7 @@ describe('importing a participant by email links only an existing account', () =
   });
 
   it('gives each matched doubles athlete their own roster row and notification', async () => {
-    const harness = createHarness(importScopes('DOUBLES'), [
-      [LINKED_ACCOUNT],
-      [SECOND_LINKED_ACCOUNT],
-    ]);
+    const harness = createHarness(importScopes('DOUBLES'), [[LINKED_ACCOUNT, SECOND_LINKED_ACCOUNT]]);
 
     const result = await createRepository(harness.tx).importParticipants(
       TOURNAMENT_ID,
@@ -355,6 +357,7 @@ describe('importing a participant by email links only an existing account', () =
           player2Name: 'Nguyen Van B',
           player2Email: SECOND_LINKED_EMAIL,
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
       ],
       DIVISION_ID,
@@ -373,10 +376,7 @@ describe('importing a participant by email links only an existing account', () =
   });
 
   it('resolves rows independently so one unmatched contact does not hide a matched account', async () => {
-    const harness = createHarness(importScopes('SINGLES'), [
-      [],
-      [LINKED_ACCOUNT],
-    ]);
+    const harness = createHarness(importScopes('SINGLES'), [[LINKED_ACCOUNT]]);
 
     const result = await createRepository(harness.tx).importParticipants(
       TOURNAMENT_ID,
@@ -387,12 +387,14 @@ describe('importing a participant by email links only an existing account', () =
           player1Name: 'VĐV Chưa Có Tài Khoản',
           player1Email: UNKNOWN_CONTACT_EMAIL,
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
         {
           teamName: 'Nguyen Van A',
           player1Name: 'Nguyen Van A',
           player1Email: LINKED_EMAIL,
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
       ],
       DIVISION_ID,
@@ -406,8 +408,7 @@ describe('importing a participant by email links only an existing account', () =
     ]);
   });
 
-  it('does not create a roster row for a contact that resolves by neither email nor phone', async () => {
-    // No `profiles` scope is scripted, so the phone fallback finds no profile.
+  it('does not link by phone when the imported email is unmatched', async () => {
     const harness = createHarness(importScopes('SINGLES'), [[]]);
 
     const result = await createRepository(harness.tx).importParticipants(
@@ -420,6 +421,7 @@ describe('importing a participant by email links only an existing account', () =
           player1Email: UNKNOWN_CONTACT_EMAIL,
           player1Phone: '0900000000',
           autoApprove: true,
+          source: 'MANUAL_EMAIL',
         },
       ],
       DIVISION_ID,
@@ -444,8 +446,10 @@ describe('import rows follow the current one/doubles contract', () => {
           {
             teamName: 'Dòng lỗi',
             player1Name: 'Nguyen Van A',
+            player1Email: LINKED_EMAIL,
             player2Name: 'Nguyen Van B',
             autoApprove: true,
+            source: 'MANUAL_EMAIL',
           },
         ],
         DIVISION_ID,
@@ -455,7 +459,30 @@ describe('import rows follow the current one/doubles contract', () => {
     expect(harness.inserts).toEqual([]);
   });
 
-  it('rejects a doubles row whose second athlete is missing before writing anything', async () => {
+  it('accepts a doubles row containing only the first athlete', async () => {
+    const harness = createHarness(importScopes('DOUBLES'), []);
+
+    const result = await createRepository(harness.tx).importParticipants(
+      TOURNAMENT_ID,
+      MANAGER_ID,
+      [
+        {
+          teamName: 'Nguyen Van A',
+          player1Name: 'Nguyen Van A',
+          player1Email: LINKED_EMAIL,
+          autoApprove: true,
+          source: 'MANUAL_EMAIL',
+        },
+      ],
+      DIVISION_ID,
+    );
+
+    expect(result.importedCount).toBe(1);
+    expect(insertsOf(harness.inserts, 'participants')).toHaveLength(1);
+    expect(insertsOf(harness.inserts, 'rosters')).toEqual([]);
+  });
+
+  it('rejects a named doubles partner without an email before writing anything', async () => {
     const harness = createHarness(importScopes('DOUBLES'), []);
 
     await expect(
@@ -464,9 +491,12 @@ describe('import rows follow the current one/doubles contract', () => {
         MANAGER_ID,
         [
           {
-            teamName: 'Cặp đôi thiếu người',
+            teamName: 'Cặp đôi thiếu email',
             player1Name: 'Nguyen Van A',
+            player1Email: LINKED_EMAIL,
+            player2Name: 'Nguyen Van B',
             autoApprove: true,
+            source: 'MANUAL_EMAIL',
           },
         ],
         DIVISION_ID,
@@ -475,7 +505,9 @@ describe('import rows follow the current one/doubles contract', () => {
 
     expect(harness.inserts).toEqual([]);
   });
+});
 
+describe('import contact email validation', () => {
   it('rejects a row without a first athlete name before writing anything', async () => {
     const harness = createHarness(importScopes('SINGLES'), []);
 
@@ -483,7 +515,7 @@ describe('import rows follow the current one/doubles contract', () => {
       createRepository(harness.tx).importParticipants(
         TOURNAMENT_ID,
         MANAGER_ID,
-        [{ teamName: 'Dòng trống tên', player1Name: '   ', autoApprove: true }],
+        [{ teamName: 'Dòng trống tên', player1Name: '   ', player1Email: 'valid@example.test', autoApprove: true, source: 'MANUAL_EMAIL' }],
         DIVISION_ID,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -504,6 +536,7 @@ describe('import rows follow the current one/doubles contract', () => {
             player1Name: 'Nguyen Van A',
             player1Email: 'khong-phai-email',
             autoApprove: true,
+            source: 'MANUAL_EMAIL',
           },
         ],
         DIVISION_ID,
@@ -528,6 +561,37 @@ describe('import rows follow the current one/doubles contract', () => {
             player2Name: 'Nguyen Van B',
             player2Email: LINKED_EMAIL.toUpperCase(),
             autoApprove: true,
+            source: 'MANUAL_EMAIL',
+          },
+        ],
+        DIVISION_ID,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(harness.inserts).toEqual([]);
+  });
+});
+describe('duplicate email checks for existing tournament rosters', () => {
+  it('rejects an account already linked through regular registration', async () => {
+    const harness = createHarness(
+      {
+        ...importScopes('SINGLES'),
+        'participants+rosters+users': [[{ email: LINKED_EMAIL }]],
+      },
+      [],
+    );
+
+    await expect(
+      createRepository(harness.tx).importParticipants(
+        TOURNAMENT_ID,
+        MANAGER_ID,
+        [
+          {
+            teamName: 'Existing participant',
+            player1Name: 'Nguyen Van A',
+            player1Email: LINKED_EMAIL,
+            autoApprove: true,
+            source: 'EXCEL',
           },
         ],
         DIVISION_ID,

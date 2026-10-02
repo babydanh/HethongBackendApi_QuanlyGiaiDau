@@ -12,6 +12,7 @@ import {
   buildParticipantRegistrationRejectedNotification,
   buildParticipantRegistrationSuccessNotification,
 } from '../../notifications/notification-builder';
+import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import { isLiteRegistrationTournament } from '../utils/registration-payment-eligibility';
 import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
 
@@ -31,6 +32,41 @@ export class TournamentParticipantAdminService {
     private readonly tournamentAccessService: TournamentAccessService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  async previewRosterImport(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: RosterImportPreviewDto,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
+    if (!isAuthorized) {
+      throw new ForbiddenException(
+        'Bạn không có quyền xem trước danh sách VĐV',
+      );
+    }
+
+    if (tournament.status === 'COMPLETED') {
+      throw new BadRequestException('Giải đấu đã kết thúc');
+    }
+    if (
+      tournament.status === 'REGISTRATION_CLOSED' ||
+      tournament.isRegistrationLocked
+    ) {
+      throw new BadRequestException(
+        'Đăng ký đã được khóa. Không thể nhập thêm VĐV.',
+      );
+    }
+
+    return this.tournamentsRepository.previewRosterImport(tournamentId, dto);
+  }
   async seedMockParticipants(
     tournamentId: string,
     userId: string,

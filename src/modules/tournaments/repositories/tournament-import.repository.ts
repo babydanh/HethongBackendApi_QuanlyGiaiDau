@@ -9,7 +9,76 @@ import {
   lockCapacityOwner,
   readEffectiveCapacity,
 } from '../services/tournament-capacity.service';
-import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
+import {
+  findEligibleRosterAccountIds,
+  findExistingRosterImportEmails,
+  isBlockingRosterStatus,
+  normalizeRosterEmail,
+  ROSTER_EMAIL_PATTERN,
+  resolveRosterAccountStatuses,
+  validateRosterRows,
+} from '../validation/roster-import';
+import type {
+  RosterImportItem,
+  RosterPreviewRow,
+  RosterRowStatus,
+} from '../validation/roster-import';
+import type {
+  ImportSource,
+  RosterEntryType,
+} from '../dto/import-participants.dto';
+import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
+
+function getRosterValidationMessage(
+  rowIndex: number,
+  status: RosterRowStatus,
+): string {
+  const rowNumber = rowIndex + 1;
+  switch (status) {
+    case 'MISSING_NAME':
+      return `Dòng ${rowNumber} thiếu tên VĐV 1`;
+    case 'MISSING_EMAIL':
+      return `Dòng ${rowNumber} thiếu email VĐV`;
+    case 'INVALID_EMAIL':
+      return `Dòng ${rowNumber} có email không hợp lệ`;
+    case 'DUPLICATE_IN_FILE':
+      return `Dòng ${rowNumber} dùng email đã xuất hiện trong danh sách`;
+    case 'DUPLICATE_IN_TOURNAMENT':
+      return `Dòng ${rowNumber} có VĐV đã tham gia giải`;
+    case 'PLAYER2_REQUIRED':
+      return `Dòng ${rowNumber} có thông tin VĐV 2 nhưng thiếu tên`;
+    case 'PLAYER2_NOT_ALLOWED':
+      return `Dòng ${rowNumber} của nội dung đơn có dữ liệu VĐV 2`;
+    case 'DIVISION_UNKNOWN':
+      return `Dòng ${rowNumber} có nội dung thi đấu không khớp`;
+    case 'FOUND':
+    case 'NOT_FOUND':
+      return `Dòng ${rowNumber} không hợp lệ`;
+  }
+}
+
+function getRosterEmails(items: readonly RosterImportItem[]): string[] {
+  return items.flatMap((item) =>
+    [item.player1Email, item.player2Email]
+      .filter((email): email is string => Boolean(email))
+      .map(normalizeRosterEmail),
+  );
+}
+
+function applyAccountStatuses(
+  rows: RosterPreviewRow[],
+  eligibleEmails: ReadonlySet<string>,
+): void {
+  for (const row of rows) {
+    const emails = [row.player1Email, row.player2Email].filter(
+      (email): email is string =>
+        typeof email === 'string' && ROSTER_EMAIL_PATTERN.test(email),
+    );
+    for (const email of emails) {
+      row.status.push(eligibleEmails.has(email) ? 'FOUND' : 'NOT_FOUND');
+    }
+  }
+}
 
 @Injectable()
 export class TournamentImportRepository {
@@ -17,22 +86,99 @@ export class TournamentImportRepository {
     @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly tournamentPaymentRepository: TournamentPaymentRepository,
   ) {}
+  async previewRosterImport(
+    tournamentId: string,
+    dto: RosterImportPreviewDto,
+  ): Promise<{
+    divisionMatched: boolean;
+    rows: RosterPreviewRow[];
+    requestedTeamSlots: number;
+    capacityRemaining: number | null;
+  }> {
+    return this.db.transaction(async (tx) => {
+      const tournament = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
+      if (!dto.participants.length) {
+        throw new BadRequestException('Danh sách nhập không có dữ liệu hợp lệ');
+      }
+
+      let matchType = tournament.matchType;
+      let divisionNames: string[] = [];
+      if (dto.divisionId) {
+        const division = await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(
+            and(
+              eq(schema.tournamentDivisions.id, dto.divisionId),
+              eq(schema.tournamentDivisions.tournamentId, tournamentId),
+            ),
+          )
+          .limit(1)
+          .then((rows) => rows[0]);
+        if (!division) {
+          throw new BadRequestException(
+            'Nội dung thi đấu không thuộc giải này',
+          );
+        }
+        matchType = division.matchType;
+        divisionNames = [division.name];
+      }
+
+      const isDoubles =
+        matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
+      const emails = getRosterEmails(dto.participants);
+      const existingEmails = await findExistingRosterImportEmails(
+        tournamentId,
+        emails,
+        tx,
+      );
+      const validation = validateRosterRows({
+        items: dto.participants,
+        isDoubles,
+        matchType,
+        tournamentConfig: tournament.tournamentConfig,
+        divisionNames,
+        existingEmails,
+      });
+      const eligibleEmails = await resolveRosterAccountStatuses(emails, tx);
+      applyAccountStatuses(validation.rows, eligibleEmails);
+
+      const capacity = await readEffectiveCapacity(tx, {
+        tournamentId,
+        divisionId: dto.divisionId,
+      });
+
+      return {
+        divisionMatched: Boolean(dto.divisionId),
+        rows: validation.rows,
+        requestedTeamSlots: validation.requestedTeamSlots,
+        capacityRemaining:
+          capacity.maxTeamSlots === null
+            ? null
+            : Math.max(
+                0,
+                capacity.maxTeamSlots - capacity.occupiedTeamSlots,
+              ),
+      };
+    });
+  }
+
   async importParticipants(
     tournamentId: string,
     managerUserId: string,
-    items: {
+    items: (RosterImportItem & {
       teamName: string;
       player1Name: string;
-      player1Email?: string;
-      player1Phone?: string;
-      player2Name?: string;
-      player2Email?: string;
-      player2Phone?: string;
-      elo?: number;
-      isPaid?: boolean;
-      autoApprove?: boolean;
-      customResponses?: Record<string, unknown>;
-    }[],
+      player1Email: string;
+      source: ImportSource;
+      entryType?: RosterEntryType;
+    })[],
     divisionId?: string,
   ) {
     return await this.db.transaction(async (tx) => {
@@ -46,6 +192,7 @@ export class TournamentImportRepository {
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
       let divisionMatchType = tournament.matchType;
+      let divisionNames: string[] = [];
       if (divisionId) {
         const division = await tx
           .select()
@@ -65,6 +212,7 @@ export class TournamentImportRepository {
           );
         }
         divisionMatchType = division.matchType;
+        divisionNames = [division.name];
       }
 
       const isDoubles =
@@ -75,165 +223,92 @@ export class TournamentImportRepository {
         throw new BadRequestException('Danh sách nhập không có dữ liệu hợp lệ');
       }
 
-      // Serialize the bulk import on the rows that own the limit, then judge
-      // it with the same weighted policy every registration path uses. Demand
-      // is summed row by row — one slot for a singles/team row, a whole pair
-      // or a lone athlete for a doubles row — so a multi-row batch can never
-      // collapse into a single claim.
       await lockCapacityOwner(tx, { tournamentId, divisionId });
+      const emails = getRosterEmails(items);
+      const existingEmails = await findExistingRosterImportEmails(
+        tournamentId,
+        emails,
+        tx,
+      );
+      const validation = validateRosterRows({
+        items,
+        isDoubles,
+        matchType: divisionMatchType,
+        tournamentConfig: tournament.tournamentConfig,
+        divisionNames,
+        existingEmails,
+      });
+      const invalidRow = validation.rows.find((row) => !row.isEligible);
+      if (invalidRow) {
+        const blockingStatus = invalidRow.status.find(isBlockingRosterStatus);
+        if (blockingStatus) {
+          throw new BadRequestException(
+            getRosterValidationMessage(invalidRow.rowIndex, blockingStatus),
+          );
+        }
+      }
+
       const limitCapacity = await readEffectiveCapacity(tx, {
         tournamentId,
         divisionId,
       });
-      const capacityContext = {
-        tournamentConfig: tournament.tournamentConfig,
-      };
-      assertCapacityHasRoom(
-        limitCapacity,
-        items.reduce(
-          (requestedTeamSlots, item) =>
-            requestedTeamSlots +
-            calculateRequestedTeamSlots(
-              divisionMatchType,
-              item.player2Name?.trim() ? 2 : 1,
-              capacityContext,
-            ),
-          0,
-        ),
-      );
+      assertCapacityHasRoom(limitCapacity, validation.requestedTeamSlots);
 
-      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const eligibleAccountIds = await findEligibleRosterAccountIds(
+        emails,
+        tx,
+      );
       const results: (typeof schema.tournamentParticipants.$inferSelect)[] = [];
-      const unregisteredEmails: Array<{
-        email: string;
-        name: string;
-        teamName: string;
-      }> = [];
       const linkedAccountNotifications: Array<{
         userId: string;
         status: 'COMPLETE' | 'PENDING_APPROVAL';
         divisionId: string | null;
       }> = [];
 
-      for (const [itemIndex, item] of items.entries()) {
-        const player1Name = item.player1Name?.trim();
+      for (const item of items) {
+        const player1Name = item.player1Name.trim();
         const player2Name = item.player2Name?.trim() || '';
-        const teamName = item.teamName?.trim() || player1Name;
-        const p1Email = item.player1Email?.trim()?.toLowerCase();
-        const p2Email = item.player2Email?.trim()?.toLowerCase();
+        const teamName = item.teamName.trim() || player1Name;
+        const p1Email = normalizeRosterEmail(item.player1Email);
+        const p2Email = item.player2Email
+          ? normalizeRosterEmail(item.player2Email)
+          : '';
         const p1Phone = item.player1Phone?.trim();
         const p2Phone = item.player2Phone?.trim();
-        const hasPlayer2Data = Boolean(player2Name || p2Email || p2Phone);
-
-        if (!player1Name) {
-          throw new BadRequestException(
-            `Dòng ${itemIndex + 1} thiếu tên VĐV 1`,
-          );
-        }
-        if (isDoubles && !player2Name) {
-          throw new BadRequestException(
-            `Dòng ${itemIndex + 1} của nội dung đôi thiếu VĐV 2`,
-          );
-        }
-        if (!isDoubles && hasPlayer2Data) {
-          throw new BadRequestException(
-            `Dòng ${itemIndex + 1} của nội dung đơn có dữ liệu VĐV 2`,
-          );
-        }
-        if (
-          (p1Email && !emailPattern.test(p1Email)) ||
-          (p2Email && !emailPattern.test(p2Email))
-        ) {
-          throw new BadRequestException(
-            `Dòng ${itemIndex + 1} có email không hợp lệ`,
-          );
-        }
-        if (p1Email && p2Email && p1Email === p2Email) {
-          throw new BadRequestException(
-            `Dòng ${itemIndex + 1} dùng trùng email cho hai VĐV`,
-          );
-        }
-
-        // Resolve only existing SportO accounts. Unmatched contacts remain
-        // participant metadata and never become synthetic users or notification
-        // recipients.
-        let user1Id: string | null = null;
-        if (p1Email || p1Phone) {
-          let foundUser: typeof schema.users.$inferSelect | undefined;
-          if (p1Email) {
-            foundUser = await tx
-              .select()
-              .from(schema.users)
-              .where(eq(schema.users.email, p1Email))
-              .limit(1)
-              .then((r) => r[0]);
-          }
-          if (!foundUser && p1Phone) {
-            const foundProfile = await tx
-              .select()
-              .from(schema.profiles)
-              .where(eq(schema.profiles.phoneNumber, p1Phone))
-              .limit(1)
-              .then((r) => r[0]);
-            if (foundProfile) {
-              foundUser = await tx
-                .select()
-                .from(schema.users)
-                .where(eq(schema.users.id, foundProfile.userId))
-                .limit(1)
-                .then((r) => r[0]);
-            }
-          }
-          user1Id = foundUser?.id ?? null;
-        }
-
-        // Resolve User 2 only when the doubles participant already has a
-        // matching SportO account. Names/emails are retained in customResponses.
-        let user2Id: string | null = null;
-        if (isDoubles && hasPlayer2Data && (p2Email || p2Phone)) {
-          let foundUser2: typeof schema.users.$inferSelect | undefined;
-          if (p2Email) {
-            foundUser2 = await tx
-              .select()
-              .from(schema.users)
-              .where(eq(schema.users.email, p2Email))
-              .limit(1)
-              .then((r) => r[0]);
-          }
-          if (!foundUser2 && p2Phone) {
-            const foundProfile2 = await tx
-              .select()
-              .from(schema.profiles)
-              .where(eq(schema.profiles.phoneNumber, p2Phone))
-              .limit(1)
-              .then((r) => r[0]);
-            if (foundProfile2) {
-              foundUser2 = await tx
-                .select()
-                .from(schema.users)
-                .where(eq(schema.users.id, foundProfile2.userId))
-                .limit(1)
-                .then((r) => r[0]);
-            }
-          }
-          user2Id = foundUser2?.id ?? null;
-        }
-
+        const user1Id = eligibleAccountIds.get(p1Email) ?? null;
+        const user2Id =
+          isDoubles && p2Email
+            ? (eligibleAccountIds.get(p2Email) ?? null)
+            : null;
         const teamStatus =
           item.autoApprove && (item.isPaid ?? true)
             ? 'COMPLETE'
             : 'PENDING_APPROVAL';
 
-        // Only facts this row actually declares, so a missing optional field
-        // never overwrites a same-named key the caller supplied.
         const importMetadata: Record<string, unknown> = {
-          importedFrom: 'GOOGLE_FORM',
+          importedFrom: item.source,
+          player1Email: p1Email,
         };
-        if (item.player1Email) importMetadata.player1Email = item.player1Email;
-        if (item.player1Phone) importMetadata.player1Phone = item.player1Phone;
+        if (item.entryType === 'WILD_CARD_REQUEST') {
+          importMetadata.entryType = 'WILD_CARD_REQUEST';
+        }
+        if (p1Phone) importMetadata.player1Phone = p1Phone;
         if (player2Name) importMetadata.player2Name = player2Name;
         if (p2Email) importMetadata.player2Email = p2Email;
         if (p2Phone) importMetadata.player2Phone = p2Phone;
+
+        const customResponses = { ...(item.customResponses ?? {}) };
+        for (const key of [
+          'importedFrom',
+          'entryType',
+          'player1Email',
+          'player1Phone',
+          'player2Name',
+          'player2Email',
+          'player2Phone',
+        ]) {
+          delete customResponses[key];
+        }
 
         const [participant] = await tx
           .insert(schema.tournamentParticipants)
@@ -253,13 +328,10 @@ export class TournamentImportRepository {
             teamStatus,
             partnerUserId: user2Id || null,
             seed: item.elo ? Math.round(item.elo) : null,
-            // Keep the validated import metadata even when the caller already
-            // supplied form answers: the capacity projection recognises an
-            // imported pair by `importedFrom` + `player2Name`, and both linked
-            // roster rows can be absent when neither contact has an account.
-            // Unrelated form answers survive; the importer's own facts win.
+            // Import-owned fields must come from validated request fields;
+            // unrelated form answers remain untouched.
             customResponses: {
-              ...(item.customResponses ?? {}),
+              ...customResponses,
               ...importMetadata,
             },
           })
@@ -296,7 +368,6 @@ export class TournamentImportRepository {
 
       return {
         importedCount: results.length,
-        unregisteredEmails,
         linkedAccountNotifications,
         participants: results,
       };
