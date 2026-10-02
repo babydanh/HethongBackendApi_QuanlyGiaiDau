@@ -581,12 +581,19 @@ export class SocialSessionsRepository {
     tx: AppDbOrTx = this.db,
     prepareValues?: (executor: AppDbOrTx) => Promise<typeof schema.socialSessions.$inferInsert>,
   ): Promise<CreateWithHostOutcome> {
-    const pair = validateCoordinatePair(values.latitude, values.longitude);
-    const insertValues = (pair
-      ? { ...values, ...geoSnapshot(pair.latitude, pair.longitude) }
-      : values) as typeof schema.socialSessions.$inferInsert;
     const run = async (transaction: AppDbOrTx) => {
-      const finalValues = prepareValues ? await prepareValues(transaction) : insertValues;
+      // The venue callback can replace the coordinates. Build the point from
+      // its final values, inside the same transaction, before inserting Social.
+      const preparedValues = prepareValues
+        ? await prepareValues(transaction)
+        : values;
+      const pair = validateCoordinatePair(
+        preparedValues.latitude,
+        preparedValues.longitude,
+      );
+      const finalValues = (pair
+        ? { ...preparedValues, ...geoSnapshot(pair.latitude, pair.longitude) }
+        : { ...preparedValues, venueGeolocation: null }) as typeof schema.socialSessions.$inferInsert;
       const [session] = await transaction
         .insert(schema.socialSessions)
         .values(finalValues)
