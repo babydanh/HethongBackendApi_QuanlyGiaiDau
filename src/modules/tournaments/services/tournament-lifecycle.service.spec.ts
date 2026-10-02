@@ -129,6 +129,7 @@ describe('TournamentLifecycleService registration deadline extensions', () => {
   const dayMs = 24 * 60 * 60 * 1000;
   const repositoryMock = {
     findById: jest.fn(),
+    findByParentId: jest.fn(),
     findCategory: jest.fn(),
     update: jest.fn(),
     getFollowerUserIds: jest.fn(),
@@ -248,4 +249,55 @@ describe('TournamentLifecycleService registration deadline extensions', () => {
     ).rejects.toThrow();
     expect(repositoryMock.update).not.toHaveBeenCalled();
   });
+  it('rejects deadline propagation when a sibling registration is manually locked', async () => {
+    const existing = { ...makeClosedTournament(), parentId: 'parent-1' };
+    const lockedSibling = {
+      ...makeClosedTournament(),
+      id: 'tournament-2',
+      parentId: 'parent-1',
+      isRegistrationLocked: true,
+    };
+    const extendedDeadline = new Date(Date.now() + 5 * dayMs);
+    prepareUpdate(existing);
+    repositoryMock.findByParentId.mockResolvedValue([existing, lockedSibling]);
+
+    await expect(
+      lifecycle.update(
+        existing.id,
+        'organizer-1',
+        {
+          registrationEndDate: extendedDeadline.toISOString(),
+        } as UpdateTournamentDto,
+      ),
+    ).rejects.toThrow();
+
+    expect(repositoryMock.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects deadline propagation that would shorten a closed sibling deadline', async () => {
+    const existing = { ...makeClosedTournament(), parentId: 'parent-1' };
+    const siblingDeadline = new Date(Date.now() + 2 * dayMs);
+    const closedSibling = {
+      ...makeClosedTournament(),
+      id: 'tournament-2',
+      parentId: 'parent-1',
+      registrationEndDate: siblingDeadline,
+    };
+    const requestedDeadline = new Date(Date.now() + dayMs);
+    prepareUpdate(existing);
+    repositoryMock.findByParentId.mockResolvedValue([existing, closedSibling]);
+
+    await expect(
+      lifecycle.update(
+        existing.id,
+        'organizer-1',
+        {
+          registrationEndDate: requestedDeadline.toISOString(),
+        } as UpdateTournamentDto,
+      ),
+    ).rejects.toThrow();
+
+    expect(repositoryMock.update).not.toHaveBeenCalled();
+  });
+
 });

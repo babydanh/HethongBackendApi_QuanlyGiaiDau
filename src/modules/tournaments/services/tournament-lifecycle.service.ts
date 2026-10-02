@@ -858,6 +858,55 @@ export class TournamentLifecycleService {
       });
     }
 
+    let siblingTournamentsForUpdate:
+      | Awaited<ReturnType<TournamentsRepository['findByParentId']>>
+      | undefined;
+    if (
+      existing.parentId &&
+      updateTournamentDto.registrationEndDate !== undefined
+    ) {
+      // A shared deadline reaches every division. Validate siblings before the
+      // current tournament is written so a sibling lock cannot be bypassed.
+      siblingTournamentsForUpdate =
+        await this.tournamentsRepository.findByParentId(existing.parentId);
+      const requestedDeadline =
+        updateTournamentDto.registrationEndDate !== null
+          ? new Date(updateTournamentDto.registrationEndDate).getTime()
+          : Number.NaN;
+
+      for (const sibling of siblingTournamentsForUpdate) {
+        if (sibling.id === id) continue;
+        const currentDeadline = sibling.registrationEndDate
+          ? new Date(sibling.registrationEndDate).getTime()
+          : Number.NaN;
+        const deadlineIsUnchanged =
+          (Number.isFinite(requestedDeadline) &&
+            requestedDeadline === currentDeadline) ||
+          (updateTournamentDto.registrationEndDate === null &&
+            sibling.registrationEndDate === null);
+        if (deadlineIsUnchanged) continue;
+
+        if (
+          sibling.isRegistrationLocked ||
+          (sibling.status === 'REGISTRATION_CLOSED' &&
+            (!Number.isFinite(requestedDeadline) ||
+              !Number.isFinite(currentDeadline) ||
+              requestedDeadline <= Date.now() ||
+              requestedDeadline <= currentDeadline))
+        ) {
+          throw new BadRequestException(
+            'Đăng ký đã đóng hoặc bị khóa. Chỉ có thể gia hạn hạn chót khi chưa bị khóa thủ công; các thay đổi khác cần thao tác mở lại đăng ký.',
+          );
+        }
+
+        if (['IN_PROGRESS', 'COMPLETED'].includes(sibling.status)) {
+          throw new BadRequestException(
+            "Không thể sửa trường 'registrationEndDate' khi giải đang diễn ra hoặc đã kết thúc",
+          );
+        }
+      }
+    }
+
     if (
       updateTournamentDto.bannerUrl !== undefined &&
       existing.bannerUrl &&
@@ -959,9 +1008,9 @@ export class TournamentLifecycleService {
     }
 
     if (existing.parentId) {
-      const siblings = await this.tournamentsRepository.findByParentId(
-        existing.parentId,
-      );
+      const siblings =
+        siblingTournamentsForUpdate ??
+        (await this.tournamentsRepository.findByParentId(existing.parentId));
       const sharedFields: Record<string, unknown> = {};
       const fieldsToCheck = [
         'categoryId',
