@@ -1,8 +1,8 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, InternalServerErrorException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { and, count, desc, eq, ilike, or, sql, SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or, sql, SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
@@ -180,6 +180,10 @@ export class VenuesRepository {
           imagesUrls: data.imagesUrls,
         } as typeof schema.tournamentVenues.$inferInsert)
         .returning();
+
+      if (!record) {
+        throw new InternalServerErrorException('Venue insert returned no record');
+      }
 
       await this.auditService.logCreate(tx, userId, 'tournament_venues', record.id, record);
       return { record } as const;

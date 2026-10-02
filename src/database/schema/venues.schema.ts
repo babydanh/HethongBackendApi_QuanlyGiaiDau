@@ -34,7 +34,6 @@ export const tournamentVenues = pgTable(
     wardCode: varchar('ward_code', { length: 20 }),
     searchText: pgText('search_text').generatedAlwaysAs(
       sql`public.f_unaccent(lower(${sql.identifier('name')} || ' ' || ${sql.identifier('location_address')}))`,
-      { mode: 'stored' },
     ),
     imagesUrls: text('images_urls')
       .array()

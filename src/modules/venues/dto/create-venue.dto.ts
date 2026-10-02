@@ -20,7 +20,7 @@ export class CreateVenueDto {
   @IsString()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @ApiProperty({
     example: '238 Đường 3/2, Phường 12, Quận 10, TP.HCM',
@@ -29,7 +29,7 @@ export class CreateVenueDto {
   @IsString()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @Length(1, 500)
-  locationAddress: string;
+  locationAddress!: string;
 
   // lat/lng luôn đi cặp: chỉ có một nửa là payload sai, và im lặng bỏ qua nửa
   // còn lại sẽ tạo sân không có toạ độ mà không ai biết vì sao. ValidateIf chặn

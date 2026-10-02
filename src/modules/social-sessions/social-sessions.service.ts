@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  InternalServerErrorException,
   Injectable,
   Logger,
   NotFoundException,
@@ -394,6 +395,9 @@ export class SocialSessionsService {
           name: newVenue.name.trim(), locationAddress: newVenue.locationAddress.trim(),
           latitude: newVenue.latitude, longitude: newVenue.longitude,
         }, tx, resolved ? { provinceCode: resolved.provinceCode, wardCode: resolved.wardCode } : { provinceCode: null, wardCode: null });
+        if (!result) {
+          throw new InternalServerErrorException('Venue creation returned no result');
+        }
         if ('duplicateCandidates' in result) {
           throw new ConflictException({ code: 'VENUE_DUPLICATE_CANDIDATES', details: { candidates: result.duplicateCandidates } });
         }
@@ -821,6 +825,9 @@ export class SocialSessionsService {
           latitude: dto.newVenue!.latitude,
           longitude: dto.newVenue!.longitude,
         }, tx, { provinceCode: region?.provinceCode ?? null, wardCode: region?.wardCode ?? null });
+        if (!venueResult) {
+          throw new InternalServerErrorException('Venue creation returned no result');
+        }
         if ('duplicateCandidates' in venueResult) {
           throw new ConflictException({ code: 'VENUE_DUPLICATE_CANDIDATES', details: { candidates: venueResult.duplicateCandidates } });
         }

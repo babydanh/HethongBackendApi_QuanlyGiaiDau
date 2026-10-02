@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { LivestreamService } from '../livestream/livestream.service';
 import { VenuesRepository } from './venues.repository';
 import { CreateVenueDto } from './dto/create-venue.dto';
@@ -40,6 +40,9 @@ export class VenuesService {
       provinceCode: region?.provinceCode ?? null,
       wardCode: region?.wardCode ?? null,
     });
+    if (!result) {
+      throw new InternalServerErrorException('Venue creation returned no result');
+    }
     if ('duplicateCandidates' in result) {
       throw new ConflictException({ code: 'VENUE_DUPLICATE_CANDIDATES', details: { candidates: result.duplicateCandidates } });
     }

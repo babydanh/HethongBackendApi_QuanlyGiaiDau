@@ -1,11 +1,13 @@
 import { PartialType } from '@nestjs/swagger';
-import { Validate, ValidatorConstraint, ValidatorConstraintInterface } from 'class-validator';
+import { Validate, ValidationArguments, ValidatorConstraint, ValidatorConstraintInterface } from 'class-validator';
 import { CreateVenueDto } from './create-venue.dto';
 
 @ValidatorConstraint({ name: 'venueCoordinatePair', async: false })
 class VenueCoordinatePairConstraint implements ValidatorConstraintInterface {
-  validate(value: unknown, args: { object: UpdateVenueDto }) {
-    const { latitude, longitude } = args.object;
+  validate(value: unknown, args?: ValidationArguments): boolean {
+    const object = args?.object as UpdateVenueDto | undefined;
+    if (!object) return true;
+    const { latitude, longitude } = object;
     const hasLat = latitude !== undefined;
     const hasLng = longitude !== undefined;
     if (!hasLat && !hasLng) return true;

@@ -5,7 +5,7 @@ export class CreateVenueCourtDto {
   @ApiProperty({ example: 'Sân số 1', description: 'Tên sân con' })
   @IsString()
   @IsNotEmpty()
-  courtName: string;
+  courtName!: string;
 
   @ApiPropertyOptional({
     example: 'AVAILABLE',
