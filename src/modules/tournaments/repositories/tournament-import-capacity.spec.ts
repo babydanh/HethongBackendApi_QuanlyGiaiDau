@@ -16,6 +16,7 @@ type Row = Record<string, unknown>;
 
 function createHarness(queues: Record<string, Row[][]>) {
   const inserts: Array<{ table: string; values: Row }> = [];
+  const lockCounter = { count: 0 };
 
   const takeRows = (key: string): Row[] => {
     const queue = queues[key];
@@ -52,15 +53,15 @@ function createHarness(queues: Record<string, Row[][]>) {
       const tables: string[] = [];
       const query: Record<string, unknown> = {};
 
-      const record = (fn: (...args: unknown[]) => unknown) => (
-        ...args: unknown[]
-      ) => {
-        for (const arg of args) {
-          const name = TABLE_KEYS.get(arg);
-          if (name) tables.push(name);
-        }
-        return fn(...args);
-      };
+      const record =
+        (fn: (...args: unknown[]) => unknown) =>
+        (...args: unknown[]) => {
+          for (const arg of args) {
+            const name = TABLE_KEYS.get(arg);
+            if (name) tables.push(name);
+          }
+          return fn(...args);
+        };
 
       query.from = record(() => query);
       query.innerJoin = record(() => query);
@@ -69,7 +70,10 @@ function createHarness(queues: Record<string, Row[][]>) {
       query.groupBy = () => query;
       query.orderBy = () => query;
       query.limit = () => query;
-      query.for = () => query;
+      query.for = () => {
+        lockCounter.count += 1;
+        return query;
+      };
       query.then = (
         resolve: (value: unknown) => unknown,
         reject?: (reason: unknown) => unknown,
@@ -100,7 +104,11 @@ function createHarness(queues: Record<string, Row[][]>) {
     },
   };
 
-  return { tx: tx as unknown as Record<string, unknown>, inserts };
+  return {
+    tx: tx as unknown as Record<string, unknown>,
+    inserts,
+    lockCount: () => lockCounter.count,
+  };
 }
 
 function createRepository(tx: unknown) {
@@ -117,11 +125,65 @@ function createRepository(tx: unknown) {
   );
 }
 
+describe('TournamentImportRepository.previewRosterImport', () => {
+  it('returns row and capacity verdicts without writes or capacity locks', async () => {
+    const tournament = {
+      id: 'tournament-1',
+      matchType: 'SINGLES',
+      maxParticipants: 4,
+      tournamentConfig: null,
+      entryFee: 0,
+    };
+    const { tx, inserts, lockCount } = createHarness({
+      tournaments: [[tournament], [tournament]],
+      participants: [[]],
+      users: [[]],
+      'participants+rosters': [[]],
+    });
+    const repository = createRepository(tx);
+
+    const result = await repository.previewRosterImport('tournament-1', {
+      participants: [
+        {
+          teamName: 'Guest entrant',
+          player1Name: 'Guest entrant',
+          player1Email: 'guest@example.test',
+          source: 'EXCEL',
+        },
+      ],
+    });
+
+    expect(result.rows[0]).toMatchObject({
+      rowIndex: 0,
+      status: ['NOT_FOUND'],
+      isEligible: true,
+      capacityDelta: 1,
+    });
+    expect(result.requestedTeamSlots).toBe(1);
+    expect(result.capacityRemaining).toBe(4);
+    expect(lockCount()).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+});
+
 const PAIR = {
   teamName: 'Cặp đôi',
   player1Name: 'Nguyen Van A',
+  player1Email: 'player-one@example.test',
   player2Name: 'Nguyen Van B',
+  player2Email: 'player-two@example.test',
   autoApprove: true,
+  source: 'GOOGLE_FORM' as const,
+};
+
+const PAIR_TWO = {
+  teamName: 'Cặp đôi thứ hai',
+  player1Name: 'Nguyen Van C',
+  player1Email: 'player-three@example.test',
+  player2Name: 'Nguyen Van D',
+  player2Email: 'player-four@example.test',
+  autoApprove: true,
+  source: 'GOOGLE_FORM' as const,
 };
 
 const COMPLETE_PAIR: Row = {
@@ -143,7 +205,23 @@ const LONE_MEMBER: Row = {
 const SOLO_ROSTER_ENTRY = {
   teamName: 'Nguyen Van A',
   player1Name: 'Nguyen Van A',
+  player1Email: 'solo@example.test',
   autoApprove: true,
+  source: 'EXCEL' as const,
+};
+
+const SOLO_ROSTER_ENTRY_TWO = {
+  ...SOLO_ROSTER_ENTRY,
+  teamName: 'Nguyen Van B',
+  player1Name: 'Nguyen Van B',
+  player1Email: 'solo-two@example.test',
+};
+
+const SOLO_ROSTER_ENTRY_THREE = {
+  ...SOLO_ROSTER_ENTRY,
+  teamName: 'Nguyen Van C',
+  player1Name: 'Nguyen Van C',
+  player1Email: 'solo-three@example.test',
 };
 
 function divisionImportQueues(options: {
@@ -164,7 +242,13 @@ function divisionImportQueues(options: {
       [{ id: 'tournament-1' }],
     ],
     divisions: [
-      [{ id: 'division-1', tournamentId: 'tournament-1', matchType: 'DOUBLES' }],
+      [
+        {
+          id: 'division-1',
+          tournamentId: 'tournament-1',
+          matchType: 'DOUBLES',
+        },
+      ],
       [{ id: 'division-1' }],
     ],
     'divisions+tournaments': [
@@ -191,10 +275,10 @@ describe('bulk doubles import capacity', () => {
       }),
     );
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
-      [PAIR, PAIR],
+      [PAIR, PAIR_TWO],
       'division-1',
     );
 
@@ -212,10 +296,10 @@ describe('bulk doubles import capacity', () => {
     );
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         'tournament-1',
         'organizer-1',
-        [PAIR, PAIR],
+        [PAIR, PAIR_TWO],
         'division-1',
       ),
     ).rejects.toThrow(BadRequestException);
@@ -233,7 +317,7 @@ describe('bulk doubles import capacity', () => {
       }),
     );
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [PAIR],
@@ -257,9 +341,7 @@ describe('bulk doubles import capacity', () => {
         [{ id: 'tournament-1' }],
         [uncappedTournament],
       ],
-      'participants+rosters': [
-        Array.from({ length: 40 }, () => COMPLETE_PAIR),
-      ],
+      'participants+rosters': [Array.from({ length: 40 }, () => COMPLETE_PAIR)],
       // A tournament-wide occupancy read also carries each row's division
       // format, so its rows arrive under the joined read.
       'divisions+participants+rosters': [
@@ -267,7 +349,7 @@ describe('bulk doubles import capacity', () => {
       ],
     });
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [PAIR],
@@ -281,7 +363,7 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
   it('keeps both the form answers and the validated pair metadata', async () => {
     const harness = createHarness(divisionImportQueues({ entries: [] }));
 
-    await createRepository(harness.tx).importParticipants(
+    await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [
@@ -300,7 +382,9 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
       shirtSize: 'L',
       note: 'Đăng ký qua Google Form',
       importedFrom: 'GOOGLE_FORM',
+      player1Email: 'player-one@example.test',
       player2Name: 'Nguyen Van B',
+      player2Email: 'player-two@example.test',
     });
     // Neither contact has an account, so the pair exists only as metadata.
     expect(
@@ -311,7 +395,7 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
   it('lets the validated second player win over a same-named form answer', async () => {
     const harness = createHarness(divisionImportQueues({ entries: [] }));
 
-    await createRepository(harness.tx).importParticipants(
+    await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [{ ...PAIR, customResponses: { player2Name: 'Ten nhập sai' } }],
@@ -321,9 +405,9 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
     const participantInsert = harness.inserts.find(
       (insert) => insert.table === 'participants',
     );
-    expect(
-      (participantInsert?.values.customResponses as Row).player2Name,
-    ).toBe('Nguyen Van B');
+    expect((participantInsert?.values.customResponses as Row).player2Name).toBe(
+      'Nguyen Van B',
+    );
   });
 });
 
@@ -367,10 +451,10 @@ describe('bulk singles import capacity', () => {
     const harness = createHarness(singlesImportQueues());
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         'tournament-1',
         'organizer-1',
-        [SOLO_ROSTER_ENTRY, SOLO_ROSTER_ENTRY, SOLO_ROSTER_ENTRY],
+        [SOLO_ROSTER_ENTRY, SOLO_ROSTER_ENTRY_TWO, SOLO_ROSTER_ENTRY_THREE],
         'division-singles',
       ),
     ).rejects.toThrow(BadRequestException);
@@ -381,10 +465,10 @@ describe('bulk singles import capacity', () => {
   it('admits the two singles rows that exactly fill the cap', async () => {
     const harness = createHarness(singlesImportQueues());
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
-      [SOLO_ROSTER_ENTRY, SOLO_ROSTER_ENTRY],
+      [SOLO_ROSTER_ENTRY, SOLO_ROSTER_ENTRY_TWO],
       'division-singles',
     );
 
@@ -446,10 +530,10 @@ describe('import into a division that has no limit of its own', () => {
     );
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         'tournament-1',
         'organizer-1',
-        [PAIR, PAIR],
+        [PAIR, PAIR_TWO],
         'division-1',
       ),
     ).rejects.toThrow(BadRequestException);
@@ -465,10 +549,10 @@ describe('import into a division that has no limit of its own', () => {
       }),
     );
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
-      [PAIR, PAIR],
+      [PAIR, PAIR_TWO],
       'division-1',
     );
 

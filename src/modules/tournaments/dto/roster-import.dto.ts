@@ -1,22 +1,36 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsEmail,
+  IsIn,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
 
+export const IMPORT_SOURCES = [
+  'MANUAL_EMAIL',
+  'EXCEL',
+  'AI_EXCEL',
+  'GOOGLE_FORM',
+] as const;
+export type ImportSource = (typeof IMPORT_SOURCES)[number];
+
+export const ROSTER_ENTRY_TYPES = ['REGULAR', 'WILD_CARD_REQUEST'] as const;
+export type RosterEntryType = (typeof ROSTER_ENTRY_TYPES)[number];
+
 /**
- * Legacy import payload for `POST /tournaments/:id/import-participants`.
+ * Strict roster row for `POST /tournaments/:id/roster-import`.
  *
- * Kept byte-compatible with the pre-roster endpoint: emails are optional plain
- * strings, provenance is not declared and `sendInvitationEmail` still exists,
- * so already released web/mobile clients keep working unchanged.
+ * New, additive endpoint: it never changes the legacy import contract, it only
+ * adds the email/provenance guarantees the spreadsheet workflow depends on.
  */
-export class ParticipantImportItemDto {
+export class RosterImportItemDto {
   @ApiProperty({ description: 'Tên đội / cặp đấu hoặc tên VĐV' })
   @IsString()
   teamName: string;
@@ -25,10 +39,9 @@ export class ParticipantImportItemDto {
   @IsString()
   player1Name: string;
 
-  @ApiPropertyOptional({ description: 'Email VĐV 1' })
-  @IsOptional()
-  @IsString()
-  player1Email?: string;
+  @ApiProperty({ description: 'Email VĐV 1 (bắt buộc)' })
+  @IsEmail()
+  player1Email: string;
 
   @ApiPropertyOptional({ description: 'SĐT VĐV 1' })
   @IsOptional()
@@ -42,7 +55,7 @@ export class ParticipantImportItemDto {
 
   @ApiPropertyOptional({ description: 'Email VĐV 2' })
   @IsOptional()
-  @IsString()
+  @IsEmail()
   player2Email?: string;
 
   @ApiPropertyOptional({ description: 'SĐT VĐV 2' })
@@ -65,12 +78,27 @@ export class ParticipantImportItemDto {
   @IsBoolean()
   autoApprove?: boolean;
 
+  @ApiPropertyOptional({ description: 'Loại nhập, không cấp quyền wildcard' })
+  @IsOptional()
+  @IsIn(ROSTER_ENTRY_TYPES)
+  entryType?: RosterEntryType;
+
+  @ApiProperty({ description: 'Nguồn nhập dữ liệu', enum: IMPORT_SOURCES })
+  @IsIn(IMPORT_SOURCES)
+  source: ImportSource;
+
+  @ApiPropertyOptional({ description: 'Tên nội dung thi đấu trên file' })
+  @IsOptional()
+  @IsString()
+  divisionName?: string;
+
   @ApiPropertyOptional({ description: 'Ghi chú / câu trả lời custom form' })
   @IsOptional()
+  @IsObject()
   customResponses?: Record<string, unknown>;
 }
 
-export class ImportParticipantsDto {
+export class RosterImportDto {
   @ApiPropertyOptional({ description: 'ID của division / nội dung thi đấu' })
   @IsOptional()
   @IsString()
@@ -78,19 +106,14 @@ export class ImportParticipantsDto {
 
   @ApiProperty({
     description: 'Danh sách VĐV / Đội cần nhập',
-    type: [ParticipantImportItemDto],
+    type: [RosterImportItemDto],
+    maxItems: 200,
   })
   @IsArray()
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
-  @Type(() => ParticipantImportItemDto)
-  participants: ParticipantImportItemDto[];
-
-  @ApiPropertyOptional({
-    description: 'Tự động gửi email thư mời kích hoạt tài khoản',
-  })
-  @IsOptional()
-  @IsBoolean()
-  sendInvitationEmail?: boolean;
+  @Type(() => RosterImportItemDto)
+  participants: RosterImportItemDto[];
 
   @ApiPropertyOptional({
     description: 'Gửi thông báo trong SportO cho các VĐV đã có tài khoản',

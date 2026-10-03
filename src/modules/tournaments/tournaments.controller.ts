@@ -36,6 +36,8 @@ import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
+import { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
+import { RosterImportDto } from './dto/roster-import.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
@@ -1477,6 +1479,24 @@ export class TournamentsController {
     );
   }
 
+  @Post(':id/import-participants/preview')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xem trước danh sách VĐV cần nhập' })
+  async previewRosterImport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RosterImportPreviewDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.previewRosterImport(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
   @Post(':id/import-participants')
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
@@ -1488,6 +1508,24 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.importParticipantsFromForm(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/roster-import')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Nhập danh sách VĐV từ bảng tính (yêu cầu email)' })
+  async importRoster(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RosterImportDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.importRosterFromForm(
       id,
       user.sub,
       this.getSystemRoles(user),

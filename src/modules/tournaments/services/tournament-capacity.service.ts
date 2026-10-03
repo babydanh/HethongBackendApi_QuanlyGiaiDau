@@ -9,6 +9,10 @@ import {
   calculateRequestedTeamSlots,
   type CapacityEntry,
 } from '../utils/tournament-participant-status';
+import {
+  IMPORT_SOURCES,
+  type ImportSource,
+} from '../dto/roster-import.dto';
 
 /** Capacity is always expressed in team slots; `maxParticipants` stays a team limit. */
 export interface TournamentCapacitySnapshot {
@@ -543,7 +547,11 @@ function importedPairMemberCount(
     importedFrom?: unknown;
     player2Name?: unknown;
   };
-  if (payload.importedFrom !== 'GOOGLE_FORM') return 0;
+  if (
+    !IMPORT_SOURCES.includes(payload.importedFrom as ImportSource)
+  ) {
+    return 0;
+  }
 
   const player2Name = payload.player2Name;
   const declaredMemberCount =
