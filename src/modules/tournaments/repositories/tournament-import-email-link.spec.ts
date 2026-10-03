@@ -83,15 +83,15 @@ function createHarness(reads: Record<string, Row[][]>, users: Row[][]) {
       const tables: string[] = [];
       const query: Record<string, unknown> = {};
 
-      const record = (fn: (...args: unknown[]) => unknown) => (
-        ...args: unknown[]
-      ) => {
-        for (const arg of args) {
-          const name = TABLE_KEYS.get(arg);
-          if (name) tables.push(name);
-        }
-        return fn(...args);
-      };
+      const record =
+        (fn: (...args: unknown[]) => unknown) =>
+        (...args: unknown[]) => {
+          for (const arg of args) {
+            const name = TABLE_KEYS.get(arg);
+            if (name) tables.push(name);
+          }
+          return fn(...args);
+        };
 
       query.from = record(() => query);
       query.innerJoin = record(() => query);
@@ -182,9 +182,7 @@ function importScopes(matchType: 'SINGLES' | 'DOUBLES') {
         },
       ],
     ],
-    divisions: [
-      [{ id: DIVISION_ID, tournamentId: TOURNAMENT_ID, matchType }],
-    ],
+    divisions: [[{ id: DIVISION_ID, tournamentId: TOURNAMENT_ID, matchType }]],
     'divisions+tournaments': [
       [
         {
@@ -210,7 +208,7 @@ describe('importing a participant by email links only an existing account', () =
   it('adds the matched account to the roster and creates no other account', async () => {
     const harness = createHarness(importScopes('SINGLES'), [[LINKED_ACCOUNT]]);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -250,7 +248,7 @@ describe('importing a participant by email links only an existing account', () =
   it('notifies the matched account once, with the row it landed in', async () => {
     const harness = createHarness(importScopes('SINGLES'), [[LINKED_ACCOUNT]]);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -273,7 +271,7 @@ describe('importing a participant by email links only an existing account', () =
   it('keeps an unmatched email as contact metadata without a user, roster row or notification', async () => {
     const harness = createHarness(importScopes('SINGLES'), [[]]);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -312,7 +310,7 @@ describe('importing a participant by email links only an existing account', () =
   it('links only the matched athlete of a doubles row and keeps the other contact', async () => {
     const harness = createHarness(importScopes('DOUBLES'), [[LINKED_ACCOUNT]]);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -344,9 +342,11 @@ describe('importing a participant by email links only an existing account', () =
   });
 
   it('gives each matched doubles athlete their own roster row and notification', async () => {
-    const harness = createHarness(importScopes('DOUBLES'), [[LINKED_ACCOUNT, SECOND_LINKED_ACCOUNT]]);
+    const harness = createHarness(importScopes('DOUBLES'), [
+      [LINKED_ACCOUNT, SECOND_LINKED_ACCOUNT],
+    ]);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -369,16 +369,14 @@ describe('importing a participant by email links only an existing account', () =
     ]);
     expect(insertsOf(harness.inserts, 'users')).toEqual([]);
     expect(
-      result.linkedAccountNotifications
-        ?.map((entry) => entry.userId)
-        .sort(),
+      result.linkedAccountNotifications?.map((entry) => entry.userId).sort(),
     ).toEqual(['user-linked', 'user-linked-2']);
   });
 
   it('resolves rows independently so one unmatched contact does not hide a matched account', async () => {
     const harness = createHarness(importScopes('SINGLES'), [[LINKED_ACCOUNT]]);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -411,7 +409,7 @@ describe('importing a participant by email links only an existing account', () =
   it('does not link by phone when the imported email is unmatched', async () => {
     const harness = createHarness(importScopes('SINGLES'), [[]]);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -439,7 +437,7 @@ describe('import rows follow the current one/doubles contract', () => {
     const harness = createHarness(importScopes('SINGLES'), []);
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         TOURNAMENT_ID,
         MANAGER_ID,
         [
@@ -462,7 +460,7 @@ describe('import rows follow the current one/doubles contract', () => {
   it('accepts a doubles row containing only the first athlete', async () => {
     const harness = createHarness(importScopes('DOUBLES'), []);
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       TOURNAMENT_ID,
       MANAGER_ID,
       [
@@ -486,7 +484,7 @@ describe('import rows follow the current one/doubles contract', () => {
     const harness = createHarness(importScopes('DOUBLES'), []);
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         TOURNAMENT_ID,
         MANAGER_ID,
         [
@@ -507,15 +505,60 @@ describe('import rows follow the current one/doubles contract', () => {
   });
 });
 
+describe('wildcard requests stay annotations', () => {
+  it('records the request as metadata without granting a wildcard slot', async () => {
+    const harness = createHarness(importScopes('SINGLES'), [[]]);
+
+    await createRepository(harness.tx).importRosterRows(
+      TOURNAMENT_ID,
+      MANAGER_ID,
+      [
+        {
+          teamName: 'VĐV đặc cách',
+          player1Name: 'VĐV đặc cách',
+          player1Email: UNKNOWN_CONTACT_EMAIL,
+          source: 'EXCEL',
+          entryType: 'WILD_CARD_REQUEST',
+          customResponses: {
+            importedFrom: 'MANUAL_EMAIL',
+            is_wildcard: true,
+            note: 'khách quen',
+          },
+        },
+      ],
+      DIVISION_ID,
+    );
+
+    const [participant] = insertsOf(harness.inserts, 'participants');
+    expect(participant.values.customResponses).toEqual({
+      note: 'khách quen',
+      importedFrom: 'EXCEL',
+      player1Email: UNKNOWN_CONTACT_EMAIL,
+      entryType: 'WILD_CARD_REQUEST',
+    });
+    expect(participant.values.isWildcard).toBeUndefined();
+    expect(participant.values.isMock).toBeUndefined();
+    expect(participant.values.teamStatus).toBe('PENDING_APPROVAL');
+  });
+});
+
 describe('import contact email validation', () => {
   it('rejects a row without a first athlete name before writing anything', async () => {
     const harness = createHarness(importScopes('SINGLES'), []);
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         TOURNAMENT_ID,
         MANAGER_ID,
-        [{ teamName: 'Dòng trống tên', player1Name: '   ', player1Email: 'valid@example.test', autoApprove: true, source: 'MANUAL_EMAIL' }],
+        [
+          {
+            teamName: 'Dòng trống tên',
+            player1Name: '   ',
+            player1Email: 'valid@example.test',
+            autoApprove: true,
+            source: 'MANUAL_EMAIL',
+          },
+        ],
         DIVISION_ID,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -527,7 +570,7 @@ describe('import contact email validation', () => {
     const harness = createHarness(importScopes('SINGLES'), []);
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         TOURNAMENT_ID,
         MANAGER_ID,
         [
@@ -550,7 +593,7 @@ describe('import contact email validation', () => {
     const harness = createHarness(importScopes('DOUBLES'), []);
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         TOURNAMENT_ID,
         MANAGER_ID,
         [
@@ -582,7 +625,7 @@ describe('duplicate email checks for existing tournament rosters', () => {
     );
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         TOURNAMENT_ID,
         MANAGER_ID,
         [

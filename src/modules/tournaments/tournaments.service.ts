@@ -50,6 +50,7 @@ import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
 import type { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
+import type { RosterImportDto } from './dto/roster-import.dto';
 import { MailService } from '../../providers/mail/mail.service';
 import { BracketGeneratorService } from './bracket-generator.service';
 import {
@@ -881,6 +882,20 @@ export class TournamentsService {
     dto: ImportParticipantsDto,
   ) {
     return this.tournamentImportService.importParticipantsFromForm(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+  async importRosterFromForm(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: RosterImportDto,
+  ) {
+    return this.tournamentImportService.importRosterFromForm(
       tournamentId,
       userId,
       systemRoles,

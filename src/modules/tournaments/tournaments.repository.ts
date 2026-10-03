@@ -531,6 +531,11 @@ export class TournamentsRepository {
   ) {
     return this.tournamentImportRepository.previewRosterImport(...args);
   }
+  importRosterRows(
+    ...args: Parameters<TournamentImportRepository['importRosterRows']>
+  ) {
+    return this.tournamentImportRepository.importRosterRows(...args);
+  }
   findOpsAuditLogs(
     ...args: Parameters<TournamentOperationsRepository['findOpsAuditLogs']>
   ) {

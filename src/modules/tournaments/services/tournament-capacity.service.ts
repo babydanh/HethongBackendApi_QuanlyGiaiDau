@@ -12,7 +12,7 @@ import {
 import {
   IMPORT_SOURCES,
   type ImportSource,
-} from '../dto/import-participants.dto';
+} from '../dto/roster-import.dto';
 
 /** Capacity is always expressed in team slots; `maxParticipants` stays a team limit. */
 export interface TournamentCapacitySnapshot {

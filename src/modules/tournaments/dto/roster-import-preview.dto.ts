@@ -7,7 +7,7 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { ParticipantImportItemDto } from './import-participants.dto';
+import { RosterImportItemDto } from './roster-import.dto';
 
 export class RosterImportPreviewDto {
   @ApiPropertyOptional({ description: 'ID của division / nội dung thi đấu' })
@@ -17,12 +17,11 @@ export class RosterImportPreviewDto {
 
   @ApiProperty({
     description: 'Danh sách VĐV / Đội cần xem trước',
-    type: [ParticipantImportItemDto],
-    maxItems: 200,
+    type: [RosterImportItemDto],
   })
   @IsArray()
   @ArrayMaxSize(200)
   @ValidateNested({ each: true })
-  @Type(() => ParticipantImportItemDto)
-  participants: ParticipantImportItemDto[];
+  @Type(() => RosterImportItemDto)
+  participants: RosterImportItemDto[];
 }

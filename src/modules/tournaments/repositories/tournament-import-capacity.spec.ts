@@ -53,15 +53,15 @@ function createHarness(queues: Record<string, Row[][]>) {
       const tables: string[] = [];
       const query: Record<string, unknown> = {};
 
-      const record = (fn: (...args: unknown[]) => unknown) => (
-        ...args: unknown[]
-      ) => {
-        for (const arg of args) {
-          const name = TABLE_KEYS.get(arg);
-          if (name) tables.push(name);
-        }
-        return fn(...args);
-      };
+      const record =
+        (fn: (...args: unknown[]) => unknown) =>
+        (...args: unknown[]) => {
+          for (const arg of args) {
+            const name = TABLE_KEYS.get(arg);
+            if (name) tables.push(name);
+          }
+          return fn(...args);
+        };
 
       query.from = record(() => query);
       query.innerJoin = record(() => query);
@@ -143,12 +143,14 @@ describe('TournamentImportRepository.previewRosterImport', () => {
     const repository = createRepository(tx);
 
     const result = await repository.previewRosterImport('tournament-1', {
-      participants: [{
-        teamName: 'Guest entrant',
-        player1Name: 'Guest entrant',
-        player1Email: 'guest@example.test',
-        source: 'EXCEL',
-      }],
+      participants: [
+        {
+          teamName: 'Guest entrant',
+          player1Name: 'Guest entrant',
+          player1Email: 'guest@example.test',
+          source: 'EXCEL',
+        },
+      ],
     });
 
     expect(result.rows[0]).toMatchObject({
@@ -240,7 +242,13 @@ function divisionImportQueues(options: {
       [{ id: 'tournament-1' }],
     ],
     divisions: [
-      [{ id: 'division-1', tournamentId: 'tournament-1', matchType: 'DOUBLES' }],
+      [
+        {
+          id: 'division-1',
+          tournamentId: 'tournament-1',
+          matchType: 'DOUBLES',
+        },
+      ],
       [{ id: 'division-1' }],
     ],
     'divisions+tournaments': [
@@ -267,7 +275,7 @@ describe('bulk doubles import capacity', () => {
       }),
     );
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [PAIR, PAIR_TWO],
@@ -288,7 +296,7 @@ describe('bulk doubles import capacity', () => {
     );
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         'tournament-1',
         'organizer-1',
         [PAIR, PAIR_TWO],
@@ -309,7 +317,7 @@ describe('bulk doubles import capacity', () => {
       }),
     );
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [PAIR],
@@ -333,9 +341,7 @@ describe('bulk doubles import capacity', () => {
         [{ id: 'tournament-1' }],
         [uncappedTournament],
       ],
-      'participants+rosters': [
-        Array.from({ length: 40 }, () => COMPLETE_PAIR),
-      ],
+      'participants+rosters': [Array.from({ length: 40 }, () => COMPLETE_PAIR)],
       // A tournament-wide occupancy read also carries each row's division
       // format, so its rows arrive under the joined read.
       'divisions+participants+rosters': [
@@ -343,7 +349,7 @@ describe('bulk doubles import capacity', () => {
       ],
     });
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [PAIR],
@@ -357,7 +363,7 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
   it('keeps both the form answers and the validated pair metadata', async () => {
     const harness = createHarness(divisionImportQueues({ entries: [] }));
 
-    await createRepository(harness.tx).importParticipants(
+    await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [
@@ -389,7 +395,7 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
   it('lets the validated second player win over a same-named form answer', async () => {
     const harness = createHarness(divisionImportQueues({ entries: [] }));
 
-    await createRepository(harness.tx).importParticipants(
+    await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [{ ...PAIR, customResponses: { player2Name: 'Ten nhập sai' } }],
@@ -399,9 +405,9 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
     const participantInsert = harness.inserts.find(
       (insert) => insert.table === 'participants',
     );
-    expect(
-      (participantInsert?.values.customResponses as Row).player2Name,
-    ).toBe('Nguyen Van B');
+    expect((participantInsert?.values.customResponses as Row).player2Name).toBe(
+      'Nguyen Van B',
+    );
   });
 });
 
@@ -445,7 +451,7 @@ describe('bulk singles import capacity', () => {
     const harness = createHarness(singlesImportQueues());
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         'tournament-1',
         'organizer-1',
         [SOLO_ROSTER_ENTRY, SOLO_ROSTER_ENTRY_TWO, SOLO_ROSTER_ENTRY_THREE],
@@ -459,7 +465,7 @@ describe('bulk singles import capacity', () => {
   it('admits the two singles rows that exactly fill the cap', async () => {
     const harness = createHarness(singlesImportQueues());
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [SOLO_ROSTER_ENTRY, SOLO_ROSTER_ENTRY_TWO],
@@ -524,7 +530,7 @@ describe('import into a division that has no limit of its own', () => {
     );
 
     await expect(
-      createRepository(harness.tx).importParticipants(
+      createRepository(harness.tx).importRosterRows(
         'tournament-1',
         'organizer-1',
         [PAIR, PAIR_TWO],
@@ -543,7 +549,7 @@ describe('import into a division that has no limit of its own', () => {
       }),
     );
 
-    const result = await createRepository(harness.tx).importParticipants(
+    const result = await createRepository(harness.tx).importRosterRows(
       'tournament-1',
       'organizer-1',
       [PAIR, PAIR_TWO],
