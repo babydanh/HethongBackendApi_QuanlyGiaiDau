@@ -38,14 +38,32 @@ describe('validateRosterRows', () => {
     expect(requestedTeamSlots).toBe(1);
   });
 
-  it('reports a missing player-one email instead of silently accepting the row', () => {
+  it('reports a missing player-one email without refusing the row', () => {
     const { rows } = validateRosterRows({
       ...SINGLES,
       items: [{ teamName: 'Không email', player1Name: 'Không email' }],
     });
 
+    // Still surfaced so the organizer can see the athlete has no account yet,
+    // but a missing address is no longer a hard refusal.
     expect(rows[0].status).toContain('MISSING_EMAIL');
-    expect(rows[0].isEligible).toBe(false);
+    expect(rows[0].isEligible).toBe(true);
+  });
+
+  it('still refuses two email-less rows that name the same athlete', () => {
+    const { rows } = validateRosterRows({
+      ...SINGLES,
+      items: [
+        { teamName: 'CLB A', player1Name: 'Nguyen Van A' },
+        { teamName: 'CLB A', player1Name: 'Nguyen Van A' },
+      ],
+    });
+
+    // With no address to compare on, team plus name is the only identity left.
+    for (const row of rows) {
+      expect(row.status).toContain('DUPLICATE_IN_FILE');
+      expect(row.isEligible).toBe(false);
+    }
   });
 
   it('reports a malformed player-one email', () => {
