@@ -9,6 +9,7 @@ import {
   TOURNAMENT_CLEANUP_GRACE_DAYS,
 } from './utils/tournament-cleanup-policy';
 import { TournamentRegistrationService } from './services/tournament-registration.service';
+import { RankingConsentService } from './services/ranking-consent.service';
 
 @Injectable()
 export class TournamentSchedulerService {
@@ -17,7 +18,30 @@ export class TournamentSchedulerService {
   constructor(
     @Inject(PG_CONNECTION) private readonly db: AppDb,
     private readonly tournamentRegistrationService: TournamentRegistrationService,
+    private readonly rankingConsentService: RankingConsentService,
   ) {}
+
+  /**
+   * Nhắc xác nhận ELO tự động, tối đa 3 lần rồi dừng.
+   *
+   * Hourly, not 5-minutely: the delays are measured in hours, so a finer tick would
+ * only re-check the same rows and burn queries.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleRankingConsentReminders() {
+    try {
+      const sent = await this.rankingConsentService.sendDueReminders();
+      if (sent > 0) {
+        this.logger.log(`Đã gửi ${sent} nhắc xác nhận Elo.`);
+      }
+    } catch (err) {
+      this.logger.error(
+        `Nhắc xác nhận Elo thất bại: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
   @Cron('*/5 * * * *')
   async handleRegistrationsTimeout() {
     await this.tournamentRegistrationService.processPendingRegistrationTimeout();

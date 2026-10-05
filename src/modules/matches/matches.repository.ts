@@ -1953,24 +1953,41 @@ export class MatchesRepository {
     const hasMockParticipant =
       mockParticipants.some((participant) => participant.isMock) ||
       mockRosterUsers.some((roster) => roster.isMock);
-    // Gate on rankingConsentAt (the instant the player confirmed), NOT on the
-    // rankingConsent boolean — that boolean is a copy of the tournament's isRanked
-    // flag and is true for every entrant of a ranked tournament, so gating on it
-    // would let everyone through. A participant with NULL here has not confirmed,
-    // and all-or-nothing is deliberate: splitting it per-player would let a player
-    // farm rating by facing opponents who never consented, since only the
-    // consenting side's delta would be kept.
-    const consentRows = participantIds.length
+    // Consent lives on tournament_rosters, one row per USER — matching how
+    // processMatchResult applies ELO (rankings.service.ts:600-617 / 628-645 read
+    // tournamentRosters.userId per participant). Reading it off the participant
+    // would let one team-mate's confirmation hand every other user their score.
+    //
+    // The roster predicate must stay exactly `.where(eq(participantId, X))` — no
+    // status filter. Adding `status = 'ACTIVE'` would give a REMOVED/INVITED row
+    // a NULL consent forever and silently kill ELO for the whole participant.
+    //
+    // A participant with NO roster row (Excel import, no account) must fail:
+    // `[].every()` is true, so an empty roster would otherwise pass the gate and
+    // such entrants — who have no account to confirm — would be scored anyway.
+    //
+    // All-or-nothing is deliberate: scoring only the consenting side would let a
+    // player farm rating by facing opponents who never confirmed.
+    const consentRosterRows = participantIds.length
       ? await tx
           .select({
-            rankingConsentAt: schema.tournamentParticipants.rankingConsentAt,
+            participantId: schema.tournamentRosters.participantId,
+            rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
           })
-          .from(schema.tournamentParticipants)
-          .where(inArray(schema.tournamentParticipants.id, participantIds))
+          .from(schema.tournamentRosters)
+          .where(inArray(schema.tournamentRosters.participantId, participantIds))
       : [];
     const allParticipantsConsented =
-      participantIds.length === consentRows.length &&
-      consentRows.every((row) => row.rankingConsentAt !== null);
+      participantIds.length > 0 &&
+      consentRosterRows.length > 0 &&
+      participantIds.every((participantId) => {
+        const rows = consentRosterRows.filter(
+          (row) => row.participantId === participantId,
+        );
+        return (
+          rows.length > 0 && rows.every((row) => row.rankingConsentAt !== null)
+        );
+      });
 
     const footballTeamRows = participantIds.length
       ? await tx

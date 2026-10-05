@@ -588,6 +588,7 @@ export class TournamentImportRepository {
   ): Promise<{
     participants: (typeof schema.tournamentParticipants.$inferSelect)[];
     linkedAccountNotifications: Array<{
+      rosterId: string;
       userId: string;
       status: 'COMPLETE' | 'PENDING_APPROVAL';
       divisionId: string | null;
@@ -611,6 +612,7 @@ export class TournamentImportRepository {
     const participants: (typeof schema.tournamentParticipants.$inferSelect)[] =
       [];
     const linkedAccountNotifications: Array<{
+      rosterId: string;
       userId: string;
       status: 'COMPLETE' | 'PENDING_APPROVAL';
       divisionId: string | null;
@@ -651,12 +653,16 @@ export class TournamentImportRepository {
           (value): value is string => Boolean(value),
         ),
       )) {
-        await tx.insert(schema.tournamentRosters).values({
-          participantId: participant.id,
-          userId: linkedUserId,
-          role: 'MAIN',
-        });
+        const [rosterRow] = await tx
+          .insert(schema.tournamentRosters)
+          .values({
+            participantId: participant.id,
+            userId: linkedUserId,
+            role: 'MAIN',
+          })
+          .returning({ id: schema.tournamentRosters.id });
         linkedAccountNotifications.push({
+          rosterId: rosterRow.id,
           userId: linkedUserId,
           status: teamStatus,
           divisionId: divisionId ?? null,

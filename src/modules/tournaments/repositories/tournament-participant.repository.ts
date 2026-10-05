@@ -103,6 +103,78 @@ export class TournamentParticipantRepository {
       .limit(1);
     return participant?.participant ?? null;
   }
+
+  /**
+   * Records the instant a player agreed to have their results ranked.
+   *
+   * Writes the CALLER's own roster row, not the participant: ELO is applied per
+   * tournament_rosters.userId, so consent has to be per user too. Setting it on the
+   * participant would hand every MAIN/RESERVE team-mate their score without them
+   * ever agreeing.
+   *
+   * Only the player themself may set this — an organizer-facing version would
+   * defeat the whole rule, which exists so nobody can be force-enrolled and then
+   * have results land against them.
+   *
+   * Idempotent on purpose: once the timestamp exists it is NEVER rewritten.
+   * Re-stamping it on a repeat click would push the scoring boundary forward and
+   * let a player un-score matches they had already agreed to have counted.
+   */
+  async confirmRankingConsent(tournamentId: string, userId: string) {
+    const participant = await this.findParticipantByTournamentAndUser(
+      tournamentId,
+      userId,
+    );
+    if (!participant) return null;
+
+    const [updated] = await this.db
+      .update(schema.tournamentRosters)
+      .set({ rankingConsentAt: new Date() })
+      .where(
+        and(
+          eq(schema.tournamentRosters.participantId, participant.id),
+          eq(schema.tournamentRosters.userId, userId),
+          isNull(schema.tournamentRosters.rankingConsentAt),
+        ),
+      )
+      .returning({
+        participantId: schema.tournamentRosters.participantId,
+        rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+      });
+
+    if (updated) {
+      return {
+        participantId: updated.participantId,
+        consentedAt: updated.rankingConsentAt,
+        alreadyConfirmed: false as const,
+      };
+    }
+
+    // The update matched nothing, so the instant was already set. Read it back
+    // rather than returning null: "not in this tournament" and "already
+    // confirmed" are different answers, and collapsing them would make the API
+    // 404 a player who simply tapped the button twice.
+    const [existing] = await this.db
+      .select({
+        participantId: schema.tournamentRosters.participantId,
+        rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+      })
+      .from(schema.tournamentRosters)
+      .where(
+        and(
+          eq(schema.tournamentRosters.participantId, participant.id),
+          eq(schema.tournamentRosters.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (!existing) return null;
+    return {
+      participantId: existing.participantId,
+      consentedAt: existing.rankingConsentAt,
+      alreadyConfirmed: true as const,
+    };
+  }
   async countParticipants(tournamentId: string) {
     const [result] = await this.db
       .select({ count: count() })

@@ -294,6 +294,7 @@ describe('TournamentsService — Lite pairing guards', () => {
           mockRepo as unknown as TournamentsRepository,
         ),
         mockNotifications as unknown as NotificationsService,
+        { sendConfirmationRequest: jest.fn().mockResolvedValue(false) } as never,
       ),
       new TournamentBracketService(
         mockRepo as unknown as TournamentsRepository,

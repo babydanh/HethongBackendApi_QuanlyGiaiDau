@@ -190,6 +190,7 @@ describe('TournamentsService registration lifecycle', () => {
           repository as unknown as TournamentsRepository,
         ),
         null as unknown as NotificationsService,
+        { sendConfirmationRequest: jest.fn().mockResolvedValue(false) } as never,
       ),
       new TournamentBracketService(
         repository as unknown as TournamentsRepository,
