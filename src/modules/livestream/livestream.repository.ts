@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -54,7 +54,19 @@ export class LivestreamRepository {
 
   async listCameras(tournamentId: string) {
     return this.db
-      .select()
+      .select({
+        id: schema.livestreamCameras.id,
+        tournamentId: schema.livestreamCameras.tournamentId,
+        name: schema.livestreamCameras.name,
+        mode: schema.livestreamCameras.mode,
+        courtId: schema.livestreamCameras.courtId,
+        protocol: schema.livestreamCameras.protocol,
+        streamName: schema.livestreamCameras.streamName,
+        status: schema.livestreamCameras.status,
+        playbackUrl: schema.livestreamCameras.playbackUrl,
+        createdAt: schema.livestreamCameras.createdAt,
+        updatedAt: schema.livestreamCameras.updatedAt,
+      })
       .from(schema.livestreamCameras)
       .where(
         and(
@@ -197,6 +209,11 @@ export class LivestreamRepository {
    * Chỉ dùng cho đường đọc (gán sẵn cho trận, dựng URL phát). Đường ghi của
    * PULL vẫn phải dùng `findPullCameraByCourt`, nếu không thì việc BTC dán URL
    * PULL sẽ nhảy vào camera PUSH của sân và đè mất playbackUrl của nó.
+   *
+   * Sân có cả PULL lẫn PUSH thì URL BTC khai (PULL) THẮNG. Trước đây chỉ xếp theo
+   * `updatedAt`, nên thêm một camera PUSH là URL phát của sân bị che: khán giả
+   * nhận URL của camera chưa ai đẩy luồng và thấy màn đen dù sân vẫn đang phát.
+   * PULL là luồng BTC tuyên bố cho CẢ sân; PUSH chỉ là thiết bị phụ.
    */
   async findActiveCameraByCourt(courtId: string, tournamentId: string) {
     const [camera] = await this.db
@@ -209,10 +226,50 @@ export class LivestreamRepository {
           isNull(schema.livestreamCameras.deletedAt),
         ),
       )
-      .orderBy(desc(schema.livestreamCameras.updatedAt))
+      .orderBy(
+        desc(sql`(${schema.livestreamCameras.mode} = 'PULL')`),
+        desc(schema.livestreamCameras.updatedAt),
+      )
       .limit(1);
 
     return camera ?? null;
+  }
+
+  /**
+   * Các trận của một sân CHƯA có camera nào. Dùng khi BTC khai camera cho sân sau
+   * khi lịch đã xếp: những trận đó phải được gán camera của sân, nếu không nút
+   * "Bắt đầu" hiện sáng nhưng API từ chối.
+   *
+   * Trận đã gán camera (tay hoặc của sân) bị loại, nên thao tác này không bao giờ
+   * ghi đè lựa chọn thủ công hay reset một luồng đang chạy. Phép join thứ hai lọc
+   * `deletedAt` giống `findMatchLivestream`: camera đã xoá mềm được coi như chưa
+   * gán, nếu không trận còn trỏ camera mồ côi sẽ không bao giờ được gán lại.
+   */
+  async listMatchIdsWithoutCameraOnCourt(courtId: string, tournamentId: string) {
+    const rows = await this.db
+      .select({ id: schema.matches.id })
+      .from(schema.matches)
+      .leftJoin(
+        schema.matchLivestreams,
+        eq(schema.matchLivestreams.matchId, schema.matches.id),
+      )
+      .leftJoin(
+        schema.livestreamCameras,
+        and(
+          eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.matches.courtId, courtId),
+          eq(schema.matches.tournamentId, tournamentId),
+          isNull(schema.matches.deletedAt),
+          isNull(schema.livestreamCameras.id),
+        ),
+      );
+
+    return rows.map((row) => row.id);
   }
 
   async findCameraById(cameraId: string) {
@@ -406,9 +463,17 @@ export class LivestreamRepository {
     return stream ?? null;
   }
 
+  /**
+   * `OFFLINE` là dấu "BTC đã bấm Dừng", khác hẳn `IDLE` ("chưa từng phát").
+   *
+   * Nhánh playback của sân cần phân biệt hai thứ này: lịch xếp sân có camera ghi
+   * `IDLE` lúc gán, nếu coi `IDLE` là "đã dừng" thì trận ONGOING mất video ngay
+   * khi vừa xếp lịch. Ngược lại nếu không có dấu dừng nào thì nút Dừng chẳng có
+   * tác dụng gì với trận dùng camera sân — video vẫn phát theo trạng thái trận.
+   */
   async updateStreamStatus(
     matchId: string,
-    status: 'IDLE' | 'LIVE',
+    status: 'IDLE' | 'LIVE' | 'OFFLINE',
     _userId: string | null,
     playbackUrl: string | null,
   ) {

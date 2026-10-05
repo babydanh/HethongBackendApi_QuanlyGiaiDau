@@ -40,12 +40,12 @@ export class LivestreamService {
     return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
   }
 
-  private getMediaServerHost() {
-    return this.configService.get<string>('LIVESTREAM_MEDIA_SERVER_HOST') || 'media.aqvision.net';
-  }
-
   private getRtmpBaseUrl() {
     return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://sporto.asia:1935/live';
+  }
+
+  private getSrtBaseUrl() {
+    return this.configService.get<string>('LIVESTREAM_SRT_BASE_URL') || 'srt://localhost:8890';
   }
 
   private getHlsBaseUrl() {
@@ -93,21 +93,26 @@ export class LivestreamService {
 
   // ENDED was used by the old stop flow. Replay is not supported yet, so it
   // must not permanently block a match or a newly assigned camera.
+  // `OFFLINE` is the explicit "the organizer pressed Stop" marker and is kept:
+  // it is what separates a match whose court feed was switched off from one that
+  // was merely scheduled and never started.
   private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T): T;
   private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T | null | undefined): T | null;
   private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T | null | undefined): T | null {
     if (!stream) return null;
     if (stream.streamStatus !== 'ENDED') return stream;
+    // Legacy ENDED rows came from the old stop flow, so they map onto the same
+    // explicit stopped marker the current stop writes.
     return {
       ...stream,
-      streamStatus: 'IDLE',
+      streamStatus: 'OFFLINE',
       endedAt: null,
       playbackUrl: null,
     };
   }
 
   private buildSrtUrl(streamName: string) {
-    const baseUrl = this.configService.get<string>('LIVESTREAM_SRT_BASE_URL') || 'srt://localhost:8890';
+    const baseUrl = this.getSrtBaseUrl();
     return `${baseUrl.replace(/\/$/, '')}?streamid=publish:${streamName}`;
   }
 
@@ -161,13 +166,80 @@ export class LivestreamService {
     return match;
   }
 
+  /**
+   * Bản chiếu công khai của một camera.
+   *
+   * `listCameras` và `createCamera` đọc cả hàng (`select()` không cột), nên trả
+   * nguyên hàng sẽ đẩy `streamKey` và ba cột `*_encrypted` (RTSP URL, tài khoản,
+   * mật khẩu) ra frontend — những cột mà `LivestreamCamera` không hề mô hình hoá.
+   * Liệt kê cột tường minh để một cột nhạy cảm thêm sau này không tự động rò rỉ.
+   */
+  private toPublicCamera(camera: {
+    id: string;
+    tournamentId: string;
+    name: string;
+    mode: string;
+    courtId: string | null;
+    protocol: string;
+    streamName: string;
+    status: string;
+    playbackUrl: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return {
+      id: camera.id,
+      tournamentId: camera.tournamentId,
+      name: camera.name,
+      mode: camera.mode,
+      courtId: camera.courtId,
+      protocol: camera.protocol,
+      streamName: camera.streamName,
+      status: camera.status,
+      playbackUrl: this.normalizePublicPlaybackUrl(camera.playbackUrl),
+      // Ingest endpoints a broadcaster types into OBS. Derived from config on
+      // every read, so the UI never has to hardcode a host that drifts from the
+      // deployment. The stream key itself is `streamName`, already public.
+      ingest:
+        camera.mode === 'PULL'
+          ? null
+          : { rtmp: this.getRtmpBaseUrl(), srt: this.getSrtBaseUrl() },
+      createdAt: camera.createdAt,
+      updatedAt: camera.updatedAt,
+    };
+  }
+
   async listCameras(tournamentId: string, user: JwtPayload) {
     await this.assertTournamentOperator(tournamentId, user);
     const cameras = await this.livestreamRepository.listCameras(tournamentId);
-    return cameras.map((camera) => ({
-      ...camera,
-      playbackUrl: this.normalizePublicPlaybackUrl(camera.playbackUrl),
-    }));
+    return cameras.map((camera) => this.toPublicCamera(camera));
+  }
+
+  /**
+   * Gán camera của sân cho những trận đã xếp ở sân đó nhưng chưa có camera.
+   *
+   * Thiếu bước này, BTC thêm camera sau khi lịch đã xếp sẽ thấy nút "Bắt đầu"
+   * sáng lên (vì sân đã có camera) nhưng API từ chối vì trận chưa được gán camera.
+   * Chỉ chạm các trận CHƯA có camera nên không ghi đè lựa chọn thủ công và không
+   * đụng vào luồng đang chạy.
+   */
+  private async backfillCourtCameraAssignments(
+    courtId: string,
+    tournamentId: string,
+    camera: { id: string; playbackUrl: string | null },
+  ) {
+    const matchIds = await this.livestreamRepository.listMatchIdsWithoutCameraOnCourt(
+      courtId,
+      tournamentId,
+    );
+    if (matchIds.length === 0) return;
+
+    const playbackUrl = this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '';
+    await Promise.all(
+      matchIds.map((matchId) =>
+        this.livestreamRepository.assignCameraToMatch(matchId, camera.id, playbackUrl),
+      ),
+    );
   }
 
   async listMatchLivestreams(tournamentId: string, user: JwtPayload) {
@@ -198,7 +270,9 @@ export class LivestreamService {
     data: SetCourtPlaybackUrlDto,
   ) {
     await this.assertTournamentOperator(tournamentId, user);
-    await this.assertCourtUsableByTournament(courtId, tournamentId);
+    const tournamentIdsUsingCourt =
+      await this.livestreamRepository.findTournamentIdsUsingCourt(courtId);
+    await this.assertCourtUsableByTournament(courtId, tournamentId, tournamentIdsUsingCourt);
 
     const trimmed = data.playbackUrl?.trim();
     const existing = await this.livestreamRepository.findPullCameraByCourt(courtId, tournamentId);
@@ -235,6 +309,10 @@ export class LivestreamService {
       createdBy: user.sub,
     });
 
+    // Lịch có thể đã xếp trước khi sân được khai URL. Gán luôn cho các trận của
+    // sân để chúng phát được ngay, thay vì bắt BTC bấm gán tay từng trận.
+    await this.backfillCourtCameraAssignments(courtId, tournamentId, created);
+
     return { courtId, playbackUrl: created.playbackUrl, cameraId: created.id };
   }
 
@@ -270,8 +348,15 @@ export class LivestreamService {
       createdBy: user.sub,
     });
 
+    // Cùng lý do như `setCourtPlaybackUrl`: lịch có thể đã xếp trước khi camera
+    // ra đời, nên gán ngay cho các trận của sân thay vì để nút "Bắt đầu" sáng
+    // nhưng API từ chối.
+    if (courtId) {
+      await this.backfillCourtCameraAssignments(courtId, tournamentId, camera);
+    }
+
     return {
-      ...camera,
+      ...this.toPublicCamera(camera),
       // PULL không có URL ingest để BTC cấu hình ở OBS/Camera Station.
       publish: mode === 'PULL' ? null : this.buildPublishInfo(protocol, streamName),
     };
@@ -281,8 +366,14 @@ export class LivestreamService {
    * Sân phải thuộc địa điểm mà giải này dùng — qua cả venue mặc định lẫn venue
    * theo vòng — nếu không thì khai URL cho sân của giải khác sẽ lọt vào đây.
    */
-  private async assertCourtUsableByTournament(courtId: string, tournamentId: string) {
-    const tournamentIds = await this.livestreamRepository.findTournamentIdsUsingCourt(courtId);
+  private async assertCourtUsableByTournament(
+    courtId: string,
+    tournamentId: string,
+    precomputedTournamentIds?: string[],
+  ) {
+    const tournamentIds =
+      precomputedTournamentIds ??
+      (await this.livestreamRepository.findTournamentIdsUsingCourt(courtId));
     if (tournamentIds.length === 0) {
       throw new NotFoundException('Sân không tồn tại');
     }
@@ -321,7 +412,8 @@ export class LivestreamService {
     }
 
     await this.assertTournamentOperator(camera.tournamentId, user);
-    return this.livestreamRepository.deleteCamera(cameraId);
+    const archived = await this.livestreamRepository.deleteCamera(cameraId);
+    return archived ? this.toPublicCamera(archived) : null;
   }
 
   async assignCamera(matchId: string, user: JwtPayload, data: AssignCameraDto) {
@@ -458,7 +550,12 @@ export class LivestreamService {
     }
 
     // Stopping a broadcast is reversible. Recording/replay is a separate feature.
-    return this.livestreamRepository.updateStreamStatus(matchId, 'IDLE', user.sub, null);
+    //
+    // Ghi OFFLINE, không phải IDLE: nhánh playback của sân đọc trạng thái này để
+    // biết BTC đã bấm Dừng, nên nút Dừng mới thực sự tắt được hình của trận dùng
+    // camera sân. IDLE là "chưa từng phát" — dùng nó ở đây sẽ khiến lần dừng đầu
+    // tiên trông giống hệt trạng thái chưa bấm gì.
+    return this.livestreamRepository.updateStreamStatus(matchId, 'OFFLINE', user.sub, null);
   }
 
   async getMatchPlayback(matchId: string) {
@@ -506,7 +603,12 @@ export class LivestreamService {
     // Sân có URL KHÔNG có nghĩa là đang phát. Chỉ trận đã bắt đầu (ONGOING) mới
     // được trả playbackUrl, nếu không thì khán giả sẽ thấy video dù BTC chưa bấm
     // "Bắt đầu" — đúng triệu chứng "có URL nhưng màn hình đen/ảo" khó chẩn đoán.
-    if (courtCamera?.playbackUrl && match.status === 'ONGOING') {
+    //
+    // Trạng thái trận một mình không đủ để tắt hình: nếu BTC đã bấm Dừng (OFFLINE)
+    // thì dừng phải thắng, kể cả khi trận vẫn ONGOING. Không có điều kiện này, nút
+    // Dừng không có tác dụng gì với trận dùng camera sân.
+    const isStoppedByOperator = stream?.streamStatus === 'OFFLINE';
+    if (courtCamera?.playbackUrl && match.status === 'ONGOING' && !isStoppedByOperator) {
       const courtUrl = this.normalizePublicPlaybackUrl(courtCamera.playbackUrl);
       return {
         matchId,
