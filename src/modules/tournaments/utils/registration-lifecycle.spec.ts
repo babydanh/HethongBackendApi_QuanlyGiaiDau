@@ -180,6 +180,9 @@ describe('TournamentsService registration lifecycle', () => {
           repository as unknown as TournamentsRepository,
         ),
         null as unknown as NotificationsService,
+        {} as never,
+        {} as never,
+        {} as never,
       ),
       new TournamentImportService(
         repository as unknown as TournamentsRepository,

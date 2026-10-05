@@ -480,28 +480,30 @@ describe('import rows follow the current one/doubles contract', () => {
     expect(insertsOf(harness.inserts, 'rosters')).toEqual([]);
   });
 
-  it('rejects a named doubles partner without an email before writing anything', async () => {
+  it('imports a named doubles partner without an email instead of refusing it', async () => {
     const harness = createHarness(importScopes('DOUBLES'), []);
 
-    await expect(
-      createRepository(harness.tx).importRosterRows(
-        TOURNAMENT_ID,
-        MANAGER_ID,
-        [
-          {
-            teamName: 'Cặp đôi thiếu email',
-            player1Name: 'Nguyen Van A',
-            player1Email: LINKED_EMAIL,
-            player2Name: 'Nguyen Van B',
-            autoApprove: true,
-            source: 'MANUAL_EMAIL',
-          },
-        ],
-        DIVISION_ID,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    // The partner simply has no account yet. Refusing the row meant organizers
+    // could not enter an athlete whose fee they had already collected.
+    await createRepository(harness.tx).importRosterRows(
+      TOURNAMENT_ID,
+      MANAGER_ID,
+      [
+        {
+          teamName: 'Cặp đôi thiếu email',
+          player1Name: 'Nguyen Van A',
+          player1Email: LINKED_EMAIL,
+          player2Name: 'Nguyen Van B',
+          autoApprove: true,
+          source: 'MANUAL_EMAIL',
+        },
+      ],
+      DIVISION_ID,
+    );
 
-    expect(harness.inserts).toEqual([]);
+    // One participant row: an unlinked partner has no user to create, so the
+    // name is kept on the row instead of becoming a second participant.
+    expect(insertsOf(harness.inserts, 'participants')).toHaveLength(1);
   });
 });
 

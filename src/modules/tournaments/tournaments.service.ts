@@ -875,6 +875,23 @@ export class TournamentsService {
       (id, payload) => this.broadcastRegistrationChanged(id, payload),
     );
   }
+
+  async setParticipantFeePaid(
+    tournamentId: string,
+    participantId: string,
+    paid: boolean,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    return this.tournamentParticipantAdminService.setParticipantFeePaid(
+      tournamentId,
+      participantId,
+      paid,
+      userId,
+      systemRoles,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
   async importParticipantsFromForm(
     tournamentId: string,
     userId: string,
@@ -1251,8 +1268,12 @@ export class TournamentsService {
     return this.tournamentLiteService.getLiteJoinStatus(inviteCode, userId);
   }
 
-  async joinLite(inviteCode: string, userId: string) {
-    return this.tournamentLiteService.joinLite(inviteCode, userId);
+  async joinLite(
+    inviteCode: string,
+    userId: string,
+    divisionId?: string,
+  ) {
+    return this.tournamentLiteService.joinLite(inviteCode, userId, divisionId);
   }
 
   async updateLiteBracketSlots(
@@ -1292,6 +1313,7 @@ export class TournamentsService {
     memberUserId: string,
     actorUserId: string,
     systemRoles: string[] = [],
+    divisionId?: string,
   ) {
     return this.tournamentLiteService.addLiteClubMember(
       tournamentId,
@@ -1300,6 +1322,7 @@ export class TournamentsService {
       (id, userId, data, inviteCode, actor) =>
         this.register(id, userId, data, inviteCode, actor),
       systemRoles,
+      divisionId,
     );
   }
 

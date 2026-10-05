@@ -201,7 +201,14 @@ export interface ValidatedRosterRows {
 
 const BLOCKING_STATUSES: ReadonlySet<RosterRowStatus> = new Set<RosterRowStatus>([
   'INVALID_EMAIL',
-  'MISSING_EMAIL',
+  // MISSING_EMAIL is deliberately absent. A missing address means the athlete
+  // has no account yet, not that the row is unusable: organizers collect fees on
+  // paper all the time. The row still imports, is still a real athlete rather
+  // than mock data, and the preview shows a note.
+  //
+  // The cost is identity. Nothing can later match this row to a user, to an
+  // existing entry, or to a notification, so it cannot complete its own profile.
+  // That trade belongs to the organizer, not to the system.
   'MISSING_NAME',
   'DUPLICATE_IN_FILE',
   'DUPLICATE_IN_TOURNAMENT',
@@ -226,6 +233,23 @@ export function normalizeRosterEmail(value: string): string {
  * database question answered by `resolveRosterAccountStatuses`, so this stays
  * pure and the preview and commit share one rule set.
  */
+/**
+ * Fallback identity for a row that carries no address.
+ *
+ * Weaker than an address on purpose: it cannot tell two different athletes with
+ * the same team name apart, and it cannot be compared against entries already
+ * in the tournament. But it is the only thing left when the address is blank,
+ * and without it importing the same file twice silently doubles the roster.
+ */
+const rosterIdentityKey = (item: {
+  teamName?: string;
+  divisionName?: string;
+  player1Name?: string;
+}): string =>
+  [item.teamName ?? '', item.divisionName ?? '', item.player1Name ?? '']
+    .map((part) => part.trim().toLowerCase())
+    .join(' ');
+
 export function validateRosterRows(
   input: ValidateRosterRowsInput,
 ): ValidatedRosterRows {
@@ -247,6 +271,16 @@ export function validateRosterRows(
     const owners = claimedBy.get(email);
     if (owners) owners.push(rowIndex);
     else claimedBy.set(email, [rowIndex]);
+  };
+
+  // Rows with no address never enter claimedBy, because claiming is gated on
+  // the address pattern. Once MISSING_EMAIL stopped blocking, that left them
+  // with no duplicate detection at all, so they are keyed separately.
+  const claimedByIdentity = new Map<string, number[]>();
+  const claimIdentity = (key: string, rowIndex: number): void => {
+    const owners = claimedByIdentity.get(key);
+    if (owners) owners.push(rowIndex);
+    else claimedByIdentity.set(key, [rowIndex]);
   };
 
   for (const [rowIndex, item] of items.entries()) {
@@ -306,6 +340,9 @@ export function validateRosterRows(
     if (ROSTER_EMAIL_PATTERN.test(player1Email)) {
       claimEmail(player1Email, rowIndex);
     }
+    if (!player1Email) {
+      claimIdentity(rosterIdentityKey(item), rowIndex);
+    }
     if (player2Email && ROSTER_EMAIL_PATTERN.test(player2Email)) {
       claimEmail(player2Email, rowIndex);
     }
@@ -333,6 +370,15 @@ export function validateRosterRows(
   }
 
   for (const owners of claimedBy.values()) {
+    if (owners.length < 2) continue;
+    for (const rowIndex of owners) {
+      const row = rows[rowIndex];
+      if (row.status.includes('DUPLICATE_IN_FILE')) continue;
+      row.status.push('DUPLICATE_IN_FILE');
+      row.isEligible = false;
+    }
+  }
+  for (const owners of claimedByIdentity.values()) {
     if (owners.length < 2) continue;
     for (const rowIndex of owners) {
       const row = rows[rowIndex];

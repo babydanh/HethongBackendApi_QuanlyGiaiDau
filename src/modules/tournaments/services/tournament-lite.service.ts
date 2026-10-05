@@ -1033,6 +1033,16 @@ export class TournamentLiteService {
       categoryName = cat?.name;
     }
 
+    const activeDivisions = (
+      await this.tournamentsRepository.getDivisionsByTournament(tournament.id)
+    )
+      .filter((division) => division.status !== 'CANCELLED')
+      .map(({ id, name, matchType, genderRestriction }) => ({
+        id,
+        name,
+        matchType,
+        genderRestriction,
+      }));
     const base = {
       tournament: {
         id: t.id,
@@ -1045,6 +1055,7 @@ export class TournamentLiteService {
         // Club Lite one-tap flow from Public Quick, which must use the full
         // registration flow (partner/roster support included).
         communityId: tournament.communityId ?? null,
+        divisions: activeDivisions,
       },
     };
 
@@ -1136,7 +1147,11 @@ export class TournamentLiteService {
 
     return { ...base, canJoin: true };
   }
-  async joinLite(inviteCode: string, userId: string) {
+  async joinLite(
+    inviteCode: string,
+    userId: string,
+    divisionId?: string,
+  ) {
     const tournament =
       await this.tournamentsRepository.findByInviteCode(inviteCode);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
@@ -1158,6 +1173,21 @@ export class TournamentLiteService {
     ) {
       throw new BadRequestException('Thời gian đăng ký đã kết thúc.');
     }
+    const activeDivisions = (
+      await this.tournamentsRepository.getDivisionsByTournament(tournament.id)
+    ).filter((division) => division.status !== 'CANCELLED');
+    if (
+      divisionId &&
+      !activeDivisions.some((division) => division.id === divisionId)
+    ) {
+      throw new BadRequestException('Nội dung thi đấu không hợp lệ.');
+    }
+    if (!divisionId && activeDivisions.length > 1) {
+      throw new BadRequestException(
+        'Vui lòng chọn nội dung thi đấu trước khi đăng ký.',
+      );
+    }
+    const selectedDivisionId = divisionId ?? activeDivisions[0]?.id;
 
     // Check club membership
     if (tournament.communityId) {
@@ -1224,6 +1254,9 @@ export class TournamentLiteService {
       {
         teamName: name,
         rankingConsent: tournament.isRanked === true,
+        ...(selectedDivisionId
+          ? { tournamentDivisionId: selectedDivisionId }
+          : {}),
       },
       inviteCode,
     );
@@ -1358,6 +1391,7 @@ export class TournamentLiteService {
     actorUserId: string,
     registerParticipant: RegisterLiteParticipant,
     systemRoles: string[] = [],
+    divisionId?: string,
   ) {
     const { tournament } = await this.checkLiteAuthorization(
       tournamentId,
@@ -1397,6 +1431,7 @@ export class TournamentLiteService {
       {
         teamName: profile.fullName.trim(),
         rankingConsent: tournament.isRanked === true,
+        ...(divisionId ? { tournamentDivisionId: divisionId } : {}),
       },
       undefined,
       actorUserId,

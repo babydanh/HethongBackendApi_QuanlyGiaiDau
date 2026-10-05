@@ -1,5 +1,6 @@
 import {
   isMixedGenderPair,
+  isPairEligibleForDivision,
   normalizeGenderRestriction,
   normalizeProfileGender,
 } from './gender.helper';
@@ -39,4 +40,89 @@ describe('gender normalization', () => {
     expect(isMixedGenderPair('MALE', 'MALE')).toBe(false);
     expect(isMixedGenderPair('FEMALE', 'Khác')).toBe(false);
   });
+});
+describe('open doubles pairing eligibility', () => {
+  it.each([
+    {
+      divisionMatchType: 'DOUBLES',
+      genderRestriction: null,
+      firstGender: 'MALE',
+      secondGender: 'FEMALE',
+      eligible: true,
+    },
+    {
+      divisionMatchType: 'DOUBLES',
+      genderRestriction: null,
+      firstGender: null,
+      secondGender: 'MALE',
+      eligible: true,
+    },
+    {
+      divisionMatchType: 'DOUBLES',
+      genderRestriction: 'OPEN',
+      firstGender: null,
+      secondGender: null,
+      eligible: true,
+    },
+    {
+      divisionMatchType: 'DOUBLES',
+      genderRestriction: 'MALE',
+      firstGender: 'MALE',
+      secondGender: 'MALE',
+      eligible: true,
+    },
+    {
+      divisionMatchType: 'DOUBLES',
+      genderRestriction: 'MALE',
+      firstGender: 'MALE',
+      secondGender: 'FEMALE',
+      eligible: false,
+    },
+    {
+      divisionMatchType: 'MIXED_DOUBLES',
+      genderRestriction: 'MIXED',
+      firstGender: 'MALE',
+      secondGender: 'FEMALE',
+      eligible: true,
+    },
+    {
+      divisionMatchType: 'MIXED_DOUBLES',
+      genderRestriction: 'MIXED',
+      firstGender: 'MALE',
+      secondGender: 'MALE',
+      eligible: false,
+    },
+    {
+      divisionMatchType: 'SINGLES',
+      genderRestriction: null,
+      firstGender: 'MALE',
+      secondGender: 'FEMALE',
+      eligible: false,
+    },
+    {
+      divisionMatchType: 'DOUBLES',
+      genderRestriction: 'UNKNOWN',
+      firstGender: 'MALE',
+      secondGender: 'MALE',
+      eligible: false,
+    },
+  ])(
+    'evaluates $divisionMatchType / $genderRestriction pair eligibility',
+    ({
+      divisionMatchType,
+      genderRestriction,
+      firstGender,
+      secondGender,
+      eligible,
+    }) => {
+      expect(
+        isPairEligibleForDivision(
+          divisionMatchType,
+          genderRestriction,
+          firstGender,
+          secondGender,
+        ),
+      ).toBe(eligible);
+    },
+  );
 });

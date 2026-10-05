@@ -30,6 +30,7 @@ import {
   buildRegistrationTimeoutNotification,
 } from '../../notifications/notification-builder';
 import {
+  isGenderUnrestricted,
   normalizeGenderRestriction,
   normalizeProfileGender,
 } from '../../../common/helpers/gender.helper';
@@ -145,7 +146,7 @@ export class TournamentRegistrationService {
   }
   private async validateProfileComplete(
     userId: string,
-    options?: { isLite?: boolean },
+    options?: { isLite?: boolean; requireGender?: boolean },
   ): Promise<void> {
     const profile = await this.tournamentsRepository.findUserProfile(userId);
     if (!profile?.fullName) {
@@ -153,13 +154,17 @@ export class TournamentRegistrationService {
         'Vui lòng cập nhật họ tên trước khi tham gia giải đấu.',
       );
     }
-    // Đối với giải Siêu Lite nội bộ CLB: phong trào nhanh gọn, KHÔNG bắt buộc số điện thoại hay giới tính!
     if (options?.isLite) {
       return;
     }
-    if (!profile.phoneNumber || !profile.gender) {
+
+    const requireGender = options?.requireGender ?? true;
+    if (!profile.phoneNumber || (requireGender && !profile.gender)) {
+      const requiredFields = requireGender
+        ? 'họ tên, số điện thoại và giới tính'
+        : 'họ tên và số điện thoại';
       throw new BadRequestException(
-        'Vui lòng cập nhật đầy đủ họ tên, số điện thoại và giới tính trước khi đăng ký giải đấu.',
+        `Vui lòng cập nhật đầy đủ ${requiredFields} trước khi đăng ký giải đấu.`,
       );
     }
   }
@@ -311,8 +316,7 @@ export class TournamentRegistrationService {
 
     this.assertRegistrationAccessible(tournament, { inviteCode });
 
-    // 2. Chỉ kiểm tra hồ sơ cá nhân khi đã là thành viên CLB hợp lệ (giải Siêu Lite không bắt gender)
-    await this.validateProfileComplete(userId, { isLite });
+    // 2. Giới tính chỉ bắt buộc với nội dung có giới hạn giới tính.
 
     let userIds = [userId];
     let partnerUser: { id: string } | null = null;
@@ -331,10 +335,27 @@ export class TournamentRegistrationService {
     const requestedDivisionId =
       registerTournamentDto.tournamentDivisionId ??
       registerTournamentDto.divisionId;
-    const requestedDivision = requestedDivisionId
+    let requestedDivision = requestedDivisionId
       ? await this.tournamentsRepository.findDivisionById(requestedDivisionId)
       : null;
-
+    if (!requestedDivisionId) {
+      const activeDivisions = (
+        await this.tournamentsRepository.getDivisionsByTournament(id)
+      ).filter((division) => division.status !== 'CANCELLED');
+      if (activeDivisions.length > 1) {
+        throw new BadRequestException(
+          'Vui lòng chọn nội dung thi đấu trước khi đăng ký.',
+        );
+      }
+      requestedDivision = activeDivisions[0] ?? null;
+    }
+    const genderRestriction = requestedDivision
+      ? requestedDivision.genderRestriction
+      : tournament.genderRestriction;
+    await this.validateProfileComplete(userId, {
+      isLite,
+      requireGender: !isGenderUnrestricted(genderRestriction),
+    });
     const registrationMatchType =
       requestedDivision?.matchType ?? tournament.matchType;
     const isDoublesRegistration =
@@ -586,8 +607,6 @@ export class TournamentRegistrationService {
     participantId: string,
     teamInviteToken: string,
   ) {
-    // Đồng đội cũng phải có hồ sơ đầy đủ trước khi join team
-    await this.validateProfileComplete(userId);
 
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) {
@@ -628,6 +647,12 @@ export class TournamentRegistrationService {
           participant.tournamentDivisionId,
         )
       : null;
+    // Đồng đội cần hồ sơ cơ bản; giới tính phụ thuộc nội dung đã chọn.
+    await this.validateProfileComplete(userId, {
+      requireGender: !isGenderUnrestricted(
+        division ? division.genderRestriction : tournament.genderRestriction,
+      ),
+    });
 
     await this.validateEloLimits(tournament, userIds, { division });
     // Gender validation runs once inside the join transaction using the

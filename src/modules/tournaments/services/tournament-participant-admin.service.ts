@@ -1,10 +1,15 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { PG_CONNECTION } from '../../../database/database.module';
+import type { AppDb } from '../../../database/db.types';
+import { AuditService } from '../../audit/audit.service';
 import { TournamentsRepository } from '../tournaments.repository';
+import { TournamentPaymentRepository } from '../repositories/tournament-payment.repository';
 import { TournamentAccessService } from './tournament-access.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import {
@@ -15,6 +20,7 @@ import {
 import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import { isLiteRegistrationTournament } from '../utils/registration-payment-eligibility';
 import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
+import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
 
 export type RegistrationChanged = (
   tournamentId: string,
@@ -31,6 +37,9 @@ export class TournamentParticipantAdminService {
     private readonly tournamentsRepository: TournamentsRepository,
     private readonly tournamentAccessService: TournamentAccessService,
     private readonly notificationsService: NotificationsService,
+    @Inject(PG_CONNECTION) private readonly db: AppDb,
+    private readonly auditService: AuditService,
+    private readonly tournamentPaymentRepository: TournamentPaymentRepository,
   ) {}
 
   async previewRosterImport(
@@ -363,5 +372,137 @@ export class TournamentParticipantAdminService {
     });
 
     return updated;
+  }
+
+  async setParticipantFeePaid(
+    tournamentId: string,
+    participantId: string,
+    paid: boolean,
+    userId: string,
+    systemRoles: string[] = [],
+    broadcastRegistrationChanged: RegistrationChanged,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
+    if (!isAuthorized) {
+      throw new ForbiddenException(
+        'Bạn không có quyền cập nhật trạng thái thanh toán lệ phí',
+      );
+    }
+
+    const participant =
+      await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant || participant.tournamentId !== tournamentId) {
+      throw new NotFoundException('Người tham gia không tồn tại');
+    }
+
+    // Marking a fee paid is a claim about money that is still being collected,
+    // so it is confined to the window where that claim is meaningful, matching
+    // addTeamMember's REGISTRATION_OPEN / UPCOMING gate. Clearing the mark is
+    // deliberately NOT gated: refunds are raised after the event has run, and
+    // blocking them here would make the one case this endpoint exists for
+    // impossible.
+    if (
+      paid &&
+      tournament.status !== 'REGISTRATION_OPEN' &&
+      tournament.status !== 'UPCOMING'
+    ) {
+      throw new BadRequestException(
+        'Chỉ đánh dấu đã thanh toán khi giải đấu còn trong thời gian đăng ký.',
+      );
+    }
+
+    if (participant.isPaid === paid) {
+      return { participant, refundRequested: false, refundPaymentId: null };
+    }
+
+    const result = await this.db.transaction(async (tx) => {
+      // Chỉ gỡ cờ khi có giao dịch đã thu thật sự; lệ phí đánh dấu tay thì
+      // không có dòng tiền nào cần hoàn.
+      const completedPayment = paid
+        ? null
+        : await this.tournamentPaymentRepository.findCompletedParticipantPaymentInTx(
+            tx,
+            tournamentId,
+            participantId,
+          );
+
+      // A refund already raised for this payment must never be raised twice. The
+      // CAS inside createPendingRefund would throw and roll the whole flag
+      // update back, leaving the checkbox stuck on after a tick/untick/tick
+      // cycle. Clearing the mark is still correct; only the request is skipped.
+      if (completedPayment && !completedPayment.refundStatus) {
+        const refundQuote = calculateTournamentRefundQuote({
+          amount: completedPayment.amount,
+          platformFeeAmount: completedPayment.platformFeeAmount,
+          refundedAmount: completedPayment.refundedAmount,
+          registeredAt: participant.registeredAt,
+          requestedAt: new Date(),
+          trigger: 'KICKED',
+        });
+        await this.tournamentPaymentRepository.createPendingRefund(tx, {
+          paymentId: completedPayment.id,
+          amount: refundQuote.refundAmount,
+          reason: 'ORGANIZER_UNMARKED_FEE_PAID',
+          requestedBy: userId,
+        });
+        await this.auditService.logUpdate(
+          tx,
+          userId,
+          'payments',
+          completedPayment.id,
+          {
+            refundStatus: completedPayment.refundStatus,
+            refundableAmount: completedPayment.refundableAmount,
+          },
+          {
+            refundStatus: 'PENDING_REFUND',
+            pendingRefundAmount: refundQuote.refundAmount,
+          },
+        );
+      }
+
+      const updatedParticipant =
+        await this.tournamentPaymentRepository.setParticipantPaidInTx(
+          tx,
+          participantId,
+          paid,
+        );
+      if (!updatedParticipant) {
+        throw new NotFoundException('Người tham gia không tồn tại');
+      }
+
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_participants',
+        participantId,
+        participant,
+        updatedParticipant,
+      );
+
+      // Report what this call actually did: a payment that already carried a
+      // refund state did not get a new request out of it.
+      const refundRequested = completedPayment !== null && !completedPayment.refundStatus;
+      return {
+        participant: updatedParticipant,
+        refundRequested,
+        refundPaymentId: refundRequested ? completedPayment!.id : null,
+      };
+    });
+
+    broadcastRegistrationChanged(tournamentId, {
+      participantId: result.participant.id,
+      divisionId: result.participant.tournamentDivisionId,
+      action: 'FEE_PAYMENT_UPDATED',
+    });
+
+    return result;
   }
 }

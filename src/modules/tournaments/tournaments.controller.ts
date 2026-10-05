@@ -44,6 +44,7 @@ import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
+import { UpdateParticipantFeePaymentDto } from './dto/update-participant-fee-payment.dto';
 
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
@@ -754,9 +755,14 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Tham gia Lite tournament 1 chạm' })
   async joinLite(
     @Param('inviteCode') inviteCode: string,
+    @Body('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.joinLite(inviteCode, user.sub);
+    return this.tournamentsService.joinLite(
+      inviteCode,
+      user.sub,
+      divisionId,
+    );
   }
 
   // ──── Lite pairing management ────
@@ -788,6 +794,7 @@ export class TournamentsController {
       dto.userId,
       user.sub,
       this.getSystemRoles(user),
+      dto.divisionId,
     );
   }
 
@@ -1580,6 +1587,28 @@ export class TournamentsController {
       id,
       participantId,
       status,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Patch(':id/participants/:participantId/fee-payment')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Bật/tắt cờ đã thanh toán lệ phí của người tham gia',
+  })
+  async setParticipantFeePaid(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body() dto: UpdateParticipantFeePaymentDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.setParticipantFeePaid(
+      id,
+      participantId,
+      dto.paid,
       user.sub,
       this.getSystemRoles(user),
     );

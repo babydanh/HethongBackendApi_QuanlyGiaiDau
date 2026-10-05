@@ -327,4 +327,17 @@ export class TournamentPaymentRepository {
       .returning({ id: schema.tournamentParticipants.id });
     return updated ?? null;
   }
+
+  async setParticipantPaidInTx(
+    tx: Transaction | AppDbOrTx,
+    participantId: string,
+    isPaid: boolean,
+  ) {
+    const [updated] = await tx
+      .update(schema.tournamentParticipants)
+      .set({ isPaid })
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .returning();
+    return updated ?? null;
+  }
 }

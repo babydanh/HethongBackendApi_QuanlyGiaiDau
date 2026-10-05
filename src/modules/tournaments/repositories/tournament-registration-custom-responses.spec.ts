@@ -12,6 +12,8 @@ const tableNames = new Map<unknown, string>([
   [schema.seriesStandings, 'seriesStandings'],
   [schema.tournamentParticipants, 'tournamentParticipants'],
   [schema.tournamentRosters, 'tournamentRosters'],
+  [schema.users, 'users'],
+  [schema.profiles, 'profiles'],
 ]);
 
 const tournament: Row = {
@@ -38,7 +40,10 @@ const division: Row = {
   maxParticipants: 4,
 };
 
-function createRepository() {
+function createRepository(
+  divisions: Row[] = [division],
+  tournamentRow: Row = tournament,
+) {
   const insertedParticipants: Row[] = [];
   const owner = {
     id: 'division-1',
@@ -72,11 +77,13 @@ function createRepository() {
       const key = [...new Set(tables)].sort().join('+');
       const result: Row[] =
         key === 'tournaments'
-          ? [tournament]
+          ? [tournamentRow]
           : key === 'tournamentDivisions'
-            ? [division]
+            ? divisions
             : key === 'tournamentDivisions+tournaments'
               ? [owner]
+            : key === 'profiles+users'
+              ? [{ id: 'partner-1' }]
               : [];
       return Promise.resolve(result).then(resolve, reject);
     };
@@ -130,5 +137,65 @@ describe('registration custom responses', () => {
       shirtSize: 'L',
       player2Name: 'Spoofed Partner',
     });
+  });
+});
+describe('division selection without an id', () => {
+  it('falls back to the only open division without requiring profile gender', async () => {
+    const { repository, insertedParticipants } = createRepository([
+      { ...division, genderRestriction: null },
+    ]);
+
+    await repository.registerParticipant('tournament-1', 'user-1', {
+      teamName: 'Player One',
+    });
+
+    expect(insertedParticipants[0].tournamentDivisionId).toBe('division-1');
+  });
+
+  it('rejects multiple divisions instead of inferring a gender category', async () => {
+    const { repository, insertedParticipants } = createRepository([
+      division,
+      { ...division, id: 'division-2' },
+    ]);
+
+    await expect(
+      repository.registerParticipant('tournament-1', 'user-1', {
+        teamName: 'Player One',
+      }),
+    ).rejects.toThrow('Vui lòng chọn nội dung');
+
+    expect(insertedParticipants).toHaveLength(0);
+  });
+  it('rejects ambiguous ID-less registration when a partner invite is included', async () => {
+    const { repository } = createRepository(
+      [division, { ...division, id: 'division-2' }],
+      { ...tournament, genderRestriction: 'MALE' },
+    );
+
+    await expect(
+      repository.registerParticipant('tournament-1', 'user-1', {
+        teamName: 'Player One',
+        partnerEmailOrPhone: 'partner@example.com',
+      }),
+    ).rejects.toThrow('Vui lòng chọn nội dung');
+
+  });
+  it('does not require partner profile gender for open doubles', async () => {
+    const { repository, insertedParticipants } =
+      createRepository(
+        [{ ...division, genderRestriction: 'OPEN' }],
+        {
+          ...tournament,
+          tournamentConfig: { doublesPairingMode: 'SELF' },
+        },
+      );
+
+    await repository.registerParticipant('tournament-1', 'user-1', {
+      divisionId: 'division-1',
+      teamName: 'Player One',
+      partnerEmailOrPhone: 'partner@example.com',
+    });
+
+    expect(insertedParticipants[0].tournamentDivisionId).toBe('division-1');
   });
 });

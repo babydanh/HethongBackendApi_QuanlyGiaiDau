@@ -284,6 +284,9 @@ describe('TournamentsService — Lite pairing guards', () => {
           mockRepo as unknown as TournamentsRepository,
         ),
         mockNotifications as unknown as NotificationsService,
+        {} as never,
+        {} as never,
+        {} as never,
       ),
       new TournamentImportService(
         mockRepo as unknown as TournamentsRepository,

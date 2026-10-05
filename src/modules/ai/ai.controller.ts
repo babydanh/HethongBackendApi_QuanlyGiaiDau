@@ -15,6 +15,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { AiService } from './ai.service';
 import { ParseTournamentSourceDto } from './dto/parse-tournament-source.dto';
 import { AiScheduleCommandDto } from './dto/ai-schedule-command.dto';
+import { RosterReviewRequestDto } from './dto/roster-review.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -141,5 +142,21 @@ export class AiController {
     const data = await this.aiService.parseTournamentSource(dto);
 
     return { success: true, data };
+  }
+
+  @Post('tournaments/:tournamentId/roster-review')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @UseGuards(new RateLimitGuard(10, 60000))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Gợi ý ánh xạ cột cho tệp danh sách VĐV và nhận xét ngắn về cấu trúc tệp, không ghi dữ liệu' })
+  async reviewRoster(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Body() dto: RosterReviewRequestDto,
+  ) {
+    const result = await this.aiService.reviewRosterSource(tournamentId, dto);
+
+    return { success: true, data: result.data, aiAvailable: result.aiAvailable };
   }
 }

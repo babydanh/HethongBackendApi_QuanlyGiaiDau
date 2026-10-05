@@ -250,3 +250,145 @@ describe('AiController POST /ai/parse-tournament-source', () => {
     expect(parseTournamentSource).not.toHaveBeenCalled();
   });
 });
+
+const TOURNAMENT_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+const ROSTER_REVIEW_PATH = `/api/v1/ai/tournaments/${TOURNAMENT_ID}/roster-review`;
+const ROSTER_BODY = {
+  sheetName: 'Danh sách thi',
+  headerRow: 3,
+  headers: ['Cặp đấu', 'VĐV 1', 'Email VĐV 1'],
+  sampleRows: [{ 'Cặp đấu': 'CLB Minh Đức', 'VĐV 1': 'Nguyễn An', 'Email VĐV 1': 'an@example.test' }],
+  isDoubles: true,
+};
+const ROSTER_REVIEW = {
+  suggestions: [
+    { slot: 'teamName', header: 'Cặp đấu', confidence: 0.9, reason: 'tên cặp thi đấu' },
+  ],
+  fileNotes: ['Tiêu đề nằm ở dòng 3'],
+};
+
+describe('AiController POST /ai/tournaments/:tournamentId/roster-review', () => {
+  let app: INestApplication;
+  let reviewRosterSource: jest.Mock;
+
+  beforeEach(async () => {
+    reviewRosterSource = jest.fn().mockResolvedValue({ data: ROSTER_REVIEW, aiAvailable: true });
+    const roleLookup = createRoleLookup([UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER]);
+
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      controllers: [AiController],
+      providers: [{ provide: AiService, useValue: { reviewRosterSource } }],
+    }).compile();
+
+    const reflector = new Reflector();
+    const config = {
+      get: jest.fn((key: string) => (key === 'NODE_ENV' ? 'test' : undefined)),
+    } as unknown as ConfigService;
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
+    );
+    app.useGlobalGuards(
+      new BearerAuthGuard(reflector),
+      new RolesGuard(reflector, roleLookup as never),
+      new VerifiedGuard(reflector, config),
+    );
+    await app.init();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('refuses an anonymous review before the model is ever asked', async () => {
+    const response = await request(app.getHttpServer()).post(ROSTER_REVIEW_PATH).send(ROSTER_BODY);
+
+    expect(response.status).toBe(401);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
+  it('refuses a verified player, because reviewing a roster is an organizer job', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.PLAYER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(403);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
+  it('refuses an organizer whose email is not verified before the model is ever asked', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader({ ...verifiedUser(UserRole.ORGANIZER), isEmailVerified: false }))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(403);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
+  it('returns the whitelisted suggestions in the success envelope for a verified organizer', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, data: ROSTER_REVIEW, aiAvailable: true });
+    expect(reviewRosterSource).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining(ROSTER_BODY));
+  });
+
+  it('reports an unavailable model without failing, so the wizard keeps its keyword mapping', async () => {
+    reviewRosterSource.mockResolvedValue({ data: null, aiAvailable: false });
+
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ADMIN)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, data: null, aiAvailable: false });
+  });
+
+  it('rejects a body without headers, so the model is never asked to guess the sheet shape', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ sheetName: 'Danh sách thi', sampleRows: [], isDoubles: true });
+
+    expect(response.status).toBe(400);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
+  it('rejects a headerRow outside the sheet the organizer actually uploaded', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ ...ROSTER_BODY, headerRow: 0 });
+
+    expect(response.status).toBe(400);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown body property, so file bytes cannot ride along with a review', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ ...ROSTER_BODY, uploadFileBase64: 'UEsDBA==' });
+
+    expect(response.status).toBe(400);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-uuid tournamentId before the review runs', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/ai/tournaments/khong-phai-uuid/roster-review')
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(400);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+});

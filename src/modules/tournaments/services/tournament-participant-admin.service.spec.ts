@@ -1,6 +1,13 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import type { AppDb } from '../../../database/db.types';
+import type { AuditService } from '../../audit/audit.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { TournamentsRepository } from '../tournaments.repository';
+import type { TournamentPaymentRepository } from '../repositories/tournament-payment.repository';
 import { TournamentAccessService } from './tournament-access.service';
 import { TournamentParticipantAdminService } from './tournament-participant-admin.service';
 
@@ -19,12 +26,27 @@ describe('TournamentParticipantAdminService', () => {
     sendNotification: jest.fn().mockResolvedValue(undefined),
   };
   const accessMock = { isManager: jest.fn() };
+  const tx = {};
+  const dbMock = {
+    transaction: jest.fn(
+      (cb: (arg: unknown) => unknown) => Promise.resolve(cb(tx)),
+    ),
+  };
+  const auditMock = { logUpdate: jest.fn().mockResolvedValue(undefined) };
+  const paymentRepositoryMock = {
+    findCompletedParticipantPaymentInTx: jest.fn(),
+    createPendingRefund: jest.fn().mockResolvedValue({ id: 'refund-1' }),
+    setParticipantPaidInTx: jest.fn(),
+  };
   const repository = repositoryMock as unknown as TournamentsRepository;
   const access = accessMock as unknown as TournamentAccessService;
   const admin = new TournamentParticipantAdminService(
     repository,
     access,
     notificationsMock as unknown as NotificationsService,
+    dbMock as unknown as AppDb,
+    auditMock as unknown as AuditService,
+    paymentRepositoryMock as unknown as TournamentPaymentRepository,
   );
 
   beforeEach(() => {
@@ -318,6 +340,307 @@ describe('TournamentParticipantAdminService', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(repositoryMock.updateParticipantStatus).not.toHaveBeenCalled();
+  });
+
+  describe('setParticipantFeePaid', () => {
+    const tournament = {
+      id: 'tournament-1',
+      status: 'REGISTRATION_OPEN',
+      name: 'Regional event',
+      entryFee: 500,
+    };
+    const baseParticipant = {
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      tournamentDivisionId: 'division-1',
+      teamStatus: 'COMPLETE',
+      isPaid: false,
+      entryFeeAtRegistration: '500.00',
+      registeredAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    it('rejects a caller who does not manage the tournament', async () => {
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(false);
+
+      await expect(
+        admin.setParticipantFeePaid(
+          'tournament-1',
+          'participant-1',
+          true,
+          'player-1',
+          [],
+          jest.fn(),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(dbMock.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects a participant belonging to another tournament', async () => {
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue({
+        ...baseParticipant,
+        tournamentId: 'tournament-2',
+      });
+
+      await expect(
+        admin.setParticipantFeePaid(
+          'tournament-1',
+          'participant-1',
+          true,
+          'organizer-1',
+          [],
+          jest.fn(),
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(dbMock.transaction).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when the participant already matches the requested state', async () => {
+      const broadcast = jest.fn();
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue(baseParticipant);
+
+      await expect(
+        admin.setParticipantFeePaid(
+          'tournament-1',
+          'participant-1',
+          false,
+          'organizer-1',
+          [],
+          broadcast,
+        ),
+      ).resolves.toEqual({
+        participant: baseParticipant,
+        refundRequested: false,
+        refundPaymentId: null,
+      });
+      expect(dbMock.transaction).not.toHaveBeenCalled();
+      expect(auditMock.logUpdate).not.toHaveBeenCalled();
+      expect(broadcast).not.toHaveBeenCalled();
+    });
+
+    it('marks the fee paid without creating any payment row', async () => {
+      const broadcast = jest.fn();
+      const updated = { ...baseParticipant, isPaid: true };
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue(baseParticipant);
+      paymentRepositoryMock.setParticipantPaidInTx.mockResolvedValue(updated);
+
+      const result = await admin.setParticipantFeePaid(
+        'tournament-1',
+        'participant-1',
+        true,
+        'organizer-1',
+        [],
+        broadcast,
+      );
+
+      expect(result).toEqual({
+        participant: updated,
+        refundRequested: false,
+        refundPaymentId: null,
+      });
+      expect(paymentRepositoryMock.createPendingRefund).not.toHaveBeenCalled();
+      expect(paymentRepositoryMock.setParticipantPaidInTx).toHaveBeenCalledWith(
+        tx,
+        'participant-1',
+        true,
+      );
+      expect(auditMock.logUpdate).toHaveBeenCalledWith(
+        tx,
+        'organizer-1',
+        'tournament_participants',
+        'participant-1',
+        baseParticipant,
+        updated,
+      );
+      expect(broadcast).toHaveBeenCalledWith('tournament-1', {
+        participantId: 'participant-1',
+        divisionId: 'division-1',
+        action: 'FEE_PAYMENT_UPDATED',
+      });
+    });
+
+    it('requests a refund through the policy quote when unmarking a captured fee', async () => {
+      const updated = { ...baseParticipant, isPaid: true };
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue(updated);
+      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue({
+        id: 'payment-1',
+        amount: '500.00',
+        platformFeeAmount: '15.00',
+        refundedAmount: '0.00',
+        refundStatus: null,
+        refundableAmount: '500.00',
+      });
+      paymentRepositoryMock.setParticipantPaidInTx.mockResolvedValue({
+        ...baseParticipant,
+      });
+
+      const result = await admin.setParticipantFeePaid(
+        'tournament-1',
+        'participant-1',
+        false,
+        'organizer-1',
+        [],
+        jest.fn(),
+      );
+
+      expect(result.refundRequested).toBe(true);
+      expect(result.refundPaymentId).toBe('payment-1');
+      expect(paymentRepositoryMock.createPendingRefund).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          paymentId: 'payment-1',
+          amount: '500.00',
+          reason: 'ORGANIZER_UNMARKED_FEE_PAID',
+          requestedBy: 'organizer-1',
+        }),
+      );
+      expect(paymentRepositoryMock.setParticipantPaidInTx).toHaveBeenCalledWith(
+        tx,
+        'participant-1',
+        false,
+      );
+    });
+
+    it('skips the refund when the fee was only ever marked manually', async () => {
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue({
+        ...baseParticipant,
+        isPaid: true,
+      });
+      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue(
+        null,
+      );
+      paymentRepositoryMock.setParticipantPaidInTx.mockResolvedValue(
+        baseParticipant,
+      );
+
+      const result = await admin.setParticipantFeePaid(
+        'tournament-1',
+        'participant-1',
+        false,
+        'organizer-1',
+        [],
+        jest.fn(),
+      );
+
+      expect(result).toEqual({
+        participant: baseParticipant,
+        refundRequested: false,
+        refundPaymentId: null,
+      });
+      expect(paymentRepositoryMock.createPendingRefund).not.toHaveBeenCalled();
+      expect(paymentRepositoryMock.setParticipantPaidInTx).toHaveBeenCalledWith(
+        tx,
+        'participant-1',
+        false,
+      );
+    });
+
+    it('clears the mark without raising a second refund when one is already pending', async () => {
+      // Tick -> untick -> tick -> untick. The second untick must not hit the
+      // compare-and-set inside createPendingRefund, which would throw, roll the
+      // whole transaction back and leave the checkbox stuck on.
+      const cleared = { ...baseParticipant, isPaid: false };
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue({
+        ...baseParticipant,
+        isPaid: true,
+      });
+      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue({
+        id: 'payment-1',
+        amount: '500.00',
+        platformFeeAmount: '15.00',
+        refundedAmount: '0.00',
+        refundStatus: 'PENDING_REFUND',
+        refundableAmount: '500.00',
+      });
+      paymentRepositoryMock.setParticipantPaidInTx.mockResolvedValue(cleared);
+
+      const result = await admin.setParticipantFeePaid(
+        'tournament-1',
+        'participant-1',
+        false,
+        'organizer-1',
+        [],
+        jest.fn(),
+      );
+
+      expect(result).toEqual({
+        participant: cleared,
+        refundRequested: false,
+        refundPaymentId: null,
+      });
+      expect(paymentRepositoryMock.createPendingRefund).not.toHaveBeenCalled();
+      expect(paymentRepositoryMock.setParticipantPaidInTx).toHaveBeenCalledWith(
+        tx,
+        'participant-1',
+        false,
+      );
+    });
+
+    it('refuses to mark a fee paid once registration has closed', async () => {
+      repositoryMock.findById.mockResolvedValue({
+        ...tournament,
+        status: 'COMPLETED',
+      });
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue(baseParticipant);
+
+      await expect(
+        admin.setParticipantFeePaid(
+          'tournament-1',
+          'participant-1',
+          true,
+          'organizer-1',
+          [],
+          jest.fn(),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dbMock.transaction).not.toHaveBeenCalled();
+      expect(paymentRepositoryMock.setParticipantPaidInTx).not.toHaveBeenCalled();
+    });
+
+    it('still allows unmarking after the event, because refunds happen late', async () => {
+      const cleared = { ...baseParticipant, isPaid: false };
+      repositoryMock.findById.mockResolvedValue({
+        ...tournament,
+        status: 'COMPLETED',
+      });
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue({
+        ...baseParticipant,
+        isPaid: true,
+      });
+      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue(
+        null,
+      );
+      paymentRepositoryMock.setParticipantPaidInTx.mockResolvedValue(cleared);
+
+      await expect(
+        admin.setParticipantFeePaid(
+          'tournament-1',
+          'participant-1',
+          false,
+          'organizer-1',
+          [],
+          jest.fn(),
+        ),
+      ).resolves.toEqual({
+        participant: cleared,
+        refundRequested: false,
+        refundPaymentId: null,
+      });
+    });
   });
 
 });

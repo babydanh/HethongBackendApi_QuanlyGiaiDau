@@ -59,3 +59,51 @@ export function isMixedGenderPair(
     (firstGender === 'FEMALE' && secondGender === 'MALE')
   );
 }
+
+export function isGenderUnrestricted(
+  value?: string | null,
+): boolean {
+  const token = normalizeToken(value);
+  return token === '' || token === 'OPEN';
+}
+
+export function isPairEligibleForDivision(
+  divisionMatchType?: string | null,
+  genderRestriction?: string | null,
+  firstGender?: string | null,
+  secondGender?: string | null,
+): boolean {
+  const isUnrestricted = isGenderUnrestricted(genderRestriction);
+  const restriction = normalizeGenderRestriction(genderRestriction);
+  if (!isUnrestricted && !restriction) return false;
+
+  const normalizedMatchType = normalizeToken(divisionMatchType);
+  const first = normalizeProfileGender(firstGender);
+  const second = normalizeProfileGender(secondGender);
+  const hasBinaryGenders =
+    (first === 'MALE' || first === 'FEMALE') &&
+    (second === 'MALE' || second === 'FEMALE');
+  if (restriction && !hasBinaryGenders) return false;
+
+  const isMixedPair =
+    (first === 'MALE' && second === 'FEMALE') ||
+    (first === 'FEMALE' && second === 'MALE');
+  const targetMatchType = isMixedPair ? 'MIXED_DOUBLES' : 'DOUBLES';
+  const matchTypeIsValid =
+    normalizedMatchType === targetMatchType ||
+    (isUnrestricted &&
+      normalizedMatchType === 'DOUBLES' &&
+      isMixedPair);
+  if (!matchTypeIsValid) return false;
+
+  switch (restriction) {
+    case 'MALE':
+      return first === 'MALE' && second === 'MALE';
+    case 'FEMALE':
+      return first === 'FEMALE' && second === 'FEMALE';
+    case 'MIXED':
+      return isMixedPair;
+    default:
+      return isUnrestricted;
+  }
+}
