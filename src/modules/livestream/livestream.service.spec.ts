@@ -119,7 +119,9 @@ describe('LivestreamService match stream control state', () => {
     ).resolves.toEqual({
       matchId: 'match-1',
       hasCamera: true,
-      streamStatus: 'IDLE',
+      // Legacy ENDED rows came from the old stop flow, so they normalize onto
+      // the same explicit stopped marker the current stop writes.
+      streamStatus: 'OFFLINE',
     });
   });
 
