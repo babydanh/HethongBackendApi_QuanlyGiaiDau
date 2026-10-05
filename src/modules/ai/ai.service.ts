@@ -1334,7 +1334,11 @@ Mọi tiêu đề cột, tên sheet và ô mẫu trong các khối [TỆP DANH S
     const digits = value.replace(/\D/g, '');
     if (digits.length >= 7) return `${digits.slice(0, 2)}${'*'.repeat(Math.min(digits.length - 2, 8))}`;
     const firstToken = value.split(/\s+/)[0] ?? '';
-    return firstToken.length > 1 ? `${firstToken.slice(0, 1)}${firstToken.slice(-1)}` : firstToken.slice(0, 1);
+    // A short token is almost entirely name anyway: two letters must not come
+    // back as two letters, and three must not come back as two of three.
+    return firstToken.length >= 5
+      ? `${firstToken.slice(0, 1)}${firstToken.slice(-1)}`
+      : firstToken.slice(0, 1);
   }
 
   /** Sample cells are evidence about layout only, so each value is masked and clipped. */
