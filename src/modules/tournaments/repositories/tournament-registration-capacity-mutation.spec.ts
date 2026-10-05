@@ -331,6 +331,44 @@ describe('accepting a doubles partner consumes one member slot', () => {
   });
 });
 
+describe('open doubles partner invitations', () => {
+  it('accepts a mixed-gender pair without a gender restriction', async () => {
+    const queues = partnerInviteQueues([COMPLETE_PAIR]);
+    queues.divisions[1] = [{ ...DIVISION_ROW, genderRestriction: null }];
+    queues.profiles = [[{ gender: 'MALE' }], [{ gender: 'FEMALE' }]];
+    const harness = createHarness(queues);
+
+    await expect(
+      createRepository(harness).acceptPartnerInvite(
+        'participant-1',
+        'partner-1',
+      ),
+    ).resolves.toMatchObject({ teamStatus: 'COMPLETE' });
+
+    expect(
+      harness.inserts.filter((insert) => insert.table === 'rosters'),
+    ).toHaveLength(1);
+  });
+
+  it('accepts participants with unset profile gender', async () => {
+    const queues = partnerInviteQueues([COMPLETE_PAIR]);
+    queues.divisions[1] = [{ ...DIVISION_ROW, genderRestriction: null }];
+    queues.profiles = [[{ gender: null }], [{ gender: null }]];
+    const harness = createHarness(queues);
+
+    await expect(
+      createRepository(harness).acceptPartnerInvite(
+        'participant-1',
+        'partner-1',
+      ),
+    ).resolves.toMatchObject({ teamStatus: 'COMPLETE' });
+
+    expect(
+      harness.inserts.filter((insert) => insert.table === 'rosters'),
+    ).toHaveLength(1);
+  });
+});
+
 describe('promoting a waitlisted doubles row', () => {
   const WAITLISTED_ROW: Row = {
     id: 'participant-9',
@@ -530,6 +568,61 @@ function joinWithoutDivisionQueues(): Record<string, Row[][]> {
     'divisions+participants+rosters': [[TOURNAMENT_SCOPED_PAIR]],
   };
 }
+
+function openDivisionJoinQueues(
+  leaderGender: string | null,
+  partnerGender: string | null,
+): Record<string, Row[][]> {
+  const tournament = { ...TOURNAMENT_ROW };
+  const pending = { ...PARTNER_PENDING_ROW, teamInviteToken: 'invite-1' };
+  const openDivision = { ...DIVISION_ROW, genderRestriction: null };
+  return {
+    tournaments: [[tournament], [tournament]],
+    participants: [[pending]],
+    divisions: [[openDivision]],
+    rosters: [[{ userId: 'leader-1' }]],
+    profiles: [[{ gender: leaderGender }], [{ gender: partnerGender }]],
+    'participants+rosters': [[]],
+    'divisions+tournaments': [[CAPACITY_OWNER_ROW]],
+    'divisions+participants+rosters': [[COMPLETE_PAIR]],
+  };
+}
+
+describe('joining open doubles teams', () => {
+  it('accepts a mixed-gender pair without a gender restriction', async () => {
+    const harness = createHarness(openDivisionJoinQueues('MALE', 'FEMALE'));
+
+    await expect(
+      createRepository(harness).joinTeam(
+        'tournament-1',
+        'partner-1',
+        'participant-1',
+        'invite-1',
+      ),
+    ).resolves.toMatchObject({ participant: { teamStatus: 'COMPLETE' } });
+
+    expect(
+      harness.inserts.filter((insert) => insert.table === 'rosters'),
+    ).toHaveLength(1);
+  });
+
+  it('accepts a pair when both profiles have no gender value', async () => {
+    const harness = createHarness(openDivisionJoinQueues(null, null));
+
+    await expect(
+      createRepository(harness).joinTeam(
+        'tournament-1',
+        'partner-1',
+        'participant-1',
+        'invite-1',
+      ),
+    ).resolves.toMatchObject({ participant: { teamStatus: 'COMPLETE' } });
+
+    expect(
+      harness.inserts.filter((insert) => insert.table === 'rosters'),
+    ).toHaveLength(1);
+  });
+});
 
 describe('a capacity claim locks its owner row before reading occupancy', () => {
   it('locks the tournament owner before a tournament-scoped partner join', async () => {

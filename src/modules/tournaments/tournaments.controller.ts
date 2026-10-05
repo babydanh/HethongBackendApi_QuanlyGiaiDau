@@ -755,9 +755,14 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Tham gia Lite tournament 1 chạm' })
   async joinLite(
     @Param('inviteCode') inviteCode: string,
+    @Body('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.joinLite(inviteCode, user.sub);
+    return this.tournamentsService.joinLite(
+      inviteCode,
+      user.sub,
+      divisionId,
+    );
   }
 
   // ──── Lite pairing management ────
@@ -789,6 +794,7 @@ export class TournamentsController {
       dto.userId,
       user.sub,
       this.getSystemRoles(user),
+      dto.divisionId,
     );
   }
 

@@ -1,5 +1,5 @@
-import { IsUUID } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsOptional, IsUUID } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class AddLiteClubMemberDto {
   @ApiProperty({
@@ -7,4 +7,10 @@ export class AddLiteClubMemberDto {
   })
   @IsUUID('4')
   userId: string;
+  @ApiPropertyOptional({
+    description: 'ID nội dung thi đấu đã chọn cho thành viên',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  divisionId?: string;
 }
