@@ -280,13 +280,9 @@ function installSourceTransport(): SourceTransportHarness {
           clearTimeout(pendingTimer);
           const status = scripted.kind === 'stream' ? (scripted.status ?? 200) : scripted.status;
           const headers =
-            scripted.kind === 'stream' || scripted.kind === 'bodyStall'
-              ? (scripted.headers ?? { 'content-type': 'text/html' })
-              : scripted.headers;
+            scripted.kind === 'stream' ? (scripted.headers ?? { 'content-type': 'text/html' }) : scripted.headers;
           const stream =
-            scripted.kind === 'stream' || scripted.kind === 'bodyStall'
-              ? scripted.stream
-              : Readable.from(scripted.body ? [scripted.body] : []);
+            scripted.kind === 'stream' ? scripted.stream : Readable.from(scripted.body ? [scripted.body] : []);
           deliveredStream = stream;
           callback(asIncomingMessage(stream, status, headers));
         });

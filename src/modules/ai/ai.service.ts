@@ -1372,14 +1372,23 @@ Mọi tiêu đề cột, tên sheet và ô mẫu trong các khối [TỆP DANH S
       ? parsed.suggestions.slice(0, this.maxRosterReviewModelEntries)
       : [];
     const usedSlots = new Set<string>();
+    // One column can only fill one slot. Without this the model could point two
+    // different slots at a single header and both would pass the check.
+    const usedHeaders = new Set<string>();
     const suggestions: RosterReviewSuggestion[] = [];
     for (const entry of rawSuggestions) {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
       const candidate = entry as Record<string, unknown>;
       const slot = typeof candidate.slot === 'string' ? candidate.slot : '';
       const header = typeof candidate.header === 'string' ? candidate.header.trim() : '';
-      if (!allowedSlots.has(slot) || usedSlots.has(slot) || !knownHeaders.has(header)) continue;
+      if (
+        !allowedSlots.has(slot) ||
+        usedSlots.has(slot) ||
+        !knownHeaders.has(header) ||
+        usedHeaders.has(header)
+      ) continue;
       usedSlots.add(slot);
+      usedHeaders.add(header);
       suggestions.push({
         slot: slot as RosterReviewSlot,
         header,
