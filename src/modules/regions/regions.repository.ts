@@ -4,7 +4,7 @@ import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 import type { AppDbOrTx } from '../../database/db.types';
-import { and, asc, eq, ilike, or, SQL } from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, or, SQL } from 'drizzle-orm';
 import {
   QueryCentroidDto,
   QueryRegionDto,
@@ -21,6 +21,8 @@ export interface RegionSearchItem {
   provinceCode: string | null;
   provinceName: string | null;
   displayAddress: string;
+  centerLat: number | null;
+  centerLng: number | null;
 }
 
 function clampLimit(raw: number | undefined, fallback: number): number {
@@ -45,9 +47,7 @@ export type ResolvedRegion = ResolvedRegionDto;
 
 @Injectable()
 export class RegionsRepository {
-  constructor(
-    @Inject(PG_CONNECTION) private readonly db: AppDb,
-  ) {}
+  constructor(@Inject(PG_CONNECTION) private readonly db: AppDb) {}
 
   async findProvinces(query: QueryRegionDto) {
     let conditions: SQL | undefined = undefined;
@@ -91,8 +91,7 @@ export class RegionsRepository {
       );
     }
 
-    const conditions =
-      filters.length > 1 ? and(...filters) : filters[0];
+    const conditions = filters.length > 1 ? and(...filters) : filters[0];
 
     return this.db
       .select({
@@ -146,6 +145,8 @@ export class RegionsRepository {
         name: schema.wards.name,
         provinceCode: schema.wards.provinceCode,
         provinceName: schema.provinces.name,
+        centerLat: schema.wards.centerLat,
+        centerLng: schema.wards.centerLng,
       })
       .from(schema.wards)
       .innerJoin(
@@ -153,10 +154,34 @@ export class RegionsRepository {
         eq(schema.wards.provinceCode, schema.provinces.code),
       )
       .where(
-        or(ilike(schema.wards.name, pattern), ilike(schema.wards.fullName, pattern)),
+        or(
+          ilike(schema.wards.name, pattern),
+          ilike(schema.wards.fullName, pattern),
+        ),
       )
       .orderBy(asc(schema.wards.name))
       .limit(wardLimit);
+
+    const provinceCenters =
+      provinces.length === 0
+        ? []
+        : await this.db
+            .select({
+              provinceCode: schema.wards.provinceCode,
+              centerLat: sql<string>`AVG(${schema.wards.centerLat})`,
+              centerLng: sql<string>`AVG(${schema.wards.centerLng})`,
+            })
+            .from(schema.wards)
+            .where(
+              inArray(
+                schema.wards.provinceCode,
+                provinces.map((p) => p.code),
+              ),
+            )
+            .groupBy(schema.wards.provinceCode);
+    const centers = new Map(
+      provinceCenters.map((row) => [row.provinceCode, row]),
+    );
 
     const items: RegionSearchItem[] = [
       ...wards.map(
@@ -169,6 +194,8 @@ export class RegionsRepository {
           displayAddress: w.provinceName
             ? `${w.name}, ${w.provinceName}`
             : w.name,
+          centerLat: w.centerLat,
+          centerLng: w.centerLng,
         }),
       ),
       ...provinces.map(
@@ -179,13 +206,24 @@ export class RegionsRepository {
           provinceCode: p.code,
           provinceName: p.name,
           displayAddress: p.name,
+          centerLat:
+            centers.get(p.code)?.centerLat == null
+              ? null
+              : Number(centers.get(p.code)!.centerLat),
+          centerLng:
+            centers.get(p.code)?.centerLng == null
+              ? null
+              : Number(centers.get(p.code)!.centerLng),
         }),
       ),
     ];
     return items.slice(0, limit);
   }
   /** Resolve only from a stored polygon; uncovered points have no inferred region. */
-  async resolveByPoint(query: QueryResolveDto, executor: AppDbOrTx = this.db): Promise<ResolvedRegion | null> {
+  async resolveByPoint(
+    query: QueryResolveDto,
+    executor: AppDbOrTx = this.db,
+  ): Promise<ResolvedRegion | null> {
     const point = geoPoint(query.lng, query.lat);
     const rows = await executor.execute(sql`
       SELECT
@@ -204,7 +242,9 @@ export class RegionsRepository {
       ORDER BY w.code ASC
       LIMIT 1
     `);
-    const covered = (rows as unknown as Omit<ResolvedRegion, 'isEstimated'>[])[0];
+    const covered = (
+      rows as unknown as Omit<ResolvedRegion, 'isEstimated'>[]
+    )[0];
     if (covered) {
       return {
         ...covered,
@@ -216,22 +256,35 @@ export class RegionsRepository {
 
   /** Returns a nullable DB center as an estimated search origin, never as a venue pin. */
   async findCentroid(query: QueryCentroidDto): Promise<ResolvedRegion | null> {
-    const [ward] = await this.db.select({
-      wardCode: schema.wards.code,
-      wardName: schema.wards.name,
-      provinceCode: schema.provinces.code,
-      provinceName: schema.provinces.name,
-      centerLat: schema.wards.centerLat,
-      centerLng: schema.wards.centerLng,
-    }).from(schema.wards).innerJoin(
-      schema.provinces,
-      eq(schema.wards.provinceCode, schema.provinces.code),
-    ).where(and(
-      eq(schema.wards.code, query.wardCode),
-      eq(schema.wards.provinceCode, query.provinceCode),
-    )).limit(1);
-    if (!ward || ward.centerLat == null || ward.centerLng == null
-      || !Number.isFinite(ward.centerLat) || !Number.isFinite(ward.centerLng)) return null;
+    const [ward] = await this.db
+      .select({
+        wardCode: schema.wards.code,
+        wardName: schema.wards.name,
+        provinceCode: schema.provinces.code,
+        provinceName: schema.provinces.name,
+        centerLat: schema.wards.centerLat,
+        centerLng: schema.wards.centerLng,
+      })
+      .from(schema.wards)
+      .innerJoin(
+        schema.provinces,
+        eq(schema.wards.provinceCode, schema.provinces.code),
+      )
+      .where(
+        and(
+          eq(schema.wards.code, query.wardCode),
+          eq(schema.wards.provinceCode, query.provinceCode),
+        ),
+      )
+      .limit(1);
+    if (
+      !ward ||
+      ward.centerLat == null ||
+      ward.centerLng == null ||
+      !Number.isFinite(ward.centerLat) ||
+      !Number.isFinite(ward.centerLng)
+    )
+      return null;
     return {
       ...ward,
       isEstimated: true,
