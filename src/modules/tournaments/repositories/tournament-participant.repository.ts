@@ -277,6 +277,8 @@ export class TournamentParticipantRepository {
       rosterLockedAt: Date | null;
       seed: number | null;
       isPaid: boolean;
+      /** Organizer's day-of-event mark. Gates nothing. */
+      isPresent: boolean;
       tournamentDivisionId: string | null;
       teamStatus: string;
       teamInviteToken: string | null;
@@ -316,6 +318,7 @@ export class TournamentParticipantRepository {
         rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
         seed: schema.tournamentParticipants.seed,
         isPaid: schema.tournamentParticipants.isPaid,
+        isPresent: schema.tournamentParticipants.isPresent,
         tournamentDivisionId:
           schema.tournamentParticipants.tournamentDivisionId,
         teamStatus: schema.tournamentParticipants.teamStatus,
