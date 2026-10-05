@@ -875,6 +875,23 @@ export class TournamentsService {
       (id, payload) => this.broadcastRegistrationChanged(id, payload),
     );
   }
+
+  async setParticipantFeePaid(
+    tournamentId: string,
+    participantId: string,
+    paid: boolean,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    return this.tournamentParticipantAdminService.setParticipantFeePaid(
+      tournamentId,
+      participantId,
+      paid,
+      userId,
+      systemRoles,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
   async importParticipantsFromForm(
     tournamentId: string,
     userId: string,
