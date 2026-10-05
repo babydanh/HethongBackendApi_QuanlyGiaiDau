@@ -203,6 +203,17 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   seed: integer('seed'),
   points: integer('points').default(0).notNull(),
   rankingConsent: boolean('ranking_consent').default(false).notNull(),
+  // When the participant actually agreed to have their results published to the
+  // ranking board. Distinct from rankingConsent above, which is merely a copy of
+  // the tournament's isRanked flag and is therefore true for EVERY entrant of a
+  // ranked tournament — it records "this tournament is ranked", never "this person
+  // agreed". Only this timestamp gates ELO.
+  //
+  // Business rule: a match counts for ELO only when
+  // matches.completedAt >= ranking_consent_at. Matches played before the player
+  // confirmed are permanently unscored, so nobody can be force-enrolled and then
+  // have old results silently counted against them.
+  rankingConsentAt: timestamp('ranking_consent_at', { withTimezone: true }),
   customResponses: jsonb('custom_responses'),
   isPaid: boolean('is_paid').default(false).notNull(),
   // Organizer's own day-of-event mark. Carries no meaning anywhere else: it does

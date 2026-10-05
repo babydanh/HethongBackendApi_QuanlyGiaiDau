@@ -1040,7 +1040,11 @@ export class TournamentRegistrationRepository {
           teamName: finalTeamName,
           footballTeamId: isTeamSport ? (data.footballTeamId ?? null) : null,
           footballTeamLogoUrl: isTeamSport ? footballTeamLogoUrl : null,
+          // rankingConsent (boolean) records "this tournament is ranked" and stays
+          // as-is; rankingConsentAt is the timestamp ELO actually gates on, so a
+          // match only counts when matches.completedAt >= this instant.
           rankingConsent: data.rankingConsent === true,
+          rankingConsentAt: data.rankingConsent === true ? new Date() : null,
           customResponses: registrationResponses,
           isPaid,
           entryFeeAtRegistration: payableEntryFeeAmount.toFixed(2),

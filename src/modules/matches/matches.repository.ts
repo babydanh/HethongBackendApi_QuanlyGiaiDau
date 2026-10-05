@@ -1953,17 +1953,24 @@ export class MatchesRepository {
     const hasMockParticipant =
       mockParticipants.some((participant) => participant.isMock) ||
       mockRosterUsers.some((roster) => roster.isMock);
+    // Gate on rankingConsentAt (the instant the player confirmed), NOT on the
+    // rankingConsent boolean — that boolean is a copy of the tournament's isRanked
+    // flag and is true for every entrant of a ranked tournament, so gating on it
+    // would let everyone through. A participant with NULL here has not confirmed,
+    // and all-or-nothing is deliberate: splitting it per-player would let a player
+    // farm rating by facing opponents who never consented, since only the
+    // consenting side's delta would be kept.
     const consentRows = participantIds.length
       ? await tx
           .select({
-            rankingConsent: schema.tournamentParticipants.rankingConsent,
+            rankingConsentAt: schema.tournamentParticipants.rankingConsentAt,
           })
           .from(schema.tournamentParticipants)
           .where(inArray(schema.tournamentParticipants.id, participantIds))
       : [];
     const allParticipantsConsented =
       participantIds.length === consentRows.length &&
-      consentRows.every((row) => row.rankingConsent);
+      consentRows.every((row) => row.rankingConsentAt !== null);
 
     const footballTeamRows = participantIds.length
       ? await tx
