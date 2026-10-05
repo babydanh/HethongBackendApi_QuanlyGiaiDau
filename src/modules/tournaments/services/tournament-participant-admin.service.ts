@@ -505,4 +505,73 @@ export class TournamentParticipantAdminService {
 
     return result;
   }
+
+  /**
+   * Organizer's day-of-event mark.
+   *
+   * Deliberately ungated by tournament status: attendance happens while the
+   * event runs, long after registration closes, so a REGISTRATION_OPEN gate
+   * would make the feature unusable exactly when it is needed. Nothing reads
+   * this flag except the list view.
+   */
+  async setParticipantPresent(
+    tournamentId: string,
+    participantId: string,
+    present: boolean,
+    userId: string,
+    systemRoles: string[],
+    broadcastRegistrationChanged: (
+      tournamentId: string,
+      payload: { participantId: string; divisionId?: string | null; action: string },
+    ) => void,
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền đánh dấu người tham gia có mặt');
+    }
+
+    const participant =
+      await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant || participant.tournamentId !== tournamentId) {
+      throw new NotFoundException('Người tham gia không tồn tại');
+    }
+
+    const updatedParticipant = await this.db.transaction(async (tx) => {
+      const updated =
+        await this.tournamentPaymentRepository.setParticipantPresentInTx(
+          tx,
+          participantId,
+          present,
+        );
+      if (!updated) {
+        throw new NotFoundException('Người tham gia không tồn tại');
+      }
+
+      await this.auditService.logUpdate(
+        tx,
+        userId,
+        'tournament_participants',
+        participantId,
+        participant,
+        updated,
+      );
+
+      return updated;
+    });
+
+    broadcastRegistrationChanged(tournamentId, {
+      participantId: updatedParticipant.id,
+      divisionId: updatedParticipant.tournamentDivisionId,
+      action: 'PRESENCE_UPDATED',
+    });
+
+    return { participant: updatedParticipant };
+  }
 }

@@ -205,6 +205,9 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   rankingConsent: boolean('ranking_consent').default(false).notNull(),
   customResponses: jsonb('custom_responses'),
   isPaid: boolean('is_paid').default(false).notNull(),
+  // Organizer's own day-of-event mark. Carries no meaning anywhere else: it does
+  // not gate roster approval, does not affect ELO, and does not block playing.
+  isPresent: boolean('is_present').default(false).notNull(),
   // Effective registration fee captured when this participant is created.
   // This is distinct from isPaid: zero means free at registration, while
   // isPaid=true after a paid flow means the payment was captured.

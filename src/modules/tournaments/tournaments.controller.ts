@@ -45,6 +45,7 @@ import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
 import { UpdateParticipantFeePaymentDto } from './dto/update-participant-fee-payment.dto';
+import { UpdateParticipantPresenceDto } from './dto/update-participant-presence.dto';
 
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
@@ -1609,6 +1610,28 @@ export class TournamentsController {
       id,
       participantId,
       dto.paid,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Patch(':id/participants/:participantId/presence')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Đánh dấu có mặt của người tham gia (ghi chú của Ban tổ chức)',
+  })
+  async setParticipantPresent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body() dto: UpdateParticipantPresenceDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.setParticipantPresent(
+      id,
+      participantId,
+      dto.present,
       user.sub,
       this.getSystemRoles(user),
     );

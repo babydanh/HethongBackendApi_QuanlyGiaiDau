@@ -572,6 +572,7 @@ export class TournamentDivisionRepository {
           teamName: schema.tournamentParticipants.teamName,
           seed: schema.tournamentParticipants.seed,
           isPaid: schema.tournamentParticipants.isPaid,
+          isPresent: schema.tournamentParticipants.isPresent,
           registeredAt: schema.tournamentParticipants.registeredAt,
           registeredBy: {
             id: schema.users.id,

@@ -892,6 +892,23 @@ export class TournamentsService {
       (id, payload) => this.broadcastRegistrationChanged(id, payload),
     );
   }
+
+  async setParticipantPresent(
+    tournamentId: string,
+    participantId: string,
+    present: boolean,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    return this.tournamentParticipantAdminService.setParticipantPresent(
+      tournamentId,
+      participantId,
+      present,
+      userId,
+      systemRoles,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
   async importParticipantsFromForm(
     tournamentId: string,
     userId: string,
