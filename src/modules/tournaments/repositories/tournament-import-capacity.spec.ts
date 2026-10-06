@@ -37,17 +37,13 @@ function createHarness(queues: Record<string, Row[][]>) {
   const tableKey = (tables: string[]): string =>
     [...new Set(tables)].sort().join('+');
 
-  // The fake tx never evaluates WHERE, so an occupancy row is projected onto
-  // the columns the capacity query asked for: the same row reads under its
-  // division for a division read and under its tournament for a tournament
-  // read, exactly as the real join would return it.
-  const projectOccupancyRow = (
-    fields: Record<string, unknown>,
-    row: Row,
-  ): Row => {
-    const projected: Row = { rosterMemberCount: row.rosterMemberCount };
+  // The fake tx never evaluates WHERE, so a row is projected onto the columns
+  // the query asked for — only those fields, exactly as the real projection
+  // would return. An occupancy row additionally reads under its division for a
+  // division read and under its tournament for a tournament read.
+  const projectRow = (fields: Record<string, unknown>, row: Row): Row => {
+    const projected: Row = {};
     for (const [key, column] of Object.entries(fields)) {
-      if (key === 'rosterMemberCount') continue;
       if (column === schema.tournamentParticipants.tournamentDivisionId)
         projected[key] =
           row.divisionId !== undefined ? row.divisionId : row.scopeId;
@@ -95,9 +91,7 @@ function createHarness(queues: Record<string, Row[][]>) {
             const key = tableKey(tables);
             selections.push({ key, locked });
             const rows = takeRows(key);
-            return fields && 'rosterMemberCount' in fields
-              ? rows.map((row) => projectOccupancyRow(fields, row))
-              : rows;
+            return fields ? rows.map((row) => projectRow(fields, row)) : rows;
           })
           .then(resolve, reject);
 
@@ -657,7 +651,7 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
 
   it('projects only public candidate fields', async () => {
     const harness = createHarness({
-      'friendships+profiles+users': [
+      'profiles+users': [
         [
           {
             userId: 'athlete-1',
@@ -749,6 +743,7 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
         duplicateRows: [],
         occupancyRows: [
           {
+            teamStatus: 'PENDING_APPROVAL',
             rosterMemberCount: 1,
             tournamentId: 'tournament-1',
             divisionId: 'division-1',

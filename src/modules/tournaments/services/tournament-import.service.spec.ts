@@ -312,6 +312,10 @@ describe('TournamentImportService organizer add-athlete flow', () => {
     });
   });
   it('notifies only a newly appended football member and preserves the roster event', async () => {
+    repositoryMock.findById.mockResolvedValue({
+      ...openTournament,
+      tournamentConfig: { teamSize: 5 },
+    });
     const footballCandidate = Object.assign(new AddAthleteCandidateDto(), {
       source: 'CLUB',
       userId: 'athlete-1',

@@ -245,25 +245,11 @@ export class TournamentImportRepository {
   async listAddAthleteCandidates(
     tournamentId: string,
     organizerId: string,
+    communityId: string | null,
     dto: ListAddAthleteCandidatesQueryDto,
   ): Promise<{ items: Array<{ userId: string; fullName: string }> }> {
-    const [tournament] = await this.db
-      .select()
-      .from(schema.tournaments)
-      .where(eq(schema.tournaments.id, tournamentId))
-      .limit(1);
-    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
-
-    const isTeamSport = resolveFootballTeamConfig(
-      tournament.tournamentConfig,
-    ).isTeamSport;
     let teamId: string | undefined;
     if (dto.participantId) {
-      if (!isTeamSport) {
-        throw new BadRequestException(
-          'Chỉ nội dung đội bóng mới nhận participantId.',
-        );
-      }
       const [target] = await this.db
         .select({
           teamId: schema.tournamentParticipants.footballTeamId,
@@ -309,13 +295,9 @@ export class TournamentImportRepository {
         throw new BadRequestException('Roster đội bóng không thể cập nhật.');
       }
       teamId = target.teamId;
-    } else if (isTeamSport) {
-      throw new BadRequestException(
-        'Hãy chọn đội bóng trước khi tìm thành viên.',
-      );
     }
 
-    if (dto.source === 'CLUB' && !tournament.communityId) {
+    if (dto.source === 'CLUB' && !communityId) {
       return { items: [] };
     }
 
@@ -347,7 +329,7 @@ export class TournamentImportRepository {
       )
       .where(
         and(
-          eq(schema.communityMembers.communityId, tournament.communityId ?? ''),
+          eq(schema.communityMembers.communityId, communityId ?? ''),
           eq(schema.communityMembers.userId, schema.users.id),
           eq(schema.communityMembers.status, 'JOINED'),
           eq(schema.communities.status, 'ACTIVE'),

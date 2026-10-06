@@ -153,6 +153,7 @@ export class TournamentImportService {
     return this.tournamentsRepository.listAddAthleteCandidates(
       tournamentId,
       userId,
+      tournament.communityId ?? null,
       dto,
     );
   }
