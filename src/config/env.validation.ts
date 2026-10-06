@@ -98,11 +98,13 @@ export const envValidationSchema = Joi.object({
     .valid('rtsp', 'rtmp')
     .optional()
     .default('rtsp'),
-  // Host/port RTSP push mà AQP cấp (docx §2.2 ghi media.aqvision.net:18554 — KHÔNG hoạt động).
-  // Để rỗng ⇒ không sinh được QR (fail-closed), xem `aqvision-publish.service.ts`.
-  // Theo Developer Portal 2026-10-06: push host = `aqvision.net`, RTSP `:8554`, RTMP `:1936`.
+  // Host/port push mà AQP cấp. Để rỗng ⇒ không sinh được QR (fail-closed),
+  // xem `aqvision-publish.service.ts`.
+  // Panel AQP phát HAI cổng riêng: RTSP (`AQVISION_PUSH_PORT`) và RTMP
+  // (`AQVISION_PUSH_RTMP_PORT`) — không suy cổng này từ cổng kia.
   AQVISION_PUSH_HOST: Joi.string().allow('').optional().default(''),
   AQVISION_PUSH_PORT: Joi.number().integer().min(1).max(65535).optional(),
+  AQVISION_PUSH_RTMP_PORT: Joi.number().integer().min(1).max(65535).optional(),
   // Cổng Agency Gateway (:3003) + Agency ID — dùng cho luồng đăng ký camera và JWT.
   AQVISION_GATEWAY_URL: Joi.string()
     .uri()

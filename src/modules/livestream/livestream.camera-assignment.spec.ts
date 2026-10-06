@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
 import { LivestreamService } from './livestream.service';
@@ -47,6 +48,7 @@ function makeService(overrides: Record<string, unknown> = {}) {
   const service = new LivestreamService(
     repository as unknown as LivestreamRepository,
     { get: (key: string) => config[key] } as unknown as ConfigService,
+    {} as AqvisionPublishService,
   );
   return { repository, service };
 }

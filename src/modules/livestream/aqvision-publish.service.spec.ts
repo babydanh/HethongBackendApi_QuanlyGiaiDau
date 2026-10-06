@@ -170,6 +170,93 @@ describe('AqvisionPublishService', () => {
     });
   });
 
+  describe('buildRtmpPublishTarget', () => {
+    it('ghép RTMP server + stream key đúng panel AQP (<stream>?<key>)', () => {
+      const target = makeService().buildRtmpPublishTarget({
+        streamId: 'cameraip',
+        publishKey: '5b0b6a3cddc4e2',
+        pushHost: 'media.aqvision.net',
+        rtmpPushPort: 11935,
+      });
+
+      expect(target).toEqual({
+        server: 'rtmp://media.aqvision.net:11935/live',
+        streamKey: 'cameraip?5b0b6a3cddc4e2',
+      });
+    });
+
+    it('thiếu streamId ⇒ ném AqvisionApiException(-300)', () => {
+      expect(() =>
+        makeService().buildRtmpPublishTarget({
+          streamId: '   ',
+          publishKey: 'pub-secret-abc',
+          pushHost: 'media.aqvision.net',
+          rtmpPushPort: 11935,
+        }),
+      ).toThrow(AqvisionApiException);
+    });
+
+    it('thiếu rtmpPushPort ⇒ ném AqvisionApiException(-300), không bịa cổng mặc định', () => {
+      expect(() =>
+        makeService().buildRtmpPublishTarget({
+          streamId: 'cameraip',
+          publishKey: 'pub-secret-abc',
+          pushHost: 'media.aqvision.net',
+          rtmpPushPort: '',
+        }),
+      ).toThrow(AqvisionApiException);
+    });
+  });
+
+  describe('buildPublishQrResult', () => {
+    it('trả QR 5 field + RTMP target, dùng env cho cả RTSP lẫn RTMP', () => {
+      const service = makeService({
+        AQVISION_PUSH_HOST: 'media.aqvision.net',
+        AQVISION_PUSH_PORT: '18554',
+        AQVISION_PUSH_RTMP_PORT: '11935',
+      });
+
+      const result = service.buildPublishQrResult({
+        streamId: 'cameraip',
+        matchTitle: 'Bán kết 1',
+        publishKey: 'pub-secret-abc',
+        autoStart: true,
+      });
+
+      expect(Object.keys(result.qrPayload)).toEqual([
+        'stream_url',
+        'match_id',
+        'match_title',
+        'protocol',
+        'auto_start',
+      ]);
+      expect(result.qrPayload.stream_url).toBe(
+        'rtsp://media.aqvision.net:18554/live/cameraip?key=pub-secret-abc',
+      );
+      expect(result.qrPayload.auto_start).toBe(true);
+      expect(JSON.parse(result.qrPayloadString)).toEqual(result.qrPayload);
+      expect(result.rtmp).toEqual({
+        server: 'rtmp://media.aqvision.net:11935/live',
+        streamKey: 'cameraip?pub-secret-abc',
+      });
+    });
+
+    it('chưa cấu hình AQVISION_PUSH_RTMP_PORT ⇒ vẫn fail-closed', () => {
+      const service = makeService({
+        AQVISION_PUSH_HOST: 'media.aqvision.net',
+        AQVISION_PUSH_PORT: '18554',
+      });
+
+      expect(() =>
+        service.buildPublishQrResult({
+          streamId: 'cameraip',
+          matchTitle: 'Bán kết 1',
+          publishKey: 'pub-secret-abc',
+        }),
+      ).toThrow(AqvisionApiException);
+    });
+  });
+
   describe('toQrPayloadString', () => {
     it('round-trip JSON: parse lại được payload gốc', () => {
       const payload: AqvisionQrPayload =

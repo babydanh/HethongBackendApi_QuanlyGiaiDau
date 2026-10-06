@@ -26,6 +26,37 @@ export interface BuildQrPayloadInput {
 }
 
 /**
+ * Cặp cấu hình RTMP mà OBS / Camera Station phải nhập TAY (panel AQP hiển thị
+ * đúng hai ô này và ghi rõ "phải dán CẢ HAI, thiếu một bị từ chối").
+ *
+ * `streamKey` mang dạng `<stream>?<key>` chứ KHÔNG phải key trần — đây là định
+ * dạng panel AQP phát ra (ví dụ `cameraip?5b0b6a3cddc4e2`).
+ */
+export interface RtmpPublishTarget {
+  readonly server: string;
+  readonly streamKey: string;
+}
+
+/** Tham số ghép cặp RTMP. Cùng bất biến fail-closed như `BuildQrPayloadInput`. */
+export interface BuildRtmpTargetInput {
+  readonly streamId: string;
+  readonly publishKey: string;
+  readonly pushHost: string;
+  readonly rtmpPushPort: string | number;
+}
+
+/**
+ * Kết quả một lần dựng QR publish: payload 5 field cho app Camera Station quét,
+ * chuỗi JSON sẵn sàng render, và cặp RTMP cho người vận hành nhập tay vào OBS.
+ */
+export interface PublishQrResult {
+  readonly qrPayload: AqvisionQrPayload;
+  readonly qrPayloadString: string;
+  readonly rtmp: RtmpPublishTarget;
+}
+
+
+/**
  * Service thuần logic: ghép payload QR publish để AQP (media server bên thứ
  * ba) đẩy luồng về. KHÔNG inject AqvisionApiClient — `publish_key` do AQP
  * cấp qua kênh khác, không endpoint nào trong 11 endpoint trả nó.
@@ -111,6 +142,99 @@ export class AqvisionPublishService {
   }): AqvisionQrPayload {
     const { pushHost, pushPort } = this.resolvePushEndpoint();
     return this.buildQrPayload({ ...input, pushHost, pushPort });
+  }
+
+  /**
+   * Cặp RTMP (`server` + `streamKey`) mà OBS/Camera Station nhập tay.
+   *
+   * Fail-closed giống `buildQrPayload`: thiếu publishKey/streamId/pushHost/
+   * rtmpPushPort ⇒ ném `AqvisionApiException(-300)`. KHÔNG suy đoán cổng RTMP
+   * từ cổng RTSP — panel AQP dùng hai cổng khác nhau.
+   */
+  buildRtmpPublishTarget(input: BuildRtmpTargetInput): RtmpPublishTarget {
+    const streamId = (input.streamId ?? '').trim();
+    const publishKey = (input.publishKey ?? '').trim();
+    const pushHost = (input.pushHost ?? '').trim();
+    const rtmpPushPort = String(input.rtmpPushPort ?? '').trim();
+
+    if (publishKey.length === 0) {
+      throw new AqvisionApiException(
+        -300,
+        'publishKey is required to build an RTMP publish target',
+      );
+    }
+    if (streamId.length === 0) {
+      throw new AqvisionApiException(
+        -300,
+        'streamId is required to build an RTMP publish target',
+      );
+    }
+    if (pushHost.length === 0) {
+      throw new AqvisionApiException(
+        -300,
+        'pushHost is required to build an RTMP publish target',
+      );
+    }
+    if (rtmpPushPort.length === 0) {
+      throw new AqvisionApiException(
+        -300,
+        'rtmpPushPort is required to build an RTMP publish target',
+      );
+    }
+
+    return {
+      server: `rtmp://${pushHost}:${rtmpPushPort}/live`,
+      streamKey: `${streamId}?${publishKey}`,
+    };
+  }
+
+  /**
+   * Cổng RTMP push, tách khỏi `AQVISION_PUSH_PORT` (RTSP): panel AQP phát hai
+   * cổng riêng. Chưa cấu hình ⇒ rỗng ⇒ fail-closed.
+   */
+  resolveRtmpPushEndpoint(): { rtmpPushPort: string | number } {
+    const rtmpPushPort =
+      this.configService.get<string | number>('AQVISION_PUSH_RTMP_PORT') ?? '';
+    return { rtmpPushPort };
+  }
+
+  /**
+   * Ghép trọn một lần publish: QR 5 field (đúng docx §2.2, để app Camera
+   * Station quét) + chuỗi JSON + cặp RTMP nhập tay.
+   *
+   * Cả hai phần đều fail-closed qua env; thiếu env nào ⇒ ném lỗi, KHÔNG trả
+   * QR thiếu credential.
+   */
+  buildPublishQrResult(input: {
+    readonly streamId: string;
+    readonly matchTitle: string;
+    readonly publishKey: string;
+    readonly autoStart?: boolean;
+  }): PublishQrResult {
+    const { pushHost, pushPort } = this.resolvePushEndpoint();
+    const { rtmpPushPort } = this.resolveRtmpPushEndpoint();
+    const streamId = (input.streamId ?? '').trim();
+
+    const qrPayload = this.buildQrPayload({
+      matchId: streamId,
+      matchTitle: input.matchTitle,
+      publishKey: input.publishKey,
+      pushHost,
+      pushPort,
+      autoStart: input.autoStart,
+    });
+    const rtmp = this.buildRtmpPublishTarget({
+      streamId,
+      publishKey: input.publishKey,
+      pushHost,
+      rtmpPushPort,
+    });
+
+    return {
+      qrPayload,
+      qrPayloadString: this.toQrPayloadString(qrPayload),
+      rtmp,
+    };
   }
 
   /** Serialized payload — thứ tự field đúng theo khai báo của interface. */

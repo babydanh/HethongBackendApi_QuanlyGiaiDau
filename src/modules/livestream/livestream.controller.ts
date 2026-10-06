@@ -21,6 +21,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
+import { PublishQrDto } from './dto/publish-qr.dto';
 import { SetCourtPlaybackUrlDto } from './dto/set-court-playback-url.dto';
 import { LivestreamService } from './livestream.service';
 import { LiveSessionService } from './live-session.service';
@@ -343,6 +344,40 @@ export class LivestreamController {
     @Body() data: CreateCameraDto,
   ) {
     return this.livestreamService.createCamera(tournamentId, user, data);
+  }
+
+  @Post('cameras/:cameraId/publish-qr')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Dựng QR publish (docx §2.2) + cặp RTMP cho camera PUSH',
+    description:
+      'Trả payload 5 field để app Camera Station của AQP quét, kèm cặp RTMP ' +
+      '(server + streamKey) để nhập tay vào OBS. `publishKey` do AQP cấp và ' +
+      'phải gửi trong request: key là per-stream, KHÔNG lưu lại, KHÔNG ghi log.',
+  })
+  buildPublishQr(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() data: PublishQrDto,
+  ) {
+    return this.livestreamService.buildCameraPublishQr(cameraId, user, data);
+  }
+
+  @Post('cameras/:cameraId/rotate-stream-key')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Cấp lại stream key nội bộ của camera PUSH (pipeline SportO)',
+    description:
+      'Sinh streamName/streamKey mới cho media server của SportO. KHÔNG phải ' +
+      'publish key của AQP — key AQP được cấp và rotate tại panel AQP.',
+  })
+  rotateStreamKey(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.rotateCameraStreamKey(cameraId, user);
   }
 
   @Delete('cameras/:cameraId')

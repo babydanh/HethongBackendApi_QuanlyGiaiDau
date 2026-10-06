@@ -1,15 +1,24 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
+import { PublishQrDto } from './dto/publish-qr.dto';
 import { SetCourtPlaybackUrlDto } from './dto/set-court-playback-url.dto';
+import {
+  AqvisionPublishService,
+  type PublishQrResult,
+  type RtmpPublishTarget,
+} from './aqvision-publish.service';
+import { AqvisionApiException } from './aqvision-api.client';
 import {
   LivestreamMode,
   LivestreamProtocol,
@@ -34,6 +43,7 @@ export class LivestreamService {
   constructor(
     private readonly livestreamRepository: LivestreamRepository,
     private readonly configService: ConfigService,
+    private readonly aqvisionPublishService: AqvisionPublishService,
   ) {}
 
   private isAdmin(user: JwtPayload) {
@@ -360,6 +370,142 @@ export class LivestreamService {
       // PULL không có URL ingest để BTC cấu hình ở OBS/Camera Station.
       publish: mode === 'PULL' ? null : this.buildPublishInfo(protocol, streamName),
     };
+  }
+
+  /**
+   * Dựng QR publish để app Camera Station của AQP quét.
+   *
+   * Payload trả về là ĐÚNG 5 field của docx §2.2 — app AQP parse đúng shape đó.
+   * Kèm theo là cặp RTMP (`server` + `streamKey`) để người vận hành nhập tay
+   * vào OBS, vì panel AQP yêu cầu dán CẢ HAI ô.
+   *
+   * `publishKey` đến từ request (operator dán từ panel AQP cho đúng stream),
+   * KHÔNG lấy từ env dùng chung và KHÔNG lưu lại: key AQP là per-stream, một
+   * biến toàn cục sẽ cho phép một ảnh chụp màn hình đẩy luồng giả cho mọi giải.
+   * INV-001: giá trị này không bao giờ được ghi log.
+   */
+  async buildCameraPublishQr(
+    cameraId: string,
+    user: JwtPayload,
+    dto: PublishQrDto,
+  ) {
+    const camera = await this.getPushCamera(cameraId, user);
+    const streamId = (dto.streamId?.trim() || camera.streamName).trim();
+
+    const result = this.buildPublishQrOrFailClosed({
+      streamId,
+      matchTitle: dto.matchTitle?.trim() || camera.name,
+      publishKey: dto.publishKey,
+      autoStart: dto.autoStart ?? false,
+    });
+
+    return {
+      camera: {
+        id: camera.id,
+        name: camera.name,
+        streamName: camera.streamName,
+        mode: camera.mode,
+        protocol: camera.protocol,
+      },
+      ...result,
+    };
+  }
+
+  /**
+   * Cấp lại danh tính stream của một camera PUSH (nút "Cấp lại stream key" của
+   * pipeline SportO).
+   *
+   * PHẠM VI: đây là key NỘI BỘ trong `livestream_cameras`, dùng cho media
+   * server của SportO. Publish key của AQP (panel AQP, dạng `<stream>?<key>`)
+   * do AQP cấp và chỉ rotate được ở panel/AQP — endpoint này KHÔNG đụng tới nó.
+   *
+   * `streamName` có unique index nên lần ghi có thể trùng; thử lại với tên mới
+   * thay vì để lỗi ràng buộc nổi lên thành 500.
+   */
+  async rotateCameraStreamKey(cameraId: string, user: JwtPayload) {
+    const camera = await this.getPushCamera(cameraId, user);
+    const maxAttempts = 5;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const streamName = `camera_${randomUUID().replace(/-/g, '')}`;
+      const streamKey = randomUUID().replace(/-/g, '');
+      try {
+        const rotated = await this.livestreamRepository.updateCameraStreamIdentity(
+          camera.id,
+          { streamName, streamKey, playbackUrl: this.buildPlaybackUrl(streamName) },
+        );
+        if (!rotated) {
+          throw new NotFoundException('Camera không tồn tại');
+        }
+        return {
+          ...this.toPublicCamera(rotated),
+          publish: this.buildPublishInfo(
+            rotated.protocol === 'SRT' ? 'SRT' : 'RTMP',
+            rotated.streamName,
+          ),
+        };
+      } catch (error) {
+        const isLastAttempt = attempt === maxAttempts;
+        if (!this.isUniqueViolation(error) || isLastAttempt) {
+          throw error;
+        }
+      }
+    }
+
+    // Không thể tới đây: vòng lặp hoặc return, hoặc ném ở lần thử cuối.
+    throw new ConflictException('Không cấp được stream key mới, vui lòng thử lại.');
+  }
+
+  /**
+   * Bọc `buildPublishQrResult` để lỗi CẤU HÌNH thành 503 kèm tên biến môi
+   * trường cần set. Nếu để `AqvisionApiException` nổi lên, exception filter chỉ
+   * trả 500 "lỗi hệ thống" và operator không biết phải sửa gì.
+   *
+   * Thông báo KHÔNG chứa `publishKey` (INV-001) — chỉ tên biến env.
+   */
+  private buildPublishQrOrFailClosed(input: {
+    readonly streamId: string;
+    readonly matchTitle: string;
+    readonly publishKey: string;
+    readonly autoStart: boolean;
+  }): PublishQrResult {
+    try {
+      return this.aqvisionPublishService.buildPublishQrResult(input);
+    } catch (error) {
+      if (error instanceof AqvisionApiException) {
+        throw new ServiceUnavailableException(
+          'Máy chủ media AQP chưa được cấu hình đầy đủ cho giải này. ' +
+            'Kiểm tra AQVISION_PUSH_HOST, AQVISION_PUSH_PORT và AQVISION_PUSH_RTMP_PORT.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Camera dùng được cho luồng đẩy: phải tồn tại, thuộc giải người gọi quản lý,
+   * và ở mode PUSH (PULL do bên ngoài phát sẵn nên không có ingest để cấu hình).
+   */
+  private async getPushCamera(cameraId: string, user: JwtPayload) {
+    const camera = await this.livestreamRepository.findCameraById(cameraId);
+    if (!camera) {
+      throw new NotFoundException('Camera không tồn tại');
+    }
+    await this.assertTournamentOperator(camera.tournamentId, user);
+    if (camera.mode !== 'PUSH') {
+      throw new BadRequestException(
+        'Camera PULL không đẩy luồng lên nên không có stream key để cấp.',
+      );
+    }
+    return camera;
+  }
+
+  /** Vi phạm unique index của Postgres (SQLSTATE 23505). */
+  private isUniqueViolation(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null || !('code' in error)) {
+      return false;
+    }
+    return error.code === '23505';
   }
 
   /**

@@ -86,6 +86,33 @@ export class LivestreamRepository {
   }
 
   /**
+   * Cấp lại danh tính stream của một camera PUSH: `streamName` (cũng là stream
+   * key mà broadcaster nhập) và `streamKey` (credential nội bộ), kèm URL phát
+   * dựng lại theo tên mới.
+   *
+   * `livestreamCameras.streamName` có unique index, nên lần gọi này có thể ném
+   * lỗi trùng khoá; caller chịu trách nhiệm thử lại với tên khác
+   * (`rotateCameraStreamKey` trong service).
+   */
+  async updateCameraStreamIdentity(
+    cameraId: string,
+    values: { streamName: string; streamKey: string; playbackUrl: string },
+  ) {
+    const [camera] = await this.db
+      .update(schema.livestreamCameras)
+      .set({ ...values, status: 'IDLE', updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.livestreamCameras.id, cameraId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .returning();
+
+    return camera ?? null;
+  }
+
+  /**
    * Camera PULL đang phục vụ một sân trong một giải. Cùng một sân có thể được khai
    * URL khác ở giải khác, nên phải lọc cả tournamentId chứ không chỉ courtId.
    */
