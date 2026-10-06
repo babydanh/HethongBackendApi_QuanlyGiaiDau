@@ -51,6 +51,11 @@ import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
 import type { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
 import type { RosterImportDto } from './dto/roster-import.dto';
+import type {
+  AddAthleteCandidateDto,
+  AddAthleteDirectDto,
+  ListAddAthleteCandidatesQueryDto,
+} from './dto/add-athlete.dto';
 import { MailService } from '../../providers/mail/mail.service';
 import { BracketGeneratorService } from './bracket-generator.service';
 import {
@@ -953,6 +958,49 @@ export class TournamentsService {
     dto: RosterImportDto,
   ) {
     return this.tournamentImportService.importRosterFromForm(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+  async listAddAthleteCandidates(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: ListAddAthleteCandidatesQueryDto,
+  ) {
+    return this.tournamentImportService.listAddAthleteCandidates(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+    );
+  }
+
+  async addAthleteCandidate(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthleteCandidateDto,
+  ) {
+    return this.tournamentImportService.addAthleteCandidate(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+
+  async addDirectAthlete(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthleteDirectDto,
+  ) {
+    return this.tournamentImportService.addDirectAthlete(
       tournamentId,
       userId,
       systemRoles,

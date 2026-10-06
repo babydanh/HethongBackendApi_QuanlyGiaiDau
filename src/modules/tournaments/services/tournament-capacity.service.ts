@@ -11,8 +11,11 @@ import {
 } from '../utils/tournament-participant-status';
 import {
   IMPORT_SOURCES,
-  type ImportSource,
 } from '../dto/roster-import.dto';
+
+// Kept private: ORGANIZER_DIRECT is persisted metadata, not an import DTO source.
+const CAPACITY_IMPORT_SOURCES = [...IMPORT_SOURCES, 'ORGANIZER_DIRECT'] as const;
+type CapacityImportSource = (typeof CAPACITY_IMPORT_SOURCES)[number];
 
 /** Capacity is always expressed in team slots; `maxParticipants` stays a team limit. */
 export interface TournamentCapacitySnapshot {
@@ -547,9 +550,7 @@ function importedPairMemberCount(
     importedFrom?: unknown;
     player2Name?: unknown;
   };
-  if (
-    !IMPORT_SOURCES.includes(payload.importedFrom as ImportSource)
-  ) {
+  if (!CAPACITY_IMPORT_SOURCES.includes(payload.importedFrom as CapacityImportSource)) {
     return 0;
   }
 
