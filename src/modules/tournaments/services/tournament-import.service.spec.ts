@@ -18,6 +18,7 @@ describe('TournamentImportService', () => {
     repository,
     access,
     null as unknown as NotificationsService,
+    { sendConfirmationRequest: jest.fn().mockResolvedValue(false) } as never,
   );
 
   beforeEach(() => {
@@ -76,6 +77,7 @@ describe('TournamentImportService import contracts', () => {
       repositoryMock as unknown as TournamentsRepository,
       accessMock as unknown as TournamentAccessService,
       null as unknown as NotificationsService,
+      { sendConfirmationRequest: jest.fn().mockResolvedValue(false) } as never,
       mailMock as never,
     );
 

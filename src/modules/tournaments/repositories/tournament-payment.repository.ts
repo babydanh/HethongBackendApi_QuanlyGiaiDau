@@ -340,4 +340,21 @@ export class TournamentPaymentRepository {
       .returning();
     return updated ?? null;
   }
+
+  /**
+   * Organizer's day-of-event mark. Deliberately a bare flag: nothing reads it
+   * except the list view, so it cannot gate approval, ELO or playing.
+   */
+  async setParticipantPresentInTx(
+    tx: Transaction | AppDbOrTx,
+    participantId: string,
+    isPresent: boolean,
+  ) {
+    const [updated] = await tx
+      .update(schema.tournamentParticipants)
+      .set({ isPresent })
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .returning();
+    return updated ?? null;
+  }
 }

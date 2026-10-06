@@ -9,6 +9,7 @@ import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentAccessService } from './tournament-access.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { MailService } from '../../../providers/mail/mail.service';
+import { RankingConsentService } from './ranking-consent.service';
 import {
   buildParticipantRegistrationPendingNotification,
   buildParticipantRegistrationSuccessNotification,
@@ -27,6 +28,7 @@ export class TournamentImportService {
     private readonly tournamentsRepository: TournamentsRepository,
     private readonly tournamentAccessService: TournamentAccessService,
     private readonly notificationsService: NotificationsService,
+    private readonly rankingConsentService: RankingConsentService,
     @Optional() private readonly mailService?: MailService,
   ) {}
   /**
@@ -59,6 +61,8 @@ export class TournamentImportService {
       dto.notifyLinkedAccounts === true,
       result.linkedAccountNotifications,
     );
+
+    await this.sendConsentRequests(result.linkedAccountNotifications);
 
     await this.sendInvitationEmails(
       tournament.name,
@@ -109,6 +113,8 @@ export class TournamentImportService {
       dto.notifyLinkedAccounts === true,
       result.linkedAccountNotifications,
     );
+
+    await this.sendConsentRequests(result.linkedAccountNotifications);
 
     broadcastRegistrationChanged(tournamentId, {
       divisionId: dto.divisionId,
@@ -185,6 +191,29 @@ export class TournamentImportService {
         // A notification failure must not roll back a successful import.
       }
     }
+  }
+
+  /**
+   * Gửi yêu cầu xác nhận cho mọi VĐV import có tài khoản.
+   *
+   * Cố ý KHÔNG nằm sau cờ `notifyLinkedAccounts`: đó là tuỳ chọn của ban tổ chức,
+   * còn consent thì không. Gộp chung thì tổ chức chỉ cần bỏ cờ là mọi người im
+   * lặng không consent và trận của họ không tính — đúng loại loại ngầm mà nghiệp vụ
+   * này sinh ra để chặn.
+   *
+   * allSettled vì một mail lỗi không được làm hỏng cả lần import đã thành công.
+   */
+  private async sendConsentRequests(
+    rows:
+      | Array<{ rosterId: string; userId: string; status: string }>
+      | undefined,
+  ): Promise<void> {
+    if (!rows?.length) return;
+    await Promise.allSettled(
+      rows.map((row) =>
+        this.rankingConsentService.sendConfirmationRequest(row.rosterId),
+      ),
+    );
   }
   private async sendInvitationEmails(
     tournamentName: string,

@@ -264,7 +264,12 @@ describe('importing a participant by email links only an existing account', () =
     );
 
     expect(result.linkedAccountNotifications).toEqual([
-      { userId: 'user-linked', status: 'COMPLETE', divisionId: DIVISION_ID },
+      {
+        rosterId: expect.any(String),
+        userId: 'user-linked',
+        status: 'COMPLETE',
+        divisionId: DIVISION_ID,
+      },
     ]);
   });
 
@@ -337,7 +342,12 @@ describe('importing a participant by email links only an existing account', () =
     });
     // The unlinked partner is not a notification recipient either.
     expect(result.linkedAccountNotifications).toEqual([
-      { userId: 'user-linked', status: 'COMPLETE', divisionId: DIVISION_ID },
+      {
+        rosterId: expect.any(String),
+        userId: 'user-linked',
+        status: 'COMPLETE',
+        divisionId: DIVISION_ID,
+      },
     ]);
   });
 
@@ -402,7 +412,12 @@ describe('importing a participant by email links only an existing account', () =
     expect(rosterUserIds(harness.inserts)).toEqual(['user-linked']);
     expect(insertsOf(harness.inserts, 'users')).toEqual([]);
     expect(result.linkedAccountNotifications).toEqual([
-      { userId: 'user-linked', status: 'COMPLETE', divisionId: DIVISION_ID },
+      {
+        rosterId: expect.any(String),
+        userId: 'user-linked',
+        status: 'COMPLETE',
+        divisionId: DIVISION_ID,
+      },
     ]);
   });
 

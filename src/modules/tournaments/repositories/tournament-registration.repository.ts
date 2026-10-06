@@ -1040,6 +1040,9 @@ export class TournamentRegistrationRepository {
           teamName: finalTeamName,
           footballTeamId: isTeamSport ? (data.footballTeamId ?? null) : null,
           footballTeamLogoUrl: isTeamSport ? footballTeamLogoUrl : null,
+          // rankingConsent (boolean) records "this tournament is ranked" and stays
+          // as-is; rankingConsentAt is the timestamp ELO actually gates on, so a
+          // match only counts when matches.completedAt >= this instant.
           rankingConsent: data.rankingConsent === true,
           customResponses: registrationResponses,
           isPaid,
@@ -1099,6 +1102,26 @@ export class TournamentRegistrationRepository {
             role: 'RESERVE',
           });
         }
+      }
+
+      // Consent thuộc về TỪNG user qua roster, không thuộc về cả participant:
+      // ELO được gán theo tournament_rosters.userId, nên một participant có nhiều
+      // user (MAIN/RESERVE) thì consent phải tách ra từng người, nếu không một
+      // người xác nhận sẽ kéo cả đội qua gate.
+      //
+      // Chỉ người đăng ký tự xác nhận ở đây. Thành viên khác giữ NULL và phải tự
+      // bấm xác nhận — không thừa hưởng consent của người đăng ký.
+      if (data.rankingConsent === true) {
+        await tx
+          .update(schema.tournamentRosters)
+          .set({ rankingConsentAt: new Date() })
+          .where(
+            and(
+              eq(schema.tournamentRosters.participantId, participant.id),
+              eq(schema.tournamentRosters.userId, userId),
+              isNull(schema.tournamentRosters.rankingConsentAt),
+            ),
+          );
       }
 
       // Keep a first-class football entry/snapshot alongside the legacy

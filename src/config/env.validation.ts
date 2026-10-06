@@ -83,6 +83,10 @@ export const envValidationSchema = Joi.object({
   MEDIA_RTMP_BASE_URL: Joi.string().allow('').optional().default(''),
   MEDIA_SRT_BASE_URL: Joi.string().allow('').optional().default(''),
   MEDIA_WEBHOOK_SECRET: Joi.string().allow('').optional().default(''),
+  AQVISION_API_BASE_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .default('https://api.media.aqvision.net'),
+  AQVISION_API_SECRET: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_ID: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_SECRET: Joi.string().allow('').optional().default(''),
   FACEBOOK_OAUTH_REDIRECT_URI: Joi.string()

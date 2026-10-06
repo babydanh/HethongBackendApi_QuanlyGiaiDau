@@ -15,6 +15,7 @@ describe('TournamentSchedulerService registration auto-open', () => {
     const scheduler = new TournamentSchedulerService(
       database as never,
       null as never,
+      { sendDueReminders: jest.fn().mockResolvedValue(0) } as never,
     );
 
     await scheduler.handleAutoOpenRegistration();

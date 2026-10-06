@@ -573,6 +573,12 @@ export class TournamentsRepository {
     );
   }
 
+  confirmRankingConsent(
+    ...args: Parameters<TournamentParticipantRepository['confirmRankingConsent']>
+  ) {
+    return this.tournamentParticipantRepository.confirmRankingConsent(...args);
+  }
+
   countParticipants(
     ...args: Parameters<TournamentParticipantRepository['countParticipants']>
   ) {

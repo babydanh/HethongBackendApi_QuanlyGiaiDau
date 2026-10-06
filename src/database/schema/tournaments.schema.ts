@@ -205,6 +205,9 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   rankingConsent: boolean('ranking_consent').default(false).notNull(),
   customResponses: jsonb('custom_responses'),
   isPaid: boolean('is_paid').default(false).notNull(),
+  // Organizer's own day-of-event mark. Carries no meaning anywhere else: it does
+  // not gate roster approval, does not affect ELO, and does not block playing.
+  isPresent: boolean('is_present').default(false).notNull(),
   // Effective registration fee captured when this participant is created.
   // This is distinct from isPaid: zero means free at registration, while
   // isPaid=true after a paid flow means the payment was captured.
@@ -246,9 +249,29 @@ export const tournamentRosters = pgTable('tournament_rosters', {
   role: varchar('role', { length: 50 }).default('MAIN').notNull(),
   // Team sport: status mời — INVITED (chưa accept) / ACTIVE / REMOVED
   status: varchar('status', { length: 20 }).default('ACTIVE').notNull(),
+  // When THIS user agreed to have their results ranked in THIS tournament.
+  //
+  // Lives here, not on tournament_participants, because ELO is applied per
+  // tournament_rosters.userId: a team participant can carry several users
+  // (MAIN + RESERVE), so a single per-participant timestamp cannot tell whose
+  // consent it is — one user confirming would hand every team-mate their score.
+  //
+  // NULL means not confirmed. Distinct from tournament_participants.ranking_consent,
+  // which is only a copy of the tournament's isRanked flag.
+  //
+  // Business rule: a match counts only when matches.completedAt >= this instant.
+  // Matches played before confirming stay permanently unscored, so nobody can be
+  // force-enrolled and then have old results land against them.
+  rankingConsentAt: timestamp('ranking_consent_at', { withTimezone: true }),
   joinedAt: timestamp('joined_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
+  // When the confirmation mail was last queued, and how many times it has been
+  // sent. Self-reminders (1-3, then stop) are scheduled from these — without them
+  // the scheduler cannot tell "never notified" from "notified and ignored", and
+  // the organizer's "awaiting confirmation" view becomes unverifiable.
+  consentNotifiedAt: timestamp('consent_notified_at', { withTimezone: true }),
+  consentNotifiedCount: integer('consent_notified_count').default(0).notNull(),
 }, (table) => ({
   idxRostersParticipantUserUnique: uniqueIndex(
     'tournament_rosters_participant_user_unique_idx',

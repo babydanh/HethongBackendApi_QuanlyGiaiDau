@@ -2032,15 +2032,46 @@ export class RankingsService {
       const winnerParticipantId = match.winnerId;
 
       const winnerRosters = await tx
-        .select({ userId: schema.tournamentRosters.userId })
+        .select({
+          userId: schema.tournamentRosters.userId,
+          rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+        })
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, winnerParticipantId));
 
       const loserParticipantId = winnerParticipantId === p1Id ? p2Id : p1Id;
       const loserRosters = await tx
-        .select({ userId: schema.tournamentRosters.userId })
+        .select({
+          userId: schema.tournamentRosters.userId,
+          rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+        })
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, loserParticipantId));
+
+      // Consent gate, reusing the roster rows this loop already loads. A separate
+      // lookup per match would turn a batch recalculation into 2N round-trips.
+      // Same rule as hasEligibleRankingConsent: EVERY user must have confirmed
+      // before the match completed, otherwise the delete + reinsert further down
+      // writes elo_history_logs for players who never agreed — which is exactly
+      // how this function used to void the enqueue and apply gates.
+      // Checked per side, not on the combined array: a participant with NO roster
+      // row (Excel import, no account — userId is NOT NULL so the row cannot exist)
+      // contributes nothing to the union, and testing the union would read that as
+      // "everyone consented". hasEligibleRankingConsent checks per participant for
+      // the same reason; the two must not drift apart.
+      const completedAtMs = completedAt?.getTime();
+      const sideConsented = (rows: typeof winnerRosters) =>
+        completedAtMs !== undefined &&
+        rows.length > 0 &&
+        rows.every(
+          (r) =>
+            r.rankingConsentAt !== null &&
+            r.rankingConsentAt.getTime() <= completedAtMs,
+        );
+
+      if (!sideConsented(winnerRosters) || !sideConsented(loserRosters)) {
+        continue;
+      }
 
       const winnerUserIds: string[] = winnerRosters.map((r) => r.userId);
       const loserUserIds: string[] = loserRosters.map((r) => r.userId);
@@ -2227,6 +2258,72 @@ export class RankingsService {
   }
 
   /**
+   * V7 gate: a match only reaches the ranking board if BOTH participants had
+   * confirmed before the match completed. Deliberately all-or-nothing — scoring
+   * only the consenting side would let a player farm rating by facing opponents
+   * who never confirmed.
+   *
+   * Runs at APPLY time, not just at enqueue time: an outbox row queued before the
+   * player confirmed is still PENDING when they click, and applying it would
+   * count exactly the pre-confirmation matches V7 forbids.
+   *
+   * Returns false (skip) rather than throwing, so the processor marks the row
+   * PROCESSED instead of retrying forever. A skipped match stays unscored for
+   * good — that is the intended outcome, not a transient failure.
+   */
+  private async hasEligibleRankingConsent(matchId: string): Promise<boolean> {
+    const [match] = await this.db
+      .select({
+        completedAt: schema.matches.completedAt,
+        participant1Id: schema.matches.participant1Id,
+        participant2Id: schema.matches.participant2Id,
+      })
+      .from(schema.matches)
+      .where(eq(schema.matches.id, matchId))
+      .limit(1);
+
+    // Without a completion time there is nothing to compare the consent instant
+    // against, so the match is not provably post-consent and stays unscored.
+    if (!match?.completedAt) return false;
+
+    const participantIds = [match.participant1Id, match.participant2Id].filter(
+      (id): id is string => Boolean(id),
+    );
+    if (participantIds.length === 0) return false;
+
+    // Read consent per USER from tournament_rosters, matching exactly the rows
+    // processMatchResult awards ELO to. No status filter, for the same reason:
+    // a REMOVED/INVITED roster row still receives a delta there, so filtering it
+    // out here would make the gate stricter than the scoring it guards and
+    // silently zero out that participant's ELO.
+    const consentRows = await this.db
+      .select({
+        participantId: schema.tournamentRosters.participantId,
+        rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+      })
+      .from(schema.tournamentRosters)
+      .where(inArray(schema.tournamentRosters.participantId, participantIds));
+
+    if (consentRows.length === 0) return false;
+
+    const completedAt = match.completedAt!.getTime();
+    return participantIds.every((participantId) => {
+      const rows = consentRows.filter(
+        (row) => row.participantId === participantId,
+      );
+      // A participant with no roster row (Excel import, no account) has nobody
+      // to confirm, so nothing about it is eligible.
+      if (rows.length === 0) return false;
+      return rows.every((row) => {
+        const consentedAt = row.rankingConsentAt;
+        return (
+          consentedAt !== null && consentedAt.getTime() <= completedAt
+        );
+      });
+    });
+  }
+
+  /**
    * Entry point used by the ELO outbox worker (elo-outbox.processor.ts).
    * Loads the match + tournament context and calls processMatchResult with the
    * same arguments the old inline completion path used, so ELO semantics stay
@@ -2234,6 +2331,11 @@ export class RankingsService {
    * Idempotent by design (advisory lock + unique elo_history_logs index).
    */
   async processMatchResultFromOutbox(matchId: string) {
+    // Must run BEFORE the football branch: footballTeamEloService writes its own
+    // ELO and returns early, so a gate placed after it would never see football
+    // matches and V7 would not apply to them at all.
+    if (!(await this.hasEligibleRankingConsent(matchId))) return;
+
     const footballResult =
       await this.footballTeamEloService?.processCompletedMatch(matchId);
     if (footballResult?.handled) return footballResult;

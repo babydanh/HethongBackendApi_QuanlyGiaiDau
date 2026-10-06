@@ -45,6 +45,8 @@ import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
 import { UpdateParticipantFeePaymentDto } from './dto/update-participant-fee-payment.dto';
+import { UpdateParticipantPresenceDto } from './dto/update-participant-presence.dto';
+import { ConfirmRankingConsentResultDto } from './dto/confirm-ranking-consent-result.dto';
 
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
@@ -1612,6 +1614,51 @@ export class TournamentsController {
       user.sub,
       this.getSystemRoles(user),
     );
+  }
+
+  @Patch(':id/participants/:participantId/presence')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Đánh dấu có mặt của người tham gia (ghi chú của Ban tổ chức)',
+  })
+  async setParticipantPresent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body() dto: UpdateParticipantPresenceDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.setParticipantPresent(
+      id,
+      participantId,
+      dto.present,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Post(':id/participants/me/ranking-consent')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Người tham gia tự xác nhận để được tính Elo',
+    description:
+      'Chỉ chính người chơi gọi được, không giới hạn vai trò Ban tổ chức — vì ban tổ ' +
+      'chức tự bấm hộ sẽ phá đúng mục đích của nghiệp vụ này. Danh tính lấy từ JWT. ' +
+      'Mốc xác nhận quyết định trận nào được tính: chỉ những trận hoàn thành từ thời ' +
+      'điểm này trở đi. Mốc không bao giờ bị ghi lại nên bấm lại vô hại.',
+  })
+  @ApiResponse({ status: 201, type: ConfirmRankingConsentResultDto })
+  @ApiResponse({
+    status: 404,
+    description: 'Không có tư cách tham gia giải này',
+  })
+  async confirmRankingConsent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.confirmRankingConsent(id, user.sub);
   }
 
   @Post(':id/participants/:participantId/lock-roster')

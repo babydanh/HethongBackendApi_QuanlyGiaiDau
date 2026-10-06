@@ -27,6 +27,7 @@ import { TournamentDivisionService } from './services/tournament-division.servic
 
 import { TournamentParticipantAdminService } from './services/tournament-participant-admin.service';
 import { TournamentImportService } from './services/tournament-import.service';
+import { RankingConsentService } from './services/ranking-consent.service';
 import { TournamentBracketService } from './services/tournament-bracket.service';
 import { TournamentRealtimeService } from './services/tournament-realtime.service';
 import { TournamentRegistrationService } from './services/tournament-registration.service';
@@ -94,6 +95,7 @@ import { TournamentRegistrationRepository } from './repositories/tournament-regi
     TournamentFootballRosterService,
     BracketGeneratorService,
     TournamentSchedulerService,
+    RankingConsentService,
   ],
   exports: [
     TournamentsService,

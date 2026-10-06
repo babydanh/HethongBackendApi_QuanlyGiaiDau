@@ -892,6 +892,46 @@ export class TournamentsService {
       (id, payload) => this.broadcastRegistrationChanged(id, payload),
     );
   }
+
+  async setParticipantPresent(
+    tournamentId: string,
+    participantId: string,
+    present: boolean,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    return this.tournamentParticipantAdminService.setParticipantPresent(
+      tournamentId,
+      participantId,
+      present,
+      userId,
+      systemRoles,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+
+  /**
+   * Người tham gia tự xác nhận để được tính Elo.
+   *
+   * Cố tình KHÔNG có biến thể cho ban tổ chức: xác nhận là quyền của người chơi,
+   * và chính quy tắc này sinh ra để chặn việc bị ép thi rồi có kết quả cũ tính vào.
+   * Chấp nhận tự làm thì mất hết ý nghĩa.
+   *
+   * userId lấy từ JWT, không lấy từ request — không có đường nào để khai thao cho
+   * hộ người khác.
+   */
+  async confirmRankingConsent(tournamentId: string, userId: string) {
+    const result = await this.tournamentsRepository.confirmRankingConsent(
+      tournamentId,
+      userId,
+    );
+    if (!result) {
+      throw new NotFoundException(
+        'Bạn không có tư cách tham gia giải này nên không thể xác nhận.',
+      );
+    }
+    return result;
+  }
   async importParticipantsFromForm(
     tournamentId: string,
     userId: string,
