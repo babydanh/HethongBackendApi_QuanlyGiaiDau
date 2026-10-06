@@ -87,6 +87,28 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .default('https://api.media.aqvision.net'),
   AQVISION_API_SECRET: Joi.string().allow('').optional().default(''),
+  AQVISION_API_TIMEOUT_SECONDS: Joi.number()
+    .integer()
+    .min(1)
+    .max(60)
+    .default(10),
+  AQVISION_VHOST: Joi.string().optional().default('__defaultVhost__'),
+  AQVISION_APP: Joi.string().optional().default('live'),
+  AQVISION_MEDIA_SCHEMA: Joi.string()
+    .valid('rtsp', 'rtmp')
+    .optional()
+    .default('rtsp'),
+  // Host/port RTSP push mà AQP cấp (docx §2.2 ghi media.aqvision.net:18554 — KHÔNG hoạt động).
+  // Để rỗng ⇒ không sinh được QR (fail-closed), xem `aqvision-publish.service.ts`.
+  // Theo Developer Portal 2026-10-06: push host = `aqvision.net`, RTSP `:8554`, RTMP `:1936`.
+  AQVISION_PUSH_HOST: Joi.string().allow('').optional().default(''),
+  AQVISION_PUSH_PORT: Joi.number().integer().min(1).max(65535).optional(),
+  // Cổng Agency Gateway (:3003) + Agency ID — dùng cho luồng đăng ký camera và JWT.
+  AQVISION_GATEWAY_URL: Joi.string()
+    .uri()
+    .optional()
+    .default('http://aqvision.net:3003/api/v1'),
+  AQVISION_AGENCY_ID: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_ID: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_SECRET: Joi.string().allow('').optional().default(''),
   FACEBOOK_OAUTH_REDIRECT_URI: Joi.string()

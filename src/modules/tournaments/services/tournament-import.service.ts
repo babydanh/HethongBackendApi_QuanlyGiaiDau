@@ -11,15 +11,26 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { MailService } from '../../../providers/mail/mail.service';
 import { RankingConsentService } from './ranking-consent.service';
 import {
+  buildFootballRosterConfirmationNotification,
   buildParticipantRegistrationPendingNotification,
   buildParticipantRegistrationSuccessNotification,
 } from '../../notifications/notification-builder';
 import type { ImportParticipantsDto } from '../dto/import-participants.dto';
 import type { RosterImportDto } from '../dto/roster-import.dto';
+import type {
+  AddAthleteCandidateDto,
+  AddAthleteDirectDto,
+  ListAddAthleteCandidatesQueryDto,
+} from '../dto/add-athlete.dto';
+import { resolveFootballTeamConfig } from '../utils/football-team-config';
 
 type RegistrationChangedBroadcaster = (
   tournamentId: string,
-  payload: { divisionId?: string | null; action: string },
+  payload: {
+    participantId?: string;
+    divisionId?: string | null;
+    action: string;
+  },
 ) => void;
 
 @Injectable()
@@ -126,14 +137,124 @@ export class TournamentImportService {
       importedCount: result.importedCount,
     };
   }
-  private async assertImportable(
+  async listAddAthleteCandidates(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: ListAddAthleteCandidatesQueryDto,
+  ) {
+    const tournament = dto.participantId
+      ? await this.assertFootballRosterEditable(tournamentId, userId, systemRoles)
+      : await this.assertImportable(tournamentId, userId, systemRoles);
+    this.assertCandidateFlowMatchesSport(
+      tournament.tournamentConfig,
+      Boolean(dto.participantId),
+    );
+    return this.tournamentsRepository.listAddAthleteCandidates(
+      tournamentId,
+      userId,
+      dto,
+    );
+  }
+
+  async addAthleteCandidate(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthleteCandidateDto,
+    broadcastRegistrationChanged: RegistrationChangedBroadcaster,
+  ) {
+    const tournament = dto.participantId
+      ? await this.assertFootballRosterEditable(tournamentId, userId, systemRoles)
+      : await this.assertImportable(tournamentId, userId, systemRoles);
+    this.assertCandidateFlowMatchesSport(
+      tournament.tournamentConfig,
+      Boolean(dto.participantId),
+    );
+    const result = await this.tournamentsRepository.addAthleteCandidate(
+      tournamentId,
+      userId,
+      dto,
+    );
+
+    await this.sendConsentRequests(result.linkedAccountNotifications);
+    const footballConfirmation = result.footballRosterConfirmation;
+    if (footballConfirmation) {
+      try {
+        await this.notificationsService.sendNotification(
+          buildFootballRosterConfirmationNotification({
+            tournamentId,
+            tournamentName: tournament.name,
+            receiverId: footballConfirmation.userId,
+            divisionId: footballConfirmation.divisionId ?? undefined,
+            participantId: footballConfirmation.participantId,
+          }),
+        );
+      } catch {
+        // Notification failure must not roll back an appended roster member.
+      }
+    }
+
+    broadcastRegistrationChanged(tournamentId, {
+      ...(dto.participantId
+        ? { participantId: dto.participantId }
+        : {}),
+      divisionId:
+        result.divisionId ??
+        footballConfirmation?.divisionId ??
+        dto.tournamentDivisionId,
+      action: dto.participantId ? 'ROSTER_UPDATED' : 'IMPORT_PARTICIPANTS',
+    });
+    return result.participant;
+  }
+
+  async addDirectAthlete(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthleteDirectDto,
+    broadcastRegistrationChanged: RegistrationChangedBroadcaster,
+  ) {
+    const tournament = await this.assertImportable(
+      tournamentId,
+      userId,
+      systemRoles,
+    );
+    this.assertCandidateFlowMatchesSport(tournament.tournamentConfig, false);
+    const result = await this.tournamentsRepository.addDirectAthlete(
+      tournamentId,
+      userId,
+      dto,
+    );
+    broadcastRegistrationChanged(tournamentId, {
+      divisionId: result.divisionId ?? dto.tournamentDivisionId,
+      action: 'IMPORT_PARTICIPANTS',
+    });
+    return result.participant;
+  }
+
+  private assertCandidateFlowMatchesSport(
+    tournamentConfig: unknown,
+    isFootballAppend: boolean,
+  ): void {
+    const isTeamSport =
+      resolveFootballTeamConfig(tournamentConfig).isTeamSport;
+    if (isTeamSport !== isFootballAppend) {
+      throw new BadRequestException(
+        isTeamSport
+          ? 'Hãy chọn đội bóng hiện có trước khi thêm VĐV.'
+          : 'Chỉ nội dung đội bóng mới nhận participantId.',
+      );
+    }
+  }
+
+  private async assertTournamentManager(
     tournamentId: string,
     userId: string,
     systemRoles: string[],
   ) {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
-
     const isAuthorized = await this.tournamentAccessService.isManager(
       tournament,
       userId,
@@ -142,7 +263,41 @@ export class TournamentImportService {
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền nhập danh sách VĐV');
     }
+    return tournament;
+  }
 
+  private async assertFootballRosterEditable(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+  ) {
+    const tournament = await this.assertTournamentManager(
+      tournamentId,
+      userId,
+      systemRoles,
+    );
+    if (
+      !['REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'UPCOMING'].includes(
+        tournament.status,
+      )
+    ) {
+      throw new BadRequestException(
+        'Không thể sửa roster sau khi giải đấu bắt đầu.',
+      );
+    }
+    return tournament;
+  }
+
+  private async assertImportable(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+  ) {
+    const tournament = await this.assertTournamentManager(
+      tournamentId,
+      userId,
+      systemRoles,
+    );
     if (tournament.status === 'COMPLETED') {
       throw new BadRequestException('Giải đấu đã kết thúc');
     }
@@ -154,7 +309,6 @@ export class TournamentImportService {
         'Đăng ký đã được khóa. Không thể nhập thêm VĐV hoặc gửi lời mời mới.',
       );
     }
-
     return tournament;
   }
   private async notifyLinkedAccounts(

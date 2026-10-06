@@ -244,6 +244,30 @@ describe('TournamentCapacityService division capacity', () => {
     expect(capacity.occupiedMemberSlots).toBe(2);
   });
 
+  it('counts one rosterless organizer direct entry as one doubles member', async () => {
+    const db = createDb({
+      divisions: [
+        { id: 'division-1', matchType: 'DOUBLES', maxParticipants: 4 },
+      ],
+      participants: [
+        {
+          scopeId: 'division-1',
+          teamStatus: 'PENDING_APPROVAL',
+          rosterMemberCount: 0,
+          customResponses: {
+            importedFrom: 'ORGANIZER_DIRECT',
+            player1Name: 'Nguyen Van A',
+          },
+        },
+      ],
+    });
+
+    const capacity = await service(db).getDivisionCapacity('division-1');
+
+    expect(capacity.occupiedTeamSlots).toBe(0.5);
+    expect(capacity.occupiedMemberSlots).toBe(1);
+  });
+
   it('tops an import up to the full pair when only the first account is linked', async () => {
     const db = createDb({
       divisions: [

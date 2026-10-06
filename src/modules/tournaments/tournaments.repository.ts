@@ -520,6 +520,26 @@ export class TournamentsRepository {
   ) {
     return this.tournamentLiteRepository.generateLitePairsTx(...args);
   }
+  listAddAthleteCandidates(
+    ...args: Parameters<TournamentImportRepository['listAddAthleteCandidates']>
+  ) {
+    return this.tournamentImportRepository.listAddAthleteCandidates(...args);
+  }
+
+  addAthleteCandidate(
+    ...args: Parameters<TournamentImportRepository['addAthleteCandidate']>
+  ) {
+    return args[2].participantId
+      ? this.tournamentParticipantRepository.addAthleteCandidate(...args)
+      : this.tournamentImportRepository.addAthleteCandidate(...args);
+  }
+
+  addDirectAthlete(
+    ...args: Parameters<TournamentImportRepository['addDirectAthlete']>
+  ) {
+    return this.tournamentImportRepository.addDirectAthlete(...args);
+  }
+
   importParticipants(
     ...args: Parameters<TournamentImportRepository['importParticipants']>
   ) {

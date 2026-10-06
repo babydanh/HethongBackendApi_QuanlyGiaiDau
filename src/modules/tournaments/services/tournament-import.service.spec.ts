@@ -1,7 +1,13 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { validate } from 'class-validator';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { ImportParticipantsDto } from '../dto/import-participants.dto';
 import { RosterImportDto } from '../dto/roster-import.dto';
+import {
+  AddAthleteCandidateDto,
+  AddAthleteDirectDto,
+  ListAddAthleteCandidatesQueryDto,
+} from '../dto/add-athlete.dto';
 import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentAccessService } from './tournament-access.service';
 import { TournamentImportService } from './tournament-import.service';
@@ -55,11 +61,17 @@ describe('TournamentImportService import contracts', () => {
     findById: jest.fn(),
     importParticipants: jest.fn(),
     importRosterRows: jest.fn(),
+    listAddAthleteCandidates: jest.fn(),
+    addAthleteCandidate: jest.fn(),
+    addDirectAthlete: jest.fn(),
   };
   const accessMock = { isManager: jest.fn() };
   const mailMock = { sendMail: jest.fn() };
+  const notificationsMock = { sendNotification: jest.fn() };
+  const consentMock = { sendConfirmationRequest: jest.fn().mockResolvedValue(false) };
   const openTournament = {
     id: 'tournament-1',
+    communityId: 'community-1',
     name: 'Giải mở rộng',
     status: 'REGISTRATION_OPEN',
     isRegistrationLocked: false,
@@ -70,17 +82,50 @@ describe('TournamentImportService import contracts', () => {
     repositoryMock.findById.mockResolvedValue(openTournament);
     accessMock.isManager.mockResolvedValue(true);
     mailMock.sendMail.mockResolvedValue(undefined);
+    notificationsMock.sendNotification.mockResolvedValue(undefined);
   });
 
   const buildImporter = () =>
     new TournamentImportService(
       repositoryMock as unknown as TournamentsRepository,
       accessMock as unknown as TournamentAccessService,
-      null as unknown as NotificationsService,
-      { sendConfirmationRequest: jest.fn().mockResolvedValue(false) } as never,
+      notificationsMock as unknown as NotificationsService,
+      consentMock as never,
       mailMock as never,
     );
 
+  type AddAthleteBroadcast = (
+    tournamentId: string,
+    payload: {
+      participantId?: string;
+      divisionId?: string | null;
+      action: string;
+    },
+  ) => void;
+  type AddAthleteService = {
+    listAddAthleteCandidates(
+      tournamentId: string,
+      userId: string,
+      systemRoles: string[],
+      dto: ListAddAthleteCandidatesQueryDto,
+    ): Promise<unknown>;
+    addAthleteCandidate(
+      tournamentId: string,
+      userId: string,
+      systemRoles: string[],
+      dto: AddAthleteCandidateDto,
+      broadcast: AddAthleteBroadcast,
+    ): Promise<unknown>;
+    addDirectAthlete(
+      tournamentId: string,
+      userId: string,
+      systemRoles: string[],
+      dto: AddAthleteDirectDto,
+      broadcast: AddAthleteBroadcast,
+    ): Promise<unknown>;
+  };
+  const buildAddAthleteService = () =>
+    buildImporter() as unknown as AddAthleteService;
   it('keeps the legacy invitation-email behaviour and emailsSent counter', async () => {
     repositoryMock.importParticipants.mockResolvedValue({
       importedCount: 1,
@@ -184,4 +229,196 @@ describe('TournamentImportService import contracts', () => {
     expect(mailMock.sendMail).not.toHaveBeenCalled();
     expect(result).not.toHaveProperty('emailsSent');
   });
+describe('TournamentImportService organizer add-athlete flow', () => {
+  const candidateDto = Object.assign(new AddAthleteCandidateDto(), {
+    source: 'FRIENDS',
+    userId: 'athlete-1',
+    tournamentDivisionId: 'division-1',
+  });
+  it('requires an explicit football role when adding to an existing team', async () => {
+    const candidate = Object.assign(new AddAthleteCandidateDto(), {
+      source: 'FRIENDS',
+      userId: '00000000-0000-4000-8000-000000000001',
+      participantId: '00000000-0000-4000-8000-000000000002',
+    });
+
+    const errors = await validate(candidate);
+
+    expect(errors.some((error) => error.property === 'role')).toBe(true);
+  });
+
+  it('rejects candidate listing for non-managers before querying relationships', async () => {
+    accessMock.isManager.mockResolvedValue(false);
+
+    await expect(
+      buildAddAthleteService().listAddAthleteCandidates(
+        'tournament-1',
+        'organizer-1',
+        [],
+        Object.assign(new ListAddAthleteCandidatesQueryDto(), {
+          source: 'FRIENDS',
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(repositoryMock.listAddAthleteCandidates).not.toHaveBeenCalled();
+  });
+
+  it('requests consent only after committing a linked candidate', async () => {
+    const events: string[] = [];
+    repositoryMock.addAthleteCandidate.mockImplementation(async () => {
+      events.push('committed');
+      return {
+        participant: {
+          participantId: 'participant-1',
+          teamName: 'VĐV',
+          teamStatus: 'PENDING_APPROVAL',
+        },
+        linkedAccountNotifications: [
+          {
+            rosterId: 'roster-1',
+            userId: 'athlete-1',
+            status: 'PENDING_APPROVAL',
+          },
+        ],
+      };
+    });
+    consentMock.sendConfirmationRequest.mockImplementation(async () => {
+      events.push('consent-requested');
+      return false;
+    });
+    const broadcast = jest.fn();
+
+    const result = await buildAddAthleteService().addAthleteCandidate(
+      'tournament-1',
+      'organizer-1',
+      [],
+      candidateDto,
+      broadcast,
+    );
+
+    expect(events).toEqual(['committed', 'consent-requested']);
+    expect(consentMock.sendConfirmationRequest).toHaveBeenCalledWith(
+      'roster-1',
+    );
+    expect(result).toEqual({
+      participantId: 'participant-1',
+      teamName: 'VĐV',
+      teamStatus: 'PENDING_APPROVAL',
+    });
+    expect(broadcast).toHaveBeenCalledWith('tournament-1', {
+      divisionId: 'division-1',
+      action: 'IMPORT_PARTICIPANTS',
+    });
+  });
+  it('notifies only a newly appended football member and preserves the roster event', async () => {
+    const footballCandidate = Object.assign(new AddAthleteCandidateDto(), {
+      source: 'CLUB',
+      userId: 'athlete-1',
+      participantId: 'participant-1',
+      role: 'RESERVE',
+    });
+    repositoryMock.addAthleteCandidate.mockResolvedValue({
+      participant: {
+        participantId: 'participant-1',
+        teamName: 'Đội A',
+        teamStatus: 'PENDING_APPROVAL',
+        rosterRole: 'RESERVE',
+      },
+      linkedAccountNotifications: [
+        {
+          rosterId: 'roster-2',
+          userId: 'athlete-1',
+          status: 'PENDING_APPROVAL',
+          divisionId: 'division-1',
+        },
+      ],
+      footballRosterConfirmation: {
+        participantId: 'participant-1',
+        divisionId: 'division-1',
+        userId: 'athlete-1',
+      },
+    });
+    const broadcast = jest.fn();
+
+    const result = await buildAddAthleteService().addAthleteCandidate(
+      'tournament-1',
+      'organizer-1',
+      [],
+      footballCandidate,
+      broadcast,
+    );
+
+    expect(consentMock.sendConfirmationRequest).toHaveBeenCalledWith('roster-2');
+    expect(notificationsMock.sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        receiverId: 'athlete-1',
+        title: 'Xác nhận đội hình thi đấu',
+      }),
+    );
+    expect(broadcast).toHaveBeenCalledWith('tournament-1', {
+      participantId: 'participant-1',
+      divisionId: 'division-1',
+      action: 'ROSTER_UPDATED',
+    });
+    expect(result).toEqual({
+      participantId: 'participant-1',
+      teamName: 'Đội A',
+      teamStatus: 'PENDING_APPROVAL',
+      rosterRole: 'RESERVE',
+    });
+  });
+
+  it('rejects direct entry in a configured team tournament', async () => {
+    repositoryMock.findById.mockResolvedValue({
+      ...openTournament,
+      tournamentConfig: { teamSize: 5 },
+    });
+
+    await expect(
+      buildAddAthleteService().addDirectAthlete(
+        'tournament-1',
+        'organizer-1',
+        [],
+        Object.assign(new AddAthleteDirectDto(), { name: 'Khách' }),
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repositoryMock.addDirectAthlete).not.toHaveBeenCalled();
+  });
+
+  it('does not request ranking consent for a direct entry', async () => {
+    repositoryMock.addDirectAthlete.mockResolvedValue({
+      participant: {
+        participantId: 'participant-direct',
+        teamName: 'Khách',
+        teamStatus: 'PENDING_APPROVAL',
+      },
+    });
+    const broadcast = jest.fn();
+
+    const result = await buildAddAthleteService().addDirectAthlete(
+      'tournament-1',
+      'organizer-1',
+      [],
+      Object.assign(new AddAthleteDirectDto(), {
+        name: 'Khách',
+        tournamentDivisionId: 'division-1',
+      }),
+      broadcast,
+    );
+
+    expect(result).toEqual({
+      participantId: 'participant-direct',
+      teamName: 'Khách',
+      teamStatus: 'PENDING_APPROVAL',
+    });
+    expect(consentMock.sendConfirmationRequest).not.toHaveBeenCalled();
+    expect(broadcast).toHaveBeenCalledWith('tournament-1', {
+      divisionId: 'division-1',
+      action: 'IMPORT_PARTICIPANTS',
+    });
+  });
+});
 });

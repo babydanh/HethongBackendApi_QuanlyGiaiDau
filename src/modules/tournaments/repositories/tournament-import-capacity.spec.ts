@@ -1,5 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import * as schema from '../../../database/schema';
+import {
+  AddAthleteCandidateDto,
+  AddAthleteDirectDto,
+  ListAddAthleteCandidatesQueryDto,
+} from '../dto/add-athlete.dto';
 import { TournamentImportRepository } from './tournament-import.repository';
 
 // Drizzle tables are object keys, so the lookup must be by identity.
@@ -10,12 +15,17 @@ const TABLE_KEYS = new Map<unknown, string>([
   [schema.tournamentRosters, 'rosters'],
   [schema.profiles, 'profiles'],
   [schema.users, 'users'],
+[schema.friendships, 'friendships'],
+[schema.communities, 'communities'],
+[schema.communityMembers, 'communityMembers'],
+[schema.userBans, 'userBans'],
 ]);
 
 type Row = Record<string, unknown>;
 
 function createHarness(queues: Record<string, Row[][]>) {
   const inserts: Array<{ table: string; values: Row }> = [];
+  const selections: Array<{ key: string; locked: boolean }> = [];
   const lockCounter = { count: 0 };
 
   const takeRows = (key: string): Row[] => {
@@ -52,6 +62,7 @@ function createHarness(queues: Record<string, Row[][]>) {
     select: (fields?: Record<string, unknown>) => {
       const tables: string[] = [];
       const query: Record<string, unknown> = {};
+      let locked = false;
 
       const record =
         (fn: (...args: unknown[]) => unknown) =>
@@ -72,6 +83,7 @@ function createHarness(queues: Record<string, Row[][]>) {
       query.limit = () => query;
       query.for = () => {
         lockCounter.count += 1;
+        locked = true;
         return query;
       };
       query.then = (
@@ -80,7 +92,9 @@ function createHarness(queues: Record<string, Row[][]>) {
       ) =>
         Promise.resolve()
           .then(() => {
-            const rows = takeRows(tableKey(tables));
+            const key = tableKey(tables);
+            selections.push({ key, locked });
+            const rows = takeRows(key);
             return fields && 'rosterMemberCount' in fields
               ? rows.map((row) => projectOccupancyRow(fields, row))
               : rows;
@@ -107,13 +121,21 @@ function createHarness(queues: Record<string, Row[][]>) {
   return {
     tx: tx as unknown as Record<string, unknown>,
     inserts,
+    selections,
     lockCount: () => lockCounter.count,
   };
 }
 
 function createRepository(tx: unknown) {
   const db = {
-    transaction: async (callback: (inner: unknown) => unknown) => callback(tx),
+    transaction: async (callback: (inner: unknown) => unknown) =>
+      callback(tx),
+    select: (fields?: Record<string, unknown>) =>
+      (
+        tx as {
+          select: (value?: Record<string, unknown>) => unknown;
+        }
+      ).select(fields),
   };
   const paymentRepository = {
     resolveDivisionEntryFee: jest.fn().mockResolvedValue(0),
@@ -557,5 +579,305 @@ describe('import into a division that has no limit of its own', () => {
     );
 
     expect(result.importedCount).toBe(2);
+  });
+});
+
+type AddAthleteRepository = {
+  listAddAthleteCandidates(
+    tournamentId: string,
+    organizerUserId: string,
+    communityId: string | null,
+    dto: ListAddAthleteCandidatesQueryDto,
+  ): Promise<{ items: Array<{ userId: string; fullName: string }> }>;
+  addAthleteCandidate(
+    tournamentId: string,
+    organizerUserId: string,
+    dto: AddAthleteCandidateDto,
+  ): Promise<Row>;
+  addDirectAthlete(
+    tournamentId: string,
+    organizerUserId: string,
+    dto: AddAthleteDirectDto,
+  ): Promise<Row>;
+};
+
+function createAddAthleteRepository(tx: unknown): AddAthleteRepository {
+  return createRepository(tx) as unknown as AddAthleteRepository;
+}
+
+function addAthleteQueues(options: {
+  source: 'FRIENDS' | 'CLUB';
+  relationRows: Row[];
+  duplicateRows: Row[];
+  occupancyRows: Row[];
+  divisionLimit?: number;
+}): Record<string, Row[][]> {
+  const tournament: Row = {
+    id: 'tournament-1',
+    communityId: 'community-1',
+    status: 'REGISTRATION_OPEN',
+    isRegistrationLocked: false,
+    matchType: 'SINGLES',
+    maxParticipants: 4,
+    tournamentConfig: null,
+    entryFee: 0,
+  };
+  const division: Row = {
+    id: 'division-1',
+    tournamentId: 'tournament-1',
+    matchType: 'SINGLES',
+    maxParticipants: options.divisionLimit ?? 4,
+    tournamentConfig: null,
+  };
+  const queues: Record<string, Row[][]> = {
+    tournaments: [[tournament], [tournament]],
+    divisions: [[division], [division]],
+    'divisions+tournaments': [[division]],
+    'profiles+users': [[{ id: 'athlete-1', fullName: 'VĐV thử nghiệm' }]],
+    'participants+rosters': [
+      options.duplicateRows,
+      options.occupancyRows,
+    ],
+  };
+
+  if (options.source === 'FRIENDS') {
+    queues.friendships = [options.relationRows];
+  } else {
+    queues['communities+communityMembers'] = [options.relationRows];
+  }
+  return queues;
+}
+
+describe('TournamentImportRepository organizer add-athlete flow', () => {
+  const candidateDto = Object.assign(new AddAthleteCandidateDto(), {
+    source: 'FRIENDS',
+    userId: 'athlete-1',
+    tournamentDivisionId: 'division-1',
+  });
+
+  it('projects only public candidate fields', async () => {
+    const harness = createHarness({
+      'friendships+profiles+users': [
+        [
+          {
+            userId: 'athlete-1',
+            fullName: 'VĐV thử nghiệm',
+            email: 'private@example.test',
+            phoneNumber: '0900000000',
+          },
+        ],
+      ],
+    });
+
+    const result = await createAddAthleteRepository(harness.tx)
+      .listAddAthleteCandidates(
+        'tournament-1',
+        'organizer-1',
+        'community-1',
+        Object.assign(new ListAddAthleteCandidatesQueryDto(), {
+          source: 'FRIENDS',
+        }),
+      );
+
+    expect(result).toEqual({
+      items: [{ userId: 'athlete-1', fullName: 'VĐV thử nghiệm' }],
+    });
+  });
+
+  it.each([
+    ['FRIENDS', 'friendships'],
+    ['CLUB', 'communities+communityMembers'],
+  ] as const)(
+    'rejects a stale %s relationship after capacity locks',
+    async (source) => {
+      const harness = createHarness(
+        addAthleteQueues({
+          source,
+          relationRows: [],
+          duplicateRows: [],
+          occupancyRows: [],
+        }),
+      );
+      const dto = Object.assign(new AddAthleteCandidateDto(), {
+        ...candidateDto,
+        source,
+      });
+
+      await expect(
+        createAddAthleteRepository(harness.tx).addAthleteCandidate(
+          'tournament-1',
+          'organizer-1',
+          dto,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(harness.inserts).toHaveLength(0);
+      expect(harness.selections.slice(0, 2)).toEqual([
+        { key: 'tournaments', locked: true },
+        { key: 'divisions', locked: true },
+      ]);
+      expect(harness.selections[2]?.key).toBe('tournaments');
+    },
+  );
+
+  it('rejects an active roster duplicate without writing another participant', async () => {
+    const harness = createHarness(
+      addAthleteQueues({
+        source: 'FRIENDS',
+        relationRows: [{ id: 'friendship-1' }],
+        duplicateRows: [{ id: 'participant-existing' }],
+        occupancyRows: [],
+      }),
+    );
+
+    await expect(
+      createAddAthleteRepository(harness.tx).addAthleteCandidate(
+        'tournament-1',
+        'organizer-1',
+        candidateDto,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects a candidate when the locked division capacity is full', async () => {
+    const harness = createHarness(
+      addAthleteQueues({
+        source: 'FRIENDS',
+        relationRows: [{ id: 'friendship-1' }],
+        duplicateRows: [],
+        occupancyRows: [
+          {
+            rosterMemberCount: 1,
+            tournamentId: 'tournament-1',
+            divisionId: 'division-1',
+          },
+        ],
+        divisionLimit: 1,
+      }),
+    );
+
+    await expect(
+      createAddAthleteRepository(harness.tx).addAthleteCandidate(
+        'tournament-1',
+        'organizer-1',
+        candidateDto,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('writes a linked candidate without setting athlete ranking consent', async () => {
+    const harness = createHarness(
+      addAthleteQueues({
+        source: 'FRIENDS',
+        relationRows: [{ id: 'friendship-1' }],
+        duplicateRows: [],
+        occupancyRows: [],
+      }),
+    );
+
+    const result = await createAddAthleteRepository(harness.tx)
+      .addAthleteCandidate('tournament-1', 'organizer-1', candidateDto);
+    const participant = harness.inserts.find(
+      (insert) => insert.table === 'participants',
+    );
+    const roster = harness.inserts.find((insert) => insert.table === 'rosters');
+
+    expect(result.participant).toMatchObject({
+      participantId: expect.any(String),
+      teamStatus: 'PENDING_APPROVAL',
+    });
+    expect(participant?.values).toMatchObject({
+      registeredBy: 'organizer-1',
+      teamName: 'VĐV thử nghiệm',
+    });
+    expect(roster?.values).toMatchObject({ userId: 'athlete-1' });
+    expect(roster?.values).not.toHaveProperty('rankingConsentAt');
+  });
+
+  it('stores a direct entry as unlinked metadata and checks capacity', async () => {
+    const queues: Record<string, Row[][]> = {
+      tournaments: [
+        [
+          {
+            id: 'tournament-1',
+            status: 'REGISTRATION_OPEN',
+            isRegistrationLocked: false,
+            matchType: 'DOUBLES',
+            maxParticipants: 4,
+            tournamentConfig: null,
+            entryFee: 0,
+          },
+        ],
+        [
+          {
+            id: 'tournament-1',
+            status: 'REGISTRATION_OPEN',
+            isRegistrationLocked: false,
+            matchType: 'DOUBLES',
+            maxParticipants: 4,
+            tournamentConfig: null,
+            entryFee: 0,
+          },
+        ],
+      ],
+      divisions: [
+        [
+          {
+            id: 'division-1',
+            tournamentId: 'tournament-1',
+            matchType: 'DOUBLES',
+            maxParticipants: 4,
+            tournamentConfig: null,
+          },
+        ],
+        [
+          {
+            id: 'division-1',
+            tournamentId: 'tournament-1',
+            matchType: 'DOUBLES',
+            maxParticipants: 4,
+            tournamentConfig: null,
+          },
+        ],
+      ],
+      'divisions+tournaments': [
+        [
+          {
+            id: 'division-1',
+            tournamentId: 'tournament-1',
+            matchType: 'DOUBLES',
+            maxParticipants: 4,
+            tournamentConfig: null,
+          },
+        ],
+      ],
+      'participants+rosters': [[]],
+    };
+    const harness = createHarness(queues);
+
+    await createAddAthleteRepository(harness.tx).addDirectAthlete(
+      'tournament-1',
+      'organizer-1',
+      Object.assign(new AddAthleteDirectDto(), {
+        name: 'Khách trực tiếp',
+        tournamentDivisionId: 'division-1',
+      }),
+    );
+
+    const participant = harness.inserts.find(
+      (insert) => insert.table === 'participants',
+    );
+    expect(participant?.values).toMatchObject({
+      registeredBy: 'organizer-1',
+      teamName: 'Khách trực tiếp',
+      customResponses: { importedFrom: 'ORGANIZER_DIRECT' },
+    });
+    expect(
+      harness.inserts.filter((insert) => insert.table === 'rosters'),
+    ).toHaveLength(0);
   });
 });

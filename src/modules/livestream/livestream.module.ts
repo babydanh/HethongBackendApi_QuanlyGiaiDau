@@ -10,6 +10,11 @@ import { FacebookPageConnectionService } from './facebook-page-connection.servic
 import { FacebookTokenCryptoService } from './facebook-token-crypto.service';
 import { LiveSessionService } from './live-session.service';
 import { CameraDeviceService } from './camera-device.service';
+import { AqvisionApiClient } from './aqvision-api.client';
+import { AqvisionHealthService } from './aqvision-health.service';
+import { AqvisionRecordingService } from './aqvision-recording.service';
+import { AqvisionSnapshotService } from './aqvision-snapshot.service';
+import { AqvisionPublishService } from './aqvision-publish.service';
 import { LivestreamHealthProcessor } from './livestream-health.processor';
 import { LivestreamHealthQueue } from './livestream-health.queue';
 
@@ -28,6 +33,11 @@ import { LivestreamHealthQueue } from './livestream-health.queue';
     FacebookPageConnectionService,
     LiveSessionService,
     CameraDeviceService,
+    AqvisionApiClient,
+    AqvisionHealthService,
+    AqvisionRecordingService,
+    AqvisionSnapshotService,
+    AqvisionPublishService,
     LivestreamHealthProcessor,
     LivestreamHealthQueue,
   ],
@@ -37,6 +47,10 @@ import { LivestreamHealthQueue } from './livestream-health.queue';
     FacebookLiveService,
     FacebookPageConnectionService,
     CameraDeviceService,
+    AqvisionHealthService,
+    AqvisionRecordingService,
+    AqvisionSnapshotService,
+    AqvisionPublishService,
   ],
 })
 export class LivestreamModule {}
