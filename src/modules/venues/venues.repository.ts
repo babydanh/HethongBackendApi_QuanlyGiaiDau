@@ -11,6 +11,9 @@ import { CreateVenueCourtDto } from './dto/create-venue-court.dto';
 import type { AppDbOrTx, AppTx } from '../../database/db.types';
 import { geoPoint, validateCoordinatePair } from '../../common/utils/geo-point';
 
+/** Bán kính coi là "cùng một sân" khi chống trùng. */
+const VENUE_DEDUPE_RADIUS_M = 50;
+
 @Injectable()
 export class VenuesRepository {
   constructor(
@@ -150,11 +153,103 @@ export class VenuesRepository {
     }).from(schema.tournamentVenues).where(and(
       sql`similarity(public.f_unaccent(lower(${schema.tournamentVenues.name})), public.f_unaccent(lower(${data.name.trim()}))) > 0.5`,
       sql`${schema.tournamentVenues.locationGeolocation} IS NOT NULL`,
-      sql`ST_DWithin(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)}, 50)`,
+      sql`ST_DWithin(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)}, ${VENUE_DEDUPE_RADIUS_M})`,
       sql`${schema.tournamentVenues.deletedAt} IS NULL`,
     )).orderBy(asc(sql`ST_Distance(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)})`), asc(schema.tournamentVenues.id)).limit(10);
   }
 
+  /**
+   * Venue trùng vị trí mà tên khớp TUYỆT ĐỐI sau khi bỏ dấu + hạ chữ thường +
+   * cắt khoảng trắng. Khác `findMatchingPinnedVenues` (dùng fuzzy > 0.5) ở chỗ
+   * này là điều kiện nhị phân: chỉ khi đúng một venue thoả mới tái dùng được.
+   *
+   * Lấy tối đa 2 dòng vì trùng cả tên lẫn vị trí thì không dứt khoáng được —
+   * đẩy xuống bước dedupe mơ hồ để host chọn.
+   */
+  async findExactNamedPinnedVenues(
+    data: CreateVenueDto,
+    tx: AppDbOrTx = this.db,
+  ) {
+    const pair = validateCoordinatePair(data.latitude, data.longitude, { required: true })!;
+    return tx.select({
+      id: schema.tournamentVenues.id,
+      name: schema.tournamentVenues.name,
+      locationAddress: schema.tournamentVenues.locationAddress,
+      latitude: sql<number | null>`ST_Y(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      longitude: sql<number | null>`ST_X(${schema.tournamentVenues.locationGeolocation}::geometry)`,
+      distanceMeters: sql<number>`ST_Distance(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)})`,
+    }).from(schema.tournamentVenues).where(and(
+      sql`public.f_unaccent(lower(btrim(${schema.tournamentVenues.name}))) = public.f_unaccent(lower(btrim(${data.name.trim()})))`,
+      sql`${schema.tournamentVenues.locationGeolocation} IS NOT NULL`,
+      sql`ST_DWithin(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)}, ${VENUE_DEDUPE_RADIUS_M})`,
+      sql`${schema.tournamentVenues.deletedAt} IS NULL`,
+    )).orderBy(asc(sql`ST_Distance(${schema.tournamentVenues.locationGeolocation}, ${geoPoint(pair.longitude, pair.latitude)})`), asc(schema.tournamentVenues.id)).limit(2);
+  }
+
+  /**
+   * Tạo venue cho host ghim trong kèo, nhưng tái dùng venue đã có thay vì nhân
+   * bản khi trùng rõ ràng. Khác `create`: đường create cố ý trả 409 để bắt
+   * host chọn lại venue có sẵn, còn đường update phải idempotent — sửa kèo mà
+   * giữ nguyên sân sẽ gặp lại chính venue đó và phải không tạo bản sao.
+   */
+  async findOrCreateForSocial(
+    userId: string,
+    data: CreateVenueDto,
+    executor: AppDbOrTx | undefined = this.db,
+    regionCodes?: { provinceCode: string | null; wardCode: string | null },
+  ) {
+    const pair = validateCoordinatePair(data.latitude, data.longitude);
+    const write = async (tx: AppTx) => {
+      if (pair) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(731904, 1)`);
+        const exact = await this.findExactNamedPinnedVenues({ ...data, ...pair }, tx);
+        if (exact.length === 1) return { record: exact[0] } as const;
+        const candidates = await this.findMatchingPinnedVenues({ ...data, ...pair }, tx);
+        if (candidates.length) return { duplicateCandidates: candidates } as const;
+      }
+      return { record: await this.insertVenue(tx, userId, data, pair, regionCodes) } as const;
+    };
+    const activeExecutor = executor ?? this.db;
+    const outcome = activeExecutor === this.db
+      ? await this.db.transaction(write)
+      : await write(activeExecutor as AppTx);
+    return 'record' in outcome ? outcome.record : outcome;
+  }
+
+  /** Phần ghi dùng chung cho luồng tạo và luồng sửa. */
+  async insertVenue(
+    tx: AppTx,
+    userId: string,
+    data: CreateVenueDto,
+    pair: { latitude: number; longitude: number } | null,
+    regionCodes?: { provinceCode: string | null; wardCode: string | null },
+  ) {
+    const [record] = await tx
+      .insert(schema.tournamentVenues)
+      .values({
+        ownerUserId: userId,
+        name: data.name,
+        locationAddress: data.locationAddress,
+        provinceCode: regionCodes?.provinceCode ?? null,
+        wardCode: regionCodes?.wardCode ?? null,
+        ...(pair && { locationGeolocation: geoPoint(pair.longitude, pair.latitude) }),
+        imagesUrls: data.imagesUrls,
+      } as typeof schema.tournamentVenues.$inferInsert)
+      .returning();
+
+    if (!record) {
+      throw new InternalServerErrorException('Venue insert returned no record');
+    }
+
+    await this.auditService.logCreate(tx, userId, 'tournament_venues', record.id, record);
+    return record;
+  }
+
+  /**
+   * Đường tạo venue: giữ nguyên hành vi 409 để bắt host chọn lại sân đã có.
+   * Cố tình KHÔNG tái dùng theo tên tuyệt đối như `findOrCreateForSocial` —
+   * lúc tạo kèo, host ghim trùng sân đang có vẫn nên được nhắc chọn lại.
+   */
   async create(
     userId: string,
     data: CreateVenueDto,
@@ -168,25 +263,7 @@ export class VenuesRepository {
         const candidates = await this.findMatchingPinnedVenues({ ...data, ...pair }, tx);
         if (candidates.length) return { duplicateCandidates: candidates } as const;
       }
-      const [record] = await tx
-        .insert(schema.tournamentVenues)
-        .values({
-          ownerUserId: userId,
-          name: data.name,
-          locationAddress: data.locationAddress,
-          provinceCode: regionCodes?.provinceCode ?? null,
-          wardCode: regionCodes?.wardCode ?? null,
-          ...(pair && { locationGeolocation: geoPoint(pair.longitude, pair.latitude) }),
-          imagesUrls: data.imagesUrls,
-        } as typeof schema.tournamentVenues.$inferInsert)
-        .returning();
-
-      if (!record) {
-        throw new InternalServerErrorException('Venue insert returned no record');
-      }
-
-      await this.auditService.logCreate(tx, userId, 'tournament_venues', record.id, record);
-      return { record } as const;
+      return { record: await this.insertVenue(tx, userId, data, pair, regionCodes) } as const;
     };
     const activeExecutor = executor ?? this.db;
     const outcome = activeExecutor === this.db

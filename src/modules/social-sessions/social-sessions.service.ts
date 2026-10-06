@@ -36,6 +36,11 @@ type SessionRow = typeof schema.socialSessions.$inferSelect;
 
 const MANAGER_ROLES = new Set(['OWNER', 'MODERATOR']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Sai số toạ độ chấp nhận được — phải khớp ngưỡng `1e-7` mà constraint
+ * `social_sessions` dùng để đối chiếu `venue_geolocation` với lat/lng.
+ */
+const VENUE_GEOMETRY_EPSILON_DEG = 1e-7;
 
 function apiError(
   ExceptionType:
@@ -804,6 +809,20 @@ export class SocialSessionsService {
       assertLocationPair(dto.latitude ?? null, dto.longitude ?? null);
       patch.latitude = dto.latitude;
       patch.longitude = dto.longitude;
+      // Đường legacy: host chỉ gửi toạ độ, không kèm venue. Nếu pin thực sự
+      // dịch khỏi vị trí venue đang gắn thì `venueId`/`courtId` cũ không còn
+      // khớp tên/địa chỉ/toạ độ, giữ lại sẽ khiến `getById` join nhầm sân khác.
+      const pinMoved =
+        patch.latitude == null ||
+        patch.longitude == null ||
+        session.latitude == null ||
+        session.longitude == null ||
+        Math.abs(patch.latitude - session.latitude) > VENUE_GEOMETRY_EPSILON_DEG ||
+        Math.abs(patch.longitude - session.longitude) > VENUE_GEOMETRY_EPSILON_DEG;
+      if (pinMoved) {
+        patch.venueId = null;
+        patch.courtId = null;
+      }
     }
     const locationChanged = dto.newVenue != null || dto.venueId !== undefined
       || dto.latitude !== undefined || dto.longitude !== undefined;
@@ -819,7 +838,10 @@ export class SocialSessionsService {
     if (dto.newVenue) {
       updated = await this.repository.getDb().transaction(async (tx) => {
         const region = await this.regionsService.resolveByPoint({ lat: dto.newVenue!.latitude, lng: dto.newVenue!.longitude }, tx);
-        const venueResult = await this.venuesRepository.create(actor.id, {
+        // Khác `create`: sửa kèo mà giữ nguyên sân sẽ gặp lại đúng venue đó,
+        // nên phải tái dùng thay vì 409/nhân bản — nếu không mỗi lần sửa là mất
+        // liên kết với thư viện sân và search sẽ không ra kèo vừa đổi địa điểm.
+        const venueResult = await this.venuesRepository.findOrCreateForSocial(actor.id, {
           name: dto.newVenue!.name.trim(),
           locationAddress: dto.newVenue!.locationAddress.trim(),
           latitude: dto.newVenue!.latitude,

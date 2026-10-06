@@ -8,6 +8,7 @@ import { SocialSessionsService } from './social-sessions.service';
 import { SocialSessionsRepository } from './social-sessions.repository';
 import { ChatService } from '../chat/chat.service';
 import { RegionsService } from '../regions/regions.service';
+import { VenuesRepository } from '../venues/venues.repository';
 
 function makeRepositoryMock(): jest.Mocked<SocialSessionsRepository> {
   return {
@@ -50,6 +51,14 @@ const regionsStub = {
   resolveByPoint: jest.fn().mockResolvedValue(null),
   validateCodes: jest.fn().mockResolvedValue({ provinceCode: null, wardCode: null }),
 } as unknown as RegionsService;
+
+function makeVenuesRepositoryMock() {
+  return {
+    create: jest.fn(),
+    findOrCreateForSocial: jest.fn(),
+  } as unknown as jest.Mocked<VenuesRepository>;
+}
+
 
 const CATEGORY_ID = '11111111-1111-4111-8111-111111111111';
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
@@ -114,10 +123,12 @@ function baseCreateDto(overrides = {}) {
 describe('SocialSessionsService', () => {
   let service: SocialSessionsService;
   let repository: jest.Mocked<SocialSessionsRepository>;
+  let venuesRepository: jest.Mocked<VenuesRepository>;
 
   beforeEach(() => {
     repository = makeRepositoryMock();
-    service = new SocialSessionsService(repository, undefined, regionsStub);
+    venuesRepository = makeVenuesRepositoryMock();
+    service = new SocialSessionsService(repository, undefined, regionsStub, venuesRepository);
     repository.findCategoryBySlug.mockResolvedValue({
       id: CATEGORY_ID,
       slug: 'pickleball',
@@ -450,6 +461,134 @@ describe('SocialSessionsService', () => {
         expect.objectContaining({ title: 'Tên mới' }),
       );
       expect(result).toBeDefined();
+    });
+
+    describe('đổi địa điểm', () => {
+      // startAt ở tương lai để `refreshStatusIfExpired` không tự đóng kèo.
+      const hostedSession = (overrides = {}) =>
+        baseSession({
+          venueId: 'venue-old',
+          courtId: null,
+          playDate: '2099-01-01',
+          startAt: new Date('2099-01-01T09:00:00+07:00'),
+          ...overrides,
+        });
+
+      beforeEach(() => {
+        repository.findSessionById.mockResolvedValue({
+          session: hostedSession(),
+          communityName: null,
+          communityLogoUrl: null,
+          categorySlug: 'pickleball',
+          categoryName: 'Pickleball',
+        });
+        repository.listParticipants.mockResolvedValue([]);
+        const tx = {};
+        repository.getDb.mockReturnValue({
+          transaction: (cb: (t: unknown) => unknown) => cb(tx),
+        } as never);
+        repository.updateSession.mockImplementation((_id, patch) =>
+          Promise.resolve(hostedSession({ ...patch })),
+        );
+      });
+
+      it('ghim mới thì tái dùng venue qua findOrCreateForSocial, không tạo bản sao', async () => {
+        venuesRepository.findOrCreateForSocial.mockResolvedValue({
+          id: 'venue-reused',
+        } as never);
+
+        await service.update({ id: HOST_ID }, SESSION_ID, {
+          newVenue: {
+            name: 'Sân Mới',
+            locationAddress: '909 Đường Nguyễn Trãi, Q.1',
+            latitude: 10.7769,
+            longitude: 106.7009,
+          },
+        });
+
+        expect(venuesRepository.findOrCreateForSocial).toHaveBeenCalledWith(
+          HOST_ID,
+          expect.objectContaining({ name: 'Sân Mới' }),
+          expect.anything(),
+          expect.objectContaining({ provinceCode: null, wardCode: null }),
+        );
+        // `create` giữ nguyên hành vi 409 cho luồng tạo mới.
+        expect(venuesRepository.create).not.toHaveBeenCalled();
+        expect(repository.updateSession).toHaveBeenCalledWith(
+          SESSION_ID,
+          expect.objectContaining({
+            venueId: 'venue-reused',
+            venueName: 'Sân Mới',
+            venueAddress: '909 Đường Nguyễn Trãi, Q.1',
+            courtId: null,
+          }),
+          expect.anything(),
+        );
+      });
+
+      it('ghim trùng bán kính mà tên lệch thì vẫn 409 để host chọn lại venue', async () => {
+        venuesRepository.findOrCreateForSocial.mockResolvedValue({
+          duplicateCandidates: [{ id: 'venue-nearby', name: 'Sân Khác' }],
+        } as never);
+
+        await expect(
+          service.update({ id: HOST_ID }, SESSION_ID, {
+            newVenue: {
+              name: 'Sân Mới',
+              locationAddress: '909 Đường Nguyễn Trãi, Q.1',
+              latitude: 10.7769,
+              longitude: 106.7009,
+            },
+          }),
+        ).rejects.toBeInstanceOf(ConflictException);
+      });
+
+      it('đường legacy chỉ gửi toạ độ và pin dịch chuyển thì xoá venueId/courtId cũ', async () => {
+        repository.findSessionById.mockResolvedValue({
+          session: hostedSession({ latitude: 10.7769, longitude: 106.7009 }),
+          communityName: null,
+          communityLogoUrl: null,
+          categorySlug: 'pickleball',
+          categoryName: 'Pickleball',
+        });
+
+        await service.update({ id: HOST_ID }, SESSION_ID, {
+          latitude: 11.0,
+          longitude: 107.0,
+          venueName: 'Chỗ mới',
+          venueAddress: 'Địa chỉ mới',
+        });
+
+        expect(repository.updateSession).toHaveBeenCalledWith(
+          SESSION_ID,
+          expect.objectContaining({
+            latitude: 11.0,
+            longitude: 107.0,
+            venueId: null,
+            courtId: null,
+          }),
+        );
+      });
+
+      it('đường legacy giữ nguyên toạ độ thì không đụng venueId', async () => {
+        repository.findSessionById.mockResolvedValue({
+          session: hostedSession({ latitude: 10.7769, longitude: 106.7009 }),
+          communityName: null,
+          communityLogoUrl: null,
+          categorySlug: 'pickleball',
+          categoryName: 'Pickleball',
+        });
+
+        await service.update({ id: HOST_ID }, SESSION_ID, {
+          latitude: 10.7769,
+          longitude: 106.7009,
+        });
+
+        const patch = repository.updateSession.mock.calls[0][1] as Record<string, unknown>;
+        expect(patch.latitude).toBe(10.7769);
+        expect(patch).not.toHaveProperty('venueId');
+        expect(patch).not.toHaveProperty('courtId');
+      });
     });
   });
 
