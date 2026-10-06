@@ -102,9 +102,24 @@ export const envValidationSchema = Joi.object({
   // xem `aqvision-publish.service.ts`.
   // Panel AQP phát HAI cổng riêng: RTSP (`AQVISION_PUSH_PORT`) và RTMP
   // (`AQVISION_PUSH_RTMP_PORT`) — không suy cổng này từ cổng kia.
+  //
+  // `.allow('')`: `.env.example` phát hai dòng này ở dạng TRỐNG, nên operator
+  // copy sang VPS sẽ có `AQVISION_PUSH_PORT=`. Nếu không cho phép chuỗi rỗng,
+  // Joi từ chối và container crash-loop (đã xảy ra ở production). Rỗng phải
+  // nghĩa là "chưa cấu hình" và bị chặn ở tầng service (503), KHÔNG phải lúc boot.
   AQVISION_PUSH_HOST: Joi.string().allow('').optional().default(''),
-  AQVISION_PUSH_PORT: Joi.number().integer().min(1).max(65535).optional(),
-  AQVISION_PUSH_RTMP_PORT: Joi.number().integer().min(1).max(65535).optional(),
+  AQVISION_PUSH_PORT: Joi.number()
+    .integer()
+    .min(1)
+    .max(65535)
+    .allow('')
+    .optional(),
+  AQVISION_PUSH_RTMP_PORT: Joi.number()
+    .integer()
+    .min(1)
+    .max(65535)
+    .allow('')
+    .optional(),
   // Cổng Agency Gateway (:3003) + Agency ID — dùng cho luồng đăng ký camera và JWT.
   AQVISION_GATEWAY_URL: Joi.string()
     .uri()

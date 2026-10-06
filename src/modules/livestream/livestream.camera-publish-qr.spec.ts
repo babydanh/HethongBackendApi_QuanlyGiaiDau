@@ -172,6 +172,25 @@ describe('LivestreamService camera publish QR', () => {
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
+  it('env TRỐNG như .env.example ⇒ vẫn fail-closed 503, KHÔNG sinh QR thiếu credential', async () => {
+    // VPS copy nguyên dòng `AQVISION_PUSH_PORT=` từ .env.example, nên giá trị
+    // đến service là chuỗi rỗng chứ không phải undefined. Chuỗi rỗng phải đi
+    // xuống đúng đường fail-closed, không được lọt thành URL `rtmp://host:/live`.
+    const { service } = makeService({
+      env: {
+        AQVISION_PUSH_HOST: 'media.aqvision.net',
+        AQVISION_PUSH_PORT: '',
+        AQVISION_PUSH_RTMP_PORT: '',
+      },
+    });
+
+    await expect(
+      service.buildCameraPublishQr('camera-push-1', owner, {
+        publishKey: 'pub-secret-abc',
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
   it('thiếu env ⇒ thông báo nêu đúng tên biến môi trường, không lộ key', async () => {
     const { service } = makeService({ env: {} });
 
