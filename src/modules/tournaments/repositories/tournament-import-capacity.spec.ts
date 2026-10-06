@@ -678,10 +678,7 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
     });
   });
 
-  it.each([
-    ['FRIENDS', 'friendships'],
-    ['CLUB', 'communities+communityMembers'],
-  ] as const)(
+  it.each([['FRIENDS'], ['CLUB']] as const)(
     'rejects a stale %s relationship after capacity locks',
     async (source) => {
       const harness = createHarness(

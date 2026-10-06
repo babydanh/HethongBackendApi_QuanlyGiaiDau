@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
@@ -1762,18 +1763,22 @@ export class TournamentParticipantRepository {
         nextEntryStatus === 'CONFIRMED' ? new Date() : null;
       const updatedAt = new Date();
 
-      await this.auditService.logUpdate(tx, 'tournament_team_entries', entry.id, {
-        status: nextEntryStatus,
-        confirmedAt,
-        updatedAt,
-      });
-      await tx
+      const [updatedEntry] = await tx
         .update(schema.tournamentTeamEntries)
         .set({ status: nextEntryStatus, confirmedAt, updatedAt })
-        .where(eq(schema.tournamentTeamEntries.id, entry.id));
+        .where(eq(schema.tournamentTeamEntries.id, entry.id))
+        .returning();
+      await this.auditService.logUpdate(
+        tx,
+        organizerId,
+        'tournament_team_entries',
+        entry.id,
+        entry,
+        updatedEntry,
+      );
       await tx
         .update(schema.tournamentParticipants)
-        .set({ teamStatus: nextParticipantStatus, updatedAt })
+        .set({ teamStatus: nextParticipantStatus })
         .where(eq(schema.tournamentParticipants.id, participant.id));
 
       return {

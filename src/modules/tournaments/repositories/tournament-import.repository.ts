@@ -59,7 +59,7 @@ const INACTIVE_PARTICIPANT_STATUSES = [
   'KICKED',
   'EXPIRED',
   'CANCELLED',
-] as const;
+];
 
 function escapeLikeQuery(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
