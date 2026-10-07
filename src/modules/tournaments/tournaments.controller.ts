@@ -38,6 +38,7 @@ import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
 import { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
 import { RosterImportDto } from './dto/roster-import.dto';
+import { ReopenRegistrationDto } from './dto/reopen-registration.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
@@ -1255,12 +1256,24 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Mở lại đăng ký có kiểm soát trước khi tạo sơ đồ' })
   async reopenRegistration(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() reopenRegistrationDto: ReopenRegistrationDto,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.reopenRegistration(
       id,
       user.sub,
       this.getSystemRoles(user),
+      {
+        registrationEndDate: reopenRegistrationDto.registrationEndDate
+          ? new Date(reopenRegistrationDto.registrationEndDate)
+          : null,
+        startDate: reopenRegistrationDto.startDate
+          ? new Date(reopenRegistrationDto.startDate)
+          : null,
+        endDate: reopenRegistrationDto.endDate
+          ? new Date(reopenRegistrationDto.endDate)
+          : null,
+      },
     );
   }
 
@@ -1466,6 +1479,7 @@ export class TournamentsController {
       dto.names,
       this.getSystemRoles(user),
       dto.divisionId,
+      dto.pairingMode,
     );
   }
 

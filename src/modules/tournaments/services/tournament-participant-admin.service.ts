@@ -82,10 +82,10 @@ export class TournamentParticipantAdminService {
     names: string[],
     systemRoles: string[] = [],
     divisionId?: string,
+    pairingMode?: 'AUTO' | 'INDIVIDUAL_WAITING',
   ) {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
-
     const isLite =
       (
         tournament.tournamentConfig as
@@ -113,6 +113,7 @@ export class TournamentParticipantAdminService {
       tournamentId,
       names,
       divisionId,
+      pairingMode,
     );
   }
 

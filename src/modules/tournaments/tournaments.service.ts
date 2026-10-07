@@ -825,6 +825,7 @@ export class TournamentsService {
     names: string[],
     systemRoles: string[] = [],
     divisionId?: string,
+    pairingMode?: 'AUTO' | 'INDIVIDUAL_WAITING',
   ) {
     return this.tournamentParticipantAdminService.seedMockParticipants(
       tournamentId,
@@ -832,9 +833,9 @@ export class TournamentsService {
       names,
       systemRoles,
       divisionId,
+      pairingMode,
     );
   }
-
   async clearMockParticipants(
     tournamentId: string,
     userId: string,
@@ -1280,11 +1281,17 @@ export class TournamentsService {
     id: string,
     userId: string,
     systemRoles: string[] = [],
+    options?: {
+      registrationEndDate?: Date | null;
+      startDate?: Date | null;
+      endDate?: Date | null;
+    },
   ) {
     return this.tournamentRegistrationService.reopenRegistration(
       id,
       userId,
       systemRoles,
+      options,
     );
   }
 

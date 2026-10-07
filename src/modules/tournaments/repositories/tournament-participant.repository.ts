@@ -695,6 +695,7 @@ export class TournamentParticipantRepository {
     tournamentId: string,
     names: string[],
     divisionId?: string,
+    pairingMode?: 'AUTO' | 'INDIVIDUAL_WAITING',
   ) {
     return await this.db.transaction(async (tx) => {
       const tournament = await tx
@@ -765,7 +766,49 @@ export class TournamentParticipantRepository {
       const createdParticipants: (typeof schema.tournamentParticipants.$inferSelect)[] =
         [];
 
-      if (isDoubles) {
+      if (isDoubles && pairingMode === 'INDIVIDUAL_WAITING') {
+        // Sinh từng VĐV lẻ độc lập ở trạng thái PENDING_PARTNER (không có invite token)
+        // để BTC tự vào giao diện Ghép Cặp (Pairing Modal) thử nghiệm ghép tay
+        for (const name of names) {
+          const mockEmail = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@mock.com`;
+
+          const [user] = await tx
+            .insert(schema.users)
+            .values({ email: mockEmail, isMock: true })
+            .returning();
+          await tx
+            .insert(schema.profiles)
+            .values({
+              userId: user.id,
+              fullName: name,
+              allowStrangerMessages: false,
+            })
+            .returning();
+
+          const [participant] = await tx
+            .insert(schema.tournamentParticipants)
+            .values({
+              tournamentId,
+              tournamentDivisionId: effectiveDivisionId ?? null,
+              registeredBy: user.id,
+              teamName: name,
+              isPaid: true,
+              entryFeeAtRegistration: '0.00',
+              teamInviteToken: null,
+              teamStatus: 'PENDING_PARTNER',
+              isMock: true,
+            })
+            .returning();
+
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: user.id,
+            role: 'MAIN',
+          });
+
+          createdParticipants.push(participant);
+        }
+      } else if (isDoubles) {
         for (let i = 0; i < names.length; i += 2) {
           const name1 = names[i];
           const name2 = names[i + 1] || `${name1} Partner`;
