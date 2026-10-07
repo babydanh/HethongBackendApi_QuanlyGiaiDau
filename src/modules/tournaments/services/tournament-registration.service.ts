@@ -998,34 +998,77 @@ export class TournamentRegistrationService {
     id: string,
     userId: string,
     systemRoles: string[] = [],
+    options?: {
+      registrationEndDate?: Date | null;
+      startDate?: Date | null;
+      endDate?: Date | null;
+    },
   ) {
     const tournament = await this.tournamentsRepository.findById(id);
     if (!tournament) {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
 
-    const isAuthorized = await this.tournamentAccessService.isManager(tournament, userId, systemRoles);
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền mở lại đăng ký');
     }
 
-    if (
-      !canOpenRegistrationImmediately(tournament.status)
-    ) {
+    if (!canOpenRegistrationImmediately(tournament.status)) {
       throw new BadRequestException(
         'Chỉ có thể mở đăng ký ngay từ trạng thái Sắp diễn ra hoặc Đã khóa đăng ký.',
       );
     }
+
     const now = new Date();
-    if (tournament.startDate && new Date(tournament.startDate) <= now) {
+    const requestedRegistrationEnd = options?.registrationEndDate ?? null;
+    const requestedStart = options?.startDate ?? null;
+    const requestedEnd = options?.endDate ?? null;
+    const originalStart = tournament.startDate ? new Date(tournament.startDate) : null;
+    const originalEnd = tournament.endDate ? new Date(tournament.endDate) : null;
+    const originalDurationMs =
+      originalStart && originalEnd && originalEnd.getTime() > originalStart.getTime()
+        ? originalEnd.getTime() - originalStart.getTime()
+        : null;
+
+    const nextRegistrationEnd =
+      requestedRegistrationEnd ??
+      (tournament.registrationEndDate
+        ? new Date(tournament.registrationEndDate)
+        : null);
+    if (!nextRegistrationEnd || nextRegistrationEnd.getTime() <= now.getTime()) {
       throw new BadRequestException(
-        'Không thể mở lại đăng ký sau thời điểm giải bắt đầu.',
+        'Hạn đăng ký đã kết thúc. Hãy chọn hạn đăng ký mới trước khi mở lại.',
       );
     }
-    if (isRegistrationDeadlineExpired(tournament.registrationEndDate, now)) {
-      throw new BadRequestException(
-        'Hạn đăng ký đã kết thúc. Hãy cập nhật hạn đăng ký trước khi mở lại.',
-      );
+
+    let nextStart = requestedStart ?? originalStart;
+    if (requestedStart && requestedStart.getTime() <= now.getTime()) {
+      throw new BadRequestException('Ngày bắt đầu giải phải nằm trong tương lai.');
+    }
+    if (!requestedStart && originalStart && originalStart.getTime() <= now.getTime()) {
+      nextStart = null;
+    }
+    if (nextStart && nextRegistrationEnd.getTime() > nextStart.getTime()) {
+      const shifted = new Date(nextRegistrationEnd.getTime());
+      shifted.setMinutes(shifted.getMinutes() + 1);
+      nextStart = shifted;
+    } else if (!nextStart) {
+      const shifted = new Date(nextRegistrationEnd.getTime());
+      shifted.setMinutes(shifted.getMinutes() + 1);
+      nextStart = shifted;
+    }
+
+    let nextEnd = requestedEnd ?? null;
+    if (nextEnd && nextEnd.getTime() <= nextStart.getTime()) {
+      throw new BadRequestException('Ngày kết thúc giải phải nằm sau ngày bắt đầu.');
+    }
+    if (!nextEnd && originalDurationMs !== null) {
+      nextEnd = new Date(nextStart.getTime() + originalDurationMs);
     }
 
     const bracket = await this.tournamentsRepository.findBracket(id);
@@ -1038,6 +1081,11 @@ export class TournamentRegistrationService {
     const updated = await this.tournamentsRepository.reopenRegistration(
       id,
       now,
+      {
+        registrationEndDate: nextRegistrationEnd,
+        startDate: nextStart,
+        endDate: nextEnd,
+      },
     );
     if (!updated) {
       throw new NotFoundException('Giải đấu không tồn tại');

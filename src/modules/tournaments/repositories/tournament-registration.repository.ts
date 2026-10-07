@@ -84,13 +84,26 @@ export class TournamentRegistrationRepository {
   private isDoublesMatchType(matchType: string | null | undefined) {
     return matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
   }
-  async reopenRegistration(id: string, registrationStartDate?: Date) {
+  async reopenRegistration(
+    id: string,
+    registrationStartDate?: Date,
+    options?: {
+      registrationEndDate?: Date | null;
+      startDate?: Date | null;
+      endDate?: Date | null;
+    },
+  ) {
     const [updated] = await this.db
       .update(schema.tournaments)
       .set({
         status: 'REGISTRATION_OPEN',
         isRegistrationLocked: false,
         ...(registrationStartDate ? { registrationStartDate } : {}),
+        ...(options?.registrationEndDate
+          ? { registrationEndDate: options.registrationEndDate }
+          : {}),
+        ...(options?.startDate ? { startDate: options.startDate } : {}),
+        ...(options?.endDate ? { endDate: options.endDate } : {}),
         updatedAt: new Date(),
       })
       .where(eq(schema.tournaments.id, id))
