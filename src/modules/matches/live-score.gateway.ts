@@ -398,6 +398,20 @@ export class LiveScoreGateway
     }
   }
 
+  /**
+   * Cờ ẩn/hiện bảng điểm live là tín hiệu điều khiển sóng, KHÔNG phải thay đổi
+   * tỷ số: chỉ phát cho phòng `match:{id}` (người đang xem trận) theo event
+   * riêng để các tab giải đấu đang nghe `match:update` không nhận payload
+   * thiếu trường điểm.
+   */
+  broadcastScoreboardVisibility(matchId: string, scoreboardVisible: boolean) {
+    if (!this.server) return;
+    this.server.to(`match:${matchId}`).emit(
+      'scoreboard:visibility',
+      JSON.stringify({ id: matchId, matchId, scoreboardVisible }),
+    );
+  }
+
   broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(this.normalizeMatchBroadcastData(matchData, tournamentId));
@@ -411,7 +425,7 @@ export class LiveScoreGateway
     sessionId: string,
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility',
     communityId?: string | null,
   ) {
     if (!this.server) return;
@@ -433,7 +447,7 @@ export class LiveScoreGateway
   broadcastClubStandaloneMatchUpdate(
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility',
     communityId?: string | null,
   ) {
     if (!this.server) return;
