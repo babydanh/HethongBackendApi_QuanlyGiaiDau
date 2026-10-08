@@ -215,6 +215,21 @@ export class TournamentDivisionService {
       );
     }
 
+    const bracket = await this.tournamentsRepository.findBracket(
+      tournament.id,
+      divisionId,
+    );
+    if (bracket?.stages?.length) {
+      throw new BadRequestException(
+        'Không thể chỉnh sửa nội dung thi đấu sau khi sơ đồ thi đấu đã được tạo',
+      );
+    }
+    if (await this.tournamentsRepository.hasStartedMatch(tournament.id)) {
+      throw new BadRequestException(
+        'Không thể chỉnh sửa nội dung thi đấu sau khi trận đấu đã bắt đầu',
+      );
+    }
+
     const feeMutation = this.tournamentFeePolicyService.resolveDivisionEntryFeeMutation(updateDivisionDto);
     if (feeMutation.hasMutation) {
       await this.tournamentFeePolicyService.assertEntryFeeAllowed(feeMutation.fee);
@@ -323,6 +338,25 @@ export class TournamentDivisionService {
       await this.tournamentsRepository.findDivisionById(divisionId);
     if (!currentDivision) {
       throw new NotFoundException('Bảng đấu không tồn tại');
+    }
+
+    if (currentDivision.tournamentId !== tournamentId) {
+      throw new NotFoundException('Bảng đấu không tồn tại');
+    }
+    const bracket = await this.tournamentsRepository.findBracket(
+      tournamentId,
+      divisionId,
+    );
+    if (bracket?.stages?.length) {
+      throw new BadRequestException(
+        'Không thể cập nhật cấu hình nội dung sau khi sơ đồ thi đấu đã được tạo',
+      );
+    }
+
+    if (await this.tournamentsRepository.hasStartedMatch(tournamentId)) {
+      throw new BadRequestException(
+        'Không thể cập nhật cấu hình nội dung sau khi trận đấu đã bắt đầu',
+      );
     }
 
     const category = await this.tournamentsRepository.findCategory(

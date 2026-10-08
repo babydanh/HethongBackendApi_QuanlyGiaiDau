@@ -1117,6 +1117,19 @@ export class TournamentsService {
       systemRoles,
     );
   }
+  async cancelDivisionBracket(
+    id: string,
+    divisionId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    return this.tournamentBracketService.cancelDivisionBracket(
+      id,
+      divisionId,
+      userId,
+      systemRoles,
+    );
+  }
 
   async autoSeedFromElo(
     tournamentId: string,

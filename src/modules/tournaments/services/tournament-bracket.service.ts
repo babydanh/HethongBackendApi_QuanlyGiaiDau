@@ -576,6 +576,61 @@ export class TournamentBracketService {
 
     return result;
   }
+  async cancelDivisionBracket(
+    id: string,
+    divisionId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(id);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    let isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
+    if (!isAuthorized && tournament.parentId) {
+      const parent = await this.tournamentsRepository.findParentById(
+        tournament.parentId,
+      );
+      isAuthorized = parent?.createdBy === userId;
+    }
+    if (!isAuthorized && tournament.communityId) {
+      const member = await this.tournamentsRepository.findCommunityMember(
+        tournament.communityId,
+        userId,
+      );
+      isAuthorized = member?.role === 'OWNER' || member?.role === 'MODERATOR';
+    }
+    if (!isAuthorized) {
+      throw new ForbiddenException(
+        'Bạn không có quyền hủy bracket của giải đấu này',
+      );
+    }
+
+    const divisions =
+      await this.tournamentsRepository.getDivisionsByTournament(id);
+    if (!divisions.some((division) => division.id === divisionId)) {
+      throw new NotFoundException('Không tìm thấy bảng đấu cho giải đấu này');
+    }
+
+    const result = await this.tournamentsRepository.cancelDivisionBracket(
+      id,
+      divisionId,
+    );
+    try {
+      await this.redisService.delByPattern('tournaments:list:*');
+      await this.redisService.delByPattern('matches:list:*');
+      await this.redisService.del(`matches:tournament:${id}`);
+      await this.redisService.del(`tournament:${id}`);
+    } catch (cacheErr) {
+      this.logger.warn(
+        `Failed to clear cache for tournament ${id}: ${cacheErr}`,
+      );
+    }
+    return result;
+  }
   async autoSeedFromElo(
     tournamentId: string,
     userId: string,

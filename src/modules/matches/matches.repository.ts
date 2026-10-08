@@ -1674,11 +1674,21 @@ export class MatchesRepository {
     const [updated] = await this.db
       .update(schema.matches)
       .set(setClause)
-      .where(eq(schema.matches.id, id))
+      .where(
+        and(
+          eq(schema.matches.id, id),
+          isNull(schema.matches.deletedAt),
+        ),
+      )
       .returning();
+
+    if (!updated) {
+      throw new NotFoundException('Match not found');
+    }
 
     return await this.findById(updated.id);
   }
+
 
   /**
    * Return the already completed leg of a two-legged football tie. Keeping

@@ -99,6 +99,7 @@ describe('TournamentsService registration lifecycle', () => {
         registrationEndDate: new Date(now + 2 * 60 * 60 * 1000),
       }),
       findBracket: jest.fn().mockResolvedValue(null),
+      hasStartedMatch: jest.fn().mockResolvedValue(false),
       reopenRegistration: jest.fn().mockResolvedValue({
         id: 'tournament-1',
         status: 'REGISTRATION_OPEN',
@@ -231,6 +232,9 @@ describe('TournamentsService registration lifecycle', () => {
     expect(repository.reopenRegistration).toHaveBeenCalledWith(
       'tournament-1',
       expect.any(Date),
+      expect.objectContaining({
+        registrationEndDate: new Date(now + 2 * 60 * 60 * 1000),
+      }),
     );
   });
 });

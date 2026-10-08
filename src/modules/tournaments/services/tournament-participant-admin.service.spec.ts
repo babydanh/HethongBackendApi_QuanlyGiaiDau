@@ -8,6 +8,7 @@ import type { AuditService } from '../../audit/audit.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { TournamentsRepository } from '../tournaments.repository';
 import type { TournamentPaymentRepository } from '../repositories/tournament-payment.repository';
+import { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import { TournamentAccessService } from './tournament-access.service';
 import { TournamentParticipantAdminService } from './tournament-participant-admin.service';
 
@@ -21,6 +22,9 @@ describe('TournamentParticipantAdminService', () => {
     updateParticipantStatus: jest.fn(),
     assignNextAvailableSeed: jest.fn(),
     getParticipantRosters: jest.fn(),
+    previewRosterImport: jest.fn(),
+    findBracket: jest.fn(),
+    hasStartedMatch: jest.fn(),
   };
   const notificationsMock = {
     sendNotification: jest.fn().mockResolvedValue(undefined),
@@ -640,6 +644,87 @@ describe('TournamentParticipantAdminService', () => {
         refundRequested: false,
         refundPaymentId: null,
       });
+    });
+  });
+
+  describe('previewRosterImport eligibility', () => {
+    const closedTournament = {
+      id: 'tournament-1',
+      status: 'REGISTRATION_CLOSED',
+      isRegistrationLocked: true,
+    };
+    const previewDto = Object.assign(new RosterImportPreviewDto(), {
+      participants: [{ teamName: 'VĐV 1', player1Name: 'VĐV 1' }],
+    } as never);
+    const previewResult = {
+      divisionMatched: false,
+      rows: [],
+      requestedTeamSlots: 0,
+      capacityRemaining: null,
+    };
+
+    beforeEach(() => {
+      repositoryMock.findById.mockResolvedValue(closedTournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.hasStartedMatch.mockResolvedValue(false);
+      repositoryMock.findBracket.mockResolvedValue({ stages: [] });
+      repositoryMock.previewRosterImport.mockResolvedValue(previewResult);
+    });
+
+    it('previews while registration is closed and the bracket does not exist yet', async () => {
+      await expect(
+        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+      ).resolves.toEqual(previewResult);
+
+      expect(repositoryMock.previewRosterImport).toHaveBeenCalledWith(
+        'tournament-1',
+        previewDto,
+      );
+    });
+
+    it('rejects the preview once a bracket stage exists', async () => {
+      repositoryMock.findBracket.mockResolvedValue({
+        stages: [{ id: 'stage-1' }],
+      });
+
+      await expect(
+        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
+    });
+
+    it('rejects the preview once a match has started', async () => {
+      repositoryMock.hasStartedMatch.mockResolvedValue(true);
+
+      await expect(
+        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
+    });
+
+    it('rejects the preview for a completed tournament even without a bracket', async () => {
+      repositoryMock.findById.mockResolvedValue({
+        ...closedTournament,
+        status: 'COMPLETED',
+      });
+
+      await expect(
+        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
+    });
+
+    it('keeps the manager authorization gate for the preview', async () => {
+      accessMock.isManager.mockResolvedValue(false);
+
+      await expect(
+        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
     });
   });
 

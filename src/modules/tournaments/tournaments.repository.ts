@@ -377,6 +377,13 @@ export class TournamentsRepository {
   ) {
     return this.tournamentBracketRepository.updateBracketSlots(...args);
   }
+  cancelDivisionBracket(
+    ...args: Parameters<
+      TournamentBracketRepository['cancelDivisionBracket']
+    >
+  ) {
+    return this.tournamentBracketRepository.cancelDivisionBracket(...args);
+  }
 
   findStageById(
     ...args: Parameters<TournamentBracketRepository['findStageById']>
@@ -817,6 +824,12 @@ export class TournamentsRepository {
   ) {
     return this.tournamentRegistrationRepository.reopenRegistration(...args);
   }
+  hasStartedMatch(
+    ...args: Parameters<TournamentRegistrationRepository['hasStartedMatch']>
+  ) {
+    return this.tournamentRegistrationRepository.hasStartedMatch(...args);
+  }
+
 
   registerParticipant(
     ...args: Parameters<TournamentRegistrationRepository['registerParticipant']>

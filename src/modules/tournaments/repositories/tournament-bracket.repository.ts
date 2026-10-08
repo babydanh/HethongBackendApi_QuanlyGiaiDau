@@ -198,6 +198,91 @@ export class TournamentBracketRepository {
       })),
     };
   }
+  async cancelDivisionBracket(tournamentId: string, divisionId: string) {
+    return this.db.transaction(async (tx) => {
+      const stages = await tx
+        .select({ id: schema.tournamentStages.id })
+        .from(schema.tournamentStages)
+        .where(
+          and(
+            eq(schema.tournamentStages.tournamentId, tournamentId),
+            eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+            isNull(schema.tournamentStages.deletedAt),
+          ),
+        )
+        .orderBy(asc(schema.tournamentStages.id))
+        .for('update');
+
+      if (stages.length === 0) {
+        return { cancelledStages: 0, cancelledMatches: 0 };
+      }
+
+      const stageIds = stages.map((stage) => stage.id);
+      const matches = await tx
+        .select({
+          id: schema.matches.id,
+          status: schema.matches.status,
+          startedAt: schema.matches.startedAt,
+          completedAt: schema.matches.completedAt,
+        })
+        .from(schema.matches)
+        .where(
+          and(
+            inArray(schema.matches.stageId, stageIds),
+            isNull(schema.matches.deletedAt),
+          ),
+        )
+        .orderBy(asc(schema.matches.id))
+        .for('update');
+
+      if (
+        matches.some(
+          (match) =>
+            match.startedAt !== null ||
+            match.completedAt !== null ||
+            match.status === 'ONGOING' ||
+            match.status === 'COMPLETED',
+        )
+      ) {
+        throw new BadRequestException(
+          'Không thể hủy bảng đấu sau khi một trận đã bắt đầu.',
+        );
+      }
+
+      const deletedAt = new Date();
+      const deletedMatches =
+        matches.length === 0
+          ? []
+          : await tx
+              .update(schema.matches)
+              .set({ deletedAt, updatedAt: deletedAt })
+              .where(
+                and(
+                  inArray(
+                    schema.matches.id,
+                    matches.map((match) => match.id),
+                  ),
+                  isNull(schema.matches.deletedAt),
+                ),
+              )
+              .returning({ id: schema.matches.id });
+      const deletedStages = await tx
+        .update(schema.tournamentStages)
+        .set({ deletedAt })
+        .where(
+          and(
+            inArray(schema.tournamentStages.id, stageIds),
+            isNull(schema.tournamentStages.deletedAt),
+          ),
+        )
+        .returning({ id: schema.tournamentStages.id });
+
+      return {
+        cancelledStages: deletedStages.length,
+        cancelledMatches: deletedMatches.length,
+      };
+    });
+  }
   async updateBracketSlots(
     tournamentId: string,
     divisionId: string,
