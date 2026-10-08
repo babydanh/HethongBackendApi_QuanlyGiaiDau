@@ -288,6 +288,13 @@
       "when": 1790688825554,
       "tag": "2026-09-29_enable_unaccent",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791435154552,
+      "tag": "0041_panoramic_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }
