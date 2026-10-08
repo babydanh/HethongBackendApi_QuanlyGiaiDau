@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Headers,
   Param,
   ParseUUIDPipe,
@@ -33,6 +34,7 @@ import {
   UpdateClubMatchPreferencesDto,
   UpdateClubMatchSessionDto,
 } from './dto/club-match-session.dto';
+import { StandalonePlaybackSettingsDto } from './dto/standalone-playback-settings.dto';
 
 type RequestUser = { id: string; roles?: string[] };
 
@@ -86,6 +88,25 @@ export class ClubMatchSessionsController {
     @Param('matchId', ParseUUIDPipe) matchId: string,
   ) {
     return this.service.deleteStandaloneMatch(matchId, user);
+  }
+
+  @Get('standalone-matches/:matchId/playback-url')
+  @Header('Cache-Control', 'private, no-store')
+  getStandalonePlaybackSettings(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+  ) {
+    return this.service.getStandalonePlaybackSettings(matchId, user);
+  }
+
+  @Patch('standalone-matches/:matchId/playback-url')
+  @Header('Cache-Control', 'private, no-store')
+  updateStandalonePlaybackSettings(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Body() dto: StandalonePlaybackSettingsDto,
+  ) {
+    return this.service.updateStandalonePlaybackSettings(matchId, user, dto);
   }
 
   /**

@@ -10,14 +10,15 @@ import {
   Post,
   Put,
   Query,
-  Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FacebookPageConnectionService } from './facebook-page-connection.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
@@ -463,12 +464,21 @@ export class LivestreamController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('matches/:matchId/playback')
+  @Header('Cache-Control', 'private, no-store')
   @ApiOperation({
     summary:
       'Người chơi/khán giả xem playback livestream, không trả stream key',
   })
-  async getMatchPlayback(@Param('matchId', ParseUUIDPipe) matchId: string) {
+  async getMatchPlayback(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    const standalonePlayback =
+      await this.livestreamService.getStandaloneMatchPlayback(matchId, user);
+    if (standalonePlayback) return standalonePlayback;
+
     const providerPlayback =
       await this.liveSessionService.getMatchPlayback(matchId);
     if (providerPlayback?.playbackUrl || providerPlayback?.replayUrl) {
