@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import { AqvisionApiClient } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
@@ -41,6 +42,7 @@ describe('LivestreamService camera publish info', () => {
       repository as unknown as LivestreamRepository,
       configService,
       {} as AqvisionPublishService,
+      {} as AqvisionApiClient,
     );
     return { repository, service };
   }
@@ -121,6 +123,7 @@ describe('LivestreamService court camera assignment', () => {
       repository as unknown as LivestreamRepository,
       { get: jest.fn(() => undefined) } as unknown as ConfigService,
       {} as AqvisionPublishService,
+      {} as AqvisionApiClient,
     );
     return { repository, service };
   }

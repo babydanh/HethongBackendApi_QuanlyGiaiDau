@@ -1,5 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { AqvisionApiClient } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
@@ -48,6 +49,7 @@ function makeService(stream: unknown = null) {
     repository as unknown as LivestreamRepository,
     {} as ConfigService,
     {} as AqvisionPublishService,
+    {} as AqvisionApiClient,
   );
   return { repository, service };
 }

@@ -23,6 +23,7 @@ import type {
   ListAddAthleteCandidatesQueryDto,
 } from '../dto/add-athlete.dto';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
+import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
 
 type RegistrationChangedBroadcaster = (
   tournamentId: string,
@@ -105,7 +106,7 @@ export class TournamentImportService {
     dto: RosterImportDto,
     broadcastRegistrationChanged: RegistrationChangedBroadcaster,
   ) {
-    const tournament = await this.assertImportable(
+    const tournament = await this.assertSpreadsheetRosterImportable(
       tournamentId,
       userId,
       systemRoles,
@@ -310,6 +311,34 @@ export class TournamentImportService {
         'Đăng ký đã được khóa. Không thể nhập thêm VĐV hoặc gửi lời mời mới.',
       );
     }
+    return tournament;
+  }
+
+  /**
+   * Spreadsheet commit policy: unlike {@link assertImportable}, a closed or
+   * locked registration is not disqualifying. The roster may still be written
+   * until the bracket exists or a match has started. Runs on every commit so a
+   * stale preview can never grant write access (TOCTOU).
+   */
+  private async assertSpreadsheetRosterImportable(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+  ) {
+    const tournament = await this.assertTournamentManager(
+      tournamentId,
+      userId,
+      systemRoles,
+    );
+    await assertSpreadsheetRosterEligible(tournament, {
+      hasStartedMatch: () =>
+        this.tournamentsRepository.hasStartedMatch(tournamentId),
+      hasActiveBracketStage: async () =>
+        Boolean(
+          (await this.tournamentsRepository.findBracket(tournamentId))?.stages
+            ?.length,
+        ),
+    });
     return tournament;
   }
   private async notifyLinkedAccounts(

@@ -44,14 +44,24 @@ export class CreateCameraDto {
   protocol?: 'RTMP' | 'SRT';
 
   @ApiPropertyOptional({
-    example: 'https://media.aqvision.net/live/cam1.live.flv',
+    example: 'https://media.aqvision.net/live/cam1/hls.m3u8',
     description:
-      'Bắt buộc khi mode=PULL. URL phát do bên ngoài cung cấp (.live.flv hoặc /hls.m3u8).',
+      'Chỉ dùng cho mode=PULL khi luồng ĐÃ được phát sẵn từ bên ngoài; BTC dán URL phát vào. Loại trừ lẫn nhau với cameraRtspUrl.',
   })
   @IsOptional()
   @IsUrl({ require_protocol: true, protocols: ['https'] })
   @MaxLength(2000)
   playbackUrl?: string;
+
+  @ApiPropertyOptional({
+    example: 'rtsp://admin:matkhau@192.168.1.50:554/Streaming/Channels/101',
+    description:
+      'Chỉ dùng cho mode=PULL khi nguồn là CAMERA IP tại sân: hệ thống nhờ media server AQP kéo luồng từ địa chỉ này về (không cần stream key). Loại trừ lẫn nhau với playbackUrl.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  cameraRtspUrl?: string;
 
   @ApiPropertyOptional({ example: 'Camera cố định góc cuối sân' })
   @IsOptional()

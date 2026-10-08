@@ -21,6 +21,7 @@ import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import { isLiteRegistrationTournament } from '../utils/registration-payment-eligibility';
 import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
 import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
+import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
 
 export type RegistrationChanged = (
   tournamentId: string,
@@ -62,17 +63,18 @@ export class TournamentParticipantAdminService {
       );
     }
 
-    if (tournament.status === 'COMPLETED') {
-      throw new BadRequestException('Giải đấu đã kết thúc');
-    }
-    if (
-      tournament.status === 'REGISTRATION_CLOSED' ||
-      tournament.isRegistrationLocked
-    ) {
-      throw new BadRequestException(
-        'Đăng ký đã được khóa. Không thể nhập thêm VĐV.',
-      );
-    }
+    // Spreadsheet preview keeps working while registration is closed/locked as
+    // long as the bracket does not exist yet and no match has started; the
+    // manager authorization above is unchanged.
+    await assertSpreadsheetRosterEligible(tournament, {
+      hasStartedMatch: () =>
+        this.tournamentsRepository.hasStartedMatch(tournamentId),
+      hasActiveBracketStage: async () =>
+        Boolean(
+          (await this.tournamentsRepository.findBracket(tournamentId))?.stages
+            ?.length,
+        ),
+    });
 
     return this.tournamentsRepository.previewRosterImport(tournamentId, dto);
   }

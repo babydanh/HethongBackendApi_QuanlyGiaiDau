@@ -1071,6 +1071,12 @@ export class TournamentRegistrationService {
       nextEnd = new Date(nextStart.getTime() + originalDurationMs);
     }
 
+    if (await this.tournamentsRepository.hasStartedMatch(id)) {
+      throw new BadRequestException(
+        'Không thể mở lại đăng ký sau khi trận đấu đã bắt đầu.',
+      );
+    }
+
     const bracket = await this.tournamentsRepository.findBracket(id);
     if (bracket?.stages?.length) {
       throw new BadRequestException(

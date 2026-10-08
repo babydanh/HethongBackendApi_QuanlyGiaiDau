@@ -16,6 +16,8 @@ export interface CreateCameraInput {
   streamName: string;
   streamKey: string;
   playbackUrl: string;
+  /** Khoá proxy AQP của camera PULL có nguồn là camera IP; `null` với mọi nguồn khác. */
+  pullProxyKey?: string | null;
   createdBy: string;
 }
 
@@ -305,6 +307,22 @@ export class LivestreamRepository {
       .from(schema.livestreamCameras)
       .where(and(eq(schema.livestreamCameras.id, cameraId), isNull(schema.livestreamCameras.deletedAt)))
       .limit(1);
+
+    return camera ?? null;
+  }
+
+  /** Ghi trạng thái phát hiện được từ media server (IDLE / LIVE / OFFLINE). */
+  async updateCameraStatus(cameraId: string, status: string) {
+    const [camera] = await this.db
+      .update(schema.livestreamCameras)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.livestreamCameras.id, cameraId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .returning();
 
     return camera ?? null;
   }

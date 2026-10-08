@@ -84,6 +84,25 @@ export class TournamentRegistrationRepository {
   private isDoublesMatchType(matchType: string | null | undefined) {
     return matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
   }
+  async hasStartedMatch(tournamentId: string): Promise<boolean> {
+    const [match] = await this.db
+      .select({ id: schema.matches.id })
+      .from(schema.matches)
+      .where(
+        and(
+          eq(schema.matches.tournamentId, tournamentId),
+          or(
+            isNotNull(schema.matches.startedAt),
+            isNotNull(schema.matches.completedAt),
+            inArray(schema.matches.status, ['ONGOING', 'COMPLETED']),
+          ),
+        ),
+      )
+      .limit(1);
+
+    return Boolean(match);
+  }
+
   async reopenRegistration(
     id: string,
     registrationStartDate?: Date,

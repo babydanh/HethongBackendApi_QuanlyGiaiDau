@@ -64,6 +64,8 @@ describe('TournamentImportService import contracts', () => {
     listAddAthleteCandidates: jest.fn(),
     addAthleteCandidate: jest.fn(),
     addDirectAthlete: jest.fn(),
+    findBracket: jest.fn(),
+    hasStartedMatch: jest.fn(),
   };
   const accessMock = { isManager: jest.fn() };
   const mailMock = { sendMail: jest.fn() };
@@ -83,6 +85,8 @@ describe('TournamentImportService import contracts', () => {
     accessMock.isManager.mockResolvedValue(true);
     mailMock.sendMail.mockResolvedValue(undefined);
     notificationsMock.sendNotification.mockResolvedValue(undefined);
+    repositoryMock.findBracket.mockResolvedValue({ stages: [] });
+    repositoryMock.hasStartedMatch.mockResolvedValue(false);
   });
 
   const buildImporter = () =>
@@ -228,6 +232,158 @@ describe('TournamentImportService import contracts', () => {
 
     expect(mailMock.sendMail).not.toHaveBeenCalled();
     expect(result).not.toHaveProperty('emailsSent');
+  });
+
+  const closedTournament = {
+    ...openTournament,
+    status: 'REGISTRATION_CLOSED',
+    isRegistrationLocked: true,
+  };
+  const rosterCommitDto = Object.assign(new RosterImportDto(), {
+    participants: [
+      {
+        teamName: 'VĐV 1',
+        player1Name: 'VĐV 1',
+        player1Email: 'a@example.test',
+        source: 'EXCEL' as const,
+      },
+    ],
+  });
+
+  it('commits roster rows while registration is closed and no bracket exists yet', async () => {
+    repositoryMock.findById.mockResolvedValue(closedTournament);
+    repositoryMock.importRosterRows.mockResolvedValue({
+      importedCount: 1,
+      linkedAccountNotifications: [],
+    });
+
+    const result = await buildImporter().importRosterFromForm(
+      'tournament-1',
+      'organizer-1',
+      [],
+      rosterCommitDto,
+      jest.fn(),
+    );
+
+    expect(repositoryMock.importRosterRows).toHaveBeenCalled();
+    expect(result.importedCount).toBe(1);
+  });
+
+  it('rejects the roster commit once a bracket stage exists', async () => {
+    repositoryMock.findById.mockResolvedValue(closedTournament);
+    repositoryMock.findBracket.mockResolvedValue({
+      stages: [{ id: 'stage-1' }],
+    });
+
+    await expect(
+      buildImporter().importRosterFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        rosterCommitDto,
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repositoryMock.importRosterRows).not.toHaveBeenCalled();
+  });
+
+  it('re-checks at commit time and rejects when a match started after a preview', async () => {
+    repositoryMock.findById.mockResolvedValue(closedTournament);
+    repositoryMock.findBracket.mockResolvedValue({ stages: [] });
+    // A concurrent bracket generation plus kickoff lands between preview and commit.
+    repositoryMock.hasStartedMatch.mockResolvedValue(true);
+
+    await expect(
+      buildImporter().importRosterFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        rosterCommitDto,
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repositoryMock.hasStartedMatch).toHaveBeenCalledWith('tournament-1');
+    expect(repositoryMock.importRosterRows).not.toHaveBeenCalled();
+  });
+
+  it('rejects the roster commit for a completed tournament even without a bracket', async () => {
+    repositoryMock.findById.mockResolvedValue({
+      ...openTournament,
+      status: 'COMPLETED',
+    });
+
+    await expect(
+      buildImporter().importRosterFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        rosterCommitDto,
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repositoryMock.importRosterRows).not.toHaveBeenCalled();
+  });
+
+  it('keeps the manager authorization gate for the roster commit', async () => {
+    repositoryMock.findById.mockResolvedValue(closedTournament);
+    accessMock.isManager.mockResolvedValue(false);
+
+    await expect(
+      buildImporter().importRosterFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        rosterCommitDto,
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(repositoryMock.importRosterRows).not.toHaveBeenCalled();
+  });
+
+  it('keeps the legacy import and manual add-athlete paths blocked once registration is closed', async () => {
+    repositoryMock.findById.mockResolvedValue(closedTournament);
+
+    await expect(
+      buildImporter().importParticipantsFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        Object.assign(new ImportParticipantsDto(), { participants: [] }),
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      buildAddAthleteService().addAthleteCandidate(
+        'tournament-1',
+        'organizer-1',
+        [],
+        Object.assign(new AddAthleteCandidateDto(), {
+          source: 'FRIENDS',
+          userId: 'athlete-1',
+        }),
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      buildAddAthleteService().addDirectAthlete(
+        'tournament-1',
+        'organizer-1',
+        [],
+        Object.assign(new AddAthleteDirectDto(), { name: 'Khách' }),
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repositoryMock.importParticipants).not.toHaveBeenCalled();
+    expect(repositoryMock.addAthleteCandidate).not.toHaveBeenCalled();
+    expect(repositoryMock.addDirectAthlete).not.toHaveBeenCalled();
+    expect(repositoryMock.importRosterRows).not.toHaveBeenCalled();
   });
 describe('TournamentImportService organizer add-athlete flow', () => {
   const candidateDto = Object.assign(new AddAthleteCandidateDto(), {

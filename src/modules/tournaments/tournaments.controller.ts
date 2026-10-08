@@ -1056,6 +1056,23 @@ export class TournamentsController {
       this.getSystemRoles(user),
     );
   }
+  @Delete(':id/bracket/divisions/:divisionId')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Hủy bracket của một bảng đấu chưa bắt đầu' })
+  async cancelDivisionBracket(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('divisionId', ParseUUIDPipe) divisionId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.cancelDivisionBracket(
+      id,
+      divisionId,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
 
   @Post(':id/publish')
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)

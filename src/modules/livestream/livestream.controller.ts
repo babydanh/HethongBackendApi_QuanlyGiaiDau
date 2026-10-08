@@ -380,6 +380,22 @@ export class LivestreamController {
     return this.livestreamService.rotateCameraStreamKey(cameraId, user);
   }
 
+  @Get('cameras/:cameraId/status')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Trạng thái phát thật của camera, đọc từ media server',
+    description:
+      'Gọi AQP `isMediaOnline` cho stream của camera và đồng bộ cột status. ' +
+      'Dùng để BTC biết camera đã lên hình chưa thay vì suy đoán.',
+  })
+  getCameraStatus(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.getCameraLiveStatus(cameraId, user);
+  }
+
   @Delete('cameras/:cameraId')
   @Verified()
   @ApiBearerAuth()
