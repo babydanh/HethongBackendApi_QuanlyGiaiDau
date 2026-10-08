@@ -15,6 +15,7 @@ describe('ClubMatchSessionsService', () => {
     findParticipant: jest.fn(),
     findPreference: jest.fn(),
     findStandaloneMatch: jest.fn(),
+    updateStandalonePlaybackSettings: jest.fn(),
   };
   const gateway = { broadcastClubSessionMatchUpdate: jest.fn() };
   const processor = {
@@ -475,6 +476,125 @@ describe('ClubMatchSessionsService', () => {
     ).resolves.toMatchObject({ match: { id: 'match-1' } });
   });
 
+
+  it('returns standalone playback settings only to a score editor', async () => {
+    repository.findStandaloneMatch.mockResolvedValue({
+      id: 'match-1',
+      communityId: 'community-1',
+      playbackUrl: 'https://media.example/live/index.m3u8',
+      cameraName: 'Court 1',
+    });
+    repository.findCommunityContext.mockResolvedValue({
+      status: 'ACTIVE',
+      memberStatus: 'JOINED',
+      memberRole: 'OWNER',
+      memberMatchScoringEnabled: false,
+    });
+    repository.findMembership.mockResolvedValue({
+      status: 'JOINED',
+      role: 'OWNER',
+    });
+
+    await expect(
+      (service as any).getStandalonePlaybackSettings('match-1', {
+        id: 'owner-1',
+        roles: [],
+      }),
+    ).resolves.toEqual({
+      matchId: 'match-1',
+      playbackUrl: 'https://media.example/live/index.m3u8',
+      cameraName: 'Court 1',
+    });
+  });
+
+  it('updates standalone playback settings only after editor authorization', async () => {
+    repository.findStandaloneMatch.mockResolvedValue({
+      id: 'match-1',
+      communityId: 'community-1',
+    });
+    repository.findCommunityContext.mockResolvedValue({
+      status: 'ACTIVE',
+      memberStatus: 'JOINED',
+      memberRole: 'MEMBER',
+      memberMatchScoringEnabled: false,
+    });
+    repository.findMembership.mockResolvedValue({
+      status: 'JOINED',
+      role: 'MEMBER',
+    });
+
+    await expect(
+      (service as any).updateStandalonePlaybackSettings(
+        'match-1',
+        { id: 'member-1', roles: [] },
+        { playbackUrl: 'https://media.example/live/index.m3u8' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.updateStandalonePlaybackSettings).not.toHaveBeenCalled();
+  });
+
+  it('clears camera name together with a cleared standalone playback URL', async () => {
+    repository.findStandaloneMatch.mockResolvedValue({
+      id: 'match-1',
+      communityId: 'community-1',
+    });
+    repository.findCommunityContext.mockResolvedValue({
+      status: 'ACTIVE',
+      memberStatus: 'JOINED',
+      memberRole: 'OWNER',
+      memberMatchScoringEnabled: false,
+    });
+    repository.findMembership.mockResolvedValue({
+      status: 'JOINED',
+      role: 'OWNER',
+    });
+    repository.updateStandalonePlaybackSettings.mockResolvedValue({
+      id: 'match-1',
+      playbackUrl: null,
+      cameraName: null,
+    });
+
+    await expect(
+      (service as any).updateStandalonePlaybackSettings(
+        'match-1',
+        { id: 'owner-1', roles: [] },
+        { playbackUrl: null },
+      ),
+    ).resolves.toEqual({
+      matchId: 'match-1',
+      playbackUrl: null,
+      cameraName: null,
+    });
+    expect(repository.updateStandalonePlaybackSettings).toHaveBeenCalledWith(
+      'match-1',
+      { playbackUrl: null, cameraName: null },
+    );
+  });
+
+  it('rejects an empty playback settings patch', async () => {
+    repository.findStandaloneMatch.mockResolvedValue({
+      id: 'match-1',
+      communityId: 'community-1',
+    });
+    repository.findCommunityContext.mockResolvedValue({
+      status: 'ACTIVE',
+      memberStatus: 'JOINED',
+      memberRole: 'OWNER',
+    });
+    repository.findMembership.mockResolvedValue({
+      status: 'JOINED',
+      role: 'OWNER',
+    });
+
+    await expect(
+      (service as any).updateStandalonePlaybackSettings(
+        'match-1',
+        { id: 'owner-1', roles: [] },
+        {},
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.updateStandalonePlaybackSettings).not.toHaveBeenCalled();
+  });
   it('rejects a session category that differs from the club sport', async () => {
     repository.findCommunityContext.mockResolvedValue({
       id: 'community-1',

@@ -396,6 +396,47 @@ export class LivestreamRepository {
     return row ?? null;
   }
 
+  async findStandaloneMatchPlayback(matchId: string, userId?: string) {
+    const [row] = await this.db
+      .select({
+        status: schema.clubStandaloneMatches.status,
+        playbackUrl: schema.clubStandaloneMatches.playbackUrl,
+        cameraName: schema.clubStandaloneMatches.cameraName,
+        startedAt: schema.clubStandaloneMatches.startedAt,
+        communityVisibility: schema.communities.visibility,
+        memberStatus: schema.communityMembers.status,
+      })
+      .from(schema.clubStandaloneMatches)
+      .innerJoin(
+        schema.communities,
+        eq(schema.clubStandaloneMatches.communityId, schema.communities.id),
+      )
+      .leftJoin(
+        schema.communityMembers,
+        userId
+          ? and(
+              eq(
+                schema.communityMembers.communityId,
+                schema.clubStandaloneMatches.communityId,
+              ),
+              eq(schema.communityMembers.userId, userId),
+              eq(schema.communityMembers.status, 'JOINED'),
+            )
+          : sql`false`,
+      )
+      .where(
+        and(
+          eq(schema.clubStandaloneMatches.id, matchId),
+          isNull(schema.clubStandaloneMatches.deletedAt),
+          isNull(schema.communities.deletedAt),
+          eq(schema.communities.status, 'ACTIVE'),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
   async findMatchLivestream(matchId: string) {
     const [row] = await this.db
       .select({

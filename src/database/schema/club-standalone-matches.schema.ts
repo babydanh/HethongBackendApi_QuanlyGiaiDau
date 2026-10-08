@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  text,
   timestamp,
   uuid,
   varchar,
@@ -37,6 +38,8 @@ export const clubStandaloneMatches = pgTable(
     scoreDetails: jsonb('score_details').default('{}').notNull(),
     // Cờ ẩn bảng điểm live chung cho cả 3 loại trận; mặc định bật.
     scoreboardVisible: boolean('scoreboard_visible').default(true).notNull(),
+    playbackUrl: text('playback_url'),
+    cameraName: varchar('camera_name', { length: 255 }),
     scoreConfig: jsonb('score_config').$type<Record<string, unknown> | null>(),
     p1SetsWon: integer('p1_sets_won').default(0).notNull(),
     p2SetsWon: integer('p2_sets_won').default(0).notNull(),

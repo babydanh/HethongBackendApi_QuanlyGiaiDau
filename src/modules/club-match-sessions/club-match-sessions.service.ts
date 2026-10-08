@@ -30,6 +30,7 @@ import {
   UpdateClubMatchPreferencesDto,
   UpdateClubMatchSessionDto,
 } from './dto/club-match-session.dto';
+import { StandalonePlaybackSettingsDto } from './dto/standalone-playback-settings.dto';
 import { ClubMatchSessionsRepository } from './club-match-sessions.repository';
 import { selectScoringPreset } from './scoring-preset';
 import { TournamentsService } from '../tournaments/tournaments.service';
@@ -2046,6 +2047,47 @@ export class ClubMatchSessionsService {
       session.session.communityId,
     );
     return projected;
+  }
+
+  async getStandalonePlaybackSettings(matchId: string, actor: Actor) {
+    const { match } = await this.requireStandaloneMatchEditor(matchId, actor);
+    return {
+      matchId,
+      playbackUrl: match.playbackUrl ?? null,
+      cameraName: match.cameraName ?? null,
+    };
+  }
+
+  async updateStandalonePlaybackSettings(
+    matchId: string,
+    actor: Actor,
+    dto: StandalonePlaybackSettingsDto,
+  ) {
+    const { match } = await this.requireStandaloneMatchEditor(matchId, actor);
+    if (dto.playbackUrl === undefined && dto.cameraName === undefined) {
+      apiError(BadRequestException, 'PLAYBACK_SETTINGS_EMPTY');
+    }
+
+    const values: { playbackUrl?: string | null; cameraName?: string | null } =
+      {
+        ...(dto.playbackUrl !== undefined
+          ? { playbackUrl: dto.playbackUrl }
+          : {}),
+        ...(dto.cameraName !== undefined
+          ? { cameraName: dto.cameraName }
+          : {}),
+        ...(dto.playbackUrl === null ? { cameraName: null } : {}),
+      };
+    const updated = await this.repository.updateStandalonePlaybackSettings(
+      match.id,
+      values,
+    );
+    if (!updated) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
+    return {
+      matchId: updated.id,
+      playbackUrl: updated.playbackUrl ?? null,
+      cameraName: updated.cameraName ?? null,
+    };
   }
 
   /**

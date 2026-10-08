@@ -636,6 +636,27 @@ export class ClubMatchSessionsRepository {
     return row ?? null;
   }
 
+  async updateStandalonePlaybackSettings(
+    id: string,
+    values: { playbackUrl?: string | null; cameraName?: string | null },
+  ) {
+    const [updated] = await this.db
+      .update(schema.clubStandaloneMatches)
+      .set({ ...values, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.clubStandaloneMatches.id, id),
+          isNull(schema.clubStandaloneMatches.deletedAt),
+        ),
+      )
+      .returning({
+        id: schema.clubStandaloneMatches.id,
+        playbackUrl: schema.clubStandaloneMatches.playbackUrl,
+        cameraName: schema.clubStandaloneMatches.cameraName,
+      });
+    return updated ?? null;
+  }
+
   async findStandaloneMatchIncludingDeleted(id: string) {
     const [row] = await this.db
       .select()
@@ -842,6 +863,13 @@ export class ClubMatchSessionsRepository {
         .map((member) => member.fullName)
         .filter(Boolean)
         .join(' · ') || 'Đội B';
+    const {
+      playbackUrl: _playbackUrl,
+      cameraName: _cameraName,
+      ...publicMatch
+    } = match;
+    void _playbackUrl;
+    void _cameraName;
     const rawCategoryConfig = context.categoryConfig;
     const configuredRules =
       rawCategoryConfig && typeof rawCategoryConfig === 'object'
@@ -874,7 +902,7 @@ export class ClubMatchSessionsRepository {
           ? 'SIDE_B'
           : null;
     return {
-      ...match,
+      ...publicMatch,
       contextType: 'CLUB_STANDALONE_MATCH' as const,
       standaloneMatchId: match.id,
       clubMatchSessionId: null,

@@ -993,6 +993,39 @@ export class LivestreamService {
     }
   }
 
+  async getStandaloneMatchPlayback(
+    matchId: string,
+    user?: JwtPayload,
+  ) {
+    const match = await this.livestreamRepository.findStandaloneMatchPlayback(
+      matchId,
+      user?.sub,
+    );
+    if (!match) return null;
+
+    const isAdmin =
+      user?.role === 'ADMIN' || user?.roles?.includes('ADMIN') === true;
+    if (
+      match.communityVisibility !== 'PUBLIC' &&
+      !isAdmin &&
+      match.memberStatus !== 'JOINED'
+    ) {
+      throw new NotFoundException('Trận đấu không tồn tại');
+    }
+
+    if (match.status !== 'ONGOING' || !match.playbackUrl) {
+      return { matchId, streamStatus: 'OFFLINE', playbackUrl: null };
+    }
+    return {
+      matchId,
+      streamStatus: 'LIVE',
+      playbackUrl: match.playbackUrl,
+      cameraName: match.cameraName,
+      startedAt: match.startedAt,
+      endedAt: null,
+    };
+  }
+
   async getMatchPlayback(matchId: string) {
     const match = await this.livestreamRepository.findMatchWithTournament(matchId);
     if (!match) {
