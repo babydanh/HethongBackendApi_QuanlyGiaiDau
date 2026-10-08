@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { AqvisionApiClient } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
@@ -85,6 +86,7 @@ function makeService(options: {
     new AqvisionPublishService({
       get: (key: string, fallback?: unknown) => env[key] ?? fallback,
     } as unknown as ConfigService),
+    {} as AqvisionApiClient,
   );
   return { repo, service };
 }

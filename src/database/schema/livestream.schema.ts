@@ -32,6 +32,11 @@ export const livestreamCameras = pgTable(
     streamKey: varchar('stream_key', { length: 255 }).notNull(),
     status: varchar('status', { length: 20 }).default('IDLE').notNull(),
     playbackUrl: text('playback_url'),
+    // Khoá proxy do AQP trả về ở `addStreamProxy`, dùng cho camera PULL có nguồn
+    // là camera IP tại sân: cần giữ để `delStreamProxy` ngắt đúng proxy khi camera
+    // bị xoá. KHÔNG trả ra API công khai — cùng nhóm với `stream_key` và các cột
+    // `*_encrypted`.
+    pullProxyKey: varchar('pull_proxy_key', { length: 255 }),
     rtspUrlEncrypted: text('rtsp_url_encrypted'),
     usernameEncrypted: text('username_encrypted'),
     passwordEncrypted: text('password_encrypted'),

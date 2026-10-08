@@ -97,6 +97,37 @@ export class AqvisionApiClient {
     return { online: data.online === true };
   }
 
+  /**
+   * `POST /index/api/addStreamProxy` — nhờ AQP KÉO luồng từ `url`
+   * (RTSP/RTMP/HLS) về và phát lại từ server AQP.
+   *
+   * Đây là chiều ngược với PUSH: không cần publish key, vì AQP là bên chủ động
+   * kết nối tới camera. AQP trả về khoá proxy nội bộ (`data.key`) — khoá này
+   * KHÔNG phải credential publish, chỉ dùng để ngắt proxy về sau.
+   */
+  async addStreamProxy(params: {
+    readonly stream: string;
+    readonly url: string;
+  }): Promise<{ proxyKey: string | null }> {
+    const data = await this.call<{ key?: unknown }>('addStreamProxy', {
+      stream: params.stream,
+      url: params.url,
+    });
+
+    return {
+      proxyKey:
+        typeof data.key === 'string' && data.key.length > 0 ? data.key : null,
+    };
+  }
+
+  /**
+   * `POST /index/api/delStreamProxy` — ngắt proxy kéo luồng theo khoá đã lưu.
+   * Không có bước này thì AQP vẫn kéo luồng của camera đã bị xoá khỏi SportO.
+   */
+  async delStreamProxy(proxyKey: string): Promise<void> {
+    await this.call('delStreamProxy', { key: proxyKey });
+  }
+
   /** `GET /index/api/getMP4RecordFile` — duyệt bản ghi MP4 (2 bước khi cần tên file). */
   async getMp4RecordFile(
     params: GetMp4RecordFileParams,

@@ -98,6 +98,20 @@ export const envValidationSchema = Joi.object({
     .valid('rtsp', 'rtmp')
     .optional()
     .default('rtsp'),
+  // Host PHÁT luồng cho khán giả — KHÁC host API (`api.media.aqvision.net`).
+  // Tách riêng vì trộn hai host sẽ trả URL mà trình duyệt không xem được.
+  // Định dạng URL phát theo docx §4.1: `{host}/live/{stream}/hls.m3u8`.
+  //
+  // `.allow('')`: `docker-compose` không dùng `env_file`, nên một dòng
+  // `AQVISION_PLAYBACK_BASE_URL=` copy lên VPS sẽ tới container dưới dạng chuỗi
+  // rỗng. Không cho phép rỗng thì Joi từ chối và container crash-loop ngay lúc
+  // boot (đúng sự cố đã xảy ra với `AQVISION_PUSH_PORT`). Rỗng = "không cấu
+  // hình" ⇒ code rơi về mặc định.
+  AQVISION_PLAYBACK_BASE_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .optional()
+    .default('https://media.aqvision.net'),
   // Host/port push mà AQP cấp. Để rỗng ⇒ không sinh được QR (fail-closed),
   // xem `aqvision-publish.service.ts`.
   // Panel AQP phát HAI cổng riêng: RTSP (`AQVISION_PUSH_PORT`) và RTMP

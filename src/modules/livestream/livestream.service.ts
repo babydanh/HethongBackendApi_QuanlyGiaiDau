@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -18,7 +19,7 @@ import {
   type PublishQrResult,
   type RtmpPublishTarget,
 } from './aqvision-publish.service';
-import { AqvisionApiException } from './aqvision-api.client';
+import { AqvisionApiClient, AqvisionApiException } from './aqvision-api.client';
 import {
   LivestreamMode,
   LivestreamProtocol,
@@ -40,10 +41,13 @@ function isMatchStreamControlStatus(
 
 @Injectable()
 export class LivestreamService {
+  private readonly logger = new Logger(LivestreamService.name);
+
   constructor(
     private readonly livestreamRepository: LivestreamRepository,
     private readonly configService: ConfigService,
     private readonly aqvisionPublishService: AqvisionPublishService,
+    private readonly aqvisionApiClient: AqvisionApiClient,
   ) {}
 
   private isAdmin(user: JwtPayload) {
@@ -64,6 +68,25 @@ export class LivestreamService {
 
   private buildPlaybackUrl(streamKey: string) {
     return `${this.getHlsBaseUrl().replace(/\/$/, '')}/${streamKey}/index.m3u8`;
+  }
+
+  /**
+   * URL phát của stream trên media server AQP — đúng định dạng docx §4.1:
+   * `https://media.aqvision.net/live/{stream}/hls.m3u8`.
+   *
+   * Host tách khỏi `AQVISION_API_BASE_URL` vì API nằm trên host quản trị
+   * (`api.media.aqvision.net`) còn luồng phát nằm trên host media; trộn hai host
+   * sẽ trả về URL mà trình duyệt khán giả không xem được.
+   */
+  private buildAqvisionHlsUrl(streamName: string) {
+    // `||` chứ không `??`: chuỗi rỗng nghĩa là "chưa cấu hình" (xem
+    // `env.validation.ts`), không phải host rỗng.
+    const baseUrl = (
+      this.configService.get<string>('AQVISION_PLAYBACK_BASE_URL') ||
+      'https://media.aqvision.net'
+    ).replace(/\/+$/, '');
+
+    return `${baseUrl}/live/${streamName}/hls.m3u8`;
   }
 
   /**
@@ -339,12 +362,38 @@ export class LivestreamService {
     }
 
 
-    // PULL: luồng đã được phát sẵn từ bên ngoài, BTC dán URL phát vào.
-    // Không sinh và không chuẩn hoá lại URL đó — mọi hình dạng đều phải giữ nguyên.
-    const playbackUrl =
-      mode === 'PULL'
-        ? this.assertPullPlaybackUrl(data.playbackUrl)
-        : this.buildPlaybackUrl(streamName);
+    // PULL có hai nguồn loại trừ lẫn nhau:
+    //  - CAMERA  : camera IP tại sân. SportO nhờ AQP kéo luồng về
+    //              (`addStreamProxy`) rồi phát lại — không cần stream key.
+    //  - PLAYBACK: luồng đã phát sẵn từ bên ngoài. BTC dán URL phát và hệ thống
+    //              KHÔNG sinh lại, KHÔNG chuẩn hoá — mọi hình dạng đều giữ nguyên.
+    //
+    // Camera PUSH lấy hình từ thiết bị đẩy lên, nên `cameraRtspUrl` gửi kèm là
+    // hiểu nhầm về luồng nghiệp vụ: bỏ qua im lặng sẽ khiến BTC tưởng đã nối
+    // được camera trong khi thực tế hệ thống chưa hề kéo gì.
+    if (mode !== 'PULL' && (data.cameraRtspUrl?.trim() ?? '').length > 0) {
+      throw new BadRequestException(
+        'URL camera chỉ dùng cho camera PULL. Camera PUSH nhận hình từ thiết bị đẩy lên.',
+      );
+    }
+
+    const pullSource = mode === 'PULL' ? this.assertPullSource(data) : null;
+
+    let playbackUrl: string;
+    let pullProxyKey: string | null = null;
+
+    if (pullSource?.kind === 'CAMERA') {
+      const pulled = await this.startAqvisionPull({
+        streamName,
+        cameraUrl: pullSource.url,
+      });
+      pullProxyKey = pulled.proxyKey;
+      playbackUrl = this.buildAqvisionHlsUrl(streamName);
+    } else if (pullSource?.kind === 'PLAYBACK') {
+      playbackUrl = pullSource.url;
+    } else {
+      playbackUrl = this.buildPlaybackUrl(streamName);
+    }
 
     const camera = await this.livestreamRepository.createCamera({
       tournamentId,
@@ -355,6 +404,7 @@ export class LivestreamService {
       streamName,
       streamKey,
       playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
+      pullProxyKey,
       createdBy: user.sub,
     });
 
@@ -551,6 +601,150 @@ export class LivestreamService {
     return trimmed;
   }
 
+  /**
+   * Nguồn của camera PULL. Hai nguồn LOẠI TRỪ lẫn nhau: gửi cả hai (hoặc không
+   * gửi gì) là lỗi cấu hình của người gọi, không được chọn ngầm một cái.
+   */
+  private assertPullSource(
+    data: CreateCameraDto,
+  ): { kind: 'CAMERA'; url: string } | { kind: 'PLAYBACK'; url: string } {
+    const cameraUrl = data.cameraRtspUrl?.trim() ?? '';
+    const playbackUrl = data.playbackUrl?.trim() ?? '';
+
+    if (cameraUrl.length > 0 && playbackUrl.length > 0) {
+      throw new BadRequestException(
+        'Chỉ chọn một nguồn cho camera PULL: URL camera hoặc URL phát sẵn.',
+      );
+    }
+
+    if (cameraUrl.length > 0) {
+      return { kind: 'CAMERA', url: this.assertPullCameraUrl(cameraUrl) };
+    }
+
+    if (playbackUrl.length > 0) {
+      return { kind: 'PLAYBACK', url: this.assertPullPlaybackUrl(playbackUrl) };
+    }
+
+    throw new BadRequestException(
+      'Chế độ PULL cần URL camera (rtsp://...) hoặc URL phát trực tiếp (https://...).',
+    );
+  }
+
+  /**
+   * Nguồn camera phải dùng giao thức mà media server KÉO được. `https://` bị từ
+   * chối vì đó là URL PHÁT cho khán giả, không phải nguồn — nhầm hai thứ này sẽ
+   * đẩy URL trình phát vào lệnh kéo luồng.
+   */
+  private assertPullCameraUrl(cameraUrl: string) {
+    let parsed: URL;
+    try {
+      parsed = new URL(cameraUrl);
+    } catch {
+      throw new BadRequestException('URL camera không hợp lệ.');
+    }
+
+    if (!['rtsp:', 'rtsps:', 'rtmp:'].includes(parsed.protocol)) {
+      throw new BadRequestException(
+        'URL camera phải là rtsp:// hoặc rtmp:// của camera.',
+      );
+    }
+
+    return cameraUrl;
+  }
+
+  /**
+   * Nhờ AQP kéo luồng từ camera. Lỗi của AQP đổi thành 503 kèm tên biến môi
+   * trường cần set, giống `buildPublishQrOrFailClosed`: để nguyên
+   * `AqvisionApiException` thì exception filter chỉ trả 500 và BTC không biết
+   * phải sửa gì.
+   *
+   * KHÔNG log `cameraUrl` — địa chỉ đó chứa tài khoản/mật khẩu của camera.
+   */
+  private async startAqvisionPull(input: {
+    readonly streamName: string;
+    readonly cameraUrl: string;
+  }): Promise<{ proxyKey: string | null }> {
+    try {
+      return await this.aqvisionApiClient.addStreamProxy({
+        stream: input.streamName,
+        url: input.cameraUrl,
+      });
+    } catch (error) {
+      if (error instanceof AqvisionApiException) {
+        throw new ServiceUnavailableException(
+          'Chưa nhờ được máy chủ media AQP kéo luồng từ camera. ' +
+            'Kiểm tra AQVISION_API_SECRET và địa chỉ camera.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Ngắt proxy kéo luồng trên AQP.
+   *
+   * Cố ý KHÔNG chặn việc xoá camera khi AQP lỗi hoặc chưa cấu hình: camera phải
+   * xoá được kể cả khi media server sập. Proxy sót lại chỉ là một luồng thừa bên
+   * AQP, không phải dữ liệu sai bên mình — đổi lại là một dòng cảnh báo.
+   *
+   * Không log khoá proxy: nó là định danh nội bộ của AQP, không phải thông tin
+   * cần cho người vận hành.
+   */
+  private async stopAqvisionPull(pullProxyKey: string | null | undefined) {
+    if (!pullProxyKey) return;
+
+    try {
+      await this.aqvisionApiClient.delStreamProxy(pullProxyKey);
+    } catch (error) {
+      this.logger.warn(
+        `Không ngắt được proxy AQP khi xoá camera (code ${
+          error instanceof AqvisionApiException ? error.providerCode : 'unknown'
+        }).`,
+      );
+    }
+  }
+
+  /**
+   * Trạng thái phát của một camera, đọc TRỰC TIẾP từ media server.
+   *
+   * `isMediaOnline` trả lời đúng câu "sân này đã có hình chưa" thay vì suy đoán
+   * từ cột `status` trong DB — cột đó chỉ biết việc BTC đã bấm gì, không biết
+   * luồng có thật sự lên hay không.
+   */
+  async getCameraLiveStatus(cameraId: string, user: JwtPayload) {
+    const camera = await this.livestreamRepository.findCameraById(cameraId);
+    if (!camera) {
+      throw new NotFoundException('Camera không tồn tại');
+    }
+
+    await this.assertTournamentOperator(camera.tournamentId, user);
+
+    let online: boolean;
+    try {
+      ({ online } = await this.aqvisionApiClient.isMediaOnline(camera.streamName));
+    } catch (error) {
+      if (error instanceof AqvisionApiException) {
+        throw new ServiceUnavailableException(
+          'Không đọc được trạng thái phát từ máy chủ media AQP. ' +
+            'Kiểm tra AQVISION_API_SECRET.',
+        );
+      }
+      throw error;
+    }
+
+    const status = online ? 'LIVE' : 'IDLE';
+    if (camera.status !== status && camera.status !== 'ARCHIVED') {
+      await this.livestreamRepository.updateCameraStatus(camera.id, status);
+    }
+
+    return {
+      cameraId: camera.id,
+      streamName: camera.streamName,
+      online,
+      status: camera.status === 'ARCHIVED' ? camera.status : status,
+    };
+  }
+
   async deleteCamera(cameraId: string, user: JwtPayload) {
     const camera = await this.livestreamRepository.findCameraById(cameraId);
     if (!camera) {
@@ -558,6 +752,7 @@ export class LivestreamService {
     }
 
     await this.assertTournamentOperator(camera.tournamentId, user);
+    await this.stopAqvisionPull(camera.pullProxyKey);
     const archived = await this.livestreamRepository.deleteCamera(cameraId);
     return archived ? this.toPublicCamera(archived) : null;
   }
