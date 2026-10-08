@@ -25,6 +25,7 @@ import { CreateTournamentVenueDto } from './dto/create-tournament-venue.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
+import { QueryHomeTournamentsDto } from './dto/query-home-tournaments.dto';
 import { QueryMyManagementTournamentsDto } from './dto/query-my-management-tournaments.dto';
 import { QueryMyWorkspaceDto } from './dto/query-my-workspace.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
@@ -108,6 +109,20 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Chỉ lấy danh sách giải đấu PUBLIC công khai' })
   async findPublic(@Query() query: QueryTournamentDto) {
     return this.tournamentsService.findPublic(query);
+  }
+
+  @Public()
+  @Header(
+    'Cache-Control',
+    'public, max-age=0, s-maxage=10, stale-while-revalidate=10',
+  )
+  @Header('Vary', 'Accept-Encoding')
+  @Get('home')
+  @ApiOperation({
+    summary: 'Lấy projection giải nổi bật và trận chung kết cho Trang chủ',
+  })
+  async findHome(@Query() query: QueryHomeTournamentsDto) {
+    return this.tournamentsService.findHome(query);
   }
 
   @Get('my')
@@ -766,11 +781,7 @@ export class TournamentsController {
     @Body('divisionId') divisionId: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.tournamentsService.joinLite(
-      inviteCode,
-      user.sub,
-      divisionId,
-    );
+    return this.tournamentsService.joinLite(inviteCode, user.sub, divisionId);
   }
 
   // ──── Lite pairing management ────
@@ -888,7 +899,9 @@ export class TournamentsController {
 
   @Post(':id/pairing/generate')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'BTC tự động ghép đôi theo RANDOM hoặc ELO_BALANCED' })
+  @ApiOperation({
+    summary: 'BTC tự động ghép đôi theo RANDOM hoặc ELO_BALANCED',
+  })
   async generateTournamentPairs(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: GenerateLitePairsDto,

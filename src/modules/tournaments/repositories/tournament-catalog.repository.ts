@@ -16,6 +16,7 @@ import {
   count,
   desc,
   eq,
+  exists,
   gt,
   inArray,
   isNotNull,
@@ -28,6 +29,7 @@ import {
   or,
   sql,
   type SQL,
+  aliasedTable,
 } from 'drizzle-orm';
 import { isDeepStrictEqual } from 'node:util';
 import { AuditService, Transaction } from '../../audit/audit.service';
@@ -365,15 +367,12 @@ export class TournamentCatalogRepository {
             };
             return {
               ...result,
-              inviteCode: includeInviteCode
-                ? row.tournament.inviteCode
-                : null,
+              inviteCode: includeInviteCode ? row.tournament.inviteCode : null,
             };
           }),
         );
 
-        const { inviteCode: _inviteCode, ...safeTournament } =
-          row.tournament;
+        const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
         return {
           ...safeTournament,
           inviteCode: includeInviteCode ? _inviteCode : null,
@@ -420,11 +419,331 @@ export class TournamentCatalogRepository {
           hasMore && dataWithCapacity.length > 0
             ? CursorPaginationHelper.encodeCursor({
                 id: dataWithCapacity[dataWithCapacity.length - 1].id,
-                createdAt: dataWithCapacity[dataWithCapacity.length - 1].createdAt,
+                createdAt:
+                  dataWithCapacity[dataWithCapacity.length - 1].createdAt,
               })
             : null,
         hasMore,
       },
+    };
+  }
+  async findHomeProjection(
+    sport: string | undefined,
+    matchStatus: 'ONGOING' | 'COMPLETED',
+  ) {
+    const publicTournamentConditions = [
+      isNull(schema.tournaments.deletedAt),
+      eq(schema.tournaments.tournamentType, 'PUBLIC'),
+      eq(schema.tournaments.visibility, 'PUBLIC'),
+      notInArray(schema.tournaments.status, [
+        'DRAFT',
+        'PENDING_APPROVAL',
+        'SUSPENDED',
+        'CANCELLED',
+        'PENDING_DELETE',
+        'pending_delete',
+      ]),
+      ...(sport ? [eq(schema.categories.slug, sport)] : []),
+    ];
+
+    const matchStatusCondition =
+      matchStatus === 'ONGOING'
+        ? sql`upper(${schema.matches.status}) in ('ONGOING', 'IN_PROGRESS', 'LIVE', 'PLAYING')`
+        : sql`upper(${schema.matches.status}) in ('COMPLETED', 'FINISHED', 'DONE', 'ENDED')`;
+
+    // Generated elimination brackets link every non-final round into the
+    // next match. The terminal MAIN/PLAYOFF nodes are therefore the finals;
+    // double-elimination finals are explicitly marked GRAND_FINALS. This is
+    // evaluated before limiting tournaments and independently per division.
+    const hasMatchingFinal = this.db
+      .select({ id: schema.matches.id })
+      .from(schema.matches)
+      .innerJoin(
+        schema.tournamentStages,
+        eq(schema.matches.stageId, schema.tournamentStages.id),
+      )
+      .where(
+        and(
+          eq(schema.matches.tournamentId, schema.tournaments.id),
+          isNull(schema.matches.deletedAt),
+          isNull(schema.tournamentStages.deletedAt),
+          matchStatusCondition,
+          eq(schema.matches.isBye, false),
+          isNotNull(schema.matches.participant1Id),
+          isNotNull(schema.matches.participant2Id),
+          sql`(
+            upper(${schema.matches.bracketBranch}) in ('GRAND_FINALS', 'FINAL')
+            or (
+              upper(${schema.matches.bracketBranch}) in ('MAIN', 'PLAYOFF')
+              and upper(${schema.tournamentStages.type}) in (
+                'SINGLE_ELIMINATION',
+                'DOUBLE_ELIMINATION',
+                'GROUP_STAGE_KNOCKOUT',
+                'KNOCKOUT',
+                'PLAYOFF'
+              )
+              and ${schema.tournamentStages.order} = (
+                select max(final_stage.order)
+                from tournament_stages final_stage
+                where final_stage.tournament_id = ${schema.matches.tournamentId}
+                  and final_stage.tournament_division_id is not distinct from ${schema.tournamentStages.tournamentDivisionId}
+                  and final_stage.deleted_at is null
+                  and upper(final_stage.type) in (
+                    'SINGLE_ELIMINATION',
+                    'DOUBLE_ELIMINATION',
+                    'GROUP_STAGE_KNOCKOUT',
+                    'KNOCKOUT',
+                    'PLAYOFF'
+                  )
+              )
+              and ${schema.matches.nextMatchId} is null
+            )
+          )`,
+          sql`exists (
+            select 1
+            from tournament_participants home_p1
+            where home_p1.id = ${schema.matches.participant1Id}
+              and home_p1.is_mock = false
+              and upper(home_p1.team_status) not in ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
+              and upper(trim(home_p1.team_name)) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')
+          )`,
+          sql`exists (
+            select 1
+            from tournament_participants home_p2
+            where home_p2.id = ${schema.matches.participant2Id}
+              and home_p2.is_mock = false
+              and upper(home_p2.team_status) not in ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
+              and upper(trim(home_p2.team_name)) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')
+          )`,
+        ),
+      )
+      .limit(1);
+
+    const [featuredTournaments, eligibleTournaments] = await Promise.all([
+      this.db
+        .select({
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+          bannerUrl: schema.tournaments.bannerUrl,
+          sport: schema.categories.name,
+          registrationStatus: schema.tournaments.status,
+        })
+        .from(schema.tournaments)
+        .innerJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .where(and(...publicTournamentConditions))
+        .orderBy(
+          desc(schema.tournaments.createdAt),
+          desc(schema.tournaments.id),
+        )
+        .limit(5),
+      this.db
+        .select({
+          id: schema.tournaments.id,
+          name: schema.tournaments.name,
+          createdAt: schema.tournaments.createdAt,
+        })
+        .from(schema.tournaments)
+        .innerJoin(
+          schema.categories,
+          eq(schema.tournaments.categoryId, schema.categories.id),
+        )
+        .where(and(...publicTournamentConditions, exists(hasMatchingFinal)))
+        .orderBy(
+          desc(schema.tournaments.createdAt),
+          desc(schema.tournaments.id),
+        )
+        .limit(5),
+    ]);
+
+    if (eligibleTournaments.length === 0) {
+      return {
+        featuredTournaments: featuredTournaments.map((tournament) => ({
+          ...tournament,
+          registrationStatus:
+            tournament.registrationStatus === 'REGISTRATION_OPEN'
+              ? 'OPEN'
+              : tournament.registrationStatus === 'REGISTRATION_CLOSED'
+                ? 'CLOSED'
+                : null,
+        })),
+        tournaments: [],
+      };
+    }
+
+    const finalParticipant2 = aliasedTable(
+      schema.tournamentParticipants,
+      'home_final_p2',
+    );
+    const finals = await this.db
+      .select({
+        tournamentId: schema.matches.tournamentId,
+        matchId: schema.matches.id,
+        divisionId: schema.tournamentStages.tournamentDivisionId,
+        divisionName: schema.tournamentDivisions.name,
+        roundNumber: schema.matches.roundNumber,
+        matchOrder: schema.matches.matchOrder,
+        bracketBranch: schema.matches.bracketBranch,
+        leg: schema.matches.leg,
+        tieId: schema.matches.tieId,
+        status: schema.matches.status,
+        scheduledAt: schema.matches.scheduledAt,
+        startedAt: schema.matches.startedAt,
+        completedAt: schema.matches.completedAt,
+        team1Id: schema.tournamentParticipants.id,
+        team1Name: schema.tournamentParticipants.teamName,
+        team1LogoUrl: schema.tournamentParticipants.footballTeamLogoUrl,
+        team1Sets: schema.matches.p1SetsWon,
+        team2Id: finalParticipant2.id,
+        team2Name: finalParticipant2.teamName,
+        team2LogoUrl: finalParticipant2.footballTeamLogoUrl,
+        team2Sets: schema.matches.p2SetsWon,
+      })
+      .from(schema.matches)
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.matches.tournamentId, schema.tournaments.id),
+      )
+      .innerJoin(
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
+      )
+      .innerJoin(
+        schema.tournamentStages,
+        eq(schema.matches.stageId, schema.tournamentStages.id),
+      )
+      .innerJoin(
+        schema.tournamentParticipants,
+        eq(schema.matches.participant1Id, schema.tournamentParticipants.id),
+      )
+      .innerJoin(
+        finalParticipant2,
+        eq(schema.matches.participant2Id, finalParticipant2.id),
+      )
+      .leftJoin(
+        schema.tournamentDivisions,
+        eq(
+          schema.tournamentStages.tournamentDivisionId,
+          schema.tournamentDivisions.id,
+        ),
+      )
+      .where(
+        and(
+          inArray(
+            schema.matches.tournamentId,
+            eligibleTournaments.map((tournament) => tournament.id),
+          ),
+          ...publicTournamentConditions,
+          isNull(schema.matches.deletedAt),
+          isNull(schema.tournamentStages.deletedAt),
+          matchStatusCondition,
+          eq(schema.matches.isBye, false),
+          isNotNull(schema.matches.participant1Id),
+          isNotNull(schema.matches.participant2Id),
+          eq(schema.tournamentParticipants.isMock, false),
+          notInArray(schema.tournamentParticipants.teamStatus, [
+            'REJECTED',
+            'WITHDRAWN',
+            'KICKED',
+            'EXPIRED',
+            'CANCELLED',
+          ]),
+          eq(finalParticipant2.isMock, false),
+          notInArray(finalParticipant2.teamStatus, [
+            'REJECTED',
+            'WITHDRAWN',
+            'KICKED',
+            'EXPIRED',
+            'CANCELLED',
+          ]),
+          sql`upper(trim(${schema.tournamentParticipants.teamName})) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')`,
+          sql`upper(trim(${finalParticipant2.teamName})) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')`,
+          sql`(
+            upper(${schema.matches.bracketBranch}) in ('GRAND_FINALS', 'FINAL')
+            or (
+              upper(${schema.matches.bracketBranch}) in ('MAIN', 'PLAYOFF')
+              and upper(${schema.tournamentStages.type}) in (
+                'SINGLE_ELIMINATION',
+                'DOUBLE_ELIMINATION',
+                'GROUP_STAGE_KNOCKOUT',
+                'KNOCKOUT',
+                'PLAYOFF'
+              )
+              and ${schema.tournamentStages.order} = (
+                select max(final_stage.order)
+                from tournament_stages final_stage
+                where final_stage.tournament_id = ${schema.matches.tournamentId}
+                  and final_stage.tournament_division_id is not distinct from ${schema.tournamentStages.tournamentDivisionId}
+                  and final_stage.deleted_at is null
+                  and upper(final_stage.type) in (
+                    'SINGLE_ELIMINATION',
+                    'DOUBLE_ELIMINATION',
+                    'GROUP_STAGE_KNOCKOUT',
+                    'KNOCKOUT',
+                    'PLAYOFF'
+                  )
+              )
+              and ${schema.matches.nextMatchId} is null
+            )
+          )`,
+        ),
+      )
+      .orderBy(
+        desc(schema.matches.tournamentId),
+        desc(schema.tournamentStages.tournamentDivisionId),
+        desc(schema.tournamentStages.order),
+        desc(schema.matches.roundNumber),
+        schema.matches.matchOrder,
+        schema.matches.leg,
+      );
+
+    const matchesByTournament = new Map<string, typeof finals>();
+    for (const match of finals) {
+      const rows = matchesByTournament.get(match.tournamentId) ?? [];
+      rows.push(match);
+      matchesByTournament.set(match.tournamentId, rows);
+    }
+    const finalTournaments = eligibleTournaments.map((tournament) => ({
+      ...tournament,
+      matches: (matchesByTournament.get(tournament.id) ?? []).map((match) => ({
+        id: match.matchId,
+        divisionId: match.divisionId,
+        divisionName: match.divisionName,
+        roundNumber: match.roundNumber,
+        bracketBranch: match.bracketBranch,
+        leg: match.leg,
+        tieId: match.tieId,
+        status: match.status,
+        scheduledAt: match.scheduledAt,
+        startedAt: match.startedAt,
+        completedAt: match.completedAt,
+        score: { team1: match.team1Sets, team2: match.team2Sets },
+        team1: {
+          id: match.team1Id,
+          name: match.team1Name,
+          logoUrl: match.team1LogoUrl,
+        },
+        team2: {
+          id: match.team2Id,
+          name: match.team2Name,
+          logoUrl: match.team2LogoUrl,
+        },
+      })),
+    }));
+
+    return {
+      featuredTournaments: featuredTournaments.map((tournament) => ({
+        ...tournament,
+        registrationStatus:
+          tournament.registrationStatus === 'REGISTRATION_OPEN'
+            ? 'OPEN'
+            : tournament.registrationStatus === 'REGISTRATION_CLOSED'
+              ? 'CLOSED'
+              : null,
+      })),
+      tournaments: finalTournaments,
     };
   }
   async generateUniqueInviteCode(tx: Transaction | AppDbOrTx): Promise<string> {
@@ -709,9 +1028,7 @@ export class TournamentCatalogRepository {
     // A tournament with no configured divisions is itself the only division;
     // expose the same aggregate projection for that branch instead of leaving
     // clients to infer occupancy from the participant row count.
-    const capacity = divisions.length
-      ? undefined
-      : tournamentCapacities[id];
+    const capacity = divisions.length ? undefined : tournamentCapacities[id];
 
     const { inviteCode: _inviteCode, ...safeTournament } = row.tournament;
     return {
@@ -2168,14 +2485,15 @@ export class TournamentCatalogRepository {
       : null;
     // Keyset: lấy những bản ghi cũ hơn mốc cursor. `updatedAt` có thể trùng
     // nên chốt bằng (updatedAt, id) để không bỏ sót hoặc lặp phần tử.
-    const pagedEntries = cursorTime === null
-      ? allEntries
-      : allEntries.filter(
-          (entry) =>
-            entry.tournament.updatedAt.getTime() < cursorTime ||
-            (entry.tournament.updatedAt.getTime() === cursorTime &&
-              entry.tournament.id < (cursorPayload?.id ?? '')),
-        );
+    const pagedEntries =
+      cursorTime === null
+        ? allEntries
+        : allEntries.filter(
+            (entry) =>
+              entry.tournament.updatedAt.getTime() < cursorTime ||
+              (entry.tournament.updatedAt.getTime() === cursorTime &&
+                entry.tournament.id < (cursorPayload?.id ?? '')),
+          );
     const pageEntries = pagedEntries.slice(0, limit);
     const lastEntry = pageEntries[pageEntries.length - 1];
     const hasMore = pagedEntries.length > limit;
