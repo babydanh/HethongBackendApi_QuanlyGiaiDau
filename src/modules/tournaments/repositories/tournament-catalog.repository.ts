@@ -505,10 +505,14 @@ export class TournamentCatalogRepository {
           ) desc, ${schema.matches.id} desc
         )`.as('home_rank'),
         tournamentId: schema.matches.tournamentId,
-        matchId: schema.matches.id,
+        // Object keys do not alias SQL columns. The outer select needs unique
+        // names for columns shared by matches, stages, divisions and both teams.
+        matchId: sql<string>`${schema.matches.id}`.as('match_id'),
         divisionId: schema.tournamentStages.tournamentDivisionId,
-        divisionName: schema.tournamentDivisions.name,
-        stageName: schema.tournamentStages.name,
+        divisionName: sql<string | null>`${schema.tournamentDivisions.name}`.as(
+          'division_name',
+        ),
+        stageName: sql<string>`${schema.tournamentStages.name}`.as('stage_name'),
         roundNumber: schema.matches.roundNumber,
         lastRoundNumber: sql<number>`(
           select max(round_match.round_number)
@@ -528,12 +532,18 @@ export class TournamentCatalogRepository {
         completedAt: schema.matches.completedAt,
         scoreDetails: schema.matches.scoreDetails,
         scoreboardVisible: schema.matches.scoreboardVisible,
-        team1Id: schema.tournamentParticipants.id,
-        team1Name: schema.tournamentParticipants.teamName,
-        team1LogoUrl: schema.tournamentParticipants.footballTeamLogoUrl,
-        team2Id: finalParticipant2.id,
-        team2Name: finalParticipant2.teamName,
-        team2LogoUrl: finalParticipant2.footballTeamLogoUrl,
+        team1Id: sql<string>`${schema.tournamentParticipants.id}`.as('team1_id'),
+        team1Name: sql<string>`${schema.tournamentParticipants.teamName}`.as(
+          'team1_name',
+        ),
+        team1LogoUrl: sql<string | null>`${schema.tournamentParticipants.footballTeamLogoUrl}`.as(
+          'team1_logo_url',
+        ),
+        team2Id: sql<string>`${finalParticipant2.id}`.as('team2_id'),
+        team2Name: sql<string>`${finalParticipant2.teamName}`.as('team2_name'),
+        team2LogoUrl: sql<string | null>`${finalParticipant2.footballTeamLogoUrl}`.as(
+          'team2_logo_url',
+        ),
       })
       .from(schema.matches)
       .innerJoin(

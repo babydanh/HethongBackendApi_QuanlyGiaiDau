@@ -3,6 +3,7 @@ import {
   Catch,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import { Request, Response } from 'express';
@@ -11,6 +12,8 @@ import { SentryExceptionCaptured } from '@sentry/nestjs';
 
 @Catch(Error)
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
+
   @SentryExceptionCaptured()
   catch(exception: Error, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -100,6 +103,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
       code = 'INTERNAL_SERVER_ERROR';
     }
 
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      // Log operational metadata only. Drizzle messages/stacks may contain SQL,
+      // bound parameters or complete URLs; never serialize the raw exception.
+      this.logger.error(
+        JSON.stringify({
+          event: 'http_server_error',
+          method: request.method,
+          route:
+            typeof request.route?.path === 'string'
+              ? request.route.path
+              : '<unmatched>',
+          statusCode: status,
+          errorType: exception.constructor.name,
+          sqlState: readSqlState(exception),
+        }),
+      );
+    }
+
     response.status(status).json({
       statusCode: status,
       code,
@@ -112,4 +133,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
       ...extensions,
     });
   }
+}
+
+function readSqlState(exception: Error): string | null {
+  let cause: unknown = exception;
+  const seen = new Set<object>();
+  for (let depth = 0; depth < 8; depth++) {
+    if (!cause || typeof cause !== 'object' || seen.has(cause)) return null;
+    seen.add(cause);
+    const current = cause as { code?: unknown; cause?: unknown };
+    if (typeof current.code === 'string' && /^[0-9A-Z]{5}$/.test(current.code)) {
+      return current.code;
+    }
+    cause = current.cause;
+  }
+  return null;
 }
