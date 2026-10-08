@@ -4,7 +4,14 @@ import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
 
-export type LivestreamProtocol = 'RTMP' | 'SRT';
+/**
+ * Giao thức ĐẨY luồng lên media server. Chỉ còn RTMP vì AQP không nhận SRT, và
+ * SportO đã bỏ media server riêng — mọi luồng đi qua hạ tầng AQP.
+ *
+ * Giá trị `SRT` cũ vẫn nằm trong các hàng DB đã tạo trước đây; `toPublicCamera`
+ * quy chúng về `RTMP` khi đọc.
+ */
+export type LivestreamProtocol = 'RTMP';
 export type LivestreamMode = 'PUSH' | 'PULL';
 
 export interface CreateCameraInput {

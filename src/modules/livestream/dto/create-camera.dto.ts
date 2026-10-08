@@ -20,7 +20,7 @@ export class CreateCameraDto {
     example: 'PUSH',
     enum: ['PUSH', 'PULL'],
     description:
-      'Bắt buộc. PUSH: SportO sinh URL RTMP/SRT để camera đẩy luồng lên. PULL: bên ngoài đã phát sẵn, BTC dán URL phát.',
+      'Bắt buộc. PUSH: camera đẩy luồng lên AQP (RTMP), SportO trả URL đích. PULL: SportO nhờ AQP kéo từ camera, hoặc BTC dán URL phát đã có sẵn.',
   })
   @IsIn(['PUSH', 'PULL'])
   mode!: 'PUSH' | 'PULL';
@@ -36,12 +36,13 @@ export class CreateCameraDto {
 
   @ApiProperty({
     example: 'RTMP',
-    enum: ['RTMP', 'SRT'],
-    description: 'Chỉ dùng cho mode PUSH. Với mode PULL có thể bỏ qua.',
+    enum: ['RTMP'],
+    description:
+      'Giao thức ĐẨY lên AQP. Chỉ RTMP: AQP không nhận SRT, và SportO không còn media server riêng.',
   })
-  @IsIn(['RTMP', 'SRT'])
+  @IsIn(['RTMP'])
   @IsOptional()
-  protocol?: 'RTMP' | 'SRT';
+  protocol?: 'RTMP';
 
   @ApiPropertyOptional({
     example: 'https://media.aqvision.net/live/cam1/hls.m3u8',

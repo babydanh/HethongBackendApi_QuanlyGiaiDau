@@ -35,8 +35,13 @@ describe('LivestreamService camera publish info', () => {
       createCamera: jest.fn(async (input) => ({ id: 'camera-1', ...input })),
     };
     const configService = {
-      // No overrides: the service must fall back to its shipped defaults.
-      get: jest.fn(() => undefined),
+      // Không override gì khác: service phải dùng mặc định của nó, riêng endpoint
+      // đẩy nằm ở env AQP nên phải cấp đủ để không rơi vào nhánh fail-closed.
+      get: jest.fn((key: string, fallback?: unknown) => {
+        if (key === 'AQVISION_PUSH_HOST') return 'media.aqvision.net';
+        if (key === 'AQVISION_PUSH_RTMP_PORT') return 11935;
+        return fallback;
+      }),
     } as unknown as ConfigService;
     const service = new LivestreamService(
       repository as unknown as LivestreamRepository,
@@ -74,17 +79,18 @@ describe('LivestreamService camera publish info', () => {
     expect(created.publish).not.toBeNull();
     expect(created.publish?.protocol).toBe('RTMP');
     expect(created.publish?.url).toBe(
-      `rtmp://sporto.asia:1935/live/${created.publish?.streamName}`,
+      `rtmp://media.aqvision.net:11935/live/${created.publish?.streamName}`,
     );
-    // The stream key OBS needs is the last path segment of the ingest URL.
+    // The stream name OBS needs is the last path segment of the ingest URL; the
+    // publish key that authenticates the push is issued by AQP, not by SportO.
     expect(created.publish?.rtmpUrl.split('/').pop()).toBe(
       created.publish?.streamName,
     );
 
-    // A PUSH camera stores its own HLS playback URL, so once it is assigned to a
-    // match, that match plays exactly what OBS pushes to the ingest path.
+    // A PUSH camera stores its own playback URL on the AQP media host, so once it
+    // is assigned to a match, that match plays exactly what the device pushes.
     expect(created.playbackUrl).toBe(
-      `https://sporto.asia/hls/${created.publish?.streamName}/index.m3u8`,
+      `https://media.aqvision.net/live/${created.publish?.streamName}/hls.m3u8`,
     );
   });
 });
@@ -121,7 +127,13 @@ describe('LivestreamService court camera assignment', () => {
     };
     const service = new LivestreamService(
       repository as unknown as LivestreamRepository,
-      { get: jest.fn(() => undefined) } as unknown as ConfigService,
+      {
+        get: jest.fn((key: string, fallback?: unknown) => {
+          if (key === 'AQVISION_PUSH_HOST') return 'media.aqvision.net';
+          if (key === 'AQVISION_PUSH_RTMP_PORT') return 11935;
+          return fallback;
+        }),
+      } as unknown as ConfigService,
       {} as AqvisionPublishService,
       {} as AqvisionApiClient,
     );
