@@ -6,6 +6,7 @@ import {
 import { PaymentStatus } from '../../../common/constants/enums';
 import { RedisService } from '../../../providers/redis/redis.service';
 import { QueryTournamentDto } from '../dto/query-tournament.dto';
+import { QueryHomeTournamentsDto } from '../dto/query-home-tournaments.dto';
 import { QueryMyManagementTournamentsDto } from '../dto/query-my-management-tournaments.dto';
 import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentAccessService } from './tournament-access.service';
@@ -23,7 +24,9 @@ const PUBLIC_TOURNAMENT_CACHE_VERSION = 'v1';
 function serializeTournamentQuery(query: Record<string, unknown>): string {
   return JSON.stringify(
     Object.fromEntries(
-      Object.entries(query).sort(([left], [right]) => left.localeCompare(right)),
+      Object.entries(query).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
     ),
   );
 }
@@ -133,6 +136,17 @@ export class TournamentDiscoveryService {
     });
   }
 
+  async findHome(query: QueryHomeTournamentsDto) {
+    const sport = query.sport || 'all';
+    const cacheKey = `tournaments:home:v1:${sport}:${query.matchStatus}`;
+    return this.redisService.getOrSetJson(cacheKey, 10, () =>
+      this.tournamentsRepository.findHomeProjection(
+        sport === 'all' ? undefined : sport,
+        query.matchStatus,
+      ),
+    );
+  }
+
   async findMy(userId: string) {
     const result = await this.tournamentsRepository.findMyTournaments(userId);
     return result.map((t) => mapTournamentFormat(t));
@@ -203,7 +217,11 @@ export class TournamentDiscoveryService {
 
     if (managementAccess) {
       const canManage = userId
-        ? await this.tournamentAccessService.isManager(tournament, userId, systemRoles)
+        ? await this.tournamentAccessService.isManager(
+            tournament,
+            userId,
+            systemRoles,
+          )
         : false;
       if (!canManage) {
         throw new ForbiddenException(
@@ -327,7 +345,13 @@ export class TournamentDiscoveryService {
     if (!tournament) {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
-    if (!(await this.tournamentAccessService.isManager(tournament, userId, systemRoles))) {
+    if (
+      !(await this.tournamentAccessService.isManager(
+        tournament,
+        userId,
+        systemRoles,
+      ))
+    ) {
       throw new ForbiddenException(
         'Bạn không có quyền xem hồ sơ đăng ký của giải đấu này.',
       );

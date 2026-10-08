@@ -39,6 +39,7 @@ import { CreateTournamentVenueDto } from './dto/create-tournament-venue.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
 import { QueryTournamentDto } from './dto/query-tournament.dto';
+import { QueryHomeTournamentsDto } from './dto/query-home-tournaments.dto';
 import { QueryMyManagementTournamentsDto } from './dto/query-my-management-tournaments.dto';
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
@@ -490,6 +491,10 @@ export class TournamentsService {
 
   async findPublic(query: QueryTournamentDto) {
     return this.tournamentDiscoveryService.findPublic(query);
+  }
+
+  async findHome(query: QueryHomeTournamentsDto) {
+    return this.tournamentDiscoveryService.findHome(query);
   }
 
   async findMy(userId: string) {
@@ -1308,11 +1313,7 @@ export class TournamentsService {
     return this.tournamentLiteService.getLiteJoinStatus(inviteCode, userId);
   }
 
-  async joinLite(
-    inviteCode: string,
-    userId: string,
-    divisionId?: string,
-  ) {
+  async joinLite(inviteCode: string, userId: string, divisionId?: string) {
     return this.tournamentLiteService.joinLite(inviteCode, userId, divisionId);
   }
 

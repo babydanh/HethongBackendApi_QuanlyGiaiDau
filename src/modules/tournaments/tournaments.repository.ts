@@ -149,6 +149,12 @@ export class TournamentsRepository {
     return this.tournamentCatalogRepository.findAll(...args);
   }
 
+  findHomeProjection(
+    ...args: Parameters<TournamentCatalogRepository['findHomeProjection']>
+  ) {
+    return this.tournamentCatalogRepository.findHomeProjection(...args);
+  }
+
   generateUniqueInviteCode(
     ...args: Parameters<TournamentCatalogRepository['generateUniqueInviteCode']>
   ) {
@@ -574,7 +580,9 @@ export class TournamentsRepository {
   }
 
   confirmRankingConsent(
-    ...args: Parameters<TournamentParticipantRepository['confirmRankingConsent']>
+    ...args: Parameters<
+      TournamentParticipantRepository['confirmRankingConsent']
+    >
   ) {
     return this.tournamentParticipantRepository.confirmRankingConsent(...args);
   }
