@@ -42,9 +42,15 @@ function makeService(overrides: Record<string, unknown> = {}) {
     })),
     ...overrides,
   };
-  const config: Record<string, string> = {
+  const config: Record<string, string | number> = {
+    // Media server riêng đang ẨN: giá trị vẫn cấu hình được nhưng không dùng cho
+    // đường phát sóng nữa.
     LIVESTREAM_RTMP_BASE_URL: 'rtmp://media.test:1935/live',
     LIVESTREAM_SRT_BASE_URL: 'srt://media.test:8890',
+    // Hạ tầng thật đang dùng.
+    AQVISION_PUSH_HOST: 'media.test',
+    AQVISION_PUSH_RTMP_PORT: 11935,
+    AQVISION_PLAYBACK_BASE_URL: 'https://media.test',
   };
   const service = new LivestreamService(
     repository as unknown as LivestreamRepository,
@@ -130,15 +136,18 @@ describe('LivestreamService camera projection', () => {
     const created = await service.createCamera(tournamentId, owner, {
       name: 'OBS chính',
       mode: 'PUSH',
-      protocol: 'SRT',
+      protocol: 'RTMP',
     });
 
+    // Đích đẩy RTMP là hạ tầng AQP. `srt` vẫn mang giá trị của media server riêng
+    // đang ẩn — UI đã ẩn lựa chọn này nên không ai dùng.
     expect(created.ingest).toEqual({
-      rtmp: 'rtmp://media.test:1935/live',
+      rtmp: 'rtmp://media.test:11935/live',
       srt: 'srt://media.test:8890',
     });
-    // The publish URL still carries the per-camera stream key.
-    expect(created.publish?.url).toBe(`srt://media.test:8890?streamid=publish:${created.streamName}`);
+    expect(created.publish?.url).toBe(
+      `rtmp://media.test:11935/live/${created.streamName}`,
+    );
   });
 });
 

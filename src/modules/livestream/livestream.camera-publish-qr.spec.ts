@@ -223,13 +223,13 @@ describe('LivestreamService rotate stream key', () => {
     expect(values.streamName).toMatch(/^camera_[0-9a-f]{32}$/);
     expect(values.streamKey).toMatch(/^[0-9a-f]{32}$/);
     expect(values.playbackUrl).toBe(
-      `https://sporto.asia/hls/${values.streamName}/index.m3u8`,
+      `https://media.aqvision.net/live/${values.streamName}/hls.m3u8`,
     );
 
     expect(result.id).toBe('camera-push-1');
     expect(result.streamName).toBe(values.streamName);
     expect(result.publish?.rtmpUrl).toBe(
-      `rtmp://sporto.asia:1935/live/${values.streamName}`,
+      `rtmp://media.aqvision.net:11935/live/${values.streamName}`,
     );
     expect(result).not.toHaveProperty('streamKey');
   });

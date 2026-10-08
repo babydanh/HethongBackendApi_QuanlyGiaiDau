@@ -54,6 +54,14 @@ export class LivestreamService {
     return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
   }
 
+  // ---------------------------------------------------------------------------
+  // Media server RIÊNG của SportO — ĐANG ẨN, KHÔNG DÙNG.
+  //
+  // Giữ lại nguyên code theo yêu cầu, nhưng không còn nằm trên đường phát sóng:
+  // mọi camera giờ đi qua hạ tầng AQP. Bật lại thì phải cấu hình `LIVESTREAM_*`
+  // và nối lại các hàm này vào `buildPublishInfo` / `buildPlaybackUrl`.
+  // ---------------------------------------------------------------------------
+
   private getRtmpBaseUrl() {
     return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://sporto.asia:1935/live';
   }
@@ -66,8 +74,48 @@ export class LivestreamService {
     return this.configService.get<string>('LIVESTREAM_HLS_PUBLIC_BASE_URL') || 'https://sporto.asia/hls';
   }
 
+  /** ẨN/KHÔNG DÙNG cho camera mới. Chỉ còn `normalizePublicPlaybackUrl` gọi để vá hàng cũ. */
   private buildPlaybackUrl(streamKey: string) {
     return `${this.getHlsBaseUrl().replace(/\/$/, '')}/${streamKey}/index.m3u8`;
+  }
+
+  /**
+   * Đích ĐẨY luồng của AQP — đường phát sóng duy nhất đang dùng.
+   *
+   * Chưa cấu hình host/cổng thì ném 503 kèm tên biến env, KHÔNG trả URL tạm:
+   * BTC dán URL tạm vào OBS/điện thoại thì không ai xem được hình mà cũng không
+   * biết vì sao.
+   */
+  private resolveAqvisionIngestServer(): string {
+    const host = (
+      this.configService.get<string>('AQVISION_PUSH_HOST') ?? ''
+    ).trim();
+    // Cổng RTMP tách khỏi cổng RTSP: panel AQP phát hai cổng riêng.
+    const rtmpPort = String(
+      this.configService.get<string | number>('AQVISION_PUSH_RTMP_PORT') ?? '',
+    ).trim();
+
+    if (host.length === 0 || rtmpPort.length === 0) {
+      throw new ServiceUnavailableException(
+        'Chưa cấu hình máy chủ media AQP để đẩy luồng. ' +
+          'Kiểm tra AQVISION_PUSH_HOST và AQVISION_PUSH_RTMP_PORT.',
+      );
+    }
+
+    return `rtmp://${host}:${rtmpPort}/live`;
+  }
+
+  /**
+   * Bản không ném của `resolveAqvisionIngestServer` cho đường ĐỌC: liệt kê camera
+   * không được 503 chỉ vì chưa cấu hình env — khi đó trả chuỗi rỗng để UI nói
+   * "chưa cấu hình".
+   */
+  private tryAqvisionIngestServer(): string {
+    try {
+      return this.resolveAqvisionIngestServer();
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -120,6 +168,7 @@ export class LivestreamService {
     }
   }
 
+  /** ẨN/KHÔNG DÙNG — ingest RTMP của media server riêng; RTMP giờ dựng từ AQP. */
   private buildIngestUrl(streamKey: string) {
     return `${this.getRtmpBaseUrl().replace(/\/$/, '')}/${streamKey}`;
   }
@@ -144,13 +193,20 @@ export class LivestreamService {
     };
   }
 
+  /** ẨN/KHÔNG DÙNG — SRT của media server riêng. AQP không nhận SRT. */
   private buildSrtUrl(streamName: string) {
     const baseUrl = this.getSrtBaseUrl();
     return `${baseUrl.replace(/\/$/, '')}?streamid=publish:${streamName}`;
   }
 
+  /**
+   * Cặp ingest cho OBS / Camera Station.
+   *
+   * Nhánh RTMP đi thẳng vào hạ tầng AQP — đây là đường đang dùng. Nhánh SRT giữ
+   * nguyên code cũ nhưng KHÔNG dùng: AQP không nhận SRT và UI đã ẩn lựa chọn đó.
+   */
   private buildPublishInfo(protocol: 'RTMP' | 'SRT', streamName: string) {
-    const rtmpUrl = this.buildIngestUrl(streamName);
+    const rtmpUrl = `${this.resolveAqvisionIngestServer()}/${streamName}`;
     const srtUrl = this.buildSrtUrl(streamName);
 
     return {
@@ -230,13 +286,13 @@ export class LivestreamService {
       streamName: camera.streamName,
       status: camera.status,
       playbackUrl: this.normalizePublicPlaybackUrl(camera.playbackUrl),
-      // Ingest endpoints a broadcaster types into OBS. Derived from config on
-      // every read, so the UI never has to hardcode a host that drifts from the
-      // deployment. The stream key itself is `streamName`, already public.
+      // Endpoint đẩy để BTC nhập vào OBS / Camera Station. RTMP giờ trỏ vào AQP
+      // (hạ tầng đang dùng); `srt` vẫn là giá trị của media server riêng đang ẨN
+      // — UI đã ẩn lựa chọn SRT nên trường này không được dùng.
       ingest:
         camera.mode === 'PULL'
           ? null
-          : { rtmp: this.getRtmpBaseUrl(), srt: this.getSrtBaseUrl() },
+          : { rtmp: this.tryAqvisionIngestServer(), srt: this.getSrtBaseUrl() },
       createdAt: camera.createdAt,
       updatedAt: camera.updatedAt,
     };
@@ -392,7 +448,7 @@ export class LivestreamService {
     } else if (pullSource?.kind === 'PLAYBACK') {
       playbackUrl = pullSource.url;
     } else {
-      playbackUrl = this.buildPlaybackUrl(streamName);
+      playbackUrl = this.buildAqvisionHlsUrl(streamName);
     }
 
     const camera = await this.livestreamRepository.createCamera({
@@ -482,7 +538,7 @@ export class LivestreamService {
       try {
         const rotated = await this.livestreamRepository.updateCameraStreamIdentity(
           camera.id,
-          { streamName, streamKey, playbackUrl: this.buildPlaybackUrl(streamName) },
+          { streamName, streamKey, playbackUrl: this.buildAqvisionHlsUrl(streamName) },
         );
         if (!rotated) {
           throw new NotFoundException('Camera không tồn tại');
@@ -864,7 +920,7 @@ export class LivestreamService {
     }
 
     const playbackUrl = this.normalizePublicPlaybackUrl(
-      stream.cameraPlaybackUrl || this.buildPlaybackUrl(stream.streamKey),
+      stream.cameraPlaybackUrl || this.buildAqvisionHlsUrl(stream.streamKey),
     )!;
     const livestream = await this.livestreamRepository.updateStreamStatus(matchId, 'LIVE', user.sub, playbackUrl);
 
