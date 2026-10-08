@@ -1,5 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+} from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -19,6 +28,18 @@ export interface CreateCameraInput {
   /** Khoá proxy AQP của camera PULL có nguồn là camera IP; `null` với mọi nguồn khác. */
   pullProxyKey?: string | null;
   createdBy: string;
+}
+
+/**
+ * Projection điều phối ghi MP4 của một camera: camera còn assignment
+ * trận (trận chưa xoá mềm, camera chưa xoá mềm), kèm stream name
+ * để gọi AQVision và cờ có assignment `LIVE` hay không.
+ */
+export interface CameraRecordingTarget {
+  cameraId: string;
+  streamName: string;
+  /** Ít nhất một assignment `LIVE` trên một trận chưa xoá mềm. */
+  hasLiveAssignment: boolean;
 }
 
 @Injectable()
@@ -436,6 +457,86 @@ export class LivestreamRepository {
         ),
       )
       .where(and(eq(schema.matches.tournamentId, tournamentId), isNull(schema.matches.deletedAt)));
+  }
+
+  /**
+   * Mục tiêu ghi MP4: một dòng mỗi camera còn ít nhất một assignment
+   * trận (kể cả assignment `OFFLINE`), gom theo camera/stream.
+   *
+   * `hasLiveAssignment` là aggregate `bool_or` trên mọi assignment
+   * LIVE của camera đó — camera chia sẻ nhiều trận vẫn chỉ xuất
+   * hiện một lần, và việc dừng một trận không làm mất dấu trận
+   * LIVE còn lại. Camera đã xoá mềm và trận đã xoá mềm bị loại
+   * (giống `syncCameraStatus`: camera mồ côi được coi như chưa
+   * gán).
+   */
+  async listCameraRecordingTargets(): Promise<CameraRecordingTarget[]> {
+    const rows = await this.cameraRecordingTargetQuery()
+      .where(isNotNull(schema.matchLivestreams.cameraId))
+      .groupBy(
+        schema.matchLivestreams.cameraId,
+        schema.livestreamCameras.streamName,
+      );
+
+    return rows.map((row) => ({
+      cameraId: row.cameraId as string,
+      streamName: row.streamName,
+      hasLiveAssignment: row.hasLiveAssignment,
+    }));
+  }
+
+  /**
+   * Mục tiêu ghi MP4 của một camera, hoặc `null` khi camera không
+   * còn assignment nào (hoặc đã bị xoá mềm). Đọc lại trạng thái
+   * hiện hành trước mọi side effect ghi MP4.
+   */
+  async findCameraRecordingTarget(
+    cameraId: string,
+  ): Promise<CameraRecordingTarget | null> {
+    const [row] = await this.cameraRecordingTargetQuery()
+      .where(
+        and(
+          isNotNull(schema.matchLivestreams.cameraId),
+          eq(schema.matchLivestreams.cameraId, cameraId),
+        ),
+      )
+      .groupBy(
+        schema.matchLivestreams.cameraId,
+        schema.livestreamCameras.streamName,
+      )
+      .limit(1);
+
+    return row
+      ? {
+          cameraId: row.cameraId as string,
+          streamName: row.streamName,
+          hasLiveAssignment: row.hasLiveAssignment,
+        }
+      : null;
+  }
+
+  private cameraRecordingTargetQuery() {
+    return this.db
+      .select({
+        cameraId: schema.matchLivestreams.cameraId,
+        streamName: schema.livestreamCameras.streamName,
+        hasLiveAssignment: sql<boolean>`bool_or(${schema.matchLivestreams.streamStatus} = 'LIVE')`,
+      })
+      .from(schema.matchLivestreams)
+      .innerJoin(
+        schema.livestreamCameras,
+        and(
+          eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .innerJoin(
+        schema.matches,
+        and(
+          eq(schema.matchLivestreams.matchId, schema.matches.id),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
   }
 
   async assignCameraToMatch(matchId: string, cameraId: string, playbackUrl: string) {

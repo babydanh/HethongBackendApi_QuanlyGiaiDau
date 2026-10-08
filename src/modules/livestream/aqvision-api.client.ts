@@ -153,6 +153,49 @@ export class AqvisionApiClient {
   }
 
   /**
+   * `POST /index/api/startRecord` — bắt đầu ghi MP4 (`type=1`) cho `stream`.
+   * Chỉ thành công khi AQP xác nhận `result: true` (boolean).
+   */
+  async startRecordMp4(stream: string): Promise<void> {
+    const data = await this.call<{ result?: unknown }>('startRecord', {
+      type: 1,
+      stream,
+    });
+    this.assertRecordWriteResult('startRecord', data);
+  }
+
+  /**
+   * `GET /index/api/isRecording` — `stream` có đang ghi MP4 (`type=1`)?
+   * Chỉ literal boolean `status: true` mới là true; `status` không phải
+   * boolean ⇒ nem lỗi thay vì ép kiểu.
+   */
+  async isRecordingMp4(stream: string): Promise<boolean> {
+    const data = await this.call<{ status?: unknown }>('isRecording', {
+      type: 1,
+      stream,
+    });
+    if (data.status !== true && data.status !== false) {
+      throw new AqvisionApiException(
+        -1,
+        'Máy chủ media AQP trả trạng thái ghi MP4 không hợp lệ.',
+      );
+    }
+    return data.status;
+  }
+
+  /**
+   * `POST /index/api/stopRecord` — dừng ghi MP4 (`type=1`) cho `stream`.
+   * Chỉ thành công khi AQP xác nhận `result: true` (boolean).
+   */
+  async stopRecordMp4(stream: string): Promise<void> {
+    const data = await this.call<{ result?: unknown }>('stopRecord', {
+      type: 1,
+      stream,
+    });
+    this.assertRecordWriteResult('stopRecord', data);
+  }
+
+  /**
    * `GET /index/api/getSnap` — trả **JPEG nhị phân**, KHÔNG đi qua envelope JSON.
    * Vendor sample: `url` + `timeout_sec` + `expire_sec` (không có `vhost`/`app`/`stream`).
    */
@@ -338,6 +381,20 @@ export class AqvisionApiClient {
 
   private readMessage(payload: JsonObject): string {
     return typeof payload.msg === 'string' ? payload.msg : 'không xác định';
+  }
+
+  /** Write op chỉ thành công khi AQP xác nhận `result: true` (boolean). */
+  private assertRecordWriteResult(
+    operation: string,
+    data: { result?: unknown },
+  ): void {
+    if (data.result !== true) {
+      // Sanitized: chỉ tên operation, KHÔNG log URL/query (chứa secret).
+      throw new AqvisionApiException(
+        -1,
+        `Máy chủ media AQP không xác nhận thao tác ghi MP4 (${operation}).`,
+      );
+    }
   }
 
   private parseDataFiles(

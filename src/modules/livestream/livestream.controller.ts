@@ -441,6 +441,8 @@ export class LivestreamController {
   @ApiOperation({
     summary:
       'BTC hoặc trọng tài được phân công bắt đầu livestream nếu trận đã có camera',
+    description:
+      'Phản hồi thêm recordingStatus; PENDING cho biết trạng thái ghi MP4 chưa được xác nhận và không làm thất bại livestream.',
   })
   startMatchStream(
     @Param('matchId', ParseUUIDPipe) matchId: string,
@@ -454,6 +456,8 @@ export class LivestreamController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'BTC hoặc trọng tài được phân công dừng livestream',
+    description:
+      'Phản hồi giữ các trường trạng thái trận hiện có và thêm recordingStatus; PENDING cho biết trạng thái ghi MP4 chưa được xác nhận.',
   })
   stopMatchStream(
     @Param('matchId', ParseUUIDPipe) matchId: string,

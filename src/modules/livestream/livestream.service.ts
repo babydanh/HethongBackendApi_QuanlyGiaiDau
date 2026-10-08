@@ -21,6 +21,11 @@ import {
 } from './aqvision-publish.service';
 import { AqvisionApiClient, AqvisionApiException } from './aqvision-api.client';
 import {
+  AqvisionRecordingService,
+  type RecordingStatus,
+} from './aqvision-recording.service';
+import { LivestreamHealthQueue } from './livestream-health.queue';
+import {
   LivestreamMode,
   LivestreamProtocol,
   LivestreamRepository,
@@ -48,6 +53,8 @@ export class LivestreamService {
     private readonly configService: ConfigService,
     private readonly aqvisionPublishService: AqvisionPublishService,
     private readonly aqvisionApiClient: AqvisionApiClient,
+    private readonly aqvisionRecordingService: AqvisionRecordingService,
+    private readonly livestreamHealthQueue: LivestreamHealthQueue,
   ) {}
 
   private isAdmin(user: JwtPayload) {
@@ -922,8 +929,13 @@ export class LivestreamService {
     const playbackUrl = this.normalizePublicPlaybackUrl(
       stream.cameraPlaybackUrl || this.buildAqvisionHlsUrl(stream.streamKey),
     )!;
-    const livestream = await this.livestreamRepository.updateStreamStatus(matchId, 'LIVE', user.sub, playbackUrl);
-
+    const livestream = await this.livestreamRepository.updateStreamStatus(
+      matchId,
+      'LIVE',
+      user.sub,
+      playbackUrl,
+    );
+    const recordingStatus = await this.reconcileCameraRecording(stream.cameraId);
     const protocol = stream.cameraProtocol === 'SRT' ? 'SRT' : 'RTMP';
 
     return {
@@ -935,6 +947,7 @@ export class LivestreamService {
           ? null
           : this.buildPublishInfo(protocol, stream.streamName ?? stream.streamKey),
       playbackUrl,
+      recordingStatus,
     };
   }
 
@@ -952,7 +965,32 @@ export class LivestreamService {
     // biết BTC đã bấm Dừng, nên nút Dừng mới thực sự tắt được hình của trận dùng
     // camera sân. IDLE là "chưa từng phát" — dùng nó ở đây sẽ khiến lần dừng đầu
     // tiên trông giống hệt trạng thái chưa bấm gì.
-    return this.livestreamRepository.updateStreamStatus(matchId, 'OFFLINE', user.sub, null);
+    const livestream = await this.livestreamRepository.updateStreamStatus(
+      matchId,
+      'OFFLINE',
+      user.sub,
+      null,
+    );
+    const recordingStatus = await this.reconcileCameraRecording(stream.cameraId);
+
+    return { ...(livestream ?? {}), recordingStatus };
+  }
+
+  private async reconcileCameraRecording(
+    cameraId: string,
+  ): Promise<RecordingStatus> {
+    try {
+      const status = await this.livestreamHealthQueue.runWithCameraLock(
+        cameraId,
+        (lease) => this.aqvisionRecordingService.reconcileCamera(cameraId, lease),
+      );
+      return status ?? 'PENDING';
+    } catch {
+      this.logger.warn(
+        `Camera recording reconciliation failed: camera=${cameraId}`,
+      );
+      return 'PENDING';
+    }
   }
 
   async getMatchPlayback(matchId: string) {

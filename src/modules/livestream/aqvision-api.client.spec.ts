@@ -283,4 +283,124 @@ describe('AqvisionApiClient', () => {
       ).rejects.toMatchObject({ providerCode: code });
     });
   });
+
+  describe('ghi MP4 typed wrappers', () => {
+    it('startRecordMp4 => POST /startRecord, type=1, stream; result true => resolve', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ code: 0, result: true }));
+
+      await makeClient().startRecordMp4('camera01');
+
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(init.method).toBe('POST');
+      expect(init.body).toBeUndefined();
+      expect(calledUrl).toContain('/index/api/startRecord?');
+      expect(calledUrl).toContain('type=1');
+      expect(calledUrl).toContain('stream=camera01');
+    });
+
+    it('startRecordMp4 result !== true => nem AqvisionApiException da sanitize', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ code: 0, result: 'yes' }));
+
+      const error: unknown = await makeClient()
+        .startRecordMp4('camera01')
+        .then(
+          () => {
+            throw new Error('expected rejection');
+          },
+          (e: unknown) => e,
+        );
+
+      expect(error).toBeInstanceOf(AqvisionApiException);
+      expect((error as Error).message).not.toContain(SECRET);
+      expect((error as Error).message).not.toContain('api.media.aqvision.net');
+    });
+
+    it('stopRecordMp4 => POST /stopRecord, type=1, stream; result true => resolve', async () => {
+      fetchSpy.mockResolvedValue(
+        jsonResponse({ code: 0, data: { result: true } }),
+      );
+
+      await makeClient().stopRecordMp4('camera01');
+
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(init.method).toBe('POST');
+      expect(calledUrl).toContain('/index/api/stopRecord?');
+      expect(calledUrl).toContain('type=1');
+      expect(calledUrl).toContain('stream=camera01');
+    });
+
+    it('stopRecordMp4 result !== true => nem AqvisionApiException', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ code: 0, result: false }));
+
+      await expect(
+        makeClient().stopRecordMp4('camera01'),
+      ).rejects.toBeInstanceOf(AqvisionApiException);
+    });
+
+    it('isRecordingMp4 => GET /isRecording, type=1, stream; status true => true', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ code: 0, status: true }));
+
+      const result = await makeClient().isRecordingMp4('camera01');
+
+      expect(result).toBe(true);
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(init.method).toBe('GET');
+      expect(calledUrl).toContain('/index/api/isRecording?');
+      expect(calledUrl).toContain('type=1');
+      expect(calledUrl).toContain('stream=camera01');
+    });
+
+    it('isRecordingMp4 status false => false', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ code: 0, status: false }));
+
+      const result = await makeClient().isRecordingMp4('camera01');
+
+      expect(result).toBe(false);
+    });
+
+    it('isRecordingMp4 status malformed (string/missing) => nem AqvisionApiException', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ code: 0, status: 'true' }));
+      await expect(
+        makeClient().isRecordingMp4('camera01'),
+      ).rejects.toBeInstanceOf(AqvisionApiException);
+
+      fetchSpy.mockClear();
+      fetchSpy.mockResolvedValue(jsonResponse({ code: 0 }));
+      await expect(
+        makeClient().isRecordingMp4('camera01'),
+      ).rejects.toBeInstanceOf(AqvisionApiException);
+    });
+
+    it('startRecordMp4 POST khong thu lai khi network loi', async () => {
+      fetchSpy.mockRejectedValue(new Error('network down'));
+
+      await expect(
+        makeClient().startRecordMp4('camera01'),
+      ).rejects.toBeInstanceOf(AqvisionApiException);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('isRecordingMp4 GET thu lai bounded khi network loi', async () => {
+      fetchSpy.mockRejectedValue(new Error('network down'));
+
+      await expect(
+        makeClient().isRecordingMp4('camera01'),
+      ).rejects.toBeInstanceOf(AqvisionApiException);
+      expect(fetchSpy.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it('provider tu choi => log khong chua secret hay URL', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+      fetchSpy.mockResolvedValue(jsonResponse({ code: -1, msg: 'Other failed' }));
+
+      await expect(
+        makeClient().startRecordMp4('camera01'),
+      ).rejects.toMatchObject({ providerCode: -1 });
+
+      const logged = warnSpy.mock.calls.flat().join(' ');
+      expect(logged).not.toContain(SECRET);
+      expect(logged).not.toContain('secret=');
+      expect(logged).not.toContain('api.media.aqvision.net');
+    });
+  });
 });

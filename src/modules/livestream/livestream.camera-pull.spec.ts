@@ -7,6 +7,8 @@ import { AqvisionApiClient, AqvisionApiException } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
+import type { AqvisionRecordingService } from './aqvision-recording.service';
+import type { LivestreamHealthQueue } from './livestream-health.queue';
 import { LivestreamService } from './livestream.service';
 
 type RepositoryMock = {
@@ -99,6 +101,8 @@ describe('LivestreamService camera PULL', () => {
       configService,
       {} as AqvisionPublishService,
       aqvisionApiClient as unknown as AqvisionApiClient,
+      {} as unknown as AqvisionRecordingService,
+      {} as unknown as LivestreamHealthQueue,
     );
 
     return { repository, service, aqvisionApiClient };

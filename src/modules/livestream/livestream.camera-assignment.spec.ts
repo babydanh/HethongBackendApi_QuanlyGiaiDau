@@ -3,6 +3,8 @@ import { AqvisionApiClient } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
+import type { AqvisionRecordingService } from './aqvision-recording.service';
+import type { LivestreamHealthQueue } from './livestream-health.queue';
 import { LivestreamService } from './livestream.service';
 
 const owner: JwtPayload = {
@@ -57,6 +59,8 @@ function makeService(overrides: Record<string, unknown> = {}) {
     { get: (key: string) => config[key] } as unknown as ConfigService,
     {} as AqvisionPublishService,
     {} as AqvisionApiClient,
+    {} as unknown as AqvisionRecordingService,
+    {} as unknown as LivestreamHealthQueue,
   );
   return { repository, service };
 }
