@@ -451,112 +451,30 @@ export class TournamentCatalogRepository {
         ? sql`upper(${schema.matches.status}) in ('ONGOING', 'IN_PROGRESS', 'LIVE', 'PLAYING')`
         : sql`upper(${schema.matches.status}) in ('COMPLETED', 'FINISHED', 'DONE', 'ENDED')`;
 
-    // Generated elimination brackets link every non-final round into the
-    // next match. The terminal MAIN/PLAYOFF nodes are therefore the finals;
-    // double-elimination finals are explicitly marked GRAND_FINALS. This is
-    // evaluated before limiting tournaments and independently per division.
-    const hasMatchingFinal = this.db
-      .select({ id: schema.matches.id })
-      .from(schema.matches)
+    const eligibleTournaments = await this.db
+      .select({
+        id: schema.tournaments.id,
+        name: schema.tournaments.name,
+        logoUrl: schema.tournaments.logoUrl,
+        bannerUrl: schema.tournaments.bannerUrl,
+        sport: schema.categories.name,
+        registrationStatus: schema.tournaments.status,
+      })
+      .from(schema.tournaments)
       .innerJoin(
-        schema.tournamentStages,
-        eq(schema.matches.stageId, schema.tournamentStages.id),
+        schema.categories,
+        eq(schema.tournaments.categoryId, schema.categories.id),
       )
-      .where(
-        and(
-          eq(schema.matches.tournamentId, schema.tournaments.id),
-          isNull(schema.matches.deletedAt),
-          isNull(schema.tournamentStages.deletedAt),
-          matchStatusCondition,
-          eq(schema.matches.isBye, false),
-          isNotNull(schema.matches.participant1Id),
-          isNotNull(schema.matches.participant2Id),
-          sql`(
-            upper(${schema.matches.bracketBranch}) in ('GRAND_FINALS', 'FINAL')
-            or (
-              upper(${schema.matches.bracketBranch}) in ('MAIN', 'PLAYOFF')
-              and upper(${schema.tournamentStages.type}) in (
-                'SINGLE_ELIMINATION',
-                'DOUBLE_ELIMINATION',
-                'GROUP_STAGE_KNOCKOUT',
-                'KNOCKOUT',
-                'PLAYOFF'
-              )
-              and ${schema.tournamentStages.order} = (
-                select max(final_stage.order)
-                from tournament_stages final_stage
-                where final_stage.tournament_id = ${schema.matches.tournamentId}
-                  and final_stage.tournament_division_id is not distinct from ${schema.tournamentStages.tournamentDivisionId}
-                  and final_stage.deleted_at is null
-                  and upper(final_stage.type) in (
-                    'SINGLE_ELIMINATION',
-                    'DOUBLE_ELIMINATION',
-                    'GROUP_STAGE_KNOCKOUT',
-                    'KNOCKOUT',
-                    'PLAYOFF'
-                  )
-              )
-              and ${schema.matches.nextMatchId} is null
-            )
-          )`,
-          sql`exists (
-            select 1
-            from tournament_participants home_p1
-            where home_p1.id = ${schema.matches.participant1Id}
-              and home_p1.is_mock = false
-              and upper(home_p1.team_status) not in ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
-              and upper(trim(home_p1.team_name)) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')
-          )`,
-          sql`exists (
-            select 1
-            from tournament_participants home_p2
-            where home_p2.id = ${schema.matches.participant2Id}
-              and home_p2.is_mock = false
-              and upper(home_p2.team_status) not in ('REJECTED', 'WITHDRAWN', 'KICKED', 'EXPIRED', 'CANCELLED')
-              and upper(trim(home_p2.team_name)) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')
-          )`,
-        ),
-      )
-      .limit(1);
-
-    const [featuredTournaments, eligibleTournaments] = await Promise.all([
-      this.db
-        .select({
-          id: schema.tournaments.id,
-          name: schema.tournaments.name,
-          bannerUrl: schema.tournaments.bannerUrl,
-          sport: schema.categories.name,
-          registrationStatus: schema.tournaments.status,
-        })
-        .from(schema.tournaments)
-        .innerJoin(
-          schema.categories,
-          eq(schema.tournaments.categoryId, schema.categories.id),
-        )
-        .where(and(...publicTournamentConditions))
-        .orderBy(
-          desc(schema.tournaments.createdAt),
-          desc(schema.tournaments.id),
-        )
-        .limit(5),
-      this.db
-        .select({
-          id: schema.tournaments.id,
-          name: schema.tournaments.name,
-          createdAt: schema.tournaments.createdAt,
-        })
-        .from(schema.tournaments)
-        .innerJoin(
-          schema.categories,
-          eq(schema.tournaments.categoryId, schema.categories.id),
-        )
-        .where(and(...publicTournamentConditions, exists(hasMatchingFinal)))
-        .orderBy(
-          desc(schema.tournaments.createdAt),
-          desc(schema.tournaments.id),
-        )
-        .limit(5),
-    ]);
+      .where(and(...publicTournamentConditions))
+      .orderBy(desc(schema.tournaments.createdAt), desc(schema.tournaments.id))
+      .limit(5);
+    const featuredTournaments = eligibleTournaments.map((tournament) => ({
+      id: tournament.id,
+      name: tournament.name,
+      bannerUrl: tournament.bannerUrl,
+      sport: tournament.sport,
+      registrationStatus: tournament.registrationStatus,
+    }));
 
     if (eligibleTournaments.length === 0) {
       return {
@@ -577,13 +495,29 @@ export class TournamentCatalogRepository {
       schema.tournamentParticipants,
       'home_final_p2',
     );
-    const finals = await this.db
+    const rankedMatches = this.db
       .select({
+        homeRank: sql<number>`row_number() over (
+          partition by ${schema.matches.tournamentId}
+          order by coalesce(
+            ${schema.matches.completedAt}, ${schema.matches.startedAt},
+            ${schema.matches.scheduledAt}, ${schema.matches.updatedAt}
+          ) desc, ${schema.matches.id} desc
+        )`.as('home_rank'),
         tournamentId: schema.matches.tournamentId,
         matchId: schema.matches.id,
         divisionId: schema.tournamentStages.tournamentDivisionId,
         divisionName: schema.tournamentDivisions.name,
+        stageName: schema.tournamentStages.name,
         roundNumber: schema.matches.roundNumber,
+        lastRoundNumber: sql<number>`(
+          select max(round_match.round_number)
+          from matches round_match
+          where round_match.stage_id = ${schema.matches.stageId}
+            and round_match.bracket_branch = ${schema.matches.bracketBranch}
+            and round_match.deleted_at is null
+            and round_match.is_bye = false
+        )`.as('last_round_number'),
         matchOrder: schema.matches.matchOrder,
         bracketBranch: schema.matches.bracketBranch,
         leg: schema.matches.leg,
@@ -592,14 +526,14 @@ export class TournamentCatalogRepository {
         scheduledAt: schema.matches.scheduledAt,
         startedAt: schema.matches.startedAt,
         completedAt: schema.matches.completedAt,
+        scoreDetails: schema.matches.scoreDetails,
+        scoreboardVisible: schema.matches.scoreboardVisible,
         team1Id: schema.tournamentParticipants.id,
         team1Name: schema.tournamentParticipants.teamName,
         team1LogoUrl: schema.tournamentParticipants.footballTeamLogoUrl,
-        team1Sets: schema.matches.p1SetsWon,
         team2Id: finalParticipant2.id,
         team2Name: finalParticipant2.teamName,
         team2LogoUrl: finalParticipant2.footballTeamLogoUrl,
-        team2Sets: schema.matches.p2SetsWon,
       })
       .from(schema.matches)
       .innerJoin(
@@ -642,7 +576,6 @@ export class TournamentCatalogRepository {
           eq(schema.matches.isBye, false),
           isNotNull(schema.matches.participant1Id),
           isNotNull(schema.matches.participant2Id),
-          eq(schema.tournamentParticipants.isMock, false),
           notInArray(schema.tournamentParticipants.teamStatus, [
             'REJECTED',
             'WITHDRAWN',
@@ -650,7 +583,6 @@ export class TournamentCatalogRepository {
             'EXPIRED',
             'CANCELLED',
           ]),
-          eq(finalParticipant2.isMock, false),
           notInArray(finalParticipant2.teamStatus, [
             'REJECTED',
             'WITHDRAWN',
@@ -660,58 +592,85 @@ export class TournamentCatalogRepository {
           ]),
           sql`upper(trim(${schema.tournamentParticipants.teamName})) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')`,
           sql`upper(trim(${finalParticipant2.teamName})) not in ('BYE', 'TBD', 'TBA', 'PENDING', 'WAITING')`,
-          sql`(
-            upper(${schema.matches.bracketBranch}) in ('GRAND_FINALS', 'FINAL')
-            or (
-              upper(${schema.matches.bracketBranch}) in ('MAIN', 'PLAYOFF')
-              and upper(${schema.tournamentStages.type}) in (
-                'SINGLE_ELIMINATION',
-                'DOUBLE_ELIMINATION',
-                'GROUP_STAGE_KNOCKOUT',
-                'KNOCKOUT',
-                'PLAYOFF'
+          sql`upper(${schema.tournamentStages.type}) in (
+            'SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION',
+            'GROUP_STAGE_KNOCKOUT', 'KNOCKOUT', 'PLAYOFF'
+          )`,
+          sql`${schema.tournamentStages.order} = (
+            select max(final_stage.order)
+            from tournament_stages final_stage
+            where final_stage.tournament_id = ${schema.matches.tournamentId}
+              and final_stage.tournament_division_id is not distinct from ${schema.tournamentStages.tournamentDivisionId}
+              and final_stage.deleted_at is null
+              and upper(final_stage.type) in (
+                'SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION',
+                'GROUP_STAGE_KNOCKOUT', 'KNOCKOUT', 'PLAYOFF'
               )
-              and ${schema.tournamentStages.order} = (
-                select max(final_stage.order)
-                from tournament_stages final_stage
-                where final_stage.tournament_id = ${schema.matches.tournamentId}
-                  and final_stage.tournament_division_id is not distinct from ${schema.tournamentStages.tournamentDivisionId}
-                  and final_stage.deleted_at is null
-                  and upper(final_stage.type) in (
-                    'SINGLE_ELIMINATION',
-                    'DOUBLE_ELIMINATION',
-                    'GROUP_STAGE_KNOCKOUT',
-                    'KNOCKOUT',
-                    'PLAYOFF'
-                  )
-              )
-              and ${schema.matches.nextMatchId} is null
-            )
           )`,
         ),
       )
-      .orderBy(
-        desc(schema.matches.tournamentId),
-        desc(schema.tournamentStages.tournamentDivisionId),
-        desc(schema.tournamentStages.order),
-        desc(schema.matches.roundNumber),
-        schema.matches.matchOrder,
-        schema.matches.leg,
-      );
+      .as('home_ranked_matches');
+    const finalStageMatches = await this.db
+      .select()
+      .from(rankedMatches)
+      .where(sql`${rankedMatches.homeRank} <= 5`)
+      .orderBy(rankedMatches.tournamentId, rankedMatches.homeRank);
 
-    const matchesByTournament = new Map<string, typeof finals>();
-    for (const match of finals) {
+    const matchesByTournament = new Map<string, typeof finalStageMatches>();
+    for (const match of finalStageMatches) {
       const rows = matchesByTournament.get(match.tournamentId) ?? [];
       rows.push(match);
       matchesByTournament.set(match.tournamentId, rows);
     }
+    const selectedMatches = [...matchesByTournament.values()].flat();
+    const participantIds = [
+      ...new Set(
+        selectedMatches.flatMap((match) => [match.team1Id, match.team2Id]),
+      ),
+    ];
+    const rosterRows =
+      participantIds.length === 0
+        ? []
+        : await this.db
+            .select({
+              participantId: schema.tournamentRosters.participantId,
+              name: schema.profiles.fullName,
+              avatarUrl: schema.profiles.avatarUrl,
+            })
+            .from(schema.tournamentRosters)
+            .leftJoin(
+              schema.profiles,
+              eq(schema.tournamentRosters.userId, schema.profiles.userId),
+            )
+            .where(
+              and(
+                inArray(schema.tournamentRosters.participantId, participantIds),
+                eq(schema.tournamentRosters.status, 'ACTIVE'),
+              ),
+            )
+            .orderBy(schema.tournamentRosters.joinedAt);
+    const membersByParticipant = new Map<
+      string,
+      { name: string; avatarUrl: string | null }[]
+    >();
+    for (const roster of rosterRows) {
+      if (!roster.name?.trim()) continue;
+      const members = membersByParticipant.get(roster.participantId) ?? [];
+      if (members.length >= 2) continue;
+      members.push({ name: roster.name, avatarUrl: roster.avatarUrl });
+      membersByParticipant.set(roster.participantId, members);
+    }
     const finalTournaments = eligibleTournaments.map((tournament) => ({
-      ...tournament,
+      id: tournament.id,
+      name: tournament.name,
+      logoUrl: tournament.logoUrl,
       matches: (matchesByTournament.get(tournament.id) ?? []).map((match) => ({
         id: match.matchId,
         divisionId: match.divisionId,
         divisionName: match.divisionName,
+        stageName: match.stageName,
         roundNumber: match.roundNumber,
+        lastRoundNumber: match.lastRoundNumber,
         bracketBranch: match.bracketBranch,
         leg: match.leg,
         tieId: match.tieId,
@@ -719,16 +678,20 @@ export class TournamentCatalogRepository {
         scheduledAt: match.scheduledAt,
         startedAt: match.startedAt,
         completedAt: match.completedAt,
-        score: { team1: match.team1Sets, team2: match.team2Sets },
+        scoreSets: match.scoreboardVisible
+          ? projectHomeScoreSets(match.scoreDetails)
+          : [],
         team1: {
           id: match.team1Id,
           name: match.team1Name,
           logoUrl: match.team1LogoUrl,
+          members: membersByParticipant.get(match.team1Id) ?? [],
         },
         team2: {
           id: match.team2Id,
           name: match.team2Name,
           logoUrl: match.team2LogoUrl,
+          members: membersByParticipant.get(match.team2Id) ?? [],
         },
       })),
     }));
@@ -2907,4 +2870,54 @@ export class TournamentCatalogRepository {
       statuses,
     };
   }
+}
+
+function projectHomeScoreSets(
+  value: unknown,
+): { team1: number; team2: number }[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const details = value as Record<string, unknown>;
+  const point = (raw: unknown): number | null => {
+    if (typeof raw === 'string' && raw.trim().length === 0) return null;
+    const parsed =
+      typeof raw === 'number' || typeof raw === 'string' ? Number(raw) : NaN;
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+  };
+  const pair = (left: unknown, right: unknown) => {
+    const team1 = point(left);
+    const team2 = point(right);
+    return team1 === null || team2 === null ? null : { team1, team2 };
+  };
+  if (Array.isArray(details.sets)) {
+    const sets = details.sets.flatMap((raw) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+      const set = raw as Record<string, unknown>;
+      const score = pair(
+        set.team1Score ?? set.score1 ?? set.p1,
+        set.team2Score ?? set.score2 ?? set.p2,
+      );
+      return score ? [score] : [];
+    });
+    if (sets.length > 0) return sets;
+  }
+  const football = details.football;
+  if (football && typeof football === 'object' && !Array.isArray(football)) {
+    const goals = football as Record<string, unknown>;
+    const score = pair(goals.team1Goals, goals.team2Goals);
+    if (score) return [score];
+  }
+  return Object.keys(details)
+    .filter((key) => /^(set|game)\d+$/i.test(key))
+    .sort(
+      (left, right) =>
+        Number(left.match(/\d+/)?.[0]) - Number(right.match(/\d+/)?.[0]),
+    )
+    .flatMap((key) => {
+      const raw = details[key];
+      if (typeof raw !== 'string') return [];
+      const parts = raw.split('-');
+      if (parts.length !== 2) return [];
+      const score = pair(parts[0], parts[1]);
+      return score ? [score] : [];
+    });
 }
