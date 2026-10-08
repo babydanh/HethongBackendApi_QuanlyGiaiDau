@@ -30,14 +30,8 @@ function normalizeCandidateEmails(emails: readonly string[]): string[] {
   ];
 }
 
-/** Account identities stay inside the write path; preview projects email status only. */
-export async function findEligibleRosterAccountIds(
-  emails: readonly string[],
-  db: AppDbOrTx,
-): Promise<Map<string, string>> {
-  const normalizedEmails = normalizeCandidateEmails(emails);
-  if (normalizedEmails.length === 0) return new Map();
-
+/** Shared account eligibility for linked tournament roster identities. */
+export function eligibleRosterAccountCondition(db: AppDbOrTx) {
   const now = new Date();
   const activeBan = db
     .select({ id: schema.userBans.id })
@@ -53,6 +47,22 @@ export async function findEligibleRosterAccountIds(
         ),
       ),
     );
+
+  return and(
+    isNull(schema.users.deletedAt),
+    eq(schema.users.isMock, false),
+    notExists(activeBan),
+  );
+}
+
+/** Account identities stay inside the write path; preview projects email status only. */
+export async function findEligibleRosterAccountIds(
+  emails: readonly string[],
+  db: AppDbOrTx,
+): Promise<Map<string, string>> {
+  const normalizedEmails = normalizeCandidateEmails(emails);
+  if (normalizedEmails.length === 0) return new Map();
+
   const accounts = await db
     .select({
       id: schema.users.id,
@@ -62,9 +72,7 @@ export async function findEligibleRosterAccountIds(
     .where(
       and(
         inArray(sql`lower(${schema.users.email})`, normalizedEmails),
-        isNull(schema.users.deletedAt),
-        eq(schema.users.isMock, false),
-        notExists(activeBan),
+        eligibleRosterAccountCondition(db),
       ),
     );
 

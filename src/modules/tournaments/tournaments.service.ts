@@ -52,6 +52,11 @@ import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
 import type { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
 import type { RosterImportDto } from './dto/roster-import.dto';
+import type {
+  AddAthleteCandidateDto,
+  AddAthleteDirectDto,
+  ListAddAthleteCandidatesQueryDto,
+} from './dto/add-athlete.dto';
 import { MailService } from '../../providers/mail/mail.service';
 import { BracketGeneratorService } from './bracket-generator.service';
 import {
@@ -825,6 +830,7 @@ export class TournamentsService {
     names: string[],
     systemRoles: string[] = [],
     divisionId?: string,
+    pairingMode?: 'AUTO' | 'INDIVIDUAL_WAITING',
   ) {
     return this.tournamentParticipantAdminService.seedMockParticipants(
       tournamentId,
@@ -832,9 +838,9 @@ export class TournamentsService {
       names,
       systemRoles,
       divisionId,
+      pairingMode,
     );
   }
-
   async clearMockParticipants(
     tournamentId: string,
     userId: string,
@@ -958,6 +964,49 @@ export class TournamentsService {
     dto: RosterImportDto,
   ) {
     return this.tournamentImportService.importRosterFromForm(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+  async listAddAthleteCandidates(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: ListAddAthleteCandidatesQueryDto,
+  ) {
+    return this.tournamentImportService.listAddAthleteCandidates(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+    );
+  }
+
+  async addAthleteCandidate(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthleteCandidateDto,
+  ) {
+    return this.tournamentImportService.addAthleteCandidate(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+
+  async addDirectAthlete(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthleteDirectDto,
+  ) {
+    return this.tournamentImportService.addDirectAthlete(
       tournamentId,
       userId,
       systemRoles,
@@ -1237,11 +1286,17 @@ export class TournamentsService {
     id: string,
     userId: string,
     systemRoles: string[] = [],
+    options?: {
+      registrationEndDate?: Date | null;
+      startDate?: Date | null;
+      endDate?: Date | null;
+    },
   ) {
     return this.tournamentRegistrationService.reopenRegistration(
       id,
       userId,
       systemRoles,
+      options,
     );
   }
 

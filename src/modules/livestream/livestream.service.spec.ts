@@ -1,5 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
 import { LivestreamService } from './livestream.service';
@@ -46,6 +47,7 @@ function makeService(stream: unknown = null) {
   const service = new LivestreamService(
     repository as unknown as LivestreamRepository,
     {} as ConfigService,
+    {} as AqvisionPublishService,
   );
   return { repository, service };
 }
@@ -119,7 +121,9 @@ describe('LivestreamService match stream control state', () => {
     ).resolves.toEqual({
       matchId: 'match-1',
       hasCamera: true,
-      streamStatus: 'IDLE',
+      // Legacy ENDED rows came from the old stop flow, so they normalize onto
+      // the same explicit stopped marker the current stop writes.
+      streamStatus: 'OFFLINE',
     });
   });
 

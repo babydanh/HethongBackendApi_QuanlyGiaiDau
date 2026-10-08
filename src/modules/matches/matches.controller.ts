@@ -16,6 +16,7 @@ import { QueryMatchDto } from './dto/query-match.dto';
 import { OperateMatchDto } from './dto/operate-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
+import { UpdateScoreboardVisibilityDto } from './dto/update-scoreboard-visibility.dto';
 import { UpdateMatchScheduleDto } from './dto/update-match-schedule.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -109,6 +110,25 @@ export class MatchesController {
     @CurrentUser() user: JwtPayload,
   ) {
     return await this.matchesService.updateScore(id, user, updateMatchScoreDto);
+  }
+
+  @Patch(':id/scoreboard-visibility')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Ẩn/hiện bảng điểm live của trận cho mọi người xem',
+  })
+  async setScoreboardVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateScoreboardVisibilityDto: UpdateScoreboardVisibilityDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.setScoreboardVisibility(
+      id,
+      user,
+      updateScoreboardVisibilityDto,
+    );
   }
 
   /**

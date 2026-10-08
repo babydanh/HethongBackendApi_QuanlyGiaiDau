@@ -233,9 +233,8 @@ export class CommunitiesService {
         ? { description: await this.sanitizeDescription(rest.description) }
         : {}),
       creatorId: userId,
-      // New clubs must enter moderation before becoming public. Existing
-      // ACTIVE rows are intentionally left untouched by this change.
-      status: 'PENDING',
+      // Clubs are created ACTIVE immediately — the moderation gate is disabled.
+      status: 'ACTIVE',
     };
     const created = await this.communitiesRepository.create(data, lat, lng, categoryIds);
     await this.invalidatePublicListCache();

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -38,6 +39,8 @@ import {
 } from '../utils/football-team-config';
 import { isRegistrationOpenStatus } from '../utils/registration-lifecycle';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
+import { eligibleRosterAccountCondition } from '../validation/roster-import';
+import type { AddAthleteCandidateDto } from '../dto/add-athlete.dto';
 
 @Injectable()
 export class TournamentParticipantRepository {
@@ -692,6 +695,7 @@ export class TournamentParticipantRepository {
     tournamentId: string,
     names: string[],
     divisionId?: string,
+    pairingMode?: 'AUTO' | 'INDIVIDUAL_WAITING',
   ) {
     return await this.db.transaction(async (tx) => {
       const tournament = await tx
@@ -762,7 +766,49 @@ export class TournamentParticipantRepository {
       const createdParticipants: (typeof schema.tournamentParticipants.$inferSelect)[] =
         [];
 
-      if (isDoubles) {
+      if (isDoubles && pairingMode === 'INDIVIDUAL_WAITING') {
+        // Sinh từng VĐV lẻ độc lập ở trạng thái PENDING_PARTNER (không có invite token)
+        // để BTC tự vào giao diện Ghép Cặp (Pairing Modal) thử nghiệm ghép tay
+        for (const name of names) {
+          const mockEmail = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@mock.com`;
+
+          const [user] = await tx
+            .insert(schema.users)
+            .values({ email: mockEmail, isMock: true })
+            .returning();
+          await tx
+            .insert(schema.profiles)
+            .values({
+              userId: user.id,
+              fullName: name,
+              allowStrangerMessages: false,
+            })
+            .returning();
+
+          const [participant] = await tx
+            .insert(schema.tournamentParticipants)
+            .values({
+              tournamentId,
+              tournamentDivisionId: effectiveDivisionId ?? null,
+              registeredBy: user.id,
+              teamName: name,
+              isPaid: true,
+              entryFeeAtRegistration: '0.00',
+              teamInviteToken: null,
+              teamStatus: 'PENDING_PARTNER',
+              isMock: true,
+            })
+            .returning();
+
+          await tx.insert(schema.tournamentRosters).values({
+            participantId: participant.id,
+            userId: user.id,
+            role: 'MAIN',
+          });
+
+          createdParticipants.push(participant);
+        }
+      } else if (isDoubles) {
         for (let i = 0; i < names.length; i += 2) {
           const name1 = names[i];
           const name2 = names[i + 1] || `${name1} Partner`;
@@ -1521,6 +1567,349 @@ export class TournamentParticipantRepository {
       };
     });
   }
+  async addAthleteCandidate(
+    tournamentId: string,
+    organizerId: string,
+    dto: AddAthleteCandidateDto,
+  ) {
+    const participantId = dto.participantId;
+    if (!participantId || !dto.role) {
+      throw new BadRequestException(
+        'Cần chọn đội bóng và vai trò MAIN hoặc RESERVE.',
+      );
+    }
+
+    return this.db.transaction(async (tx) => {
+      const [tournament] = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .for('update')
+        .limit(1);
+      const [participant] = await tx
+        .select()
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.id, participantId),
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!participant?.footballTeamId || !participant.tournamentDivisionId) {
+        throw new BadRequestException(
+          'Đăng ký đội bóng không thuộc giải đấu này.',
+        );
+      }
+      if (
+        dto.tournamentDivisionId &&
+        dto.tournamentDivisionId !== participant.tournamentDivisionId
+      ) {
+        throw new BadRequestException(
+          'Nội dung thi đấu không khớp với đội bóng đã chọn.',
+        );
+      }
+      if (participant.rosterLockedAt) {
+        throw new BadRequestException('Roster đã khóa, không thể thay đổi.');
+      }
+      if (
+        !['PENDING', 'PENDING_APPROVAL', 'COMPLETE', 'APPROVED'].includes(
+          participant.teamStatus,
+        )
+      ) {
+        throw new BadRequestException(
+          'Trạng thái đăng ký không cho phép sửa roster.',
+        );
+      }
+
+      const [entry] = await tx
+        .select()
+        .from(schema.tournamentTeamEntries)
+        .where(
+          and(
+            eq(schema.tournamentTeamEntries.tournamentId, tournamentId),
+            eq(
+              schema.tournamentTeamEntries.divisionId,
+              participant.tournamentDivisionId,
+            ),
+            eq(schema.tournamentTeamEntries.teamId, participant.footballTeamId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!entry || ['LOCKED', 'WITHDRAWN'].includes(entry.status)) {
+        throw new BadRequestException(
+          'Roster đội bóng không thể cập nhật.',
+        );
+      }
+
+      if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+      if (
+        !['REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'UPCOMING'].includes(
+          tournament.status,
+        )
+      ) {
+        throw new BadRequestException(
+          'Không thể sửa roster sau khi giải đấu bắt đầu.',
+        );
+      }
+      const teamConfig = resolveFootballTeamConfig(
+        tournament.tournamentConfig,
+      );
+      if (!teamConfig.isTeamSport) {
+        throw new BadRequestException(
+          'Giải đấu không có cấu hình đội bóng.',
+        );
+      }
+
+      await this.assertAddAthleteRelationship(
+        tx,
+        tournament.communityId,
+        organizerId,
+        dto.source,
+        dto.userId,
+      );
+      const [teamMembership] = await tx
+        .select({ id: schema.footballTeamMembers.id })
+        .from(schema.footballTeamMembers)
+        .where(
+          and(
+            eq(schema.footballTeamMembers.teamId, participant.footballTeamId),
+            eq(schema.footballTeamMembers.userId, dto.userId),
+            eq(schema.footballTeamMembers.status, 'ACTIVE'),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!teamMembership) {
+        throw new ConflictException(
+          'VĐV không còn là thành viên đang hoạt động của đội.',
+        );
+      }
+
+      const trimmedName = sql<string>`btrim(${schema.profiles.fullName})`;
+      const [candidate] = await tx
+        .select({ userId: schema.users.id, fullName: trimmedName })
+        .from(schema.users)
+        .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+        .where(
+          and(
+            eq(schema.users.id, dto.userId),
+            eligibleRosterAccountCondition(tx),
+            sql`btrim(${schema.profiles.fullName}) <> ''`,
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!candidate) {
+        throw new ConflictException('Ứng viên không còn đủ điều kiện.');
+      }
+
+      const [activeRoster] = await tx
+        .select({ id: schema.tournamentRosters.id })
+        .from(schema.tournamentRosters)
+        .innerJoin(
+          schema.tournamentParticipants,
+          eq(
+            schema.tournamentParticipants.id,
+            schema.tournamentRosters.participantId,
+          ),
+        )
+        .where(
+          and(
+            eq(schema.tournamentRosters.userId, dto.userId),
+            eq(schema.tournamentRosters.status, 'ACTIVE'),
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            notInArray(schema.tournamentParticipants.teamStatus, [
+              'WITHDRAWN',
+              'REJECTED',
+              'KICKED',
+              'EXPIRED',
+              'CANCELLED',
+            ]),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (activeRoster) {
+        throw new ConflictException(
+          'VĐV đã có roster đang hoạt động trong giải.',
+        );
+      }
+
+      const snapshots = await tx
+        .select({
+          userId: schema.tournamentTeamRosterSnapshots.userId,
+          role: schema.tournamentTeamRosterSnapshots.role,
+        })
+        .from(schema.tournamentTeamRosterSnapshots)
+        .where(eq(schema.tournamentTeamRosterSnapshots.entryId, entry.id))
+        .for('update');
+      if (snapshots.some((snapshot) => snapshot.userId === dto.userId)) {
+        throw new ConflictException(
+          'VĐV đã có bản ghi roster trong đội này.',
+        );
+      }
+
+      const mainCount = snapshots.filter(
+        (snapshot) => snapshot.role === 'MAIN',
+      ).length;
+      const reserveCount = snapshots.length - mainCount;
+      if (
+        snapshots.length >= teamConfig.maxTotalSize ||
+        (dto.role === 'MAIN' && mainCount >= teamConfig.mainSize) ||
+        (dto.role === 'RESERVE' && reserveCount >= teamConfig.maxReserve)
+      ) {
+        throw new BadRequestException(
+          'Roster đã đạt giới hạn MAIN, RESERVE hoặc tổng số VĐV.',
+        );
+      }
+
+      const [roster] = await tx
+        .insert(schema.tournamentRosters)
+        .values({
+          participantId: participant.id,
+          userId: dto.userId,
+          role: dto.role,
+        })
+        .returning({ id: schema.tournamentRosters.id });
+      await tx.insert(schema.tournamentTeamRosterSnapshots).values({
+        entryId: entry.id,
+        userId: dto.userId,
+        role: dto.role,
+        confirmationStatus: 'PENDING',
+      });
+
+      const nextMainCount = mainCount + (dto.role === 'MAIN' ? 1 : 0);
+      const nextReserveCount =
+        reserveCount + (dto.role === 'RESERVE' ? 1 : 0);
+      const requiredMainCount = getRequiredFootballMainRosterCount(
+        tournament.tournamentConfig,
+      );
+      const nextEntryStatus =
+        nextMainCount < requiredMainCount
+          ? 'DRAFT'
+          : nextMainCount === 1 && nextReserveCount === 0
+            ? 'CONFIRMED'
+            : 'PENDING_CONFIRMATION';
+      const registrationMode =
+        (tournament.tournamentConfig as Record<string, unknown> | null)
+          ?.registrationMode;
+      const nextParticipantStatus =
+        nextMainCount < requiredMainCount
+          ? 'PENDING'
+          : registrationMode === 'APPROVAL'
+            ? 'PENDING_APPROVAL'
+            : 'COMPLETE';
+      const confirmedAt =
+        nextEntryStatus === 'CONFIRMED' ? new Date() : null;
+      const updatedAt = new Date();
+
+      const [updatedEntry] = await tx
+        .update(schema.tournamentTeamEntries)
+        .set({ status: nextEntryStatus, confirmedAt, updatedAt })
+        .where(eq(schema.tournamentTeamEntries.id, entry.id))
+        .returning();
+      await this.auditService.logUpdate(
+        tx,
+        organizerId,
+        'tournament_team_entries',
+        entry.id,
+        entry,
+        updatedEntry,
+      );
+      await tx
+        .update(schema.tournamentParticipants)
+        .set({ teamStatus: nextParticipantStatus })
+        .where(eq(schema.tournamentParticipants.id, participant.id));
+
+      return {
+        participant: {
+          participantId: participant.id,
+          teamName: participant.teamName,
+          teamStatus: nextParticipantStatus,
+          rosterRole: dto.role,
+        },
+        divisionId: participant.tournamentDivisionId,
+        linkedAccountNotifications: [
+          {
+            rosterId: roster.id,
+            userId: dto.userId,
+            status: nextParticipantStatus,
+            divisionId: participant.tournamentDivisionId,
+          },
+        ],
+        footballRosterConfirmation: {
+          participantId: participant.id,
+          divisionId: participant.tournamentDivisionId,
+          userId: dto.userId,
+        },
+      };
+    });
+  }
+
+  private async assertAddAthleteRelationship(
+    tx: AppDbOrTx,
+    communityId: string | null,
+    organizerId: string,
+    source: AddAthleteCandidateDto['source'],
+    candidateId: string,
+  ): Promise<void> {
+    if (source === 'FRIENDS') {
+      const [friendship] = await tx
+        .select({ id: schema.friendships.id })
+        .from(schema.friendships)
+        .where(
+          and(
+            eq(schema.friendships.status, 'ACCEPTED'),
+            isNull(schema.friendships.deletedAt),
+            or(
+              and(
+                eq(schema.friendships.senderId, organizerId),
+                eq(schema.friendships.receiverId, candidateId),
+              ),
+              and(
+                eq(schema.friendships.receiverId, organizerId),
+                eq(schema.friendships.senderId, candidateId),
+              ),
+            ),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!friendship || candidateId === organizerId) {
+        throw new ConflictException('Quan hệ bạn bè không còn hợp lệ.');
+      }
+      return;
+    }
+
+    if (!communityId) {
+      throw new ConflictException('Thành viên CLB không còn hợp lệ.');
+    }
+    const [membership] = await tx
+      .select({ id: schema.communityMembers.id })
+      .from(schema.communityMembers)
+      .innerJoin(
+        schema.communities,
+        eq(schema.communities.id, schema.communityMembers.communityId),
+      )
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, candidateId),
+          eq(schema.communityMembers.status, 'JOINED'),
+          eq(schema.communities.status, 'ACTIVE'),
+          isNull(schema.communities.deletedAt),
+        ),
+      )
+      .for('update')
+      .limit(1);
+    if (!membership) {
+      throw new ConflictException('Thành viên CLB không còn hợp lệ.');
+    }
+  }
+
   async updateFootballRoster(
     participantId: string,
     mainMemberIds: string[],

@@ -2048,6 +2048,61 @@ export class ClubMatchSessionsService {
     return projected;
   }
 
+  /**
+   * Ẩn/hiện bảng điểm live cho trận CLB (buổi giao lưu hoặc trận rời). Chỉ
+   * người được phép chấm điểm (BTC/quản lý CLB) mới đổi được cờ này — cùng
+   * thẩm quyền với nhập điểm, không mở thêm đường quyền nào khác.
+   */
+  async setScoreboardVisibility(
+    matchId: string,
+    actor: Actor,
+    visible: boolean,
+  ) {
+    if (!(await this.repository.findMatch(matchId))) {
+      return this.setStandaloneScoreboardVisibility(matchId, actor, visible);
+    }
+    const { session } = await this.requireMatchEditor(matchId, actor);
+    const db = this.repository.getDb();
+    const [updated] = await db
+      .update(schema.clubMatchSessionMatches)
+      .set({ scoreboardVisible: visible, updatedAt: new Date() })
+      .where(eq(schema.clubMatchSessionMatches.id, matchId))
+      .returning();
+    if (!updated) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
+    const projected = await this.repository.projectMatch(matchId);
+    this.liveScoreGateway.broadcastClubSessionMatchUpdate(
+      session.session.id,
+      matchId,
+      projected ?? { ...updated, scoreboardVisible: visible },
+      'scoreboard:visibility',
+      session.session.communityId,
+    );
+    return projected;
+  }
+
+  private async setStandaloneScoreboardVisibility(
+    matchId: string,
+    actor: Actor,
+    visible: boolean,
+  ) {
+    const { match } = await this.requireStandaloneMatchEditor(matchId, actor);
+    const db = this.repository.getDb();
+    const [updated] = await db
+      .update(schema.clubStandaloneMatches)
+      .set({ scoreboardVisible: visible, updatedAt: new Date() })
+      .where(eq(schema.clubStandaloneMatches.id, matchId))
+      .returning();
+    if (!updated) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
+    const projected = await this.repository.projectStandaloneMatch(matchId);
+    this.liveScoreGateway.broadcastClubStandaloneMatchUpdate(
+      matchId,
+      projected ?? { ...updated, scoreboardVisible: visible },
+      'scoreboard:visibility',
+      match.communityId,
+    );
+    return projected;
+  }
+
   async updateScore(matchId: string, actor: Actor, dto: UpdateMatchScoreDto) {
     if (!(await this.repository.findMatch(matchId))) {
       return this.updateStandaloneScore(matchId, actor, dto);

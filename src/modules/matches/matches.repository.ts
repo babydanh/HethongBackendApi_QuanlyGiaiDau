@@ -1643,6 +1643,21 @@ export class MatchesRepository {
     return await this.findById(rows[0].id);
   }
 
+  async setScoreboardVisibility(id: string, visible: boolean) {
+    const [updated] = await this.db
+      .update(schema.matches)
+      .set({
+        scoreboardVisible: visible,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.matches.id, id), isNull(schema.matches.deletedAt)))
+      .returning();
+    if (!updated) {
+      throw new NotFoundException('Match not found');
+    }
+    return await this.findById(id);
+  }
+
   async updateStatus(id: string, data: UpdateMatchStatusDto) {
     const setClause: Record<string, unknown> = {
       status: data.status,

@@ -16,6 +16,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { UpdateMatchScoreDto } from '../matches/dto/update-match-score.dto';
+import { UpdateScoreboardVisibilityDto } from '../matches/dto/update-scoreboard-visibility.dto';
 import { ClubMatchSessionsService } from './club-match-sessions.service';
 import {
   ClubMatchRevisionDto,
@@ -116,6 +117,15 @@ export class ClubMatchSessionsController {
     @Body() dto: UpdateMatchScoreDto,
   ) {
     return this.service.updateScore(matchId, user, dto);
+  }
+
+  @Patch('matches/:matchId/scoreboard-visibility')
+  setScoreboardVisibility(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Body() dto: UpdateScoreboardVisibilityDto,
+  ) {
+    return this.service.setScoreboardVisibility(matchId, user, dto.visible);
   }
 
   @Post('matches/:matchId/complete')

@@ -64,6 +64,9 @@ export const matches = pgTable(
     winnerId: uuid('winner_id').references(() => tournamentParticipants.id),
     status: varchar('status', { length: 50 }).default('SCHEDULED').notNull(),
     scoreDetails: jsonb('score_details').default('{}').notNull(),
+    // Trọng tài/BTC tắt để giấu bảng điểm trên sóng live (overlay) cho MỌI
+    // người xem; mặc định bật nên dữ liệu cũ giữ nguyên hành vi.
+    scoreboardVisible: boolean('scoreboard_visible').default(true).notNull(),
     p1SetsWon: integer('p1_sets_won').default(0).notNull(),
     p2SetsWon: integer('p2_sets_won').default(0).notNull(),
     totalSetsPlayed: integer('total_sets_played').default(0).notNull(),

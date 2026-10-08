@@ -140,9 +140,29 @@ export class LiveScoreGateway
     this.clientClubCommunityRooms.delete(client.id);
   }
 
+  private getSocketById(socketId: string): Socket | undefined {
+    const server = this.server as unknown as Record<string, unknown> | undefined;
+    if (!server) return undefined;
+    const rawSockets = server.sockets;
+    if (rawSockets instanceof Map) {
+      return rawSockets.get(socketId) as Socket | undefined;
+    }
+    if (rawSockets && typeof rawSockets === 'object' && 'sockets' in rawSockets) {
+      const inner = (rawSockets as Record<string, unknown>).sockets;
+      if (inner instanceof Map) {
+        return inner.get(socketId) as Socket | undefined;
+      }
+    }
+    return undefined;
+  }
+
   private getViewerCount(matchId: string): number {
     const roomName = `match:${matchId}`;
-    const adapterRoom = this.server?.sockets?.adapter?.rooms?.get(roomName);
+    const server = this.server as unknown as Record<string, unknown> | undefined;
+    const adapter = (server?.adapter ?? (server?.sockets as Record<string, unknown> | undefined)?.adapter) as
+      | { rooms?: Map<string, Set<string>> }
+      | undefined;
+    const adapterRoom = adapter?.rooms?.get(roomName);
     const viewerIdentities = new Set<string>();
 
     if (adapterRoom && adapterRoom.size > 0) {
@@ -164,10 +184,10 @@ export class LiveScoreGateway
     viewerIdentities: Set<string>,
     socketId: string,
   ) {
-    const socket = this.server?.sockets?.sockets?.get(socketId);
+    const socket = this.getSocketById(socketId);
     if (!socket?.connected) return;
 
-    const subject = (socket.data.user as JwtPayload | undefined)?.sub;
+    const subject = (socket.data?.user as JwtPayload | undefined)?.sub;
     const identity =
       typeof subject === 'string' && subject.length > 0
         ? `user:${subject}`
@@ -398,6 +418,20 @@ export class LiveScoreGateway
     }
   }
 
+  /**
+   * Cờ ẩn/hiện bảng điểm live là tín hiệu điều khiển sóng, KHÔNG phải thay đổi
+   * tỷ số: chỉ phát cho phòng `match:{id}` (người đang xem trận) theo event
+   * riêng để các tab giải đấu đang nghe `match:update` không nhận payload
+   * thiếu trường điểm.
+   */
+  broadcastScoreboardVisibility(matchId: string, scoreboardVisible: boolean) {
+    if (!this.server) return;
+    this.server.to(`match:${matchId}`).emit(
+      'scoreboard:visibility',
+      JSON.stringify({ id: matchId, matchId, scoreboardVisible }),
+    );
+  }
+
   broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(this.normalizeMatchBroadcastData(matchData, tournamentId));
@@ -411,7 +445,7 @@ export class LiveScoreGateway
     sessionId: string,
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility',
     communityId?: string | null,
   ) {
     if (!this.server) return;
@@ -433,7 +467,7 @@ export class LiveScoreGateway
   broadcastClubStandaloneMatchUpdate(
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility',
     communityId?: string | null,
   ) {
     if (!this.server) return;
@@ -511,7 +545,15 @@ export class LiveScoreGateway
     if (!this.server) return;
 
     // 1. Số lượng kết nối hoạt động thực tế
-    const activeConnections = this.server.sockets?.sockets?.size ?? 0;
+    const server = this.server as unknown as Record<string, unknown> | undefined;
+    const rawSockets = server?.sockets;
+    const socketsMap =
+      rawSockets instanceof Map
+        ? (rawSockets as Map<string, Socket>)
+        : rawSockets && typeof rawSockets === 'object' && 'sockets' in rawSockets && (rawSockets as Record<string, unknown>).sockets instanceof Map
+          ? ((rawSockets as Record<string, unknown>).sockets as Map<string, Socket>)
+          : undefined;
+    const activeConnections = socketsMap?.size ?? 0;
 
     // 2. Độ trễ Event Loop trung bình (đổi từ nanoseconds sang miliseconds)
     const eventLoopLag = parseFloat((this.loopMonitor.mean / 1e6).toFixed(2));
@@ -519,8 +561,9 @@ export class LiveScoreGateway
 
     // 3. Ước tính kích thước hàng chờ buffer (Buffered Amount) trong Engine.io socket
     let totalBufferSize = 0;
-    this.server.sockets?.sockets?.forEach((socket: Socket) => {
-      const transport = (socket as any).conn?.transport;
+    socketsMap?.forEach((socket: Socket) => {
+      const conn = (socket as unknown as Record<string, unknown>).conn as { transport?: { writable?: boolean; writeBuffer?: unknown[] } } | undefined;
+      const transport = conn?.transport;
       if (transport && transport.writable === false && transport.writeBuffer) {
         totalBufferSize += transport.writeBuffer.length;
       }

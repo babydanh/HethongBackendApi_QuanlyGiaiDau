@@ -87,6 +87,45 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .default('https://api.media.aqvision.net'),
   AQVISION_API_SECRET: Joi.string().allow('').optional().default(''),
+  AQVISION_API_TIMEOUT_SECONDS: Joi.number()
+    .integer()
+    .min(1)
+    .max(60)
+    .default(10),
+  AQVISION_VHOST: Joi.string().optional().default('__defaultVhost__'),
+  AQVISION_APP: Joi.string().optional().default('live'),
+  AQVISION_MEDIA_SCHEMA: Joi.string()
+    .valid('rtsp', 'rtmp')
+    .optional()
+    .default('rtsp'),
+  // Host/port push mà AQP cấp. Để rỗng ⇒ không sinh được QR (fail-closed),
+  // xem `aqvision-publish.service.ts`.
+  // Panel AQP phát HAI cổng riêng: RTSP (`AQVISION_PUSH_PORT`) và RTMP
+  // (`AQVISION_PUSH_RTMP_PORT`) — không suy cổng này từ cổng kia.
+  //
+  // `.allow('')`: `.env.example` phát hai dòng này ở dạng TRỐNG, nên operator
+  // copy sang VPS sẽ có `AQVISION_PUSH_PORT=`. Nếu không cho phép chuỗi rỗng,
+  // Joi từ chối và container crash-loop (đã xảy ra ở production). Rỗng phải
+  // nghĩa là "chưa cấu hình" và bị chặn ở tầng service (503), KHÔNG phải lúc boot.
+  AQVISION_PUSH_HOST: Joi.string().allow('').optional().default(''),
+  AQVISION_PUSH_PORT: Joi.number()
+    .integer()
+    .min(1)
+    .max(65535)
+    .allow('')
+    .optional(),
+  AQVISION_PUSH_RTMP_PORT: Joi.number()
+    .integer()
+    .min(1)
+    .max(65535)
+    .allow('')
+    .optional(),
+  // Cổng Agency Gateway (:3003) + Agency ID — dùng cho luồng đăng ký camera và JWT.
+  AQVISION_GATEWAY_URL: Joi.string()
+    .uri()
+    .optional()
+    .default('http://aqvision.net:3003/api/v1'),
+  AQVISION_AGENCY_ID: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_ID: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_SECRET: Joi.string().allow('').optional().default(''),
   FACEBOOK_OAUTH_REDIRECT_URI: Joi.string()

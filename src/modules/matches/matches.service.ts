@@ -26,6 +26,7 @@ import {
 } from './dto/create-schedule-plan.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
+import { UpdateScoreboardVisibilityDto } from './dto/update-scoreboard-visibility.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import type { MatchBroadcastData } from './interfaces/match-broadcast.interface';
@@ -1340,6 +1341,57 @@ export class MatchesService {
       user,
     );
     return { canScore };
+  }
+
+  /**
+   * Ẩn/hiện bảng điểm live. Cờ này giấu overlay tỷ số trên sóng với MỌI người
+   * xem, nên thẩm quyền dùng đúng `canScore` của trận (BTC/quản lý giải hoặc
+   * trọng tài) — không mở thêm đường quyền mới. Trận CLB uỷ quyền sang
+   * ClubMatchSessionsService vì đây là nơi giữ luật chấm điểm của CLB.
+   */
+  async setScoreboardVisibility(
+    id: string,
+    user: JwtPayload,
+    dto: UpdateScoreboardVisibilityDto,
+  ) {
+    const context = await this.matchContextAdapter?.resolve(id);
+    if (
+      context?.type === 'CLUB_SOCIAL_MATCH_SESSION' ||
+      context?.type === 'CLUB_STANDALONE_MATCH'
+    ) {
+      if (!this.clubMatchSessionsService) {
+        throw new NotFoundException('Match not found');
+      }
+      const actor = {
+        id: user.sub,
+        roles: [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+      };
+      return this.clubMatchSessionsService.setScoreboardVisibility(
+        id,
+        actor,
+        dto.visible,
+      );
+    }
+
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const { canScore } = await this.getTournamentMatchScoreAccess(
+      existing,
+      user,
+    );
+    if (!canScore) {
+      throw new ForbiddenException(
+        'Bạn không có quyền ẩn/hiện bảng điểm của trận đấu này',
+      );
+    }
+
+    const updated = await this.matchesRepository.setScoreboardVisibility(
+      id,
+      dto.visible,
+    );
+    this.liveScoreGateway.broadcastScoreboardVisibility(id, dto.visible);
+    return updated;
   }
 
   async updateScore(

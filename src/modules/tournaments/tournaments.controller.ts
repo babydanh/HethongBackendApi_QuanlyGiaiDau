@@ -39,6 +39,7 @@ import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
 import { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
 import { RosterImportDto } from './dto/roster-import.dto';
+import { ReopenRegistrationDto } from './dto/reopen-registration.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
@@ -48,6 +49,11 @@ import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
 import { UpdateParticipantFeePaymentDto } from './dto/update-participant-fee-payment.dto';
 import { UpdateParticipantPresenceDto } from './dto/update-participant-presence.dto';
 import { ConfirmRankingConsentResultDto } from './dto/confirm-ranking-consent-result.dto';
+import {
+  AddAthleteCandidateDto,
+  AddAthleteDirectDto,
+  ListAddAthleteCandidatesQueryDto,
+} from './dto/add-athlete.dto';
 
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
@@ -1263,12 +1269,24 @@ export class TournamentsController {
   @ApiOperation({ summary: 'Mở lại đăng ký có kiểm soát trước khi tạo sơ đồ' })
   async reopenRegistration(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() reopenRegistrationDto: ReopenRegistrationDto,
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.reopenRegistration(
       id,
       user.sub,
       this.getSystemRoles(user),
+      {
+        registrationEndDate: reopenRegistrationDto.registrationEndDate
+          ? new Date(reopenRegistrationDto.registrationEndDate)
+          : null,
+        startDate: reopenRegistrationDto.startDate
+          ? new Date(reopenRegistrationDto.startDate)
+          : null,
+        endDate: reopenRegistrationDto.endDate
+          ? new Date(reopenRegistrationDto.endDate)
+          : null,
+      },
     );
   }
 
@@ -1474,6 +1492,7 @@ export class TournamentsController {
       dto.names,
       this.getSystemRoles(user),
       dto.divisionId,
+      dto.pairingMode,
     );
   }
 
@@ -1548,6 +1567,60 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.importRosterFromForm(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Get(':id/add-athletes/candidates')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tìm bạn bè hoặc thành viên CLB có thể thêm vào giải' })
+  async listAddAthleteCandidates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() dto: ListAddAthleteCandidatesQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.listAddAthleteCandidates(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/add-athletes/candidates')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Thêm tài khoản bạn bè hoặc thành viên CLB vào giải' })
+  async addAthleteCandidate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddAthleteCandidateDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addAthleteCandidate(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/add-athletes/direct')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Thêm VĐV chưa có tài khoản bằng tên' })
+  async addDirectAthlete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddAthleteDirectDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addDirectAthlete(
       id,
       user.sub,
       this.getSystemRoles(user),

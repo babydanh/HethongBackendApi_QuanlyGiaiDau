@@ -1,15 +1,24 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
+import { PublishQrDto } from './dto/publish-qr.dto';
 import { SetCourtPlaybackUrlDto } from './dto/set-court-playback-url.dto';
+import {
+  AqvisionPublishService,
+  type PublishQrResult,
+  type RtmpPublishTarget,
+} from './aqvision-publish.service';
+import { AqvisionApiException } from './aqvision-api.client';
 import {
   LivestreamMode,
   LivestreamProtocol,
@@ -34,18 +43,19 @@ export class LivestreamService {
   constructor(
     private readonly livestreamRepository: LivestreamRepository,
     private readonly configService: ConfigService,
+    private readonly aqvisionPublishService: AqvisionPublishService,
   ) {}
 
   private isAdmin(user: JwtPayload) {
     return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
   }
 
-  private getMediaServerHost() {
-    return this.configService.get<string>('LIVESTREAM_MEDIA_SERVER_HOST') || 'media.aqvision.net';
-  }
-
   private getRtmpBaseUrl() {
     return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://sporto.asia:1935/live';
+  }
+
+  private getSrtBaseUrl() {
+    return this.configService.get<string>('LIVESTREAM_SRT_BASE_URL') || 'srt://localhost:8890';
   }
 
   private getHlsBaseUrl() {
@@ -93,21 +103,26 @@ export class LivestreamService {
 
   // ENDED was used by the old stop flow. Replay is not supported yet, so it
   // must not permanently block a match or a newly assigned camera.
+  // `OFFLINE` is the explicit "the organizer pressed Stop" marker and is kept:
+  // it is what separates a match whose court feed was switched off from one that
+  // was merely scheduled and never started.
   private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T): T;
   private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T | null | undefined): T | null;
   private normalizeStream<T extends { streamStatus?: string | null; endedAt?: Date | null; playbackUrl?: string | null }>(stream: T | null | undefined): T | null {
     if (!stream) return null;
     if (stream.streamStatus !== 'ENDED') return stream;
+    // Legacy ENDED rows came from the old stop flow, so they map onto the same
+    // explicit stopped marker the current stop writes.
     return {
       ...stream,
-      streamStatus: 'IDLE',
+      streamStatus: 'OFFLINE',
       endedAt: null,
       playbackUrl: null,
     };
   }
 
   private buildSrtUrl(streamName: string) {
-    const baseUrl = this.configService.get<string>('LIVESTREAM_SRT_BASE_URL') || 'srt://localhost:8890';
+    const baseUrl = this.getSrtBaseUrl();
     return `${baseUrl.replace(/\/$/, '')}?streamid=publish:${streamName}`;
   }
 
@@ -161,13 +176,80 @@ export class LivestreamService {
     return match;
   }
 
+  /**
+   * Bản chiếu công khai của một camera.
+   *
+   * `listCameras` và `createCamera` đọc cả hàng (`select()` không cột), nên trả
+   * nguyên hàng sẽ đẩy `streamKey` và ba cột `*_encrypted` (RTSP URL, tài khoản,
+   * mật khẩu) ra frontend — những cột mà `LivestreamCamera` không hề mô hình hoá.
+   * Liệt kê cột tường minh để một cột nhạy cảm thêm sau này không tự động rò rỉ.
+   */
+  private toPublicCamera(camera: {
+    id: string;
+    tournamentId: string;
+    name: string;
+    mode: string;
+    courtId: string | null;
+    protocol: string;
+    streamName: string;
+    status: string;
+    playbackUrl: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return {
+      id: camera.id,
+      tournamentId: camera.tournamentId,
+      name: camera.name,
+      mode: camera.mode,
+      courtId: camera.courtId,
+      protocol: camera.protocol,
+      streamName: camera.streamName,
+      status: camera.status,
+      playbackUrl: this.normalizePublicPlaybackUrl(camera.playbackUrl),
+      // Ingest endpoints a broadcaster types into OBS. Derived from config on
+      // every read, so the UI never has to hardcode a host that drifts from the
+      // deployment. The stream key itself is `streamName`, already public.
+      ingest:
+        camera.mode === 'PULL'
+          ? null
+          : { rtmp: this.getRtmpBaseUrl(), srt: this.getSrtBaseUrl() },
+      createdAt: camera.createdAt,
+      updatedAt: camera.updatedAt,
+    };
+  }
+
   async listCameras(tournamentId: string, user: JwtPayload) {
     await this.assertTournamentOperator(tournamentId, user);
     const cameras = await this.livestreamRepository.listCameras(tournamentId);
-    return cameras.map((camera) => ({
-      ...camera,
-      playbackUrl: this.normalizePublicPlaybackUrl(camera.playbackUrl),
-    }));
+    return cameras.map((camera) => this.toPublicCamera(camera));
+  }
+
+  /**
+   * Gán camera của sân cho những trận đã xếp ở sân đó nhưng chưa có camera.
+   *
+   * Thiếu bước này, BTC thêm camera sau khi lịch đã xếp sẽ thấy nút "Bắt đầu"
+   * sáng lên (vì sân đã có camera) nhưng API từ chối vì trận chưa được gán camera.
+   * Chỉ chạm các trận CHƯA có camera nên không ghi đè lựa chọn thủ công và không
+   * đụng vào luồng đang chạy.
+   */
+  private async backfillCourtCameraAssignments(
+    courtId: string,
+    tournamentId: string,
+    camera: { id: string; playbackUrl: string | null },
+  ) {
+    const matchIds = await this.livestreamRepository.listMatchIdsWithoutCameraOnCourt(
+      courtId,
+      tournamentId,
+    );
+    if (matchIds.length === 0) return;
+
+    const playbackUrl = this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '';
+    await Promise.all(
+      matchIds.map((matchId) =>
+        this.livestreamRepository.assignCameraToMatch(matchId, camera.id, playbackUrl),
+      ),
+    );
   }
 
   async listMatchLivestreams(tournamentId: string, user: JwtPayload) {
@@ -198,7 +280,9 @@ export class LivestreamService {
     data: SetCourtPlaybackUrlDto,
   ) {
     await this.assertTournamentOperator(tournamentId, user);
-    await this.assertCourtUsableByTournament(courtId, tournamentId);
+    const tournamentIdsUsingCourt =
+      await this.livestreamRepository.findTournamentIdsUsingCourt(courtId);
+    await this.assertCourtUsableByTournament(courtId, tournamentId, tournamentIdsUsingCourt);
 
     const trimmed = data.playbackUrl?.trim();
     const existing = await this.livestreamRepository.findPullCameraByCourt(courtId, tournamentId);
@@ -235,6 +319,10 @@ export class LivestreamService {
       createdBy: user.sub,
     });
 
+    // Lịch có thể đã xếp trước khi sân được khai URL. Gán luôn cho các trận của
+    // sân để chúng phát được ngay, thay vì bắt BTC bấm gán tay từng trận.
+    await this.backfillCourtCameraAssignments(courtId, tournamentId, created);
+
     return { courtId, playbackUrl: created.playbackUrl, cameraId: created.id };
   }
 
@@ -270,19 +358,168 @@ export class LivestreamService {
       createdBy: user.sub,
     });
 
+    // Cùng lý do như `setCourtPlaybackUrl`: lịch có thể đã xếp trước khi camera
+    // ra đời, nên gán ngay cho các trận của sân thay vì để nút "Bắt đầu" sáng
+    // nhưng API từ chối.
+    if (courtId) {
+      await this.backfillCourtCameraAssignments(courtId, tournamentId, camera);
+    }
+
     return {
-      ...camera,
+      ...this.toPublicCamera(camera),
       // PULL không có URL ingest để BTC cấu hình ở OBS/Camera Station.
       publish: mode === 'PULL' ? null : this.buildPublishInfo(protocol, streamName),
     };
   }
 
   /**
+   * Dựng QR publish để app Camera Station của AQP quét.
+   *
+   * Payload trả về là ĐÚNG 5 field của docx §2.2 — app AQP parse đúng shape đó.
+   * Kèm theo là cặp RTMP (`server` + `streamKey`) để người vận hành nhập tay
+   * vào OBS, vì panel AQP yêu cầu dán CẢ HAI ô.
+   *
+   * `publishKey` đến từ request (operator dán từ panel AQP cho đúng stream),
+   * KHÔNG lấy từ env dùng chung và KHÔNG lưu lại: key AQP là per-stream, một
+   * biến toàn cục sẽ cho phép một ảnh chụp màn hình đẩy luồng giả cho mọi giải.
+   * INV-001: giá trị này không bao giờ được ghi log.
+   */
+  async buildCameraPublishQr(
+    cameraId: string,
+    user: JwtPayload,
+    dto: PublishQrDto,
+  ) {
+    const camera = await this.getPushCamera(cameraId, user);
+    const streamId = (dto.streamId?.trim() || camera.streamName).trim();
+
+    const result = this.buildPublishQrOrFailClosed({
+      streamId,
+      matchTitle: dto.matchTitle?.trim() || camera.name,
+      publishKey: dto.publishKey,
+      autoStart: dto.autoStart ?? false,
+    });
+
+    return {
+      camera: {
+        id: camera.id,
+        name: camera.name,
+        streamName: camera.streamName,
+        mode: camera.mode,
+        protocol: camera.protocol,
+      },
+      ...result,
+    };
+  }
+
+  /**
+   * Cấp lại danh tính stream của một camera PUSH (nút "Cấp lại stream key" của
+   * pipeline SportO).
+   *
+   * PHẠM VI: đây là key NỘI BỘ trong `livestream_cameras`, dùng cho media
+   * server của SportO. Publish key của AQP (panel AQP, dạng `<stream>?<key>`)
+   * do AQP cấp và chỉ rotate được ở panel/AQP — endpoint này KHÔNG đụng tới nó.
+   *
+   * `streamName` có unique index nên lần ghi có thể trùng; thử lại với tên mới
+   * thay vì để lỗi ràng buộc nổi lên thành 500.
+   */
+  async rotateCameraStreamKey(cameraId: string, user: JwtPayload) {
+    const camera = await this.getPushCamera(cameraId, user);
+    const maxAttempts = 5;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const streamName = `camera_${randomUUID().replace(/-/g, '')}`;
+      const streamKey = randomUUID().replace(/-/g, '');
+      try {
+        const rotated = await this.livestreamRepository.updateCameraStreamIdentity(
+          camera.id,
+          { streamName, streamKey, playbackUrl: this.buildPlaybackUrl(streamName) },
+        );
+        if (!rotated) {
+          throw new NotFoundException('Camera không tồn tại');
+        }
+        return {
+          ...this.toPublicCamera(rotated),
+          publish: this.buildPublishInfo(
+            rotated.protocol === 'SRT' ? 'SRT' : 'RTMP',
+            rotated.streamName,
+          ),
+        };
+      } catch (error) {
+        const isLastAttempt = attempt === maxAttempts;
+        if (!this.isUniqueViolation(error) || isLastAttempt) {
+          throw error;
+        }
+      }
+    }
+
+    // Không thể tới đây: vòng lặp hoặc return, hoặc ném ở lần thử cuối.
+    throw new ConflictException('Không cấp được stream key mới, vui lòng thử lại.');
+  }
+
+  /**
+   * Bọc `buildPublishQrResult` để lỗi CẤU HÌNH thành 503 kèm tên biến môi
+   * trường cần set. Nếu để `AqvisionApiException` nổi lên, exception filter chỉ
+   * trả 500 "lỗi hệ thống" và operator không biết phải sửa gì.
+   *
+   * Thông báo KHÔNG chứa `publishKey` (INV-001) — chỉ tên biến env.
+   */
+  private buildPublishQrOrFailClosed(input: {
+    readonly streamId: string;
+    readonly matchTitle: string;
+    readonly publishKey: string;
+    readonly autoStart: boolean;
+  }): PublishQrResult {
+    try {
+      return this.aqvisionPublishService.buildPublishQrResult(input);
+    } catch (error) {
+      if (error instanceof AqvisionApiException) {
+        throw new ServiceUnavailableException(
+          'Máy chủ media AQP chưa được cấu hình đầy đủ cho giải này. ' +
+            'Kiểm tra AQVISION_PUSH_HOST, AQVISION_PUSH_PORT và AQVISION_PUSH_RTMP_PORT.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Camera dùng được cho luồng đẩy: phải tồn tại, thuộc giải người gọi quản lý,
+   * và ở mode PUSH (PULL do bên ngoài phát sẵn nên không có ingest để cấu hình).
+   */
+  private async getPushCamera(cameraId: string, user: JwtPayload) {
+    const camera = await this.livestreamRepository.findCameraById(cameraId);
+    if (!camera) {
+      throw new NotFoundException('Camera không tồn tại');
+    }
+    await this.assertTournamentOperator(camera.tournamentId, user);
+    if (camera.mode !== 'PUSH') {
+      throw new BadRequestException(
+        'Camera PULL không đẩy luồng lên nên không có stream key để cấp.',
+      );
+    }
+    return camera;
+  }
+
+  /** Vi phạm unique index của Postgres (SQLSTATE 23505). */
+  private isUniqueViolation(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null || !('code' in error)) {
+      return false;
+    }
+    return error.code === '23505';
+  }
+
+  /**
    * Sân phải thuộc địa điểm mà giải này dùng — qua cả venue mặc định lẫn venue
    * theo vòng — nếu không thì khai URL cho sân của giải khác sẽ lọt vào đây.
    */
-  private async assertCourtUsableByTournament(courtId: string, tournamentId: string) {
-    const tournamentIds = await this.livestreamRepository.findTournamentIdsUsingCourt(courtId);
+  private async assertCourtUsableByTournament(
+    courtId: string,
+    tournamentId: string,
+    precomputedTournamentIds?: string[],
+  ) {
+    const tournamentIds =
+      precomputedTournamentIds ??
+      (await this.livestreamRepository.findTournamentIdsUsingCourt(courtId));
     if (tournamentIds.length === 0) {
       throw new NotFoundException('Sân không tồn tại');
     }
@@ -321,7 +558,8 @@ export class LivestreamService {
     }
 
     await this.assertTournamentOperator(camera.tournamentId, user);
-    return this.livestreamRepository.deleteCamera(cameraId);
+    const archived = await this.livestreamRepository.deleteCamera(cameraId);
+    return archived ? this.toPublicCamera(archived) : null;
   }
 
   async assignCamera(matchId: string, user: JwtPayload, data: AssignCameraDto) {
@@ -458,7 +696,12 @@ export class LivestreamService {
     }
 
     // Stopping a broadcast is reversible. Recording/replay is a separate feature.
-    return this.livestreamRepository.updateStreamStatus(matchId, 'IDLE', user.sub, null);
+    //
+    // Ghi OFFLINE, không phải IDLE: nhánh playback của sân đọc trạng thái này để
+    // biết BTC đã bấm Dừng, nên nút Dừng mới thực sự tắt được hình của trận dùng
+    // camera sân. IDLE là "chưa từng phát" — dùng nó ở đây sẽ khiến lần dừng đầu
+    // tiên trông giống hệt trạng thái chưa bấm gì.
+    return this.livestreamRepository.updateStreamStatus(matchId, 'OFFLINE', user.sub, null);
   }
 
   async getMatchPlayback(matchId: string) {
@@ -506,7 +749,12 @@ export class LivestreamService {
     // Sân có URL KHÔNG có nghĩa là đang phát. Chỉ trận đã bắt đầu (ONGOING) mới
     // được trả playbackUrl, nếu không thì khán giả sẽ thấy video dù BTC chưa bấm
     // "Bắt đầu" — đúng triệu chứng "có URL nhưng màn hình đen/ảo" khó chẩn đoán.
-    if (courtCamera?.playbackUrl && match.status === 'ONGOING') {
+    //
+    // Trạng thái trận một mình không đủ để tắt hình: nếu BTC đã bấm Dừng (OFFLINE)
+    // thì dừng phải thắng, kể cả khi trận vẫn ONGOING. Không có điều kiện này, nút
+    // Dừng không có tác dụng gì với trận dùng camera sân.
+    const isStoppedByOperator = stream?.streamStatus === 'OFFLINE';
+    if (courtCamera?.playbackUrl && match.status === 'ONGOING' && !isStoppedByOperator) {
       const courtUrl = this.normalizePublicPlaybackUrl(courtCamera.playbackUrl);
       return {
         matchId,

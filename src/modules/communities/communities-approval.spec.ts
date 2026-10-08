@@ -32,11 +32,11 @@ describe('CommunitiesService approval flow', () => {
     );
   });
 
-  it('creates a new club as PENDING', async () => {
+  it('creates a new club as ACTIVE (moderation gate disabled)', async () => {
     repository.countActiveByCreator.mockResolvedValue(0);
     repository.create.mockResolvedValue({
       id: communityId,
-      status: 'PENDING',
+      status: 'ACTIVE',
     } as never);
 
     await service.create(userId, {
@@ -47,7 +47,7 @@ describe('CommunitiesService approval flow', () => {
     expect(repository.create).toHaveBeenCalledWith(
       expect.objectContaining({
         creatorId: userId,
-        status: 'PENDING',
+        status: 'ACTIVE',
       }),
       undefined,
       undefined,
