@@ -167,6 +167,7 @@ export class LivestreamHealthQueue implements OnModuleInit {
    * Lên job xác nhận offline cho camera sau grace period 60s.
    * Job ID ổn định theo camera: sweep 30s lặp lại khi offline
    * kéo dài sẽ không tạo job trùng (BullMQ bỏ qua add trùng jobId).
+   * Xóa job lỗi cuối cùng để lần sweep sau có thể lập lại job.
    */
   async scheduleCameraOfflineConfirmation(cameraId: string): Promise<void> {
     await this.queue.add(
@@ -178,7 +179,7 @@ export class LivestreamHealthQueue implements OnModuleInit {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: true,
-        removeOnFail: 100,
+        removeOnFail: true,
       },
     );
   }

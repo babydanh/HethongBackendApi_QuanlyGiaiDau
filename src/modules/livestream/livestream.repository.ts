@@ -31,14 +31,14 @@ export interface CreateCameraInput {
 }
 
 /**
- * Projection điều phối ghi MP4 của một camera: camera còn assignment
- * trận (trận chưa xoá mềm, camera chưa xoá mềm), kèm stream name
- * để gọi AQVision và cờ có assignment `LIVE` hay không.
+ * Projection điều phối ghi MP4 của một camera. Giữ cả assignment đã
+ * soft-delete/archive để worker còn tìm được stream cần dừng; cờ live
+ * chỉ tính assignment thuộc camera, trận và giải còn hoạt động.
  */
 export interface CameraRecordingTarget {
   cameraId: string;
   streamName: string;
-  /** Ít nhất một assignment `LIVE` trên một trận chưa xoá mềm. */
+  /** Có ít nhất một assignment LIVE còn hiệu lực trên camera này. */
   hasLiveAssignment: boolean;
 }
 
@@ -501,15 +501,14 @@ export class LivestreamRepository {
   }
 
   /**
-   * Mục tiêu ghi MP4: một dòng mỗi camera còn ít nhất một assignment
-   * trận (kể cả assignment `OFFLINE`), gom theo camera/stream.
+   * Mục tiêu ghi MP4: một dòng mỗi camera còn assignment trận, kể cả
+   * assignment `OFFLINE` hoặc thuộc camera/trận/giải đã soft-delete/archive.
+   * Worker cần giữ các target cũ để dừng MP4 sau khi trạng thái nguồn bị
+   * lưu trữ.
    *
-   * `hasLiveAssignment` là aggregate `bool_or` trên mọi assignment
-   * LIVE của camera đó — camera chia sẻ nhiều trận vẫn chỉ xuất
-   * hiện một lần, và việc dừng một trận không làm mất dấu trận
-   * LIVE còn lại. Camera đã xoá mềm và trận đã xoá mềm bị loại
-   * (giống `syncCameraStatus`: camera mồ côi được coi như chưa
-   * gán).
+   * `hasLiveAssignment` chỉ tính assignment LIVE nếu camera và trận chưa
+   * bị xoá mềm, giải chưa bị xoá mềm hoặc archive. Camera dùng chung nhiều
+   * trận vẫn chỉ xuất hiện một lần và giữ recording khi còn trận LIVE hợp lệ.
    */
   async listCameraRecordingTargets(): Promise<CameraRecordingTarget[]> {
     const rows = await this.cameraRecordingTargetQuery()
@@ -527,9 +526,9 @@ export class LivestreamRepository {
   }
 
   /**
-   * Mục tiêu ghi MP4 của một camera, hoặc `null` khi camera không
-   * còn assignment nào (hoặc đã bị xoá mềm). Đọc lại trạng thái
-   * hiện hành trước mọi side effect ghi MP4.
+   * Mục tiêu ghi MP4 của một camera, kể cả khi assignment đã soft-delete
+   * hoặc giải đã archive để có thể dừng recording. `null` chỉ khi không còn
+   * assignment nào hoặc dữ liệu liên kết đã bị hard-delete.
    */
   async findCameraRecordingTarget(
     cameraId: string,
@@ -561,22 +560,26 @@ export class LivestreamRepository {
       .select({
         cameraId: schema.matchLivestreams.cameraId,
         streamName: schema.livestreamCameras.streamName,
-        hasLiveAssignment: sql<boolean>`bool_or(${schema.matchLivestreams.streamStatus} = 'LIVE')`,
+        hasLiveAssignment: sql<boolean>`bool_or(
+          ${schema.matchLivestreams.streamStatus} = 'LIVE'
+          and ${schema.livestreamCameras.deletedAt} is null
+          and ${schema.matches.deletedAt} is null
+          and ${schema.tournaments.deletedAt} is null
+          and ${schema.tournaments.archivedAt} is null
+        )`,
       })
       .from(schema.matchLivestreams)
       .innerJoin(
         schema.livestreamCameras,
-        and(
-          eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id),
-          isNull(schema.livestreamCameras.deletedAt),
-        ),
+        eq(schema.matchLivestreams.cameraId, schema.livestreamCameras.id),
       )
       .innerJoin(
         schema.matches,
-        and(
-          eq(schema.matchLivestreams.matchId, schema.matches.id),
-          isNull(schema.matches.deletedAt),
-        ),
+        eq(schema.matchLivestreams.matchId, schema.matches.id),
+      )
+      .innerJoin(
+        schema.tournaments,
+        eq(schema.matches.tournamentId, schema.tournaments.id),
       );
   }
 

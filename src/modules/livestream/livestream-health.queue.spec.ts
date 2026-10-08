@@ -385,6 +385,7 @@ describe('LivestreamHealthQueue — offline confirmation jobs', () => {
       expect.objectContaining({
         delay: CONFIRMATION_DELAY_MS,
         jobId: offlineConfirmationJobId('camera-9'),
+        removeOnFail: true,
       }),
     );
   });

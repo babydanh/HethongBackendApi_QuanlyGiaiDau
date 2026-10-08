@@ -117,8 +117,9 @@ export class LivestreamHealthProcessor extends WorkerHost {
           this.aqvisionRecordingService.confirmCameraOffline(cameraId, lease),
       );
     } catch {
-      // Lỗi provider: BullMQ thử lại job; nếu Redis mất job,
-      // sweep tiếp theo tạo lại grace period. Chỉ log cameraId.
+      // Giữ lỗi provider/mất lease trong phạm vi camera này để
+      // không làm sập worker. Job hoàn tất; sweep sau có thể lên
+      // grace period mới. Chỉ log cameraId.
       this.logger.warn(
         `Camera offline confirmation failed: camera=${cameraId}`,
       );
