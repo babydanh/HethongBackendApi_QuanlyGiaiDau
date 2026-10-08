@@ -517,7 +517,7 @@ export class TournamentCatalogRepository {
             and round_match.bracket_branch = ${schema.matches.bracketBranch}
             and round_match.deleted_at is null
             and round_match.is_bye = false
-        )`,
+        )`.as('last_round_number'),
         matchOrder: schema.matches.matchOrder,
         bracketBranch: schema.matches.bracketBranch,
         leg: schema.matches.leg,
