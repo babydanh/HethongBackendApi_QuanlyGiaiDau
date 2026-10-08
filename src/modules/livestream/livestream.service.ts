@@ -54,6 +54,22 @@ export class LivestreamService {
     return user.role === 'ADMIN' || user.roles?.includes('ADMIN') === true;
   }
 
+  private getRtmpBaseUrl() {
+    return this.configService.get<string>('LIVESTREAM_RTMP_BASE_URL') || 'rtmp://sporto.asia:1935/live';
+  }
+
+  private getSrtBaseUrl() {
+    return this.configService.get<string>('LIVESTREAM_SRT_BASE_URL') || 'srt://localhost:8890';
+  }
+
+  private getHlsBaseUrl() {
+    return this.configService.get<string>('LIVESTREAM_HLS_PUBLIC_BASE_URL') || 'https://sporto.asia/hls';
+  }
+
+  private buildPlaybackUrl(streamKey: string) {
+    return `${this.getHlsBaseUrl().replace(/\/$/, '')}/${streamKey}/index.m3u8`;
+  }
+
   /**
    * URL phát của stream trên media server AQP — đúng định dạng docx §4.1:
    * `https://media.aqvision.net/live/{stream}/hls.m3u8`.
@@ -74,61 +90,38 @@ export class LivestreamService {
   }
 
   /**
-   * Endpoint ĐẨY luồng của AQP — hạ tầng phát sóng DUY NHẤT.
-   *
-   * Không còn media server riêng của SportO: mọi camera đẩy thẳng vào AQP. Chưa
-   * cấu hình host/cổng thì **ném 503 kèm tên biến env**, KHÔNG trả URL tạm —
-   * BTC dán URL tạm vào OBS/điện thoại thì không ai xem được hình mà cũng không
-   * biết vì sao.
+   * MediaMTX serves HLS over plain HTTP on 8888. Public pages are HTTPS, so
+   * production must use the reverse-proxied HTTPS path instead of exposing
+   * the media port directly. Normalize legacy rows created with :8888 too.
    */
-  private resolveAqvisionIngestServer(): string {
-    const host = (
-      this.configService.get<string>('AQVISION_PUSH_HOST') ?? ''
-    ).trim();
-    // Cổng RTMP tách khỏi cổng RTSP: panel AQP phát hai cổng riêng, không suy
-    // cổng này từ cổng kia.
-    const rtmpPort = String(
-      this.configService.get<string | number>('AQVISION_PUSH_RTMP_PORT') ?? '',
-    ).trim();
+  private normalizePublicPlaybackUrl(url: string | null | undefined) {
+    if (!url) return url ?? null;
 
-    if (host.length === 0 || rtmpPort.length === 0) {
-      throw new ServiceUnavailableException(
-        'Chưa cấu hình máy chủ media AQP để đẩy luồng. ' +
-          'Kiểm tra AQVISION_PUSH_HOST và AQVISION_PUSH_RTMP_PORT.',
-      );
-    }
-
-    return `rtmp://${host}:${rtmpPort}/live`;
-  }
-
-  /**
-   * Bản không ném của `resolveAqvisionIngestServer` cho đường ĐỌC.
-   *
-   * Liệt kê camera không được phép thất bại chỉ vì chưa cấu hình env: khi đó
-   * `ingest` là `null` và UI nói "chưa cấu hình", thay vì cả màn camera 500.
-   */
-  private tryAqvisionIngestServer(): string | null {
     try {
-      return this.resolveAqvisionIngestServer();
+      const parsed = new URL(url);
+      if (
+        (parsed.hostname === 'giaidau.vnvar.com' || parsed.hostname === 'sporto.asia') &&
+        parsed.port === '8888'
+      ) {
+        // Old rows stored MediaMTX's plain HTTP port. Rebuild from the key so
+        // playback goes through the public HTTPS reverse proxy, regardless of
+        // whether the old path was /live or /hls.
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        const indexPosition = parts.lastIndexOf('index.m3u8');
+        const streamKey = indexPosition > 0 ? parts[indexPosition - 1] : null;
+        if (streamKey) return this.buildPlaybackUrl(streamKey);
+
+        parsed.protocol = 'https:';
+        parsed.port = '';
+      }
+      return parsed.toString();
     } catch {
-      return null;
+      return url;
     }
   }
 
-  /**
-   * Cặp ingest để BTC nhập vào OBS / Camera Station: đích đẩy của AQP + tên
-   * stream. Stream key xác thực do AQP cấp riêng (panel AQP) và đi kèm QR —
-   * không phải thứ SportO sinh ra.
-   */
-  private buildPublishInfo(streamName: string) {
-    const rtmpUrl = `${this.resolveAqvisionIngestServer()}/${streamName}`;
-
-    return {
-      protocol: 'RTMP' as const,
-      streamName,
-      url: rtmpUrl,
-      rtmpUrl,
-    };
+  private buildIngestUrl(streamKey: string) {
+    return `${this.getRtmpBaseUrl().replace(/\/$/, '')}/${streamKey}`;
   }
 
   // ENDED was used by the old stop flow. Replay is not supported yet, so it
@@ -148,6 +141,24 @@ export class LivestreamService {
       streamStatus: 'OFFLINE',
       endedAt: null,
       playbackUrl: null,
+    };
+  }
+
+  private buildSrtUrl(streamName: string) {
+    const baseUrl = this.getSrtBaseUrl();
+    return `${baseUrl.replace(/\/$/, '')}?streamid=publish:${streamName}`;
+  }
+
+  private buildPublishInfo(protocol: 'RTMP' | 'SRT', streamName: string) {
+    const rtmpUrl = this.buildIngestUrl(streamName);
+    const srtUrl = this.buildSrtUrl(streamName);
+
+    return {
+      protocol,
+      streamName,
+      url: protocol === 'SRT' ? srtUrl : rtmpUrl,
+      rtmpUrl,
+      srtUrl,
     };
   }
 
@@ -215,17 +226,17 @@ export class LivestreamService {
       name: camera.name,
       mode: camera.mode,
       courtId: camera.courtId,
-      // Hàng cũ có thể mang `SRT` của media server đã bỏ; quy về RTMP khi đọc để
-      // UI không nhận một lựa chọn không còn tồn tại.
-      protocol: camera.protocol === 'SRT' ? 'RTMP' : camera.protocol,
+      protocol: camera.protocol,
       streamName: camera.streamName,
       status: camera.status,
-      playbackUrl: camera.playbackUrl,
-      // Endpoint đẩy của AQP. Tính từ config mỗi lần đọc nên UI không phải ghi
-      // cứng host. `null` khi chưa cấu hình — liệt kê camera không được sập vì lý
-      // do đó. Tên stream chính là phần cuối URL; stream key xác thực do AQP cấp.
+      playbackUrl: this.normalizePublicPlaybackUrl(camera.playbackUrl),
+      // Ingest endpoints a broadcaster types into OBS. Derived from config on
+      // every read, so the UI never has to hardcode a host that drifts from the
+      // deployment. The stream key itself is `streamName`, already public.
       ingest:
-        camera.mode === 'PULL' ? null : { rtmp: this.tryAqvisionIngestServer() },
+        camera.mode === 'PULL'
+          ? null
+          : { rtmp: this.getRtmpBaseUrl(), srt: this.getSrtBaseUrl() },
       createdAt: camera.createdAt,
       updatedAt: camera.updatedAt,
     };
@@ -256,7 +267,7 @@ export class LivestreamService {
     );
     if (matchIds.length === 0) return;
 
-    const playbackUrl = camera.playbackUrl ?? '';
+    const playbackUrl = this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '';
     await Promise.all(
       matchIds.map((matchId) =>
         this.livestreamRepository.assignCameraToMatch(matchId, camera.id, playbackUrl),
@@ -273,7 +284,7 @@ export class LivestreamService {
       // A soft-deleted camera is intentionally treated as unassigned, even
       // when an old match row still contains its cameraId.
       return normalized.cameraName
-        ? { ...normalized, playbackUrl: normalized.playbackUrl }
+        ? { ...normalized, playbackUrl: this.normalizePublicPlaybackUrl(normalized.playbackUrl) }
         : { ...normalized, cameraId: null, streamStatus: 'IDLE', playbackUrl: null, endedAt: null };
     });
   }
@@ -314,7 +325,7 @@ export class LivestreamService {
       const updated = await this.livestreamRepository.updatePullCameraUrl(
         existing.id,
         name,
-        playbackUrl!,
+        this.normalizePublicPlaybackUrl(playbackUrl)!,
       );
       return { courtId, playbackUrl: updated.playbackUrl, cameraId: updated.id };
     }
@@ -327,7 +338,7 @@ export class LivestreamService {
       protocol: 'RTMP',
       streamName: `court_${courtId.replace(/-/g, '')}_${randomUUID().replace(/-/g, '').slice(0, 8)}`,
       streamKey: randomUUID().replace(/-/g, ''),
-      playbackUrl: playbackUrl!,
+      playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
       createdBy: user.sub,
     });
 
@@ -381,7 +392,7 @@ export class LivestreamService {
     } else if (pullSource?.kind === 'PLAYBACK') {
       playbackUrl = pullSource.url;
     } else {
-      playbackUrl = this.buildAqvisionHlsUrl(streamName);
+      playbackUrl = this.buildPlaybackUrl(streamName);
     }
 
     const camera = await this.livestreamRepository.createCamera({
@@ -392,7 +403,7 @@ export class LivestreamService {
       protocol,
       streamName,
       streamKey,
-      playbackUrl: playbackUrl!,
+      playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
       pullProxyKey,
       createdBy: user.sub,
     });
@@ -407,7 +418,7 @@ export class LivestreamService {
     return {
       ...this.toPublicCamera(camera),
       // PULL không có URL ingest để BTC cấu hình ở OBS/Camera Station.
-      publish: mode === 'PULL' ? null : this.buildPublishInfo(streamName),
+      publish: mode === 'PULL' ? null : this.buildPublishInfo(protocol, streamName),
     };
   }
 
@@ -471,14 +482,17 @@ export class LivestreamService {
       try {
         const rotated = await this.livestreamRepository.updateCameraStreamIdentity(
           camera.id,
-          { streamName, streamKey, playbackUrl: this.buildAqvisionHlsUrl(streamName) },
+          { streamName, streamKey, playbackUrl: this.buildPlaybackUrl(streamName) },
         );
         if (!rotated) {
           throw new NotFoundException('Camera không tồn tại');
         }
         return {
           ...this.toPublicCamera(rotated),
-          publish: this.buildPublishInfo(rotated.streamName),
+          publish: this.buildPublishInfo(
+            rotated.protocol === 'SRT' ? 'SRT' : 'RTMP',
+            rotated.streamName,
+          ),
         };
       } catch (error) {
         const isLastAttempt = attempt === maxAttempts;
@@ -761,7 +775,7 @@ export class LivestreamService {
         return this.livestreamRepository.assignCameraToMatch(
           matchId,
           courtCamera.id,
-          courtCamera.playbackUrl ?? '',
+          this.normalizePublicPlaybackUrl(courtCamera.playbackUrl) ?? '',
         );
       }
       return this.livestreamRepository.clearMatchCamera(matchId);
@@ -775,7 +789,7 @@ export class LivestreamService {
     return this.livestreamRepository.assignCameraToMatch(
       matchId,
       data.cameraId,
-      camera.playbackUrl ?? '',
+      this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '',
     );
   }
 
@@ -816,7 +830,7 @@ export class LivestreamService {
     return this.livestreamRepository.assignCameraToMatch(
       matchId,
       camera.id,
-      camera.playbackUrl ?? '',
+      this.normalizePublicPlaybackUrl(camera.playbackUrl) ?? '',
     );
   }
 
@@ -849,8 +863,12 @@ export class LivestreamService {
       throw new BadRequestException('Trận chưa đủ hai đội nên chưa thể bắt đầu livestream.');
     }
 
-    const playbackUrl = stream.cameraPlaybackUrl || this.buildAqvisionHlsUrl(stream.streamKey);
+    const playbackUrl = this.normalizePublicPlaybackUrl(
+      stream.cameraPlaybackUrl || this.buildPlaybackUrl(stream.streamKey),
+    )!;
     const livestream = await this.livestreamRepository.updateStreamStatus(matchId, 'LIVE', user.sub, playbackUrl);
+
+    const protocol = stream.cameraProtocol === 'SRT' ? 'SRT' : 'RTMP';
 
     return {
       livestream,
@@ -859,7 +877,7 @@ export class LivestreamService {
       publish:
         stream.cameraMode === 'PULL'
           ? null
-          : this.buildPublishInfo(stream.streamName ?? stream.streamKey),
+          : this.buildPublishInfo(protocol, stream.streamName ?? stream.streamKey),
       playbackUrl,
     };
   }
@@ -911,7 +929,7 @@ export class LivestreamService {
     );
     if (isManualCamera && stream) {
       const isLive = stream.streamStatus === 'LIVE';
-      const playbackUrl = isLive ? stream.playbackUrl : null;
+      const playbackUrl = isLive ? this.normalizePublicPlaybackUrl(stream.playbackUrl) : null;
 
       return {
         matchId,
@@ -932,7 +950,7 @@ export class LivestreamService {
     // Dừng không có tác dụng gì với trận dùng camera sân.
     const isStoppedByOperator = stream?.streamStatus === 'OFFLINE';
     if (courtCamera?.playbackUrl && match.status === 'ONGOING' && !isStoppedByOperator) {
-      const courtUrl = courtCamera.playbackUrl;
+      const courtUrl = this.normalizePublicPlaybackUrl(courtCamera.playbackUrl);
       return {
         matchId,
         streamStatus: 'LIVE',
