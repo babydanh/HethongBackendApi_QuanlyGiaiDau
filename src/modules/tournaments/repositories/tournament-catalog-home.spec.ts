@@ -65,8 +65,12 @@ describe('TournamentCatalogRepository home projection', () => {
   it.each(['ONGOING', 'COMPLETED'] as const)(
     'generates unambiguous subquery columns and maps distinct teams for %s',
     async (status) => {
+      const tournament = [
+        ...tournamentRow.slice(0, 5),
+        status === 'COMPLETED' ? 'COMPLETED' : 'REGISTRATION_OPEN',
+      ];
       const { repository, unsafe } = fixture([
-        [tournamentRow],
+        [tournament],
         [matchRow(status)],
         [
           ['team-1', 'Player A', null],
@@ -91,8 +95,17 @@ describe('TournamentCatalogRepository home projection', () => {
           ? "in ('ONGOING', 'IN_PROGRESS', 'LIVE', 'PLAYING')"
           : "in ('COMPLETED', 'FINISHED', 'DONE', 'ENDED')",
       );
+      const tournamentQuery = unsafe.mock.calls[0][0] as string;
+      if (status === 'COMPLETED') {
+        expect(tournamentQuery).toContain('"tournaments"."status" = $');
+        expect(unsafe.mock.calls[0][1]).toContain('COMPLETED');
+      }
 
-      expect(result.featuredTournaments[0].registrationStatus).toBe('OPEN');
+      expect(result.featuredTournaments[0].registrationStatus).toBe(
+        status === 'COMPLETED' ? null : 'OPEN',
+      );
+      expect(result.featuredTournaments[0].status).toBe(tournament[5]);
+      expect(result.tournaments[0].status).toBe(tournament[5]);
       expect(result.tournaments[0].matches[0]).toEqual(
         expect.objectContaining({
           id: 'match-1',

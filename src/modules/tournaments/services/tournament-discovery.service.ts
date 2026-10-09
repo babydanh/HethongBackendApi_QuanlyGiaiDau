@@ -138,7 +138,7 @@ export class TournamentDiscoveryService {
 
   async findHome(query: QueryHomeTournamentsDto) {
     const sport = query.sport || 'all';
-    const cacheKey = `tournaments:home:v2:${sport}:${query.matchStatus}`;
+    const cacheKey = `tournaments:home:v3:${sport}:${query.matchStatus}`;
     return this.redisService.getOrSetJson(cacheKey, 10, () =>
       this.tournamentsRepository.findHomeProjection(
         sport === 'all' ? undefined : sport,

@@ -443,6 +443,9 @@ export class TournamentCatalogRepository {
         'PENDING_DELETE',
         'pending_delete',
       ]),
+      ...(matchStatus === 'COMPLETED'
+        ? [eq(schema.tournaments.status, 'COMPLETED')]
+        : []),
       ...(sport ? [eq(schema.categories.slug, sport)] : []),
     ];
 
@@ -473,6 +476,7 @@ export class TournamentCatalogRepository {
       name: tournament.name,
       bannerUrl: tournament.bannerUrl,
       sport: tournament.sport,
+      status: tournament.registrationStatus,
       registrationStatus: tournament.registrationStatus,
     }));
 
@@ -674,6 +678,7 @@ export class TournamentCatalogRepository {
       id: tournament.id,
       name: tournament.name,
       logoUrl: tournament.logoUrl,
+      status: tournament.registrationStatus,
       matches: (matchesByTournament.get(tournament.id) ?? []).map((match) => ({
         id: match.matchId,
         divisionId: match.divisionId,
