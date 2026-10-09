@@ -2,7 +2,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Queue } from 'bullmq';
-import type { RedisService } from '../../providers/redis/redis.service';
+import { RedisService } from '../../providers/redis/redis.service';
 import type { LivestreamHealthJobData } from './livestream-health.processor';
 
 /** Thời gian giữ lease khoá theo camera (SET NX PX). */

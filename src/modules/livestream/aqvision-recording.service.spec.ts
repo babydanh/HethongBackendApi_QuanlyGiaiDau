@@ -1,3 +1,6 @@
+import { Test } from '@nestjs/testing';
+import { getQueueToken } from '@nestjs/bullmq';
+import { RedisService } from '../../providers/redis/redis.service';
 import {
   AqvisionApiClient,
   AqvisionApiException,
@@ -6,8 +9,11 @@ import {
   AqvisionRecordingService,
   type AqvisionRecordFile,
 } from './aqvision-recording.service';
-import type { LivestreamRepository } from './livestream.repository';
-import type { CameraLeaseHandle, LivestreamHealthQueue } from './livestream-health.queue';
+import { LivestreamRepository } from './livestream.repository';
+import {
+  LivestreamHealthQueue,
+  type CameraLeaseHandle,
+} from './livestream-health.queue';
 /**
  * Mock cứng `AqvisionApiClient` (KHÔNG gọi mạng thật).
  * INV-001: KHÔNG log URL/query string — test chỉ kiểm tra payload trả về.
@@ -97,6 +103,32 @@ function expectGetMp4Call(
 }
 
 describe('AqvisionRecordingService', () => {
+  describe('Nest dependency injection', () => {
+    it('resolves the recording service and health queue using class tokens', async () => {
+      const testModule = await Test.createTestingModule({
+        providers: [
+          AqvisionRecordingService,
+          LivestreamHealthQueue,
+          { provide: AqvisionApiClient, useValue: {} },
+          { provide: LivestreamRepository, useValue: {} },
+          {
+            provide: getQueueToken('livestream-health'),
+            useValue: { add: jest.fn() },
+          },
+          { provide: RedisService, useValue: {} },
+        ],
+      }).compile();
+
+      expect(testModule.get(AqvisionRecordingService)).toBeInstanceOf(
+        AqvisionRecordingService,
+      );
+      expect(testModule.get(LivestreamHealthQueue)).toBeInstanceOf(
+        LivestreamHealthQueue,
+      );
+      await testModule.close();
+    });
+  });
+
   describe('listRecordDays', () => {
     it('goi KHONG period => tra danh sach ten thu muc ngay', async () => {
       const getMp4RecordFile = jest
