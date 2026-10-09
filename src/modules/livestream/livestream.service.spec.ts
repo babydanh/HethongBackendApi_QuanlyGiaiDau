@@ -1,6 +1,11 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import { AqvisionApiClient } from './aqvision-api.client';
+import { AqvisionApiClient, AqvisionApiException } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import { AqvisionRecordingService } from './aqvision-recording.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -17,6 +22,15 @@ type RepositoryMock = {
   findMatchLivestream: jest.Mock;
   updateStreamStatus: jest.Mock;
   findStandaloneMatchPlayback: jest.Mock;
+};
+
+type RecordingCatalogService = {
+  listMatchRecordingDays(matchId: string, user: JwtPayload): Promise<string[]>;
+  listMatchRecordings(
+    matchId: string,
+    period: string,
+    user: JwtPayload,
+  ): Promise<{ name: string; sizeBytes?: number }[]>;
 };
 
 const owner: JwtPayload = {
@@ -80,6 +94,8 @@ function makeService(
   };
   const recordingService = {
     reconcileCamera: jest.fn().mockResolvedValue('RECORDING'),
+    listRecordDays: jest.fn().mockResolvedValue([]),
+    listRecordFiles: jest.fn().mockResolvedValue([]),
   };
   const livestreamHealthQueue = {
     runWithCameraLock: jest.fn(
@@ -529,5 +545,155 @@ describe('LivestreamService standalone match playback', () => {
     await expect(
       service.getStandaloneMatchPlayback('match-1', undefined),
     ).resolves.toBeNull();
+  });
+});
+
+describe('LivestreamService match recording catalog', () => {
+  const catalog = (service: LivestreamService) =>
+    service as LivestreamService & RecordingCatalogService;
+
+  it('authorizes the match before any provider catalog read', async () => {
+    const { repository, recordingService, service } = makeService(
+      cameraStreamForRecording,
+    );
+    repository.findMatchWithTournament.mockResolvedValue({
+      ...match,
+      refereeId: 'another-referee',
+    });
+
+    await expect(
+      catalog(service).listMatchRecordingDays('match-1', unrelatedUser),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      catalog(service).listMatchRecordings(
+        'match-1',
+        '2026-10-09',
+        unrelatedUser,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.findMatchLivestream).not.toHaveBeenCalled();
+    expect(recordingService.listRecordDays).not.toHaveBeenCalled();
+    expect(recordingService.listRecordFiles).not.toHaveBeenCalled();
+  });
+
+  it('returns valid unique days newest first for an assigned referee', async () => {
+    const { recordingService, service } = makeService(cameraStreamForRecording);
+    recordingService.listRecordDays.mockResolvedValue([
+      '2026-10-01',
+      'not-a-date',
+      '2026-10-03',
+      '2026-02-30',
+      '2026-10-03',
+      '2026-13-01',
+      '2026-09-30',
+    ]);
+
+    await expect(
+      catalog(service).listMatchRecordingDays('match-1', assignedReferee),
+    ).resolves.toEqual(['2026-10-03', '2026-10-01', '2026-09-30']);
+    expect(recordingService.listRecordDays).toHaveBeenCalledWith(
+      'camera-stream',
+    );
+  });
+
+  it.each(['2026-2-09', '2026-02-30', '2026-13-01', '2026-10-09T00:00:00Z'])(
+    'rejects invalid recording period %s before provider access',
+    async (period) => {
+      const { recordingService, service } = makeService(
+        cameraStreamForRecording,
+      );
+
+      await expect(
+        catalog(service).listMatchRecordings('match-1', period, owner),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(recordingService.listRecordFiles).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns only safe MP4 basenames and non-negative safe integer sizes', async () => {
+    const { recordingService, service } = makeService(cameraStreamForRecording);
+    const providerFileWithMetadata = {
+      name: '20261009_120000.mp4',
+      sizeBytes: 1024,
+      rootPath: 'fixture-private-root',
+      providerPayload: { source: 'fixture-only' },
+    };
+    recordingService.listRecordFiles.mockResolvedValue([
+      providerFileWithMetadata,
+      { name: 'size-zero.mp4', sizeBytes: 0 },
+      { name: 'size-unknown.mp4' },
+      { name: '../private.mp4', sizeBytes: 5 },
+      { name: 'folder/file.mp4', sizeBytes: 5 },
+      { name: 'folder\\private.mp4', sizeBytes: 5 },
+      { name: 'not-video.mov', sizeBytes: 5 },
+      { name: 'control\u0000.mp4', sizeBytes: 5 },
+      { name: 'negative.mp4', sizeBytes: -1 },
+      { name: 'fractional.mp4', sizeBytes: 0.5 },
+      { name: 'unsafe-integer.mp4', sizeBytes: Number.MAX_SAFE_INTEGER + 1 },
+      { name: 'drive:private.mp4', sizeBytes: 5 },
+      { name: null as unknown as string, sizeBytes: 5 },
+      { name: 'wildcard?.mp4', sizeBytes: 5 },
+    ]);
+
+    await expect(
+      catalog(service).listMatchRecordings('match-1', '2026-10-09', owner),
+    ).resolves.toEqual([
+      { name: '20261009_120000.mp4', sizeBytes: 1024 },
+      { name: 'size-zero.mp4', sizeBytes: 0 },
+      { name: 'size-unknown.mp4' },
+      { name: 'negative.mp4' },
+      { name: 'fractional.mp4' },
+      { name: 'unsafe-integer.mp4' },
+    ]);
+    expect(recordingService.listRecordFiles).toHaveBeenCalledWith(
+      'camera-stream',
+      '2026-10-09',
+    );
+  });
+
+  it('returns empty results and does not call the provider without a camera', async () => {
+    const noCamera = makeService(null);
+    await expect(
+      catalog(noCamera.service).listMatchRecordingDays('match-1', owner),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(noCamera.recordingService.listRecordDays).not.toHaveBeenCalled();
+
+    const emptyCatalog = makeService(cameraStreamForRecording);
+    await expect(
+      catalog(emptyCatalog.service).listMatchRecordingDays('match-1', owner),
+    ).resolves.toEqual([]);
+    expect(emptyCatalog.recordingService.listRecordDays).toHaveBeenCalledTimes(
+      1,
+    );
+  });
+
+  it('maps provider listing failures to a generic 503 without exposing the cause', async () => {
+    const secretProviderMessage = 'provider-credential-or-rootPath';
+    const { recordingService, service } = makeService(
+      cameraStreamForRecording,
+    );
+    recordingService.listRecordDays.mockRejectedValue(
+      new AqvisionApiException(-1, secretProviderMessage),
+    );
+    recordingService.listRecordFiles.mockRejectedValue(
+      new AqvisionApiException(-1, secretProviderMessage),
+    );
+
+    for (const error of [
+      await catalog(service)
+        .listMatchRecordingDays('match-1', owner)
+        .catch((caught: unknown) => caught),
+      await catalog(service)
+        .listMatchRecordings('match-1', '2026-10-09', owner)
+        .catch((caught: unknown) => caught),
+    ]) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect((error as ServiceUnavailableException).getStatus()).toBe(503);
+      expect(
+        JSON.stringify(
+          (error as ServiceUnavailableException).getResponse(),
+        ),
+      ).not.toContain(secretProviderMessage);
+    }
   });
 });

@@ -44,6 +44,48 @@ function isMatchStreamControlStatus(
   );
 }
 
+const DAYS_IN_COMMON_YEAR = [
+  31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+] as const;
+
+function isValidRecordingPeriod(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!parts) return false;
+
+  const year = Number(parts[1]);
+  const month = Number(parts[2]);
+  const day = Number(parts[3]);
+  if (year < 1 || month < 1 || month > 12) return false;
+
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = DAYS_IN_COMMON_YEAR[month - 1] ?? 0;
+  const maxDay = month === 2 && leapYear ? 29 : daysInMonth;
+  return day >= 1 && day <= maxDay;
+}
+
+function isSafeRecordingFileName(value: unknown): value is string {
+  if (
+    typeof value !== 'string' ||
+    value === '' ||
+    value === '.' ||
+    value === '..' ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    /[<>:"|?*]/.test(value) ||
+    !/\.mp4$/i.test(value)
+  ) {
+    return false;
+  }
+
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+
+  return true;
+}
+
 @Injectable()
 export class LivestreamService {
   private readonly logger = new Logger(LivestreamService.name);
@@ -912,6 +954,79 @@ export class LivestreamService {
     const streamStatus = hasCamera && isMatchStreamControlStatus(status) ? status : null;
 
     return { matchId, hasCamera, streamStatus };
+  }
+
+  async listMatchRecordingDays(
+    matchId: string,
+    user: JwtPayload,
+  ): Promise<string[]> {
+    const streamName = await this.getRecordingStreamName(matchId, user);
+    try {
+      const days = await this.aqvisionRecordingService.listRecordDays(
+        streamName,
+      );
+      if (!Array.isArray(days)) return [];
+
+      return [...new Set(days.filter(isValidRecordingPeriod))].sort((a, b) =>
+        a < b ? 1 : a > b ? -1 : 0,
+      );
+    } catch (error) {
+      if (error instanceof AqvisionApiException) {
+        throw new ServiceUnavailableException(
+          'Không thể tải danh sách bản ghi MP4.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async listMatchRecordings(
+    matchId: string,
+    period: string,
+    user: JwtPayload,
+  ): Promise<{ name: string; sizeBytes?: number }[]> {
+    const streamName = await this.getRecordingStreamName(matchId, user);
+    if (!isValidRecordingPeriod(period)) {
+      throw new BadRequestException('Ngày ghi MP4 không hợp lệ.');
+    }
+
+    try {
+      const files = await this.aqvisionRecordingService.listRecordFiles(
+        streamName,
+        period,
+      );
+      if (!Array.isArray(files)) return [];
+
+      return files.flatMap((file) => {
+        if (!file || !isSafeRecordingFileName(file.name)) return [];
+        return typeof file.sizeBytes === 'number' &&
+          Number.isSafeInteger(file.sizeBytes) &&
+          file.sizeBytes >= 0
+          ? [{ name: file.name, sizeBytes: file.sizeBytes }]
+          : [{ name: file.name }];
+      });
+    } catch (error) {
+      if (error instanceof AqvisionApiException) {
+        throw new ServiceUnavailableException(
+          'Không thể tải danh sách bản ghi MP4.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async getRecordingStreamName(
+    matchId: string,
+    user: JwtPayload,
+  ): Promise<string> {
+    await this.assertCanControlMatchStream(matchId, user);
+    const stream = this.normalizeStream(
+      await this.livestreamRepository.findMatchLivestream(matchId),
+    );
+    if (!stream?.cameraId || !stream.streamName?.trim()) {
+      throw new NotFoundException('Trận này chưa có camera livestream.');
+    }
+    return stream.streamName;
   }
 
   async startMatchStream(matchId: string, user: JwtPayload) {

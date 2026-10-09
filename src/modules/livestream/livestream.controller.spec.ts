@@ -124,4 +124,37 @@ describe('LivestreamController match stream control state route', () => {
       value: 'private, no-store',
     });
   });
+
+  it.each([
+    ['getMatchRecordingDays', 'matches/:matchId/recording-days'],
+    ['getMatchRecordings', 'matches/:matchId/recordings'],
+  ])('declares %s as an authenticated private GET route', (method, route) => {
+    const handler = Object.getOwnPropertyDescriptor(
+      LivestreamController.prototype,
+      method,
+    )?.value as object | undefined;
+
+    if (!handler) throw new Error(`Missing controller handler: ${method}`);
+
+    const path = Reflect.getMetadata(PATH_METADATA, handler) as
+      | string
+      | undefined;
+    const requestMethod = Reflect.getMetadata(METHOD_METADATA, handler) as
+      | RequestMethod
+      | undefined;
+    const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, handler) as
+      | boolean
+      | undefined;
+    const headers = Reflect.getMetadata(HEADERS_METADATA, handler) as
+      | { name: string; value: string }[]
+      | undefined;
+
+    expect(path).toBe(route);
+    expect(requestMethod).toBe(RequestMethod.GET);
+    expect(isPublic).not.toBe(true);
+    expect(headers).toContainEqual({
+      name: 'Cache-Control',
+      value: 'private, no-store',
+    });
+  });
 });
