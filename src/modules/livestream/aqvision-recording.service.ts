@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AqvisionApiClient } from './aqvision-api.client';
-import type { LivestreamRepository } from './livestream.repository';
-import type { CameraLeaseHandle, LivestreamHealthQueue } from './livestream-health.queue';
+import { LivestreamRepository } from './livestream.repository';
+import {
+  LivestreamHealthQueue,
+  type CameraLeaseHandle,
+} from './livestream-health.queue';
 
 /**
  * Trạng thái ghi MP4 của một camera theo góc nhìn điều phối:
