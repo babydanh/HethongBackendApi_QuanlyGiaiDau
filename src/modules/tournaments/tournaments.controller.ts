@@ -53,6 +53,7 @@ import {
   AddAthleteCandidateDto,
   AddAthleteDirectDto,
   ListAddAthleteCandidatesQueryDto,
+  SearchAddAthleteCandidatesDto,
 } from './dto/add-athlete.dto';
 
 import { AddRefereeDto } from './dto/add-referee.dto';
@@ -1602,6 +1603,26 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.listAddAthleteCandidates(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/add-athletes/search')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({ summary: 'Tìm tài khoản VĐV theo tên hoặc email' })
+  async searchAddAthleteCandidates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SearchAddAthleteCandidatesDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.searchAddAthleteCandidates(
       id,
       user.sub,
       this.getSystemRoles(user),

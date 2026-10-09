@@ -391,6 +391,29 @@ describe('TournamentImportService organizer add-athlete flow', () => {
     userId: 'athlete-1',
     tournamentDivisionId: 'division-1',
   });
+  it('accepts EMAIL only as an account-add source', async () => {
+    const mutation = Object.assign(new AddAthleteCandidateDto(), {
+      source: 'EMAIL',
+      userId: '00000000-0000-4000-8000-000000000001',
+    });
+    const list = Object.assign(new ListAddAthleteCandidatesQueryDto(), {
+      source: 'EMAIL',
+    });
+
+    expect(await validate(mutation)).toHaveLength(0);
+    expect((await validate(list)).some((error) => error.property === 'source'))
+      .toBe(true);
+  });
+
+  it('validates the optional guest contact email', async () => {
+    const dto = Object.assign(new AddAthleteDirectDto(), {
+      name: 'VĐV khách',
+      email: 'not-an-email',
+    });
+
+    expect((await validate(dto)).some((error) => error.property === 'email'))
+      .toBe(true);
+  });
   it('requires an explicit football role when adding to an existing team', async () => {
     const candidate = Object.assign(new AddAthleteCandidateDto(), {
       source: 'FRIENDS',

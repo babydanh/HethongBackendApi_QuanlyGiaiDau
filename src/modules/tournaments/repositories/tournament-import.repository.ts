@@ -13,6 +13,7 @@ import {
   asc,
   eq,
   exists,
+  ilike,
   inArray,
   isNull,
   like,
@@ -22,6 +23,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 import {
   assertCapacityHasRoom,
@@ -51,7 +53,9 @@ import type {
   AddAthleteCandidate,
   AddAthleteCandidateDto,
   AddAthleteDirectDto,
+  AddAthleteSearchCandidate,
   ListAddAthleteCandidatesQueryDto,
+  SearchAddAthleteCandidatesDto,
 } from '../dto/add-athlete.dto';
 
 const INACTIVE_PARTICIPANT_STATUSES = [
@@ -249,54 +253,12 @@ export class TournamentImportRepository {
     communityId: string | null,
     dto: ListAddAthleteCandidatesQueryDto,
   ): Promise<{ items: AddAthleteCandidate[] }> {
-    let teamId: string | undefined;
-    if (dto.participantId) {
-      const [target] = await this.db
-        .select({
-          teamId: schema.tournamentParticipants.footballTeamId,
-          teamStatus: schema.tournamentParticipants.teamStatus,
-          rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
-          entryStatus: schema.tournamentTeamEntries.status,
-        })
-        .from(schema.tournamentParticipants)
-        .innerJoin(
-          schema.tournamentTeamEntries,
-          and(
-            eq(
-              schema.tournamentTeamEntries.tournamentId,
-              schema.tournamentParticipants.tournamentId,
-            ),
-            eq(
-              schema.tournamentTeamEntries.divisionId,
-              schema.tournamentParticipants.tournamentDivisionId,
-            ),
-            eq(
-              schema.tournamentTeamEntries.teamId,
-              schema.tournamentParticipants.footballTeamId,
-            ),
-          ),
+    const teamId = dto.participantId
+      ? await this.resolveEditableFootballTeamId(
+          tournamentId,
+          dto.participantId,
         )
-        .where(
-          and(
-            eq(schema.tournamentParticipants.id, dto.participantId),
-            eq(schema.tournamentParticipants.tournamentId, tournamentId),
-          ),
-        )
-        .limit(1);
-      if (
-        !target?.teamId ||
-        target.rosterLockedAt ||
-        !['PENDING', 'PENDING_APPROVAL', 'COMPLETE', 'APPROVED'].includes(
-          target.teamStatus,
-        ) ||
-        !['DRAFT', 'PENDING_CONFIRMATION', 'CONFIRMED'].includes(
-          target.entryStatus,
-        )
-      ) {
-        throw new BadRequestException('Roster đội bóng không thể cập nhật.');
-      }
-      teamId = target.teamId;
-    }
+      : undefined;
 
     if (dto.source === 'CLUB' && !communityId) {
       return { items: [] };
@@ -412,6 +374,222 @@ export class TournamentImportRepository {
         ...(dto.source === 'CLUB' ? { logoUrl } : {}),
       })),
     };
+  }
+  async searchAddAthleteCandidates(
+    tournamentId: string,
+    organizerId: string,
+    dto: SearchAddAthleteCandidatesDto,
+  ): Promise<{ items: AddAthleteSearchCandidate[] }> {
+    const emailSearch = dto.email?.trim();
+    const nameSearch = dto.name?.trim();
+    const teamId = dto.participantId
+      ? await this.resolveEditableFootballTeamId(
+          tournamentId,
+          dto.participantId,
+        )
+      : undefined;
+    const activeTeamMembership = teamId
+      ? this.db
+          .select({ id: schema.footballTeamMembers.id })
+          .from(schema.footballTeamMembers)
+          .where(
+            and(
+              eq(schema.footballTeamMembers.teamId, teamId),
+              eq(schema.footballTeamMembers.userId, schema.users.id),
+              eq(schema.footballTeamMembers.status, 'ACTIVE'),
+            ),
+          )
+      : undefined;
+    const trimmedName = sql<string>`btrim(${schema.profiles.fullName})`;
+
+    if (emailSearch) {
+      const rows = await this.db
+        .select({
+          userId: schema.users.id,
+          fullName: trimmedName,
+          email: schema.users.email,
+          avatarUrl: schema.profiles.avatarUrl,
+        })
+        .from(schema.users)
+        .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+        .where(
+          and(
+            eligibleRosterAccountCondition(this.db),
+            eq(schema.users.isEmailVerified, true),
+            sql`btrim(${schema.profiles.fullName}) <> ''`,
+            ilike(
+              schema.users.email,
+              `%${escapeLikeQuery(emailSearch)}%`,
+            ),
+            activeTeamMembership ? exists(activeTeamMembership) : undefined,
+          ),
+        )
+        .orderBy(
+          asc(sql`lower(${schema.users.email})`),
+          asc(schema.users.id),
+        )
+        .limit(10);
+
+      return {
+        items: rows.map(
+          ({ userId, fullName, email, avatarUrl }) => ({
+            userId,
+            fullName,
+            email,
+            avatarUrl,
+            sources: ['EMAIL'],
+          }),
+        ),
+      };
+    }
+    if (!nameSearch) return { items: [] };
+
+    const friendship = this.db
+      .select({ id: schema.friendships.id })
+      .from(schema.friendships)
+      .where(
+        and(
+          eq(schema.friendships.status, 'ACCEPTED'),
+          isNull(schema.friendships.deletedAt),
+          or(
+            and(
+              eq(schema.friendships.senderId, organizerId),
+              eq(schema.friendships.receiverId, schema.users.id),
+            ),
+            and(
+              eq(schema.friendships.receiverId, organizerId),
+              eq(schema.friendships.senderId, schema.users.id),
+            ),
+          ),
+        ),
+      );
+    const organizerMembership = alias(
+      schema.communityMembers,
+      'organizer_community_membership',
+    );
+    const communityMembership = this.db
+      .select({ id: schema.communityMembers.id })
+      .from(schema.communityMembers)
+      .innerJoin(
+        organizerMembership,
+        and(
+          eq(
+            organizerMembership.communityId,
+            schema.communityMembers.communityId,
+          ),
+          eq(organizerMembership.userId, organizerId),
+          eq(organizerMembership.status, 'JOINED'),
+        ),
+      )
+      .innerJoin(
+        schema.communities,
+        eq(schema.communities.id, schema.communityMembers.communityId),
+      )
+      .where(
+        and(
+          eq(schema.communityMembers.userId, schema.users.id),
+          eq(schema.communityMembers.status, 'JOINED'),
+          eq(schema.communities.status, 'ACTIVE'),
+          isNull(schema.communities.deletedAt),
+        ),
+      );
+    const rows = await this.db
+      .select({
+        userId: schema.users.id,
+        fullName: trimmedName,
+        email: schema.users.email,
+        avatarUrl: schema.profiles.avatarUrl,
+        isFriend: exists(friendship),
+        isClub: exists(communityMembership),
+      })
+      .from(schema.users)
+      .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+      .where(
+        and(
+          eligibleRosterAccountCondition(this.db),
+          sql`btrim(${schema.profiles.fullName}) <> ''`,
+          ilike(
+            schema.profiles.fullName,
+            `%${escapeLikeQuery(nameSearch)}%`,
+          ),
+          or(exists(friendship), exists(communityMembership)),
+          activeTeamMembership ? exists(activeTeamMembership) : undefined,
+        ),
+      )
+      .orderBy(asc(sql`lower(${trimmedName})`), asc(schema.users.id))
+      .limit(10);
+
+    const candidates = new Map<string, AddAthleteSearchCandidate>();
+    for (const row of rows) {
+      const sources: AddAthleteSearchCandidate['sources'] = [];
+      if (row.isFriend) sources.push('FRIENDS');
+      if (row.isClub) sources.push('CLUB');
+      const existing = candidates.get(row.userId);
+      if (existing) {
+        existing.sources = [...new Set([...existing.sources, ...sources])];
+        continue;
+      }
+      candidates.set(row.userId, {
+        userId: row.userId,
+        fullName: row.fullName,
+        email: row.email,
+        avatarUrl: row.avatarUrl,
+        sources,
+      });
+    }
+
+    return { items: [...candidates.values()] };
+  }
+
+  private async resolveEditableFootballTeamId(
+    tournamentId: string,
+    participantId: string,
+  ): Promise<string> {
+    const [target] = await this.db
+      .select({
+        teamId: schema.tournamentParticipants.footballTeamId,
+        teamStatus: schema.tournamentParticipants.teamStatus,
+        rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
+        entryStatus: schema.tournamentTeamEntries.status,
+      })
+      .from(schema.tournamentParticipants)
+      .innerJoin(
+        schema.tournamentTeamEntries,
+        and(
+          eq(
+            schema.tournamentTeamEntries.tournamentId,
+            schema.tournamentParticipants.tournamentId,
+          ),
+          eq(
+            schema.tournamentTeamEntries.divisionId,
+            schema.tournamentParticipants.tournamentDivisionId,
+          ),
+          eq(
+            schema.tournamentTeamEntries.teamId,
+            schema.tournamentParticipants.footballTeamId,
+          ),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.tournamentParticipants.id, participantId),
+          eq(schema.tournamentParticipants.tournamentId, tournamentId),
+        ),
+      )
+      .limit(1);
+    if (
+      !target?.teamId ||
+      target.rosterLockedAt ||
+      !['PENDING', 'PENDING_APPROVAL', 'COMPLETE', 'APPROVED'].includes(
+        target.teamStatus,
+      ) ||
+      !['DRAFT', 'PENDING_CONFIRMATION', 'CONFIRMED'].includes(
+        target.entryStatus,
+      )
+    ) {
+      throw new BadRequestException('Roster đội bóng không thể cập nhật.');
+    }
+    return target.teamId;
   }
 
   async addAthleteCandidate(
@@ -563,7 +741,10 @@ export class TournamentImportRepository {
           teamName: dto.name,
           entryFeeAtRegistration,
           teamStatus: 'PENDING_APPROVAL',
-          customResponses: { importedFrom: 'ORGANIZER_DIRECT' },
+          customResponses: {
+            importedFrom: 'ORGANIZER_DIRECT',
+            ...(dto.email ? { player1Email: dto.email } : {}),
+          },
         })
         .returning();
 
@@ -618,6 +799,25 @@ export class TournamentImportRepository {
     source: AddAthleteCandidateDto['source'],
     candidateId: string,
   ): Promise<void> {
+    if (source === 'EMAIL') {
+      const [account] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.id, candidateId),
+            eq(schema.users.isEmailVerified, true),
+            eligibleRosterAccountCondition(tx),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!account) {
+        throw new ConflictException('Tài khoản không còn đủ điều kiện.');
+      }
+      return;
+    }
+
     if (source === 'FRIENDS') {
       const [friendship] = await tx
         .select({ id: schema.friendships.id })

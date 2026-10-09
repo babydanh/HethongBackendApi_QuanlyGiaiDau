@@ -1856,6 +1856,25 @@ export class TournamentParticipantRepository {
     source: AddAthleteCandidateDto['source'],
     candidateId: string,
   ): Promise<void> {
+    if (source === 'EMAIL') {
+      const [account] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.id, candidateId),
+            eq(schema.users.isEmailVerified, true),
+            eligibleRosterAccountCondition(tx),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!account) {
+        throw new ConflictException('Tài khoản không còn đủ điều kiện.');
+      }
+      return;
+    }
+
     if (source === 'FRIENDS') {
       const [friendship] = await tx
         .select({ id: schema.friendships.id })

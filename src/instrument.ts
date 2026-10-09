@@ -33,10 +33,39 @@ if (dsn) {
     tracesSampleRate: getSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE),
     sendDefaultPii: false,
     beforeSend(event) {
-      const locationRequest = /\/(social-sessions|socials)\/nearby|\/regions\/resolve/.test(event.request?.url ?? '');
+      const requestUrl = event.request?.url ?? '';
+      const locationRequest = /\/(social-sessions|socials)\/nearby|\/regions\/resolve/.test(requestUrl);
+      const addAthleteRequest =
+        /\/tournaments\/[^/]+\/add-athletes(?:\/|$)/.test(requestUrl);
       if (event.request?.url) {
         try { event.request.url = new URL(event.request.url).origin + new URL(event.request.url).pathname; }
         catch { event.request.url = event.request.url.split('?')[0]; }
+      }
+      if (addAthleteRequest) {
+        if (event.request) {
+          event.request.data = '[Filtered]';
+          delete event.request.query_string;
+          delete event.request.headers;
+          delete event.request.cookies;
+        }
+        delete event.user;
+        delete event.extra;
+        delete event.contexts;
+        delete event.tags;
+        event.breadcrumbs = [];
+        if (event.exception?.values) {
+          event.exception.values = event.exception.values.map((value) => ({
+            ...value,
+            value: 'Add Athlete request failed',
+          }));
+        }
+        if (event.message) event.message = 'Add Athlete request failed';
+        if (event.logentry) {
+          event.logentry.message = 'Add Athlete request failed';
+          delete event.logentry.formatted;
+          delete event.logentry.params;
+        }
+        return event;
       }
       if (event.request) {
         delete event.request.query_string;

@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsDefined,
+  IsEmail,
   IsIn,
   IsInt,
   IsOptional,
@@ -15,8 +16,36 @@ import {
 
 export const ADD_ATHLETE_SOURCES = ['FRIENDS', 'CLUB'] as const;
 export type AddAthleteSource = (typeof ADD_ATHLETE_SOURCES)[number];
+export const ADD_ATHLETE_MUTATION_SOURCES = [
+  ...ADD_ATHLETE_SOURCES,
+  'EMAIL',
+] as const;
+export type AddAthleteMutationSource =
+  (typeof ADD_ATHLETE_MUTATION_SOURCES)[number];
 export const FOOTBALL_ROSTER_ROLES = ['MAIN', 'RESERVE'] as const;
 export type FootballRosterRole = (typeof FOOTBALL_ROSTER_ROLES)[number];
+
+export class SearchAddAthleteCandidatesDto {
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || undefined : value,
+  )
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || undefined : value,
+  )
+  @IsString()
+  @MaxLength(254)
+  email?: string;
+
+  @IsOptional()
+  @IsUUID()
+  participantId?: string;
+}
 
 export class ListAddAthleteCandidatesQueryDto {
   @IsIn(ADD_ATHLETE_SOURCES)
@@ -43,8 +72,8 @@ export class ListAddAthleteCandidatesQueryDto {
 }
 
 export class AddAthleteCandidateDto {
-  @IsIn(ADD_ATHLETE_SOURCES)
-  source: AddAthleteSource;
+  @IsIn(ADD_ATHLETE_MUTATION_SOURCES)
+  source: AddAthleteMutationSource;
 
   @IsUUID()
   userId: string;
@@ -73,6 +102,14 @@ export class AddAthleteDirectDto {
   name: string;
 
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || undefined : value,
+  )
+  @IsEmail()
+  @MaxLength(254)
+  email?: string;
+
+  @IsOptional()
   @IsUUID()
   tournamentDivisionId?: string;
 }
@@ -82,6 +119,10 @@ export interface AddAthleteCandidate {
   fullName: string;
   avatarUrl?: string | null;
   logoUrl?: string | null;
+}
+export interface AddAthleteSearchCandidate extends AddAthleteCandidate {
+  email: string;
+  sources: AddAthleteMutationSource[];
 }
 
 export interface AddedTournamentParticipant {
