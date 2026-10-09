@@ -1128,6 +1128,67 @@ describe('SocialSessionsService', () => {
   });
 
   describe('geolocation', () => {
+    it('creates a session with deferred location and no coordinates', async () => {
+      const session = baseSession({
+        communityId: null,
+        venueName: 'Quyết định sau',
+        venueAddress: 'Quyết định sau',
+      });
+      repository.createWithHost.mockResolvedValue({
+        ok: true,
+        session,
+        replayed: false,
+      });
+      repository.findSessionById.mockResolvedValue({
+        session,
+        communityName: null,
+        communityLogoUrl: null,
+        categorySlug: 'pickleball',
+        categoryName: 'Pickleball',
+      });
+      repository.listParticipants.mockResolvedValue([]);
+
+      await service.create(
+        { id: HOST_ID },
+        baseCreateDto({
+          latitude: undefined,
+          longitude: undefined,
+          locationDeferred: true,
+        }),
+      );
+
+      expect(repository.createWithHost.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          venueName: 'Quyết định sau',
+          venueAddress: 'Quyết định sau',
+          latitude: null,
+          longitude: null,
+          venueId: null,
+        }),
+      );
+      const prepareValues = repository.createWithHost.mock.calls[0][3]!;
+      const regionResolveCount = (regionsStub.resolveByPoint as jest.Mock).mock.calls.length;
+      const prepared = await prepareValues({} as never);
+      expect(prepared).toEqual(expect.objectContaining({
+        venueName: 'Quyết định sau',
+        venueAddress: 'Quyết định sau',
+        latitude: null,
+        longitude: null,
+      }));
+      expect((regionsStub.resolveByPoint as jest.Mock).mock.calls).toHaveLength(regionResolveCount);
+    });
+
+    it('rejects a deferred request that also specifies a venue', async () => {
+      await expect(
+        service.create(
+          { id: HOST_ID },
+          baseCreateDto({ locationDeferred: true }),
+        ),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'DEFERRED_LOCATION_CONFLICT' }),
+      });
+    });
+
     it('requires a pin for new Social sessions', async () => {
       await expect(service.create({ id: HOST_ID }, baseCreateDto({ latitude: undefined, longitude: undefined })))
         .rejects.toMatchObject({ response: expect.objectContaining({ code: 'LOCATION_REQUIRED' }) });
