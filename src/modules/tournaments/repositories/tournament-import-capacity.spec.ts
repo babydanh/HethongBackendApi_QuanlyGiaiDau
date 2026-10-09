@@ -613,10 +613,14 @@ function addAthleteQueues(options: {
   occupancyRows: Row[];
   divisionLimit?: number;
   emailAccount?: Row[];
+  tournamentCommunityId?: string | null;
 }): Record<string, Row[][]> {
   const tournament: Row = {
     id: 'tournament-1',
-    communityId: 'community-1',
+    communityId:
+      options.tournamentCommunityId !== undefined
+        ? options.tournamentCommunityId
+        : 'community-1',
     status: 'REGISTRATION_OPEN',
     isRegistrationLocked: false,
     matchType: 'SINGLES',
@@ -695,6 +699,79 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
         },
       ],
     });
+  });
+  it('lists organizer club members for public tournaments without a linked community', async () => {
+    const harness = createHarness({
+      'communities+communityMembers': [[{ id: 'shared-club-membership' }]],
+      'communities+profiles+users': [
+        [
+          {
+            userId: 'club-athlete',
+            fullName: 'Club athlete',
+            avatarUrl: null,
+          },
+        ],
+      ],
+    });
+
+    const result = await createAddAthleteRepository(harness.tx)
+      .listAddAthleteCandidates(
+        'tournament-public',
+        'organizer-1',
+        null,
+        Object.assign(new ListAddAthleteCandidatesQueryDto(), {
+          source: 'CLUB',
+        }),
+      );
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        userId: 'club-athlete',
+        fullName: 'Club athlete',
+      }),
+    ]);
+    const organizerMembershipPredicate = harness.whereConditions
+      .filter(({ key }) => key === 'communities+communityMembers')
+      .map(({ predicate }) => dialect.sqlToQuery(predicate))
+      .find(({ params }) => params.includes('organizer-1'));
+    expect(organizerMembershipPredicate).toBeDefined();
+    expect(organizerMembershipPredicate!.params).toEqual(
+      expect.arrayContaining(['organizer-1', 'JOINED', 'ACTIVE']),
+    );
+    expect(organizerMembershipPredicate!.sql).toContain('deleted_at');
+  });
+  it('revalidates organizer-club membership for public tournament adds', async () => {
+    const harness = createHarness(
+      addAthleteQueues({
+        source: 'CLUB',
+        relationRows: [{ id: 'shared-club-membership' }],
+        duplicateRows: [],
+        occupancyRows: [],
+        tournamentCommunityId: null,
+      }),
+    );
+    const dto = Object.assign(new AddAthleteCandidateDto(), {
+      ...candidateDto,
+      source: 'CLUB',
+    });
+
+    const result = await createAddAthleteRepository(harness.tx)
+      .addAthleteCandidate('tournament-1', 'organizer-1', dto);
+
+    expect(result.participant).toHaveProperty(
+      'teamName',
+      'VĐV thử nghiệm',
+    );
+    expect(harness.inserts.filter(({ table }) => table === 'rosters'))
+      .toHaveLength(1);
+    const membershipPredicate = harness.whereConditions.find(
+      ({ key }) => key === 'communities+communityMembers',
+    )?.predicate;
+    expect(membershipPredicate).toBeDefined();
+    const query = dialect.sqlToQuery(membershipPredicate!);
+    expect(query.params).toEqual(
+      expect.arrayContaining(['organizer-1', 'JOINED', 'ACTIVE']),
+    );
   });
 
   it.each([['FRIENDS'], ['CLUB']] as const)(

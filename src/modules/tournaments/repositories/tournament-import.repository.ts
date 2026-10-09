@@ -260,9 +260,6 @@ export class TournamentImportRepository {
         )
       : undefined;
 
-    if (dto.source === 'CLUB' && !communityId) {
-      return { items: [] };
-    }
 
     const friendship = this.db
       .select({ id: schema.friendships.id })
@@ -295,6 +292,34 @@ export class TournamentImportRepository {
           eq(schema.communityMembers.communityId, communityId ?? ''),
           eq(schema.communityMembers.userId, schema.users.id),
           eq(schema.communityMembers.status, 'JOINED'),
+          eq(schema.communities.status, 'ACTIVE'),
+          isNull(schema.communities.deletedAt),
+        ),
+      );
+    const organizerMembership = alias(
+      schema.communityMembers,
+      'organizer_community_membership',
+    );
+    const organizerCommunityMembership = this.db
+      .select({ id: schema.communityMembers.id })
+      .from(schema.communityMembers)
+      .innerJoin(
+        organizerMembership,
+        eq(
+          organizerMembership.communityId,
+          schema.communityMembers.communityId,
+        ),
+      )
+      .innerJoin(
+        schema.communities,
+        eq(schema.communities.id, schema.communityMembers.communityId),
+      )
+      .where(
+        and(
+          eq(schema.communityMembers.userId, schema.users.id),
+          eq(schema.communityMembers.status, 'JOINED'),
+          eq(organizerMembership.userId, organizerId),
+          eq(organizerMembership.status, 'JOINED'),
           eq(schema.communities.status, 'ACTIVE'),
           isNull(schema.communities.deletedAt),
         ),
@@ -354,7 +379,9 @@ export class TournamentImportRepository {
           dto.source === 'FRIENDS' ? ne(schema.users.id, organizerId) : undefined,
           dto.source === 'FRIENDS'
             ? exists(friendship)
-            : exists(communityMembership),
+            : communityId
+              ? exists(communityMembership)
+              : exists(organizerCommunityMembership),
           search
             ? like(
                 schema.profiles.fullName,
@@ -846,28 +873,62 @@ export class TournamentImportRepository {
       return;
     }
 
-    if (!communityId) {
-      throw new ConflictException('Thành viên CLB không còn hợp lệ.');
+    if (communityId) {
+      const [membership] = await tx
+        .select({ id: schema.communityMembers.id })
+        .from(schema.communityMembers)
+        .innerJoin(
+          schema.communities,
+          eq(schema.communities.id, schema.communityMembers.communityId),
+        )
+        .where(
+          and(
+            eq(schema.communityMembers.communityId, communityId),
+            eq(schema.communityMembers.userId, candidateId),
+            eq(schema.communityMembers.status, 'JOINED'),
+            eq(schema.communities.status, 'ACTIVE'),
+            isNull(schema.communities.deletedAt),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!membership) {
+        throw new ConflictException('Thành viên CLB không còn hợp lệ.');
+      }
+      return;
     }
-    const [membership] = await tx
+
+    const organizerMembership = alias(
+      schema.communityMembers,
+      'organizer_community_membership',
+    );
+    const [sharedMembership] = await tx
       .select({ id: schema.communityMembers.id })
       .from(schema.communityMembers)
+      .innerJoin(
+        organizerMembership,
+        eq(
+          organizerMembership.communityId,
+          schema.communityMembers.communityId,
+        ),
+      )
       .innerJoin(
         schema.communities,
         eq(schema.communities.id, schema.communityMembers.communityId),
       )
       .where(
         and(
-          eq(schema.communityMembers.communityId, communityId),
           eq(schema.communityMembers.userId, candidateId),
           eq(schema.communityMembers.status, 'JOINED'),
+          eq(organizerMembership.userId, organizerId),
+          eq(organizerMembership.status, 'JOINED'),
           eq(schema.communities.status, 'ACTIVE'),
           isNull(schema.communities.deletedAt),
         ),
       )
       .for('update')
       .limit(1);
-    if (!membership) {
+    if (!sharedMembership) {
       throw new ConflictException('Thành viên CLB không còn hợp lệ.');
     }
   }
