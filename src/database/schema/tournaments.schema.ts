@@ -217,6 +217,7 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   }).default('0.00').notNull(),
   teamInviteToken: varchar('team_invite_token', { length: 50 }).unique(),
   teamStatus: varchar('team_status', { length: 50 }).default('PENDING').notNull(),
+  pairingSource: varchar('pairing_source', { length: 20 }).default('UNKNOWN').notNull(),
   partnerUserId: uuid('partner_user_id').references(() => users.id, { onDelete: 'restrict' }),
   partnerInviteExpiresAt: timestamp('partner_invite_expires_at', { withTimezone: true }),
   isMock: boolean('is_mock').default(false).notNull(),
@@ -236,6 +237,10 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   idxParticipantsDivisionStatus: index(
     'idx_participants_division_status',
   ).on(table.tournamentDivisionId, table.teamStatus),
+  pairingSourceCheck: check(
+    'tournament_participants_pairing_source_check',
+    sql`${table.pairingSource} in ('UNKNOWN', 'MANUAL', 'SYSTEM')`,
+  ),
 }));
 
 export const tournamentRosters = pgTable('tournament_rosters', {
