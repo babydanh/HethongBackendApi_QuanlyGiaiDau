@@ -13,7 +13,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { FacebookPageConnectionService } from './facebook-page-connection.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
@@ -465,6 +465,45 @@ export class LivestreamController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.livestreamService.stopMatchStream(matchId, user);
+  }
+
+  @Header('Cache-Control', 'private, no-store')
+  @Get('matches/:matchId/recording-days')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Liệt kê ngày có bản ghi MP4 của trận',
+    description:
+      'Chỉ trả ngày hợp lệ; yêu cầu quyền điều khiển trận và không trả đường dẫn hoặc URL phát/tải.',
+  })
+  getMatchRecordingDays(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.listMatchRecordingDays(matchId, user);
+  }
+
+  @Header('Cache-Control', 'private, no-store')
+  @Get('matches/:matchId/recordings')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiQuery({
+    name: 'period',
+    required: true,
+    type: String,
+    example: '2026-10-09',
+  })
+  @ApiOperation({
+    summary: 'Liệt kê metadata file MP4 trong một ngày của trận',
+    description:
+      'Chỉ trả tên file MP4 an toàn và dung lượng tùy chọn; không trả rootPath hoặc URL phát/tải.',
+  })
+  getMatchRecordings(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Query('period') period: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.listMatchRecordings(matchId, period, user);
   }
 
   @Public()
