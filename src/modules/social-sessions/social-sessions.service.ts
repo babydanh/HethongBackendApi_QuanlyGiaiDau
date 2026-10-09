@@ -235,7 +235,11 @@ export class SocialSessionsService {
 
   async create(actor: Actor, dto: CreateSocialSessionDto, idempotencyKey?: string) {
     const categoryId = await this.resolveCategoryId(dto.sport);
-    if (!dto.venueId && !dto.newVenue) {
+    const locationDeferred = dto.locationDeferred === true;
+    if (locationDeferred && (dto.venueId || dto.newVenue || dto.latitude != null || dto.longitude != null || dto.courtId)) {
+      apiError(BadRequestException, 'DEFERRED_LOCATION_CONFLICT');
+    }
+    if (!locationDeferred && !dto.venueId && !dto.newVenue) {
       assertLocationPair(dto.latitude, dto.longitude);
       if (dto.latitude == null && dto.longitude == null) {
         apiError(BadRequestException, 'LOCATION_REQUIRED');
@@ -247,7 +251,7 @@ export class SocialSessionsService {
       ? { name: dto.venueName.trim(), locationAddress: dto.venueAddress.trim(), latitude: dto.latitude, longitude: dto.longitude }
       : undefined;
     const newVenue = dto.newVenue ?? legacyNewVenue;
-    if (Boolean(dto.venueId) === Boolean(newVenue)) apiError(BadRequestException, 'SELECT_EXACTLY_ONE_VENUE_SOURCE');
+    if (!locationDeferred && Boolean(dto.venueId) === Boolean(newVenue)) apiError(BadRequestException, 'SELECT_EXACTLY_ONE_VENUE_SOURCE');
     if (newVenue) assertLocationPair(newVenue.latitude, newVenue.longitude);
     if (dto.communityId) {
       const community = await this.repository.findCommunityById(dto.communityId);
@@ -272,7 +276,7 @@ export class SocialSessionsService {
           .update(
             JSON.stringify({
               version: 2,
-              locationMode: dto.venueId ? 'venueId' : 'newVenue',
+              locationMode: locationDeferred ? 'deferred' : dto.venueId ? 'venueId' : 'newVenue',
               locationIntent: dto.venueId ?? (newVenue ? {
                 name: newVenue.name.trim().toLocaleLowerCase('vi'),
                 locationAddress: newVenue.locationAddress.trim().toLocaleLowerCase('vi'),
@@ -351,9 +355,9 @@ export class SocialSessionsService {
     const venue = dto.venueId ? await this.repository.findVenueById(dto.venueId) : null;
     if (dto.venueId && !venue) apiError(BadRequestException, 'VENUE_NOT_FOUND');
     if (venue && (venue.latitude == null || venue.longitude == null)) apiError(BadRequestException, 'VENUE_LOCATION_REQUIRED');
-    const latitude = venue?.latitude ?? newVenue?.latitude;
-    const longitude = venue?.longitude ?? newVenue?.longitude;
-    if (latitude == null || longitude == null) apiError(BadRequestException, 'LOCATION_REQUIRED');
+    const latitude = venue?.latitude ?? newVenue?.latitude ?? null;
+    const longitude = venue?.longitude ?? newVenue?.longitude ?? null;
+    if (!locationDeferred && (latitude == null || longitude == null)) apiError(BadRequestException, 'LOCATION_REQUIRED');
     if (dto.courtId && !dto.venueId) {
       apiError(BadRequestException, 'COURT_REQUIRES_VENUE');
     }
@@ -372,8 +376,8 @@ export class SocialSessionsService {
       playDate: toPlayDate(dto.startAt),
       startAt,
       durationMinutes: dto.durationMinutes ?? 120,
-      venueName: venue?.name || dto.venueName?.trim() || newVenue!.name.trim(),
-      venueAddress: venue?.locationAddress || dto.venueAddress?.trim() || newVenue!.locationAddress.trim(),
+      venueName: locationDeferred ? 'Quyết định sau' : venue?.name || dto.venueName?.trim() || newVenue!.name.trim(),
+      venueAddress: locationDeferred ? 'Quyết định sau' : venue?.locationAddress || dto.venueAddress?.trim() || newVenue!.locationAddress.trim(),
       latitude,
       longitude,
       provinceCode: null,
@@ -393,7 +397,9 @@ export class SocialSessionsService {
     values.creationIdempotencyKey = key ?? null;
     values.creationFingerprint = fingerprint;
     const outcome = await this.repository.createWithHost(values, actor.id, this.repository.getDb(), async (tx: AppDbOrTx) => {
-      const resolved = await this.regionsService.resolveByPoint({ lat: latitude, lng: longitude }, tx);
+      const resolved = latitude != null && longitude != null
+        ? await this.regionsService.resolveByPoint({ lat: latitude, lng: longitude }, tx)
+        : null;
       let savedVenue = venue;
       if (newVenue) {
         const result = await this.venuesRepository.create(actor.id, {
@@ -411,8 +417,8 @@ export class SocialSessionsService {
       return {
         ...values,
         venueId: savedVenue?.id ?? null,
-        venueName: dto.venueName?.trim() || savedVenue?.name || values.venueName,
-        venueAddress: dto.venueAddress?.trim() || savedVenue?.locationAddress || values.venueAddress,
+        venueName: locationDeferred ? values.venueName : dto.venueName?.trim() || savedVenue?.name || values.venueName,
+        venueAddress: locationDeferred ? values.venueAddress : dto.venueAddress?.trim() || savedVenue?.locationAddress || values.venueAddress,
         latitude,
         longitude,
         provinceCode: resolved?.provinceCode ?? null,

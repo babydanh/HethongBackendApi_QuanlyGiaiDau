@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsDefined,
   IsIn,
@@ -60,6 +61,11 @@ export class NewSocialVenueDto {
 }
 
 export class CreateSocialSessionDto {
+  @ApiPropertyOptional({ description: 'Tạo buổi trước, quyết định địa điểm sau' })
+  @IsBoolean()
+  @IsOptional()
+  locationDeferred?: boolean;
+
   @ApiPropertyOptional({
     description: 'ID Club (communities.id). Bỏ trống = kèo cá nhân',
   })
