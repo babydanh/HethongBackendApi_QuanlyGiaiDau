@@ -48,6 +48,7 @@ import type {
 import type { ImportSource, RosterEntryType } from '../dto/roster-import.dto';
 import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import type {
+  AddAthleteCandidate,
   AddAthleteCandidateDto,
   AddAthleteDirectDto,
   ListAddAthleteCandidatesQueryDto,
@@ -247,7 +248,7 @@ export class TournamentImportRepository {
     organizerId: string,
     communityId: string | null,
     dto: ListAddAthleteCandidatesQueryDto,
-  ): Promise<{ items: Array<{ userId: string; fullName: string }> }> {
+  ): Promise<{ items: AddAthleteCandidate[] }> {
     let teamId: string | undefined;
     if (dto.participantId) {
       const [target] = await this.db
@@ -372,9 +373,18 @@ export class TournamentImportRepository {
     const search = dto.q?.trim();
     const trimmedName = sql<string>`btrim(${schema.profiles.fullName})`;
     const rows = await this.db
-      .select({ userId: schema.users.id, fullName: trimmedName })
+      .select({
+        userId: schema.users.id,
+        fullName: trimmedName,
+        avatarUrl: schema.profiles.avatarUrl,
+        logoUrl: schema.communities.logoUrl,
+      })
       .from(schema.users)
       .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+      .leftJoin(
+        schema.communities,
+        communityId ? eq(schema.communities.id, communityId) : sql`false`,
+      )
       .where(
         and(
           eligibleRosterAccountCondition(this.db),
@@ -394,7 +404,14 @@ export class TournamentImportRepository {
       .orderBy(asc(trimmedName), asc(schema.users.id))
       .limit(dto.limit ?? 25);
 
-    return { items: rows };
+    return {
+      items: rows.map(({ userId, fullName, avatarUrl, logoUrl }) => ({
+        userId,
+        fullName,
+        avatarUrl,
+        ...(dto.source === 'CLUB' ? { logoUrl } : {}),
+      })),
+    };
   }
 
   async addAthleteCandidate(

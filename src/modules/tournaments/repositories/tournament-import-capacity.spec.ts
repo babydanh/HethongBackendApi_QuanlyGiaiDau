@@ -649,13 +649,15 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
     tournamentDivisionId: 'division-1',
   });
 
-  it('projects only public candidate fields', async () => {
+  it('projects approved profile and linked-club image fields without private data', async () => {
     const harness = createHarness({
-      'profiles+users': [
+      'communities+profiles+users': [
         [
           {
             userId: 'athlete-1',
             fullName: 'VĐV thử nghiệm',
+            avatarUrl: 'https://avatars.example.test/athlete.png',
+            logoUrl: 'https://clubs.example.test/community.png',
             email: 'private@example.test',
             phoneNumber: '0900000000',
           },
@@ -669,12 +671,19 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
         'organizer-1',
         'community-1',
         Object.assign(new ListAddAthleteCandidatesQueryDto(), {
-          source: 'FRIENDS',
+          source: 'CLUB',
         }),
       );
 
     expect(result).toEqual({
-      items: [{ userId: 'athlete-1', fullName: 'VĐV thử nghiệm' }],
+      items: [
+        {
+          userId: 'athlete-1',
+          fullName: 'VĐV thử nghiệm',
+          avatarUrl: 'https://avatars.example.test/athlete.png',
+          logoUrl: 'https://clubs.example.test/community.png',
+        },
+      ],
     });
   });
 

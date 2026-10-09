@@ -80,6 +80,8 @@ export class AddAthleteDirectDto {
 export interface AddAthleteCandidate {
   userId: string;
   fullName: string;
+  avatarUrl?: string | null;
+  logoUrl?: string | null;
 }
 
 export interface AddedTournamentParticipant {

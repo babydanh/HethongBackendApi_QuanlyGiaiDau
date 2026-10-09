@@ -18,6 +18,7 @@ import {
 import type { ImportParticipantsDto } from '../dto/import-participants.dto';
 import type { RosterImportDto } from '../dto/roster-import.dto';
 import type {
+  AddAthleteCandidate,
   AddAthleteCandidateDto,
   AddAthleteDirectDto,
   ListAddAthleteCandidatesQueryDto,
@@ -33,6 +34,18 @@ type RegistrationChangedBroadcaster = (
     action: string;
   },
 ) => void;
+function normalizeHttpsImageUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 
 @Injectable()
 export class TournamentImportService {
@@ -143,7 +156,7 @@ export class TournamentImportService {
     userId: string,
     systemRoles: string[],
     dto: ListAddAthleteCandidatesQueryDto,
-  ) {
+  ): Promise<{ items: AddAthleteCandidate[] }> {
     const tournament = dto.participantId
       ? await this.assertFootballRosterEditable(tournamentId, userId, systemRoles)
       : await this.assertImportable(tournamentId, userId, systemRoles);
@@ -151,12 +164,25 @@ export class TournamentImportService {
       tournament.tournamentConfig,
       Boolean(dto.participantId),
     );
-    return this.tournamentsRepository.listAddAthleteCandidates(
+    const result = await this.tournamentsRepository.listAddAthleteCandidates(
       tournamentId,
       userId,
       tournament.communityId ?? null,
       dto,
     );
+
+    return {
+      items: result.items.map(
+        ({ userId: candidateId, fullName, avatarUrl, logoUrl }) => ({
+          userId: candidateId,
+          fullName,
+          avatarUrl: normalizeHttpsImageUrl(avatarUrl),
+          ...(dto.source === 'CLUB'
+            ? { logoUrl: normalizeHttpsImageUrl(logoUrl) }
+            : {}),
+        }),
+      ),
+    };
   }
 
   async addAthleteCandidate(

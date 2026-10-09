@@ -419,6 +419,73 @@ describe('TournamentImportService organizer add-athlete flow', () => {
 
     expect(repositoryMock.listAddAthleteCandidates).not.toHaveBeenCalled();
   });
+  it('returns only allowlisted fields and HTTPS images for club candidates', async () => {
+    repositoryMock.listAddAthleteCandidates.mockResolvedValue({
+      items: [
+        {
+          userId: 'athlete-1',
+          fullName: 'VĐV thử nghiệm',
+          avatarUrl: 'https://avatars.example.test/athlete.png',
+          logoUrl: 'https://clubs.example.test/community.png',
+          email: 'private@example.test',
+          phoneNumber: '0900000000',
+        },
+      ],
+    });
+
+    const result = await buildAddAthleteService().listAddAthleteCandidates(
+      'tournament-1',
+      'organizer-1',
+      [],
+      Object.assign(new ListAddAthleteCandidatesQueryDto(), {
+        source: 'CLUB',
+      }),
+    );
+
+    expect(result).toEqual({
+      items: [
+        {
+          userId: 'athlete-1',
+          fullName: 'VĐV thử nghiệm',
+          avatarUrl: 'https://avatars.example.test/athlete.png',
+          logoUrl: 'https://clubs.example.test/community.png',
+        },
+      ],
+    });
+  });
+
+  it('rejects non-HTTPS images and omits club logos from friend candidates', async () => {
+    repositoryMock.listAddAthleteCandidates.mockResolvedValue({
+      items: [
+        {
+          userId: 'athlete-1',
+          fullName: 'VĐV thử nghiệm',
+          avatarUrl: 'http://avatars.example.test/athlete.png',
+          logoUrl: 'https://clubs.example.test/community.png',
+          email: 'private@example.test',
+        },
+      ],
+    });
+
+    const result = await buildAddAthleteService().listAddAthleteCandidates(
+      'tournament-1',
+      'organizer-1',
+      [],
+      Object.assign(new ListAddAthleteCandidatesQueryDto(), {
+        source: 'FRIENDS',
+      }),
+    );
+
+    expect(result).toEqual({
+      items: [
+        {
+          userId: 'athlete-1',
+          fullName: 'VĐV thử nghiệm',
+          avatarUrl: null,
+        },
+      ],
+    });
+  });
 
   it('requests consent only after committing a linked candidate', async () => {
     const events: string[] = [];
