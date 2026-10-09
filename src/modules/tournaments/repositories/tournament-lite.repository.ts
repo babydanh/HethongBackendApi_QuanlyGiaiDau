@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import * as crypto from 'crypto';
 import { PG_CONNECTION } from '../../../database/database.module';
 import type { AppDb, AppDbOrTx } from '../../../database/db.types';
 import * as schema from '../../../database/schema';
@@ -32,6 +31,8 @@ import {
   resolveDoublesParticipantStatus,
 } from '../utils/tournament-participant-status';
 import { lockCapacityOwner } from '../services/tournament-capacity.service';
+
+type PairingSource = 'MANUAL' | 'SYSTEM';
 
 @Injectable()
 export class TournamentLiteRepository {
@@ -158,6 +159,7 @@ export class TournamentLiteRepository {
     userId: string,
     registrationMode: string,
     teamName: string,
+    pairingSource: PairingSource,
   ) {
     // Organizer pairing is capacity-neutral: p1 grows from one athlete to two
     // (+half a team) exactly as p2 is withdrawn (-half a team). It still takes
@@ -368,6 +370,7 @@ export class TournamentLiteRepository {
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: targetStatus,
+        pairingSource,
         isPaid: registrationIsPaid,
         teamInviteToken: null,
         teamName,
@@ -423,6 +426,12 @@ export class TournamentLiteRepository {
       throw new BadRequestException('Participant không hợp lệ');
     }
 
+    if (participant.pairingSource !== 'MANUAL') {
+      throw new BadRequestException(
+        'Chỉ được tách cặp do BTC ghép thủ công.',
+      );
+    }
+
     if (
       participant.teamStatus !== 'COMPLETE' &&
       participant.teamStatus !== 'PENDING_APPROVAL'
@@ -458,30 +467,6 @@ export class TournamentLiteRepository {
       );
     }
 
-    const [pairingTournament] = await tx
-      .select({ tournamentConfig: schema.tournaments.tournamentConfig })
-      .from(schema.tournaments)
-      .where(eq(schema.tournaments.id, tournamentId))
-      .limit(1);
-    const pairingConfig = pairingTournament?.tournamentConfig;
-    const isLitePairing =
-      pairingConfig &&
-      typeof pairingConfig === 'object' &&
-      ((pairingConfig as Record<string, unknown>).isLite === true ||
-        (pairingConfig as Record<string, unknown>).mode === 'LITE');
-
-    // Create invite tokens
-    const leaderToken = crypto
-      .randomUUID()
-      .replace(/-/g, '')
-      .substring(0, 12)
-      .toUpperCase();
-    const partnerToken = crypto
-      .randomUUID()
-      .replace(/-/g, '')
-      .substring(0, 12)
-      .toUpperCase();
-
     // Get profile names
     const [leaderProfile] = await tx
       .select({ fullName: schema.profiles.fullName })
@@ -503,8 +488,9 @@ export class TournamentLiteRepository {
         registeredBy: partnerRoster.userId,
         teamName: partnerProfile?.fullName || 'Vận động viên',
         isPaid: participant.isPaid,
-        teamInviteToken: partnerToken,
+        teamInviteToken: null,
         teamStatus: 'PENDING_PARTNER',
+        pairingSource: 'UNKNOWN',
       })
       .returning();
 
@@ -519,8 +505,9 @@ export class TournamentLiteRepository {
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: 'PENDING_PARTNER',
+        pairingSource: 'UNKNOWN',
         isPaid: participant.isPaid,
-        teamInviteToken: leaderToken,
+        teamInviteToken: null,
         teamName: leaderProfile?.fullName || 'Vận động viên',
       })
       .where(eq(schema.tournamentParticipants.id, participantId))
@@ -702,6 +689,7 @@ export class TournamentLiteRepository {
         userId,
         registrationMode,
         teamName,
+        'MANUAL',
       );
     });
   }
@@ -870,6 +858,7 @@ export class TournamentLiteRepository {
             userId,
             registrationMode,
             teamName,
+            'SYSTEM',
           );
           paired.push({
             participant1Id: p1.id,
