@@ -538,6 +538,14 @@ export class TournamentsRepository {
   ) {
     return this.tournamentImportRepository.listAddAthleteCandidates(...args);
   }
+  searchAddAthleteCandidates(
+    ...args: Parameters<
+      TournamentImportRepository['searchAddAthleteCandidates']
+    >
+  ) {
+    return this.tournamentImportRepository.searchAddAthleteCandidates(...args);
+  }
+
 
   addAthleteCandidate(
     ...args: Parameters<TournamentImportRepository['addAthleteCandidate']>

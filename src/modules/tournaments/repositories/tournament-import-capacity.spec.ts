@@ -1,4 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import * as schema from '../../../database/schema';
 import {
   AddAthleteCandidateDto,
@@ -20,14 +22,15 @@ const TABLE_KEYS = new Map<unknown, string>([
 [schema.communityMembers, 'communityMembers'],
 [schema.userBans, 'userBans'],
 ]);
+const dialect = new PgDialect();
 
 type Row = Record<string, unknown>;
 
 function createHarness(queues: Record<string, Row[][]>) {
   const inserts: Array<{ table: string; values: Row }> = [];
   const selections: Array<{ key: string; locked: boolean }> = [];
+  const whereConditions: Array<{ key: string; predicate: SQL }> = [];
   const lockCounter = { count: 0 };
-
   const takeRows = (key: string): Row[] => {
     const queue = queues[key];
     if (!queue || queue.length === 0) return [];
@@ -73,7 +76,10 @@ function createHarness(queues: Record<string, Row[][]>) {
       query.from = record(() => query);
       query.innerJoin = record(() => query);
       query.leftJoin = record(() => query);
-      query.where = () => query;
+      query.where = (predicate: SQL) => {
+        whereConditions.push({ key: tableKey(tables), predicate });
+        return query;
+      };
       query.groupBy = () => query;
       query.orderBy = () => query;
       query.limit = () => query;
@@ -116,6 +122,7 @@ function createHarness(queues: Record<string, Row[][]>) {
     tx: tx as unknown as Record<string, unknown>,
     inserts,
     selections,
+    whereConditions,
     lockCount: () => lockCounter.count,
   };
 }
@@ -600,11 +607,12 @@ function createAddAthleteRepository(tx: unknown): AddAthleteRepository {
 }
 
 function addAthleteQueues(options: {
-  source: 'FRIENDS' | 'CLUB';
+  source: 'FRIENDS' | 'CLUB' | 'EMAIL';
   relationRows: Row[];
   duplicateRows: Row[];
   occupancyRows: Row[];
   divisionLimit?: number;
+  emailAccount?: Row[];
 }): Record<string, Row[][]> {
   const tournament: Row = {
     id: 'tournament-1',
@@ -636,8 +644,10 @@ function addAthleteQueues(options: {
 
   if (options.source === 'FRIENDS') {
     queues.friendships = [options.relationRows];
-  } else {
+  } else if (options.source === 'CLUB') {
     queues['communities+communityMembers'] = [options.relationRows];
+  } else {
+    queues.users = [options.emailAccount ?? [{ id: 'athlete-1' }]];
   }
   return queues;
 }
@@ -719,6 +729,59 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
       expect(harness.selections[2]?.key).toBe('tournaments');
     },
   );
+  it('revalidates verified email accounts inside the add transaction', async () => {
+    const harness = createHarness(
+      addAthleteQueues({
+        source: 'EMAIL',
+        relationRows: [],
+        duplicateRows: [],
+        occupancyRows: [],
+      }),
+    );
+    const dto = Object.assign(new AddAthleteCandidateDto(), {
+      ...candidateDto,
+      source: 'EMAIL' as unknown as AddAthleteCandidateDto['source'],
+    });
+
+    const result = await createAddAthleteRepository(harness.tx)
+      .addAthleteCandidate('tournament-1', 'organizer-1', dto);
+    const accountCheck = harness.whereConditions.find(
+      ({ key }) => key === 'users',
+    )?.predicate;
+
+    expect(result.participant.teamName).toBe('VĐV thử nghiệm');
+    expect(accountCheck).toBeDefined();
+    expect(dialect.sqlToQuery(accountCheck!).sql).toContain('is_email_verified');
+    expect(harness.inserts.filter((insert) => insert.table === 'rosters'))
+      .toHaveLength(1);
+  });
+
+  it('rejects an email candidate no longer eligible before writing', async () => {
+    const harness = createHarness(
+      addAthleteQueues({
+        source: 'EMAIL',
+        relationRows: [],
+        duplicateRows: [],
+        occupancyRows: [],
+        emailAccount: [],
+      }),
+    );
+    const dto = Object.assign(new AddAthleteCandidateDto(), {
+      ...candidateDto,
+      source: 'EMAIL' as unknown as AddAthleteCandidateDto['source'],
+    });
+
+    await expect(
+      createAddAthleteRepository(harness.tx).addAthleteCandidate(
+        'tournament-1',
+        'organizer-1',
+        dto,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(harness.inserts).toHaveLength(0);
+  });
+
 
   it('rejects an active roster duplicate without writing another participant', async () => {
     const harness = createHarness(
@@ -865,6 +928,7 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
       'organizer-1',
       Object.assign(new AddAthleteDirectDto(), {
         name: 'Khách trực tiếp',
+        email: 'guest@example.test',
         tournamentDivisionId: 'division-1',
       }),
     );
@@ -875,7 +939,10 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
     expect(participant?.values).toMatchObject({
       registeredBy: 'organizer-1',
       teamName: 'Khách trực tiếp',
-      customResponses: { importedFrom: 'ORGANIZER_DIRECT' },
+      customResponses: {
+        importedFrom: 'ORGANIZER_DIRECT',
+        player1Email: 'guest@example.test',
+      },
     });
     expect(
       harness.inserts.filter((insert) => insert.table === 'rosters'),

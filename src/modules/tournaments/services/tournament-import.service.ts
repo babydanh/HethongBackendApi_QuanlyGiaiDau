@@ -21,7 +21,9 @@ import type {
   AddAthleteCandidate,
   AddAthleteCandidateDto,
   AddAthleteDirectDto,
+  AddAthleteSearchCandidate,
   ListAddAthleteCandidatesQueryDto,
+  SearchAddAthleteCandidatesDto,
 } from '../dto/add-athlete.dto';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
 import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
@@ -180,6 +182,48 @@ export class TournamentImportService {
           ...(dto.source === 'CLUB'
             ? { logoUrl: normalizeHttpsImageUrl(logoUrl) }
             : {}),
+        }),
+      ),
+    };
+  }
+
+  async searchAddAthleteCandidates(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: SearchAddAthleteCandidatesDto,
+  ): Promise<{ items: AddAthleteSearchCandidate[] }> {
+    const email = dto.email?.trim();
+    const name = dto.name?.trim();
+    if (!email && !name) {
+      throw new BadRequestException('Nhập tên hoặc email để tìm VĐV.');
+    }
+
+    const tournament = dto.participantId
+      ? await this.assertFootballRosterEditable(tournamentId, userId, systemRoles)
+      : await this.assertImportable(tournamentId, userId, systemRoles);
+    this.assertCandidateFlowMatchesSport(
+      tournament.tournamentConfig,
+      Boolean(dto.participantId),
+    );
+
+    const result = await this.tournamentsRepository.searchAddAthleteCandidates(
+      tournamentId,
+      userId,
+      {
+        ...(email ? { email } : name ? { name } : {}),
+        ...(dto.participantId ? { participantId: dto.participantId } : {}),
+      },
+    );
+
+    return {
+      items: result.items.map(
+        ({ userId: candidateId, fullName, email, avatarUrl, sources }) => ({
+          userId: candidateId,
+          fullName,
+          email,
+          avatarUrl: normalizeHttpsImageUrl(avatarUrl),
+          sources,
         }),
       ),
     };
