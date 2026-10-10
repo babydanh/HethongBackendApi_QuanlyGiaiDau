@@ -62,7 +62,7 @@ if (dsn) {
         if (event.message) event.message = 'Add Athlete request failed';
         if (event.logentry) {
           event.logentry.message = 'Add Athlete request failed';
-          delete event.logentry.formatted;
+          delete (event.logentry as { formatted?: unknown }).formatted;
           delete event.logentry.params;
         }
         return event;

@@ -44,10 +44,18 @@ describe('Sentry Add Athlete request redaction', () => {
         { message: `search ${rawEmail}`, data: { query: rawName, userId: rawUserId } },
       ],
       exception: { values: [{ type: 'Error', value: `failed for ${rawEmail}` }] },
+      logentry: {
+        message: `failed for ${rawEmail}`,
+        params: [rawUserId],
+        formatted: `failed for ${rawName}`,
+      },
       user: { id: rawUserId, email: rawEmail },
     };
 
     const redacted = config!.beforeSend(event);
+    expect(redacted.logentry).toEqual({
+      message: 'Add Athlete request failed',
+    });
     const serialized = JSON.stringify(redacted);
 
     expect(serialized).not.toContain(rawName);
