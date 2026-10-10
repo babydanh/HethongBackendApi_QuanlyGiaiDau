@@ -5,6 +5,7 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
 import type { AqvisionRecordingService } from './aqvision-recording.service';
 import type { LivestreamHealthQueue } from './livestream-health.queue';
+import type { LivestreamCameraSourceCryptoService } from './livestream-camera-source-crypto.service';
 import { LivestreamService } from './livestream.service';
 
 type RepositoryMock = {
@@ -52,6 +53,7 @@ describe('LivestreamService camera publish info', () => {
       {} as AqvisionApiClient,
       {} as unknown as AqvisionRecordingService,
       {} as unknown as LivestreamHealthQueue,
+      {} as LivestreamCameraSourceCryptoService,
     );
     return { repository, service };
   }
@@ -136,6 +138,7 @@ describe('LivestreamService court camera assignment', () => {
       {} as AqvisionApiClient,
       {} as unknown as AqvisionRecordingService,
       {} as unknown as LivestreamHealthQueue,
+      {} as LivestreamCameraSourceCryptoService,
     );
     return { repository, service };
   }

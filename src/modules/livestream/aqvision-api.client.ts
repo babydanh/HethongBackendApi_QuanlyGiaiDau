@@ -108,10 +108,16 @@ export class AqvisionApiClient {
   async addStreamProxy(params: {
     readonly stream: string;
     readonly url: string;
+    readonly enableHls?: boolean;
+    readonly enableMp4?: boolean;
   }): Promise<{ proxyKey: string | null }> {
     const data = await this.call<{ key?: unknown }>('addStreamProxy', {
       stream: params.stream,
       url: params.url,
+      enable_hls:
+        params.enableHls === undefined ? undefined : Number(params.enableHls),
+      enable_mp4:
+        params.enableMp4 === undefined ? undefined : Number(params.enableMp4),
     });
 
     return {
