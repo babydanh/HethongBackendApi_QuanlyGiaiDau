@@ -19,6 +19,29 @@ describe('AQVision environment configuration', () => {
     expect(value.AQVISION_API_BASE_URL).toBe('https://api.media.aqvision.net');
     expect(value.AQVISION_API_SECRET).toBe('');
   });
+  it('accepts a 32-byte hex camera-source encryption key', () => {
+    const configuredKey = 'a'.repeat(64);
+    const { error, value } = envValidationSchema.validate({
+      ...requiredEnvironment,
+      LIVESTREAM_CAMERA_SOURCE_ENCRYPTION_KEY: configuredKey,
+    });
+
+    expect(error).toBeUndefined();
+    expect(value.LIVESTREAM_CAMERA_SOURCE_ENCRYPTION_KEY).toBe(configuredKey);
+  });
+
+  it('rejects a malformed livestream camera source encryption key', () => {
+    const { error } = envValidationSchema.validate({
+      ...requiredEnvironment,
+      LIVESTREAM_CAMERA_SOURCE_ENCRYPTION_KEY: 'not-64-hex-characters',
+    });
+    const issue = error?.details.find(
+      (detail) =>
+        detail.path[0] === 'LIVESTREAM_CAMERA_SOURCE_ENCRYPTION_KEY',
+    );
+
+    expect(issue?.type).toBe('string.pattern.base');
+  });
 
   it('accepts an explicitly empty API secret', () => {
     const { error } = envValidationSchema.validate({

@@ -8,7 +8,10 @@ import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import type { LivestreamRepository } from './livestream.repository';
 import type { AqvisionRecordingService } from './aqvision-recording.service';
-import type { LivestreamHealthQueue } from './livestream-health.queue';
+import type {
+  CameraLeaseHandle,
+  LivestreamHealthQueue,
+} from './livestream-health.queue';
 import { LivestreamService } from './livestream.service';
 
 type RepositoryMock = {
@@ -89,28 +92,48 @@ describe('LivestreamService camera PULL', () => {
     const configService = {
       get: (key: string, fallback?: unknown) => config[key] ?? fallback,
     } as unknown as ConfigService;
-
     const aqvisionApiClient: AqvisionClientMock = {
-      addStreamProxy: jest.fn(),
+      addStreamProxy: jest.fn().mockResolvedValue({ proxyKey: PROXY_KEY }),
       delStreamProxy: jest.fn(),
       isMediaOnline: jest.fn(),
     };
-
-    const service = new LivestreamService(
+    const livestreamHealthQueue = {
+      runWithCameraLock: jest.fn(
+        async (
+          lockCameraId: string,
+          operation: (lease: CameraLeaseHandle) => Promise<unknown>,
+        ) => operation({ cameraId: lockCameraId, isOwned: () => true }),
+      ),
+    };
+    const cameraSourceCrypto = {
+      encrypt: jest.fn((source: string) => `encrypted:${source}`),
+      decrypt: jest.fn((source: string) => source),
+    };
+    const LivestreamServiceConstructor = LivestreamService as unknown as {
+      new (...args: unknown[]): LivestreamService;
+    };
+    const service = new LivestreamServiceConstructor(
       repository as unknown as LivestreamRepository,
       configService,
       {} as AqvisionPublishService,
       aqvisionApiClient as unknown as AqvisionApiClient,
       {} as unknown as AqvisionRecordingService,
-      {} as unknown as LivestreamHealthQueue,
+      livestreamHealthQueue as unknown as LivestreamHealthQueue,
+      cameraSourceCrypto,
     );
 
-    return { repository, service, aqvisionApiClient };
+    return {
+      repository,
+      service,
+      aqvisionApiClient,
+      cameraSourceCrypto,
+      livestreamHealthQueue,
+    };
   }
 
-  it('kéo luồng từ camera qua AQP, lưu khoá proxy và trả URL phát HLS', async () => {
-    const { repository, service, aqvisionApiClient } = makeService();
-    aqvisionApiClient.addStreamProxy.mockResolvedValue({ proxyKey: PROXY_KEY });
+  it('encrypts and persists the camera source without creating a proxy yet', async () => {
+    const { repository, service, aqvisionApiClient, cameraSourceCrypto } =
+      makeService();
 
     const created = await service.createCamera(tournamentId, owner, {
       name: 'Sân 1',
@@ -118,20 +141,19 @@ describe('LivestreamService camera PULL', () => {
       cameraRtspUrl: CAMERA_RTSP,
     });
 
-    expect(aqvisionApiClient.addStreamProxy).toHaveBeenCalledTimes(1);
-    const request = aqvisionApiClient.addStreamProxy.mock.calls[0][0];
-    expect(request.url).toBe(CAMERA_RTSP);
-    expect(request.stream).toBe(created.streamName);
-
-    expect(repository.createCamera.mock.calls[0][0].pullProxyKey).toBe(
-      PROXY_KEY,
+    expect(cameraSourceCrypto.encrypt).toHaveBeenCalledWith(CAMERA_RTSP);
+    expect(repository.createCamera.mock.calls[0][0].rtspUrlEncrypted).toBe(
+      `encrypted:${CAMERA_RTSP}`,
     );
+    expect(repository.createCamera.mock.calls[0][0].pullProxyKey).toBeNull();
+    expect(aqvisionApiClient.addStreamProxy).not.toHaveBeenCalled();
     expect(created.playbackUrl).toBe(
       `https://media.aqvision.net/live/${created.streamName}/hls.m3u8`,
     );
-    // PULL không có ingest để BTC nhập vào OBS.
+    expect(created).not.toHaveProperty('rtspUrlEncrypted');
     expect(created.publish).toBeNull();
   });
+
 
   it('không gọi AQP và giữ nguyên URL khi BTC dán URL phát sẵn', async () => {
     const { repository, service, aqvisionApiClient } = makeService();
@@ -189,7 +211,7 @@ describe('LivestreamService camera PULL', () => {
     expect(aqvisionApiClient.addStreamProxy).not.toHaveBeenCalled();
   });
 
-  it('đổi lỗi AQP thành 503 khi không nhờ được kéo luồng', async () => {
+  it('saves a PULL camera source without requiring AQVision during setup', async () => {
     const { repository, service, aqvisionApiClient } = makeService();
     aqvisionApiClient.addStreamProxy.mockRejectedValue(
       new AqvisionApiException(-100, 'secret sai'),
@@ -201,11 +223,12 @@ describe('LivestreamService camera PULL', () => {
         mode: 'PULL',
         cameraRtspUrl: CAMERA_RTSP,
       }),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    ).resolves.toMatchObject({ mode: 'PULL' });
 
-    // Không được ghi camera khi luồng chưa thật sự được kéo.
-    expect(repository.createCamera).not.toHaveBeenCalled();
+    expect(repository.createCamera).toHaveBeenCalledTimes(1);
+    expect(aqvisionApiClient.addStreamProxy).not.toHaveBeenCalled();
   });
+
 
   it('dùng host mặc định khi env phát bị khai rỗng', async () => {
     // `docker-compose` không dùng `env_file`: một dòng `AQVISION_PLAYBACK_BASE_URL=`
@@ -272,6 +295,54 @@ describe('LivestreamService camera PULL', () => {
 
     expect(aqvisionApiClient.delStreamProxy).toHaveBeenCalledWith(PROXY_KEY);
   });
+  it('serializes proxy deletion and camera archival under the camera lease', async () => {
+    const {
+      repository,
+      service,
+      aqvisionApiClient,
+      livestreamHealthQueue,
+    } = makeService({
+      findCameraById: jest
+        .fn()
+        .mockResolvedValue(archivedCameraRow({ status: 'IDLE', pullProxyKey: PROXY_KEY })),
+    });
+    aqvisionApiClient.delStreamProxy.mockResolvedValue(undefined);
+
+    await service.deleteCamera(cameraId, owner);
+
+    expect(livestreamHealthQueue.runWithCameraLock).toHaveBeenCalledWith(
+      cameraId,
+      expect.any(Function),
+    );
+    expect(livestreamHealthQueue.runWithCameraLock.mock.invocationCallOrder[0]).toBeLessThan(
+      aqvisionApiClient.delStreamProxy.mock.invocationCallOrder[0],
+    );
+    expect(aqvisionApiClient.delStreamProxy.mock.invocationCallOrder[0]).toBeLessThan(
+      repository.deleteCamera.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not archive or stop a proxy when the camera lease is unavailable', async () => {
+    const {
+      repository,
+      service,
+      aqvisionApiClient,
+      livestreamHealthQueue,
+    } = makeService({
+      findCameraById: jest
+        .fn()
+        .mockResolvedValue(archivedCameraRow({ status: 'IDLE', pullProxyKey: PROXY_KEY })),
+    });
+    livestreamHealthQueue.runWithCameraLock.mockResolvedValue(null);
+
+    await expect(service.deleteCamera(cameraId, owner)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+
+    expect(aqvisionApiClient.delStreamProxy).not.toHaveBeenCalled();
+    expect(repository.deleteCamera).not.toHaveBeenCalled();
+  });
+
 
   it('vẫn lưu trữ camera khi AQP lỗi lúc ngắt proxy', async () => {
     const { service, aqvisionApiClient } = makeService({

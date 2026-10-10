@@ -6,6 +6,7 @@ import type { LivestreamRepository } from './livestream.repository';
 import type { AqvisionRecordingService } from './aqvision-recording.service';
 import type { LivestreamHealthQueue } from './livestream-health.queue';
 import { LivestreamService } from './livestream.service';
+import type { LivestreamCameraSourceCryptoService } from './livestream-camera-source-crypto.service';
 
 const owner: JwtPayload = {
   sub: 'owner-1',
@@ -61,6 +62,7 @@ function makeService(overrides: Record<string, unknown> = {}) {
     {} as AqvisionApiClient,
     {} as unknown as AqvisionRecordingService,
     {} as unknown as LivestreamHealthQueue,
+    {} as LivestreamCameraSourceCryptoService,
   );
   return { repository, service };
 }

@@ -143,6 +143,33 @@ describe('AqvisionApiClient', () => {
     });
   });
 
+  describe('addStreamProxy', () => {
+    it('sends the documented HLS and MP4 flags in the POST query', async () => {
+      fetchSpy.mockResolvedValue(
+        jsonResponse({ code: 0, data: { key: '__defaultVhost__/proxy/1' } }),
+      );
+
+      const client = makeClient();
+      const input = Object.assign(
+        {
+          stream: 'camera01',
+          url: 'https://source.example/live.m3u8',
+        },
+        { enableHls: true, enableMp4: true },
+      );
+      const result = await client.addStreamProxy(input);
+
+      expect(result).toEqual({ proxyKey: '__defaultVhost__/proxy/1' });
+      const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const query = new URL(calledUrl).searchParams;
+      expect(init.method).toBe('POST');
+      expect(init.body).toBeUndefined();
+      expect(query.get('url')).toBe('https://source.example/live.m3u8');
+      expect(query.get('enable_hls')).toBe('1');
+      expect(query.get('enable_mp4')).toBe('1');
+    });
+  });
+
   describe('getMP4RecordFile', () => {
     it('map paths[] + rootPath; bo period => liet ke thu muc ngay', async () => {
       fetchSpy.mockResolvedValue(

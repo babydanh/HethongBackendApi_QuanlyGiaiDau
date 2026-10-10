@@ -24,7 +24,11 @@ import {
   AqvisionRecordingService,
   type RecordingStatus,
 } from './aqvision-recording.service';
-import { LivestreamHealthQueue } from './livestream-health.queue';
+import {
+  LivestreamHealthQueue,
+  type CameraLeaseHandle,
+} from './livestream-health.queue';
+import { LivestreamCameraSourceCryptoService } from './livestream-camera-source-crypto.service';
 import {
   LivestreamMode,
   LivestreamProtocol,
@@ -97,6 +101,7 @@ export class LivestreamService {
     private readonly aqvisionApiClient: AqvisionApiClient,
     private readonly aqvisionRecordingService: AqvisionRecordingService,
     private readonly livestreamHealthQueue: LivestreamHealthQueue,
+    private readonly cameraSourceCrypto: LivestreamCameraSourceCryptoService,
   ) {}
 
   private isAdmin(user: JwtPayload) {
@@ -184,6 +189,22 @@ export class LivestreamService {
     ).replace(/\/+$/, '');
 
     return `${baseUrl}/live/${streamName}/hls.m3u8`;
+  }
+
+  private isAqvisionGeneratedHlsUrl(
+    playbackUrl: string | null | undefined,
+    streamName: string | null | undefined,
+  ): boolean {
+    if (!playbackUrl || !streamName) return false;
+
+    try {
+      return (
+        new URL(playbackUrl).pathname ===
+        new URL(this.buildAqvisionHlsUrl(streamName)).pathname
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -468,14 +489,10 @@ export class LivestreamService {
 
 
     // PULL có hai nguồn loại trừ lẫn nhau:
-    //  - CAMERA  : camera IP tại sân. SportO nhờ AQP kéo luồng về
-    //              (`addStreamProxy`) rồi phát lại — không cần stream key.
-    //  - PLAYBACK: luồng đã phát sẵn từ bên ngoài. BTC dán URL phát và hệ thống
-    //              KHÔNG sinh lại, KHÔNG chuẩn hoá — mọi hình dạng đều giữ nguyên.
+    //  - CAMERA  : lưu URL nguồn đã mã hoá; chỉ tạo proxy khi trận bắt đầu.
+    //  - PLAYBACK: giữ nguyên URL phát sẵn và không gọi AQP.
     //
-    // Camera PUSH lấy hình từ thiết bị đẩy lên, nên `cameraRtspUrl` gửi kèm là
-    // hiểu nhầm về luồng nghiệp vụ: bỏ qua im lặng sẽ khiến BTC tưởng đã nối
-    // được camera trong khi thực tế hệ thống chưa hề kéo gì.
+    // Camera PUSH nhận hình từ thiết bị đẩy lên, không nhận URL nguồn camera.
     if (mode !== 'PULL' && (data.cameraRtspUrl?.trim() ?? '').length > 0) {
       throw new BadRequestException(
         'URL camera chỉ dùng cho camera PULL. Camera PUSH nhận hình từ thiết bị đẩy lên.',
@@ -486,13 +503,10 @@ export class LivestreamService {
 
     let playbackUrl: string;
     let pullProxyKey: string | null = null;
+    let rtspUrlEncrypted: string | null = null;
 
     if (pullSource?.kind === 'CAMERA') {
-      const pulled = await this.startAqvisionPull({
-        streamName,
-        cameraUrl: pullSource.url,
-      });
-      pullProxyKey = pulled.proxyKey;
+      rtspUrlEncrypted = this.cameraSourceCrypto.encrypt(pullSource.url);
       playbackUrl = this.buildAqvisionHlsUrl(streamName);
     } else if (pullSource?.kind === 'PLAYBACK') {
       playbackUrl = pullSource.url;
@@ -509,6 +523,7 @@ export class LivestreamService {
       streamName,
       streamKey,
       playbackUrl: this.normalizePublicPlaybackUrl(playbackUrl)!,
+      rtspUrlEncrypted,
       pullProxyKey,
       createdBy: user.sub,
     });
@@ -768,12 +783,20 @@ export class LivestreamService {
   private async startAqvisionPull(input: {
     readonly streamName: string;
     readonly cameraUrl: string;
-  }): Promise<{ proxyKey: string | null }> {
+  }): Promise<{ proxyKey: string }> {
     try {
-      return await this.aqvisionApiClient.addStreamProxy({
+      const result = await this.aqvisionApiClient.addStreamProxy({
         stream: input.streamName,
         url: input.cameraUrl,
+        enableHls: true,
+        enableMp4: true,
       });
+      if (!result.proxyKey) {
+        throw new ServiceUnavailableException(
+          'Máy chủ media AQP chưa trả khoá proxy cho camera.',
+        );
+      }
+      return { proxyKey: result.proxyKey };
     } catch (error) {
       if (error instanceof AqvisionApiException) {
         throw new ServiceUnavailableException(
@@ -782,6 +805,45 @@ export class LivestreamService {
         );
       }
       throw error;
+    }
+  }
+
+  private async ensureAqvisionPullProxy(
+    input: {
+      readonly cameraId: string;
+      readonly streamName: string;
+      readonly pullProxyKey: string | null;
+      readonly rtspUrlEncrypted: string | null;
+    },
+    lease: CameraLeaseHandle,
+  ): Promise<void> {
+    if (input.pullProxyKey) return;
+    if (!input.rtspUrlEncrypted) {
+      throw new ServiceUnavailableException(
+        'Nguồn camera PULL chưa được lưu an toàn; cần cấu hình lại camera.',
+      );
+    }
+    if (!lease.isOwned()) {
+      throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+    }
+
+    const cameraUrl = this.cameraSourceCrypto.decrypt(input.rtspUrlEncrypted);
+    const { proxyKey } = await this.startAqvisionPull({
+      streamName: input.streamName,
+      cameraUrl,
+    });
+    if (!lease.isOwned()) {
+      throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+    }
+
+    const persisted = await this.livestreamRepository.updateCameraPullProxyKey(
+      input.cameraId,
+      proxyKey,
+    );
+    if (!persisted || !lease.isOwned()) {
+      throw new ServiceUnavailableException(
+        'Không thể lưu khoá proxy camera trước khi bắt đầu livestream.',
+      );
     }
   }
 
@@ -857,9 +919,29 @@ export class LivestreamService {
     }
 
     await this.assertTournamentOperator(camera.tournamentId, user);
-    await this.stopAqvisionPull(camera.pullProxyKey);
-    const archived = await this.livestreamRepository.deleteCamera(cameraId);
-    return archived ? this.toPublicCamera(archived) : null;
+    const result = await this.livestreamHealthQueue.runWithCameraLock(
+      camera.id,
+      async (lease) => {
+        if (!lease.isOwned()) {
+          throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+        }
+        await this.stopAqvisionPull(camera.pullProxyKey);
+        if (!lease.isOwned()) {
+          throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+        }
+
+        const archived = await this.livestreamRepository.deleteCamera(cameraId);
+        if (!lease.isOwned()) {
+          throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+        }
+        return { archived };
+      },
+    );
+    if (!result) {
+      throw new ServiceUnavailableException('Camera đang được xử lý; thử lại sau.');
+    }
+
+    return result.archived ? this.toPublicCamera(result.archived) : null;
   }
 
   async assignCamera(matchId: string, user: JwtPayload, data: AssignCameraDto) {
@@ -1031,7 +1113,9 @@ export class LivestreamService {
 
   async startMatchStream(matchId: string, user: JwtPayload) {
     const match = await this.assertCanControlMatchStream(matchId, user);
-    const stream = this.normalizeStream(await this.livestreamRepository.findMatchLivestream(matchId));
+    const stream = this.normalizeStream(
+      await this.livestreamRepository.findMatchLivestream(matchId),
+    );
 
     if (!stream?.cameraId || !stream.streamKey) {
       throw new BadRequestException('Trận này chưa được BTC gán camera nên chưa thể bắt đầu livestream.');
@@ -1041,22 +1125,111 @@ export class LivestreamService {
       throw new BadRequestException('Trận chưa đủ hai đội nên chưa thể bắt đầu livestream.');
     }
 
-    const playbackUrl = this.normalizePublicPlaybackUrl(
-      stream.cameraPlaybackUrl || this.buildAqvisionHlsUrl(stream.streamKey),
-    )!;
-    const livestream = await this.livestreamRepository.updateStreamStatus(
-      matchId,
-      'LIVE',
-      user.sub,
-      playbackUrl,
-    );
-    const recordingStatus = await this.reconcileCameraRecording(stream.cameraId);
+    const cameraId = stream.cameraId;
+    const cameraStreamName = stream.streamName?.trim() || null;
+
+    const hasEncryptedCameraSource = Boolean(stream.cameraRtspUrlEncrypted?.trim());
+    const hasPullProxy = Boolean(stream.cameraPullProxyKey?.trim());
+    const isAqvisionCameraPull =
+      stream.cameraMode === 'PULL' &&
+      (hasEncryptedCameraSource || hasPullProxy);
+    if (
+      stream.cameraMode === 'PULL' &&
+      !hasEncryptedCameraSource &&
+      !hasPullProxy &&
+      this.isAqvisionGeneratedHlsUrl(
+        stream.cameraPlaybackUrl,
+        stream.streamName,
+      )
+    ) {
+      throw new ServiceUnavailableException(
+        'Nguồn camera PULL chưa được lưu an toàn; cần cấu hình lại camera.',
+      );
+    }
+    if (isAqvisionCameraPull && !cameraStreamName) {
+      throw new ServiceUnavailableException(
+        'Camera PULL chưa có tên luồng hợp lệ để khởi tạo proxy.',
+      );
+    }
+
+    const aqvisionStreamName = cameraStreamName ?? stream.streamKey;
+
+    const requestedPlaybackUrl = isAqvisionCameraPull
+      ? this.buildAqvisionHlsUrl(aqvisionStreamName)
+      : stream.cameraMode === 'PULL'
+        ? stream.cameraPlaybackUrl
+        : stream.cameraPlaybackUrl || this.buildAqvisionHlsUrl(stream.streamKey);
+    const playbackUrl = this.normalizePublicPlaybackUrl(requestedPlaybackUrl);
+    if (!playbackUrl) {
+      throw new BadRequestException('Camera chưa có URL phát hợp lệ.');
+    }
+
+    let livestream;
+    if (isAqvisionCameraPull) {
+      const started = await this.livestreamHealthQueue.runWithCameraLock(
+        cameraId,
+        async (lease) => {
+          if (!lease.isOwned()) {
+            throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+          }
+          await this.ensureAqvisionPullProxy(
+            {
+              cameraId,
+              streamName: aqvisionStreamName,
+              pullProxyKey: stream.cameraPullProxyKey,
+              rtspUrlEncrypted: stream.cameraRtspUrlEncrypted,
+            },
+            lease,
+          );
+          if (!lease.isOwned()) {
+            throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+          }
+
+          const updated = await this.livestreamRepository.updateStreamStatus(
+            matchId,
+            'LIVE',
+            user.sub,
+            playbackUrl,
+            cameraId,
+          );
+          if (!lease.isOwned()) {
+            throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+          }
+          if (!updated) {
+            throw new ServiceUnavailableException(
+              'Camera của trận đã thay đổi trong lúc bắt đầu livestream; vui lòng thử lại.',
+            );
+          }
+          return updated;
+        },
+      );
+      if (!started) {
+        throw new ServiceUnavailableException(
+          'Camera đang được xử lý; chưa thể bắt đầu livestream.',
+        );
+      }
+      livestream = started;
+    } else {
+      livestream = await this.livestreamRepository.updateStreamStatus(
+        matchId,
+        'LIVE',
+        user.sub,
+        playbackUrl,
+        cameraId,
+      );
+      if (!livestream) {
+        throw new ServiceUnavailableException(
+          'Camera của trận đã thay đổi trong lúc bắt đầu livestream; vui lòng thử lại.',
+        );
+      }
+    }
+
+    const recordingStatus = await this.reconcileCameraRecording(cameraId);
     const protocol = stream.cameraProtocol === 'SRT' ? 'SRT' : 'RTMP';
 
     return {
       livestream,
-      // PULL: luồng đã phát sẵn từ URL của sân, không có URL ingest để BTC dán
-      // vào OBS — trả null để không sinh ra link RTMP gây hiểu nhầm.
+      // PULL: không có URL ingest để BTC cấu hình ở OBS.
       publish:
         stream.cameraMode === 'PULL'
           ? null
