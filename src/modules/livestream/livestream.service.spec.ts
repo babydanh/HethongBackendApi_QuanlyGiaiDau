@@ -21,6 +21,7 @@ type RepositoryMock = {
   isTournamentStaff: jest.Mock;
   findMatchLivestream: jest.Mock;
   updateStreamStatus: jest.Mock;
+  updateCameraPullProxyKey: jest.Mock;
   findStandaloneMatchPlayback: jest.Mock;
 };
 
@@ -90,6 +91,10 @@ function makeService(
         };
       },
     ),
+    updateCameraPullProxyKey: jest.fn().mockResolvedValue({
+      id: 'camera-1',
+      pullProxyKey: 'proxy-key',
+    }),
     findStandaloneMatchPlayback: jest.fn().mockResolvedValue(null),
   };
   const recordingService = {
@@ -105,20 +110,40 @@ function makeService(
       ) => operation({ cameraId, isOwned: () => true }),
     ),
   };
-  const service = new LivestreamService(
+  const aqvisionApiClient = {
+    addStreamProxy: jest.fn().mockResolvedValue({ proxyKey: null }),
+  };
+  const cameraSourceCrypto = {
+    encrypt: jest.fn((source: string) => `encrypted:${source}`),
+    decrypt: jest.fn().mockReturnValue('rtsp://camera.local/live'),
+  };
+  const configService = {
+    get: jest.fn((key: string, fallback?: unknown) =>
+      key === 'AQVISION_PLAYBACK_BASE_URL'
+        ? 'https://media.aqvision.net'
+        : fallback,
+    ),
+  } as unknown as ConfigService;
+  const LivestreamServiceConstructor = LivestreamService as unknown as {
+    new (...args: unknown[]): LivestreamService;
+  };
+  const service = new LivestreamServiceConstructor(
     repository as unknown as LivestreamRepository,
-    {} as ConfigService,
+    configService,
     {} as AqvisionPublishService,
-    {} as AqvisionApiClient,
+    aqvisionApiClient as unknown as AqvisionApiClient,
     recordingServiceOverride ??
       (recordingService as unknown as AqvisionRecordingService),
     livestreamHealthQueue as unknown as LivestreamHealthQueue,
+    cameraSourceCrypto,
   );
   return {
     repository,
     service,
     recordingService,
     livestreamHealthQueue,
+    aqvisionApiClient,
+    cameraSourceCrypto,
     getPersistedStreamStatus: () => persistedStreamStatus,
   };
 }
@@ -268,6 +293,144 @@ function makeRecordingCoordinator(isRecording: boolean) {
   return { provider, coordinator };
 }
 
+const cameraPullStreamForRecording = {
+  ...cameraStreamForRecording,
+  cameraPlaybackUrl: 'https://media.aqvision.net/live/camera-stream/hls.m3u8',
+  cameraRtspUrlEncrypted: 'encrypted:rtsp://camera.local/live',
+  cameraPullProxyKey: null,
+};
+
+describe('LivestreamService recording status on match lifecycle', () => {
+  it('creates and persists the PULL proxy under the camera lease before marking LIVE', async () => {
+    const {
+      repository,
+      service,
+      livestreamHealthQueue,
+      aqvisionApiClient,
+      cameraSourceCrypto,
+    } = makeService(cameraPullStreamForRecording);
+    aqvisionApiClient.addStreamProxy.mockResolvedValue({
+      proxyKey: 'proxy-key',
+    });
+
+    await service.startMatchStream('match-1', owner);
+
+    expect(livestreamHealthQueue.runWithCameraLock).toHaveBeenCalledWith(
+      'camera-1',
+      expect.any(Function),
+    );
+    expect(cameraSourceCrypto.decrypt).toHaveBeenCalledWith(
+      'encrypted:rtsp://camera.local/live',
+    );
+    expect(aqvisionApiClient.addStreamProxy).toHaveBeenCalledWith({
+      stream: 'camera-stream',
+      url: 'rtsp://camera.local/live',
+      enableHls: true,
+      enableMp4: true,
+    });
+    expect(repository.updateCameraPullProxyKey).toHaveBeenCalledWith(
+      'camera-1',
+      'proxy-key',
+    );
+    expect(repository.updateCameraPullProxyKey.mock.invocationCallOrder[0]).toBeLessThan(
+      repository.updateStreamStatus.mock.invocationCallOrder[0],
+    );
+    expect(repository.updateStreamStatus).toHaveBeenCalledWith(
+      'match-1',
+      'LIVE',
+      owner.sub,
+      'https://media.aqvision.net/live/camera-stream/hls.m3u8',
+      'camera-1',
+    );
+  });
+
+  it('fails closed when the match is no longer assigned to the starting camera', async () => {
+    const { repository, service, aqvisionApiClient, recordingService } =
+      makeService(cameraPullStreamForRecording);
+    aqvisionApiClient.addStreamProxy.mockResolvedValue({
+      proxyKey: 'proxy-key',
+    });
+    repository.updateStreamStatus.mockResolvedValue(null);
+
+    await expect(
+      service.startMatchStream('match-1', owner),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(repository.updateStreamStatus).toHaveBeenCalledWith(
+      'match-1',
+      'LIVE',
+      owner.sub,
+      'https://media.aqvision.net/live/camera-stream/hls.m3u8',
+      'camera-1',
+    );
+    expect(recordingService.reconcileCamera).not.toHaveBeenCalled();
+  });
+
+
+
+  it('does not mark a CAMERA PULL match LIVE when AQVision returns no proxy key', async () => {
+    const { repository, service, aqvisionApiClient, recordingService } =
+      makeService(cameraPullStreamForRecording);
+    aqvisionApiClient.addStreamProxy.mockResolvedValue({ proxyKey: null });
+
+    await expect(service.startMatchStream('match-1', owner)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+
+    expect(repository.updateStreamStatus).not.toHaveBeenCalled();
+    expect(repository.updateCameraPullProxyKey).not.toHaveBeenCalled();
+    expect(recordingService.reconcileCamera).not.toHaveBeenCalled();
+  });
+
+  it('keeps an already-live PLAYBACK PULL source proxy-free', async () => {
+    const { repository, service, aqvisionApiClient, cameraSourceCrypto } =
+      makeService({
+        ...cameraStreamForRecording,
+        cameraPlaybackUrl: 'https://outside.example/live.m3u8',
+      });
+
+    const response = await service.startMatchStream('match-1', owner);
+
+    expect(aqvisionApiClient.addStreamProxy).not.toHaveBeenCalled();
+    expect(cameraSourceCrypto.decrypt).not.toHaveBeenCalled();
+    expect(repository.updateStreamStatus).toHaveBeenCalledWith(
+      'match-1',
+      'LIVE',
+      owner.sub,
+      'https://outside.example/live.m3u8',
+      'camera-1',
+    );
+    expect(response.playbackUrl).toBe('https://outside.example/live.m3u8');
+  });
+
+  it('does not persist the proxy key or mark LIVE after the camera lease is lost', async () => {
+    const {
+      repository,
+      service,
+      livestreamHealthQueue,
+      aqvisionApiClient,
+    } = makeService(cameraPullStreamForRecording);
+    let leaseOwned = true;
+    aqvisionApiClient.addStreamProxy.mockImplementation(async () => {
+      leaseOwned = false;
+      return { proxyKey: 'proxy-key' };
+    });
+    livestreamHealthQueue.runWithCameraLock.mockImplementation(
+      async (cameraId, operation) =>
+        operation({ cameraId, isOwned: () => leaseOwned }),
+    );
+
+    await expect(service.startMatchStream('match-1', owner)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+
+    expect(aqvisionApiClient.addStreamProxy).toHaveBeenCalledTimes(1);
+    expect(repository.updateCameraPullProxyKey).not.toHaveBeenCalled();
+    expect(repository.updateStreamStatus).not.toHaveBeenCalled();
+  });
+
+});
+
 describe('LivestreamService recording status on match lifecycle', () => {
   it('keeps LIVE and preserves the successful stream response when MP4 reconciliation fails', async () => {
     const {
@@ -289,6 +452,7 @@ describe('LivestreamService recording status on match lifecycle', () => {
       'LIVE',
       owner.sub,
       'https://media.example.test/camera-stream/index.m3u8',
+      'camera-1',
     );
     expect(response).toMatchObject({
       livestream: {
@@ -321,6 +485,7 @@ describe('LivestreamService recording status on match lifecycle', () => {
       'LIVE',
       owner.sub,
       'https://media.example.test/camera-stream/index.m3u8',
+      'camera-1',
     );
     expect(provider.startRecordMp4).toHaveBeenCalledWith('camera-stream');
     expect(response).toMatchObject({
@@ -354,6 +519,7 @@ describe('LivestreamService recording status on match lifecycle', () => {
       'LIVE',
       owner.sub,
       'https://media.example.test/camera-stream/index.m3u8',
+      'camera-1',
     );
     expect(response).toMatchObject({ recordingStatus: 'PENDING' });
     expect(recordingService.reconcileCamera).not.toHaveBeenCalled();

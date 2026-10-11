@@ -27,6 +27,8 @@ export interface CreateCameraInput {
   playbackUrl: string;
   /** Khoá proxy AQP của camera PULL có nguồn là camera IP; `null` với mọi nguồn khác. */
   pullProxyKey?: string | null;
+  /** URL nguồn camera đã mã hoá, chỉ có với camera PULL nguồn IP. */
+  rtspUrlEncrypted?: string | null;
   createdBy: string;
 }
 
@@ -348,6 +350,21 @@ export class LivestreamRepository {
     return camera ?? null;
   }
 
+  async updateCameraPullProxyKey(cameraId: string, pullProxyKey: string) {
+    const [camera] = await this.db
+      .update(schema.livestreamCameras)
+      .set({ pullProxyKey, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.livestreamCameras.id, cameraId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .returning({ id: schema.livestreamCameras.id });
+
+    return camera ?? null;
+  }
+
   async deleteCamera(cameraId: string) {
     await this.db
       .update(schema.matchLivestreams)
@@ -458,6 +475,8 @@ export class LivestreamRepository {
         streamName: schema.livestreamCameras.streamName,
         streamKey: schema.livestreamCameras.streamKey,
         cameraMode: schema.livestreamCameras.mode,
+        cameraPullProxyKey: schema.livestreamCameras.pullProxyKey,
+        cameraRtspUrlEncrypted: schema.livestreamCameras.rtspUrlEncrypted,
       })
       .from(schema.matchLivestreams)
       .leftJoin(
@@ -666,6 +685,7 @@ export class LivestreamRepository {
     status: 'IDLE' | 'LIVE' | 'OFFLINE',
     _userId: string | null,
     playbackUrl: string | null,
+    expectedCameraId?: string,
   ) {
     const setValues =
       status === 'LIVE'
@@ -687,7 +707,14 @@ export class LivestreamRepository {
     const [stream] = await this.db
       .update(schema.matchLivestreams)
       .set(setValues)
-      .where(eq(schema.matchLivestreams.matchId, matchId))
+      .where(
+        expectedCameraId
+          ? and(
+              eq(schema.matchLivestreams.matchId, matchId),
+              eq(schema.matchLivestreams.cameraId, expectedCameraId),
+            )
+          : eq(schema.matchLivestreams.matchId, matchId),
+      )
       .returning();
 
     if (stream?.cameraId) {

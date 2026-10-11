@@ -167,6 +167,12 @@ export const envValidationSchema = Joi.object({
     .allow('')
     .optional()
     .default(''),
+  LIVESTREAM_CAMERA_SOURCE_ENCRYPTION_KEY: Joi.string()
+    .pattern(/^(?:[0-9a-fA-F]{64})?$/)
+    .allow('')
+    .optional()
+    .default(''),
+
   FACEBOOK_PUBLISH_CONFIG_TTL_SECONDS: Joi.number()
     .integer()
     .min(60)

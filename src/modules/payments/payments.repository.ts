@@ -29,6 +29,13 @@ const activePayoutStatuses = [
   'PENDING_DISBURSEMENT',
 ];
 
+const platformFeeReversalReasons = new Set<string>([
+  'WITHDRAWAL_WITHIN_3_HOURS',
+  'PARTICIPANT_KICKED',
+  'ORGANIZER_UNMARKED_FEE_PAID',
+  'TOURNAMENT_CANCELLED',
+]);
+
 @Injectable()
 export class PaymentsRepository {
   constructor(@Inject(PG_CONNECTION) private readonly db: AppDb) {}
@@ -784,7 +791,7 @@ export class PaymentsRepository {
       });
       if (
         requestedRefund &&
-        ['WITHDRAWAL_WITHIN_3_HOURS', 'PARTICIPANT_KICKED'].includes(reason) &&
+        platformFeeReversalReasons.has(reason) &&
         Number(payment.platformFeeAmount ?? 0) > 0
       ) {
         await tx.insert(schema.financialLedgerEntries).values({

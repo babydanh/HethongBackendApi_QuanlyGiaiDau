@@ -53,6 +53,9 @@ describe('Sentry Add Athlete request redaction', () => {
     };
 
     const redacted = config!.beforeSend(event);
+    expect(redacted.logentry).toEqual({
+      message: 'Add Athlete request failed',
+    });
     const serialized = JSON.stringify(redacted);
 
     expect(serialized).not.toContain(rawName);

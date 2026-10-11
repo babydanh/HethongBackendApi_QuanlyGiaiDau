@@ -67,3 +67,31 @@ describe('LivestreamRepository camera recording targets', () => {
     ).toHaveLength(1);
   });
 });
+
+describe('LivestreamRepository camera-guarded stream updates', () => {
+  it('conditions a LIVE transition on the expected camera assignment', async () => {
+    const query = {
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      returning: jest.fn().mockResolvedValue([]),
+    };
+    const repository = new LivestreamRepository({
+      update: jest.fn().mockReturnValue(query),
+    } as never);
+
+    await Reflect.apply(repository.updateStreamStatus, repository, [
+      'match-1',
+      'LIVE',
+      'user-1',
+      'https://media.example.test/live.m3u8',
+      'camera-1',
+    ]);
+
+    const predicate = new PgDialect().sqlToQuery(
+      query.where.mock.calls[0][0] as SQL,
+    );
+    expect(predicate.sql).toContain('"match_id" = $1');
+    expect(predicate.sql).toContain('"camera_id" = $2');
+    expect(predicate.params).toEqual(['match-1', 'camera-1']);
+  });
+});

@@ -7,6 +7,7 @@ import { LivestreamService } from './livestream.service';
 import { LiveSessionRepository } from './live-session.repository';
 import { FacebookLiveService } from './facebook-live.service';
 import { FacebookPageConnectionService } from './facebook-page-connection.service';
+import { LivestreamCameraSourceCryptoService } from './livestream-camera-source-crypto.service';
 import { FacebookTokenCryptoService } from './facebook-token-crypto.service';
 import { LiveSessionService } from './live-session.service';
 import { CameraDeviceService } from './camera-device.service';
@@ -29,6 +30,7 @@ import { LivestreamHealthQueue } from './livestream-health.queue';
     LivestreamRepository,
     LiveSessionRepository,
     FacebookLiveService,
+    LivestreamCameraSourceCryptoService,
     FacebookTokenCryptoService,
     FacebookPageConnectionService,
     LiveSessionService,
