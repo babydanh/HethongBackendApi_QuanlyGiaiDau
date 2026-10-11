@@ -43,6 +43,11 @@ describe('Sentry Add Athlete request redaction', () => {
       breadcrumbs: [
         { message: `search ${rawEmail}`, data: { query: rawName, userId: rawUserId } },
       ],
+      logentry: {
+        message: `search ${rawEmail}`,
+        formatted: `${rawName} ${rawEmail}`,
+        params: [rawUserId],
+      },
       exception: { values: [{ type: 'Error', value: `failed for ${rawEmail}` }] },
       user: { id: rawUserId, email: rawEmail },
     };
