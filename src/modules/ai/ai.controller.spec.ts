@@ -257,35 +257,34 @@ describe('AiController POST /ai/parse-tournament-source', () => {
 });
 
 const TOURNAMENT_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
-const ROSTER_REVIEW_PATH = `/api/v1/ai/tournaments/${TOURNAMENT_ID}/roster-review`;
+const ROSTER_LAYOUT_PATH = `/api/v1/ai/tournaments/${TOURNAMENT_ID}/roster-layout`;
 const ROSTER_BODY = {
-  sheetName: 'Danh sách thi',
-  headerRow: 3,
-  headers: ['Cặp đấu', 'VĐV 1', 'Email VĐV 1'],
-  sampleRows: [{ 'Cặp đấu': 'CLB Minh Đức', 'VĐV 1': 'Nguyễn An', 'Email VĐV 1': 'an@example.test' }],
-  isDoubles: true,
-};
-const ROSTER_REVIEW = {
-  suggestions: [
-    { slot: 'teamName', header: 'Cặp đấu', confidence: 0.9, reason: 'tên cặp thi đấu' },
+  sheets: [
+    {
+      name: 'Danh sách thi',
+      rowCount: 40,
+      columnCount: 6,
+      rows: [{ r: 3, cells: ['Cặp đấu', 'VĐV 1', 'Email VĐV 1', 'SĐT VĐV 1', 'VĐV 2', 'Email VĐV 2'] }],
+    },
   ],
-  fileNotes: ['Tiêu đề nằm ở dòng 3'],
+  locale: 'vi',
 };
+const ROSTER_LAYOUT_UNAVAILABLE = { data: null, aiAvailable: false };
 
-describe('AiController POST /ai/tournaments/:tournamentId/roster-review', () => {
+describe('AiController POST /ai/tournaments/:tournamentId/roster-layout', () => {
   let app: INestApplication;
-  let reviewRosterSource: jest.Mock;
+  let analyzeRosterLayout: jest.Mock;
   let assertTournamentManager: jest.Mock;
 
   beforeEach(async () => {
-    reviewRosterSource = jest.fn().mockResolvedValue({ data: ROSTER_REVIEW, aiAvailable: true });
+    analyzeRosterLayout = jest.fn().mockResolvedValue(ROSTER_LAYOUT_UNAVAILABLE);
     assertTournamentManager = jest.fn().mockResolvedValue(undefined);
     const roleLookup = createRoleLookup([UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER]);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [AiController],
       providers: [
-        { provide: AiService, useValue: { reviewRosterSource } },
+        { provide: AiService, useValue: { analyzeRosterLayout } },
         { provide: TournamentsService, useValue: { assertTournamentManager } },
       ],
     }).compile();
@@ -312,134 +311,97 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review', () => 
     await app.close();
   });
 
-  it('refuses an anonymous review before the model is ever asked', async () => {
-    const response = await request(app.getHttpServer()).post(ROSTER_REVIEW_PATH).send(ROSTER_BODY);
+  it('refuses an anonymous request before the service is asked', async () => {
+    const response = await request(app.getHttpServer()).post(ROSTER_LAYOUT_PATH).send(ROSTER_BODY);
 
     expect(response.status).toBe(401);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
   });
 
-  it('refuses a verified player, because reviewing a roster is an organizer job', async () => {
+  it('refuses a verified player before the service is asked', async () => {
     const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
+      .post(ROSTER_LAYOUT_PATH)
       .set(...bearerHeader(verifiedUser(UserRole.PLAYER)))
       .send(ROSTER_BODY);
 
     expect(response.status).toBe(403);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
+    expect(assertTournamentManager).not.toHaveBeenCalled();
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
   });
 
-  it('refuses an organizer who does not manage this tournament before the model is ever asked', async () => {
-    assertTournamentManager.mockRejectedValueOnce(
-      new ForbiddenException('Bạn không có quyền quản lý giải đấu này'),
-    );
+  it('refuses an organizer whose email is not verified before the service is asked', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_LAYOUT_PATH)
+      .set(...bearerHeader({ ...verifiedUser(UserRole.ORGANIZER), isEmailVerified: false }))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(403);
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
+  });
+
+  it('refuses an organizer who does not manage this tournament before the service is asked', async () => {
+    assertTournamentManager.mockRejectedValueOnce(new ForbiddenException());
 
     const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
+      .post(ROSTER_LAYOUT_PATH)
       .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
       .send(ROSTER_BODY);
 
     expect(response.status).toBe(403);
     expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
   });
 
-  it('refuses an organizer whose email is not verified before the model is ever asked', async () => {
+  it('rejects a body without sheets before the service is asked', async () => {
     const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
-      .set(...bearerHeader({ ...verifiedUser(UserRole.ORGANIZER), isEmailVerified: false }))
-      .send(ROSTER_BODY);
-
-    expect(response.status).toBe(403);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
-  });
-
-  it('returns the whitelisted suggestions in the success envelope for a verified organizer', async () => {
-    const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
+      .post(ROSTER_LAYOUT_PATH)
       .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
-      .send(ROSTER_BODY);
+      .send({ locale: 'vi' });
 
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, data: ROSTER_REVIEW, aiAvailable: true });
-    expect(reviewRosterSource).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining(ROSTER_BODY));
+    expect(response.status).toBe(400);
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
   });
 
-  it('accepts an optional supported explanation locale', async () => {
+  it('rejects an unsupported locale before the service is asked', async () => {
     const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
-      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
-      .send({ ...ROSTER_BODY, locale: 'en' });
-
-    expect(response.status).toBe(200);
-    expect(reviewRosterSource).toHaveBeenCalledWith(
-      TOURNAMENT_ID,
-      expect.objectContaining({ locale: 'en' }),
-    );
-  });
-
-  it('rejects an unsupported explanation locale through the locale validator', async () => {
-    const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
+      .post(ROSTER_LAYOUT_PATH)
       .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
       .send({ ...ROSTER_BODY, locale: 'fr' });
 
     expect(response.status).toBe(400);
-    expect(response.body.message).toEqual(expect.arrayContaining([
-      expect.stringContaining('locale must be one of the following values'),
-    ]));
-    expect(reviewRosterSource).not.toHaveBeenCalled();
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
   });
 
-  it('reports an unavailable model without failing, so the wizard keeps its keyword mapping', async () => {
-    reviewRosterSource.mockResolvedValue({ data: null, aiAvailable: false });
-
+  it('rejects an unknown body property before the service is asked', async () => {
     const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
-      .set(...bearerHeader(verifiedUser(UserRole.ADMIN)))
+      .post(ROSTER_LAYOUT_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ ...ROSTER_BODY, rawSheet: 'không được phép' });
+
+    expect(response.status).toBe(400);
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
+  });
+
+  it('rejects a tournament id that is not a UUID before the service is asked', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/ai/tournaments/not-a-uuid/roster-layout')
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(400);
+    expect(assertTournamentManager).not.toHaveBeenCalled();
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
+  });
+
+  it('answers the service envelope for a manager and passes the validated body through', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_LAYOUT_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
       .send(ROSTER_BODY);
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ success: true, data: null, aiAvailable: false });
-  });
-
-  it('rejects a body without headers, so the model is never asked to guess the sheet shape', async () => {
-    const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
-      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
-      .send({ sheetName: 'Danh sách thi', sampleRows: [], isDoubles: true });
-
-    expect(response.status).toBe(400);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
-  });
-
-  it('rejects a headerRow outside the sheet the organizer actually uploaded', async () => {
-    const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
-      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
-      .send({ ...ROSTER_BODY, headerRow: 0 });
-
-    expect(response.status).toBe(400);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
-  });
-
-  it('rejects an unknown body property, so file bytes cannot ride along with a review', async () => {
-    const response = await request(app.getHttpServer())
-      .post(ROSTER_REVIEW_PATH)
-      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
-      .send({ ...ROSTER_BODY, uploadFileBase64: 'UEsDBA==' });
-
-    expect(response.status).toBe(400);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
-  });
-
-  it('rejects a non-uuid tournamentId before the review runs', async () => {
-    const response = await request(app.getHttpServer())
-      .post('/api/v1/ai/tournaments/khong-phai-uuid/roster-review')
-      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
-      .send(ROSTER_BODY);
-
-    expect(response.status).toBe(400);
-    expect(reviewRosterSource).not.toHaveBeenCalled();
+    expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
+    expect(analyzeRosterLayout).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining({ locale: 'vi' }));
   });
 });

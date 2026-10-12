@@ -1198,7 +1198,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       expect(result.leader.teamStatus).toBe('PENDING_PARTNER');
     });
   });
-  describe('assertTournamentManager (quyền quản lý cho route AI roster-review)', () => {
+  describe('assertTournamentManager (quyền quản lý cho route AI roster-layout)', () => {
     const tournament = { id: 'tournament-1', createdBy: 'owner-1', communityId: null };
 
     it('lets the tournament creator through', async () => {

@@ -15,7 +15,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { AiService } from './ai.service';
 import { ParseTournamentSourceDto } from './dto/parse-tournament-source.dto';
 import { AiScheduleCommandDto } from './dto/ai-schedule-command.dto';
-import { RosterReviewRequestDto } from './dto/roster-review.dto';
+import { RosterLayoutRequestDto } from './dto/roster-layout.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -148,16 +148,16 @@ export class AiController {
     return { success: true, data };
   }
 
-  @Post('tournaments/:tournamentId/roster-review')
+  @Post('tournaments/:tournamentId/roster-layout')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
   @Verified()
   @UseGuards(new RateLimitGuard(10, 60000))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Gợi ý ánh xạ cột cho tệp danh sách VĐV và nhận xét ngắn về cấu trúc tệp, không ghi dữ liệu' })
-  async reviewRoster(
+  @ApiOperation({ summary: 'Gợi ý bố cục các khối, cột và trang tính của tệp danh sách VĐV, không ghi dữ liệu' })
+  async analyzeRosterLayout(
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
-    @Body() dto: RosterReviewRequestDto,
+    @Body() dto: RosterLayoutRequestDto,
     @CurrentUser() user: JwtPayload,
   ) {
     await this.tournamentsService.assertTournamentManager(
@@ -165,7 +165,7 @@ export class AiController {
       user.sub,
       user.roles ?? (user.role ? [user.role] : []),
     );
-    const result = await this.aiService.reviewRosterSource(tournamentId, dto);
+    const result = await this.aiService.analyzeRosterLayout(tournamentId, dto);
 
     return { success: true, data: result.data, aiAvailable: result.aiAvailable };
   }

@@ -209,7 +209,7 @@ export class TournamentsService {
   }
 
   /**
-   * Chặn route không phải quản lý giải (ví dụ AI roster-review): 404 nếu giải không tồn tại, 403 nếu không có quyền quản lý.
+   * Chặn route không phải quản lý giải (ví dụ AI roster-layout): 404 nếu giải không tồn tại, 403 nếu không có quyền quản lý.
    */
   async assertTournamentManager(
     tournamentId: string,
