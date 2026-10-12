@@ -169,4 +169,30 @@ export class AiController {
 
     return { success: true, data: result.data, aiAvailable: result.aiAvailable };
   }
+
+  /**
+   * Deprecated alias for clients built before roster-layout (approved plan decision D-4). Same
+   * guards as roster-layout. The legacy body is not read: while ROSTER_LAYOUT_PROVIDER_APPROVED is
+   * false no provider call happens, so the payload is the unavailable outcome. Remove with the alias.
+   */
+  @Post('tournaments/:tournamentId/roster-review')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @UseGuards(new RateLimitGuard(10, 60000))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Deprecated: dùng roster-layout', deprecated: true })
+  async reviewRosterDeprecated(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Body() _legacyBody: unknown,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.tournamentsService.assertTournamentManager(
+      tournamentId,
+      user.sub,
+      user.roles ?? (user.role ? [user.role] : []),
+    );
+
+    return { success: true, data: null, aiAvailable: false };
+  }
 }
