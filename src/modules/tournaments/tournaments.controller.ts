@@ -49,6 +49,7 @@ import { CreateDivisionDto } from './dto/create-division.dto';
 import { UpdateDivisionDto } from './dto/update-division.dto';
 import { UpdateBracketSlotsDto } from './dto/update-bracket-slots.dto';
 import { UpdateParticipantFeePaymentDto } from './dto/update-participant-fee-payment.dto';
+import { UpdateParticipantNoteDto } from './dto/update-participant-note.dto';
 import { UpdateParticipantPresenceDto } from './dto/update-participant-presence.dto';
 import { ConfirmRankingConsentResultDto } from './dto/confirm-ranking-consent-result.dto';
 import {
@@ -1802,6 +1803,28 @@ export class TournamentsController {
       id,
       participantId,
       dto.paid,
+      user.sub,
+      this.getSystemRoles(user),
+    );
+  }
+
+  @Patch(':id/participants/:participantId/note')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Ghi chú nội bộ của BTC cho người tham gia',
+  })
+  async setParticipantNote(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+    @Body() dto: UpdateParticipantNoteDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.setParticipantNote(
+      id,
+      participantId,
+      dto.note,
       user.sub,
       this.getSystemRoles(user),
     );

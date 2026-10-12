@@ -940,6 +940,22 @@ export class TournamentsService {
     );
   }
 
+  async setParticipantNote(
+    tournamentId: string,
+    participantId: string,
+    note: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    return this.tournamentParticipantAdminService.setParticipantNote(
+      tournamentId,
+      participantId,
+      note,
+      userId,
+      systemRoles,
+    );
+  }
+
   async setParticipantPresent(
     tournamentId: string,
     participantId: string,

@@ -697,6 +697,50 @@ describe('TournamentParticipantAdminService', () => {
     });
   });
 
+  describe('setParticipantNote', () => {
+    const tournament = {
+      id: 'tournament-1',
+      status: 'REGISTRATION_OPEN',
+      name: 'Regional event',
+      entryFee: 500,
+    };
+
+    it('rejects a caller who does not manage the tournament', async () => {
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(false);
+
+      await expect(
+        admin.setParticipantNote(
+          'tournament-1',
+          'participant-1',
+          'note',
+          'player-1',
+          [],
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repositoryMock.findParticipantById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a participant belonging to another tournament', async () => {
+      repositoryMock.findById.mockResolvedValue(tournament);
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue({
+        id: 'participant-1',
+        tournamentId: 'tournament-2',
+      });
+
+      await expect(
+        admin.setParticipantNote(
+          'tournament-1',
+          'participant-1',
+          'note',
+          'organizer-1',
+          [],
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   describe('previewRosterImport eligibility', () => {
     const closedTournament = {
       id: 'tournament-1',

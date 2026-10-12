@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { PG_CONNECTION } from '../../../database/database.module';
 import type { AppDb } from '../../../database/db.types';
+import { eq, sql } from 'drizzle-orm';
+import * as schema from '../../../database/schema';
 import { AuditService } from '../../audit/audit.service';
 import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentPaymentRepository } from '../repositories/tournament-payment.repository';
@@ -536,6 +538,53 @@ export class TournamentParticipantAdminService {
     });
 
     return result;
+  }
+
+  /**
+   * Organizer-only internal note. Stored in customResponses.notes, the same key
+   * the Excel roster import writes, so an imported note is shown and editable
+   * here without a second source. Empty input clears the note.
+   */
+  async setParticipantNote(
+    tournamentId: string,
+    participantId: string,
+    note: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const tournament = await this.tournamentsRepository.findById(tournamentId);
+    if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
+
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
+    if (!isAuthorized) {
+      throw new ForbiddenException('Bạn không có quyền ghi chú người tham gia');
+    }
+
+    const participant =
+      await this.tournamentsRepository.findParticipantById(participantId);
+    if (!participant || participant.tournamentId !== tournamentId) {
+      throw new NotFoundException('Người tham gia không tồn tại');
+    }
+
+    const trimmed = note.trim();
+    const current = sql`coalesce(${schema.tournamentParticipants.customResponses}, '{}'::jsonb)`;
+    const [updated] = await this.db
+      .update(schema.tournamentParticipants)
+      .set({
+        customResponses: trimmed
+          ? sql`${current} || jsonb_build_object('notes', ${trimmed}::text)`
+          : sql`${current} - 'notes'`,
+      })
+      .where(eq(schema.tournamentParticipants.id, participantId))
+      .returning({
+        id: schema.tournamentParticipants.id,
+        customResponses: schema.tournamentParticipants.customResponses,
+      });
+    return updated;
   }
 
   /**
