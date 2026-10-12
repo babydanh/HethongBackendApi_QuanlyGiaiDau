@@ -348,6 +348,54 @@ describe('TournamentParticipantAdminService', () => {
     expect(repositoryMock.updateParticipantStatus).not.toHaveBeenCalled();
   });
 
+  it('accepts an organizer-waived doubles pair without payment', async () => {
+    const tournament = {
+      id: 'tournament-1',
+      status: 'REGISTRATION_OPEN',
+      name: 'Regional event',
+      entryFee: 500,
+      matchType: 'DOUBLES',
+      tournamentConfig: { registrationMode: 'APPROVAL' },
+    };
+    const participant = {
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      tournamentDivisionId: 'division-1',
+      teamStatus: 'PENDING_APPROVAL',
+      isPaid: false,
+      organizerWaivedFee: true,
+      entryFeeAtRegistration: 500,
+    };
+    repositoryMock.findById.mockResolvedValue(tournament);
+    accessMock.isManager.mockResolvedValue(true);
+    repositoryMock.findParticipantById.mockResolvedValue(participant);
+    repositoryMock.findDivisionById.mockResolvedValue({ matchType: 'DOUBLES' });
+    repositoryMock.getParticipantRosters.mockResolvedValue([
+      { userId: 'player-1', role: 'MAIN' },
+      { userId: 'player-2', role: 'MAIN' },
+    ]);
+    repositoryMock.findCompletedParticipantPayment.mockResolvedValue(null);
+    repositoryMock.assignNextAvailableSeed.mockResolvedValue(null);
+    repositoryMock.updateParticipantStatus.mockResolvedValue({
+      ...participant,
+      teamStatus: 'COMPLETE',
+    });
+
+    await admin.updateParticipantStatus(
+      'tournament-1',
+      'participant-1',
+      'COMPLETE',
+      'organizer-1',
+      [],
+      jest.fn(),
+    );
+    expect(repositoryMock.updateParticipantStatus).toHaveBeenCalledWith(
+      'participant-1',
+      'COMPLETE',
+      'PENDING_APPROVAL',
+    );
+  });
+
   describe('setParticipantFeePaid', () => {
     const tournament = {
       id: 'tournament-1',

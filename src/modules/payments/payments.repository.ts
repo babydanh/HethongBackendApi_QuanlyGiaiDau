@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
@@ -108,7 +108,10 @@ export class PaymentsRepository {
         and(
           eq(schema.tournamentParticipants.tournamentId, tournamentId),
           eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-          eq(schema.tournamentParticipants.isPaid, true),
+          or(
+            eq(schema.tournamentParticipants.isPaid, true),
+            eq(schema.tournamentParticipants.organizerWaivedFee, true),
+          ),
         ),
       );
     return result?.count ?? 0;

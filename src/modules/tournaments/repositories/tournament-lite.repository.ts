@@ -23,6 +23,7 @@ import {
   isLiteRegistrationTournament,
   isRegistrationFeePaid,
 } from '../utils/registration-payment-eligibility';
+import { normalizeProfileGender } from '../utils/profile-gender';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 import { TournamentRatingRepository } from './tournament-rating.repository';
 import {
@@ -273,16 +274,10 @@ export class TournamentLiteRepository {
         ]),
       );
     const genders = new Map(
-      profileRows.map((profile) => {
-        const raw = (profile.gender || '').trim().toUpperCase();
-        const normalized =
-          raw === 'NAM' || raw === 'MALE'
-            ? 'MALE'
-            : raw === 'NỮ' || raw === 'NU' || raw === 'FEMALE'
-              ? 'FEMALE'
-              : null;
-        return [profile.userId, normalized] as const;
-      }),
+      profileRows.map(
+        (profile) =>
+          [profile.userId, normalizeProfileGender(profile.gender)] as const,
+      ),
     );
     const p1Gender = genders.get(p1Rosters[0].userId);
     const p2Gender = genders.get(p2Rosters[0].userId);
@@ -362,6 +357,7 @@ export class TournamentLiteRepository {
       );
     const registrationIsPaid = isRegistrationFeePaid({
       persistedIsPaid: p1.isPaid,
+      organizerWaivedFee: p1.organizerWaivedFee,
       feeSnapshot: p1.entryFeeAtRegistration,
       hasCompletedPayment: Boolean(primaryCapturedPayment),
       isLiteRegistration: isLitePairing,

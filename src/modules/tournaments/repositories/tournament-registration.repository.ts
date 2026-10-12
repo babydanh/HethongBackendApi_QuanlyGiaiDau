@@ -1277,6 +1277,7 @@ export class TournamentRegistrationRepository {
         paymentEligible:
           registrationRosterComplete &&
           !participant.isPaid &&
+          !participant.organizerWaivedFee &&
           Number.isSafeInteger(payableEntryFeeAmount) &&
           payableEntryFeeAmount > 0,
         teamInviteLink:
@@ -2531,6 +2532,7 @@ export class TournamentRegistrationRepository {
       .limit(1);
     const effectiveIsPaid = isRegistrationFeePaid({
       persistedIsPaid: participant.isPaid,
+      organizerWaivedFee: participant.organizerWaivedFee,
       feeSnapshot: payableEntryFeeAmount,
       hasCompletedPayment: Boolean(completedRegistrationPayment),
       isLiteRegistration,

@@ -57,6 +57,7 @@ import {
   ListAddAthleteCandidatesQueryDto,
   SearchAddAthleteCandidatesDto,
 } from './dto/add-athlete.dto';
+import { AddAthletePairsDto } from './dto/add-athlete-pairs.dto';
 
 import { AddRefereeDto } from './dto/add-referee.dto';
 import { AddStaffMemberDto } from './dto/add-staff-member.dto';
@@ -1705,6 +1706,26 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.addDirectAthlete(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/add-athletes/pairs')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Ghép đôi VĐV đã chọn thành các đội trong nội dung đôi',
+  })
+  async addAthletePairs(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddAthletePairsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.addAthletePairs(
       id,
       user.sub,
       this.getSystemRoles(user),

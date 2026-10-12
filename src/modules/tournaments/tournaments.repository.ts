@@ -561,6 +561,12 @@ export class TournamentsRepository {
     return this.tournamentImportRepository.addDirectAthlete(...args);
   }
 
+  addAthletePairs(
+    ...args: Parameters<TournamentImportRepository['addAthletePairs']>
+  ) {
+    return this.tournamentImportRepository.addAthletePairs(...args);
+  }
+
   importParticipants(
     ...args: Parameters<TournamentImportRepository['importParticipants']>
   ) {

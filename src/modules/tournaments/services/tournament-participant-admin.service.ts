@@ -312,7 +312,11 @@ export class TournamentParticipantAdminService {
               ? Number(division.entryFee)
               : Number(tournament.entryFee ?? 0);
 
-        if (entryFeeAmount > 0 && !participant.isPaid) {
+        if (
+          entryFeeAmount > 0 &&
+          !participant.isPaid &&
+          !participant.organizerWaivedFee
+        ) {
           throw new BadRequestException(
             'Hồ sơ có lệ phí chưa thanh toán, không thể duyệt hoàn tất.',
           );

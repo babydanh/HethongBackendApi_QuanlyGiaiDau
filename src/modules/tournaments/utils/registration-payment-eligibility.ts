@@ -12,6 +12,8 @@ export interface RegistrationPaidStateContext {
   feeSnapshot: number | string | null | undefined;
   hasCompletedPayment: boolean;
   isLiteRegistration: boolean;
+  /** Set only by the organizer add-athlete pairs flow; the fee is never collected. */
+  organizerWaivedFee: boolean;
 }
 
 /** Resolve payment state without trusting a legacy Lite pairing flag. */
@@ -20,10 +22,12 @@ export function isRegistrationFeePaid({
   feeSnapshot,
   hasCompletedPayment,
   isLiteRegistration,
+  organizerWaivedFee,
 }: RegistrationPaidStateContext): boolean {
   const feeAmount = Number(feeSnapshot);
   if (Number.isFinite(feeAmount) && feeAmount <= 0) return true;
   if (hasCompletedPayment) return true;
+  if (organizerWaivedFee) return true;
   if (isLiteRegistration) return false;
   return persistedIsPaid === true;
 }

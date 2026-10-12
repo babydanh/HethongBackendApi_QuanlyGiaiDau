@@ -57,12 +57,14 @@ export interface CapacityOwnerContext {
 export function assertCapacityHasRoom(
   capacity: DivisionCapacityLimit,
   requestedTeamSlots: number,
+  reject: () => Error = () =>
+    new BadRequestException('Nội dung thi đấu đã đầy.'),
 ): void {
   if (capacity.maxTeamSlots == null) return;
   if (!(requestedTeamSlots > 0)) return;
 
   if (capacity.occupiedTeamSlots + requestedTeamSlots > capacity.maxTeamSlots) {
-    throw new BadRequestException('Nội dung thi đấu đã đầy.');
+    throw reject();
   }
 }
 

@@ -26,6 +26,7 @@ import type {
   ListAddAthleteCandidatesQueryDto,
   SearchAddAthleteCandidatesDto,
 } from '../dto/add-athlete.dto';
+import type { AddAthletePairsDto } from '../dto/add-athlete-pairs.dto';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
 import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
 
@@ -366,6 +367,26 @@ export class TournamentImportService {
       action: 'IMPORT_PARTICIPANTS',
     });
     return result.participant;
+  }
+
+  async addAthletePairs(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthletePairsDto,
+    broadcastRegistrationChanged: RegistrationChangedBroadcaster,
+  ) {
+    await this.assertImportable(tournamentId, userId, systemRoles);
+    const result = await this.tournamentsRepository.addAthletePairs(
+      tournamentId,
+      userId,
+      dto,
+    );
+    broadcastRegistrationChanged(tournamentId, {
+      divisionId: dto.tournamentDivisionId,
+      action: 'IMPORT_PARTICIPANTS',
+    });
+    return result;
   }
 
   private assertCandidateFlowMatchesSport(

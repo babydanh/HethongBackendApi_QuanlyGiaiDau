@@ -40,7 +40,13 @@ export class BracketGeneratorService {
       'COMPLETE',
     );
     return isFootballTeamTournament
-      ? and(completeStatus, eq(schema.tournamentParticipants.isPaid, true))
+      ? and(
+          completeStatus,
+          or(
+            eq(schema.tournamentParticipants.isPaid, true),
+            eq(schema.tournamentParticipants.organizerWaivedFee, true),
+          ),
+        )
       : completeStatus;
   }
 
@@ -1152,7 +1158,10 @@ export class BracketGeneratorService {
                   eq(schema.tournamentParticipants.isMock, true),
                   and(
                     eligibleParticipantStatus,
-                    eq(schema.tournamentParticipants.isPaid, true),
+                    or(
+                      eq(schema.tournamentParticipants.isPaid, true),
+                      eq(schema.tournamentParticipants.organizerWaivedFee, true),
+                    ),
                   ),
                 ),
               )
@@ -1162,7 +1171,10 @@ export class BracketGeneratorService {
                   eq(schema.tournamentParticipants.isMock, true),
                   and(
                     eligibleParticipantStatus,
-                    eq(schema.tournamentParticipants.isPaid, true),
+                    or(
+                      eq(schema.tournamentParticipants.isPaid, true),
+                      eq(schema.tournamentParticipants.organizerWaivedFee, true),
+                    ),
                   ),
                 ),
               ),

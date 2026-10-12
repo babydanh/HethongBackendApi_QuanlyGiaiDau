@@ -205,6 +205,9 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   rankingConsent: boolean('ranking_consent').default(false).notNull(),
   customResponses: jsonb('custom_responses'),
   isPaid: boolean('is_paid').default(false).notNull(),
+  // Set only by the organizer add-athlete pairs flow. The registration fee is
+  // never collected for these rows; entryFeeAtRegistration keeps the real fee.
+  organizerWaivedFee: boolean('organizer_waived_fee').default(false).notNull(),
   // Organizer's own day-of-event mark. Carries no meaning anywhere else: it does
   // not gate roster approval, does not affect ELO, and does not block playing.
   isPresent: boolean('is_present').default(false).notNull(),

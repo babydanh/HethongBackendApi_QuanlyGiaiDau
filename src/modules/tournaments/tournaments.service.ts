@@ -59,6 +59,7 @@ import type {
   ListAddAthleteCandidatesQueryDto,
   SearchAddAthleteCandidatesDto,
 } from './dto/add-athlete.dto';
+import type { AddAthletePairsDto } from './dto/add-athlete-pairs.dto';
 import { MailService } from '../../providers/mail/mail.service';
 import { BracketGeneratorService } from './bracket-generator.service';
 import {
@@ -1054,6 +1055,21 @@ export class TournamentsService {
     dto: AddAthleteDirectDto,
   ) {
     return this.tournamentImportService.addDirectAthlete(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+
+  async addAthletePairs(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: AddAthletePairsDto,
+  ) {
+    return this.tournamentImportService.addAthletePairs(
       tournamentId,
       userId,
       systemRoles,

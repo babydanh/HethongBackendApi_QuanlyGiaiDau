@@ -34,6 +34,7 @@ import {
 } from '../services/tournament-capacity.service';
 import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
+import { normalizeProfileGender, type NormalizedGender } from '../utils/profile-gender';
 import {
   findEligibleRosterAccountIds,
   findExistingRosterImportEmails,
@@ -81,6 +82,7 @@ import type {
   ListAddAthleteCandidatesQueryDto,
   SearchAddAthleteCandidatesDto,
 } from '../dto/add-athlete.dto';
+import type { AddAthletePairsDto } from '../dto/add-athlete-pairs.dto';
 
 const INACTIVE_PARTICIPANT_STATUSES = [
   'WITHDRAWN',
@@ -94,20 +96,59 @@ function escapeLikeQuery(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
 }
 
+export interface AddAthletePairsRepositoryResult {
+  pairs: Array<{
+    participantId: string;
+    teamStatus: 'COMPLETE' | 'PENDING_PARTNER';
+    userIds: string[];
+  }>;
+}
+
+type PairingAthlete = {
+  userId: string;
+  fullName: string;
+  gender: NormalizedGender | null;
+};
+
 function assertRegularAddOpen(
   tournament: typeof schema.tournaments.$inferSelect,
   division: typeof schema.tournamentDivisions.$inferSelect | null,
+  reject: (message: string) => Error = (message) =>
+    new BadRequestException(message),
 ): void {
   if (tournament.status === 'COMPLETED') {
-    throw new BadRequestException('Giải đấu đã kết thúc');
+    throw reject('Giải đấu đã kết thúc');
   }
   if (
     tournament.status === 'REGISTRATION_CLOSED' ||
     tournament.isRegistrationLocked ||
     division?.isRegistrationLocked
   ) {
+    throw reject('Đăng ký đã được khóa. Không thể thêm VĐV.');
+  }
+}
+
+function assertPairGendersFitDivision(
+  genderRestriction: string | null | undefined,
+  athletes: ReadonlyArray<{ gender: NormalizedGender | null }>,
+): void {
+  const restriction = (genderRestriction ?? '').toUpperCase();
+  if (!['MALE', 'FEMALE', 'MIXED'].includes(restriction)) return;
+  if (athletes.some((athlete) => athlete.gender === null)) {
     throw new BadRequestException(
-      'Đăng ký đã được khóa. Không thể thêm VĐV.',
+      'Mọi VĐV cần cập nhật giới tính trong hồ sơ trước khi BTC ghép đôi.',
+    );
+  }
+  const mismatch =
+    restriction === 'MIXED'
+      ? athletes.some(
+          (athlete, index) =>
+            index % 2 === 1 && athletes[index - 1].gender === athlete.gender,
+        )
+      : athletes.some((athlete) => athlete.gender !== restriction);
+  if (mismatch) {
+    throw new BadRequestException(
+      'VĐV không phù hợp với giới hạn giới tính của nội dung thi đấu.',
     );
   }
 }
@@ -819,6 +860,132 @@ export class TournamentImportRepository {
         ],
       };
     });
+  }
+
+  async addAthletePairs(
+    tournamentId: string,
+    organizerId: string,
+    dto: AddAthletePairsDto,
+  ): Promise<AddAthletePairsRepositoryResult> {
+    return this.db.transaction(async (tx) => {
+      await lockCapacityOwner(tx, {
+        tournamentId,
+        divisionId: dto.tournamentDivisionId,
+      });
+      const { tournament, division } = await this.loadRegularAddScope(
+        tx,
+        tournamentId,
+        dto.tournamentDivisionId,
+      );
+      assertRegularAddOpen(tournament, division, (message) => new ConflictException(message));
+      const matchType = division?.matchType ?? tournament.matchType;
+      if (matchType !== 'DOUBLES' && matchType !== 'MIXED_DOUBLES') {
+        throw new BadRequestException('Chỉ nội dung đôi mới ghép cặp VĐV.');
+      }
+      if (resolveFootballTeamConfig(tournament.tournamentConfig).isTeamSport) {
+        throw new BadRequestException(
+          'Nội dung đội bóng cần thêm VĐV vào đội hiện có.',
+        );
+      }
+
+      const athletes: PairingAthlete[] = [];
+      for (const userId of dto.userIds) {
+        await this.assertCandidateRelationship(
+          tx,
+          tournament.communityId,
+          organizerId,
+          dto.source,
+          userId,
+        );
+        const candidate = await this.findEligiblePairAthlete(tx, userId);
+        if (!candidate) {
+          throw new ConflictException('Ứng viên không còn đủ điều kiện.');
+        }
+        await this.assertNoActiveRoster(tx, tournamentId, userId);
+        athletes.push({
+          userId,
+          gender: normalizeProfileGender(candidate.gender),
+          fullName: candidate.fullName,
+        });
+      }
+      assertPairGendersFitDivision(division?.genderRestriction, athletes);
+
+      const capacity = await readEffectiveCapacity(tx, {
+        tournamentId,
+        divisionId: dto.tournamentDivisionId,
+      });
+      assertCapacityHasRoom(
+        capacity,
+        calculateRequestedTeamSlots(matchType, athletes.length, {
+          tournamentConfig: tournament.tournamentConfig,
+        }),
+        () => new ConflictException('Nội dung thi đấu đã đầy.'),
+      );
+
+      const entryFee = (
+        await this.tournamentPaymentRepository.resolveDivisionEntryFee(
+          tx,
+          tournament,
+          dto.tournamentDivisionId,
+        )
+      ).toFixed(2);
+      const pairs: AddAthletePairsRepositoryResult['pairs'] = [];
+      for (let start = 0; start < athletes.length; start += 2) {
+        const members = athletes.slice(start, start + 2);
+        const isComplete = members.length === 2;
+        const teamStatus = isComplete ? 'COMPLETE' : 'PENDING_PARTNER';
+        const [participant] = await tx
+          .insert(schema.tournamentParticipants)
+          .values({
+            tournamentId,
+            tournamentDivisionId: dto.tournamentDivisionId,
+            registeredBy: organizerId,
+            teamName: [...members.map((member) => member.fullName).join(' / ')].slice(0, 255).join(''),
+            entryFeeAtRegistration: isComplete ? entryFee : '0.00',
+            teamStatus,
+            organizerWaivedFee: true,
+            pairingSource: 'MANUAL',
+          })
+          .returning({ id: schema.tournamentParticipants.id });
+        for (const member of members) {
+          await tx
+            .insert(schema.tournamentRosters)
+            .values({
+              participantId: participant.id,
+              userId: member.userId,
+              role: 'MAIN',
+            })
+            .returning({ id: schema.tournamentRosters.id });
+        }
+        pairs.push({
+          participantId: participant.id,
+          teamStatus,
+          userIds: members.map((member) => member.userId),
+        });
+      }
+      return { pairs };
+    });
+  }
+
+  private async findEligiblePairAthlete(tx: AppTx, userId: string) {
+    const [candidate] = await tx
+      .select({
+        id: schema.users.id,
+        fullName: sql<string>`btrim(${schema.profiles.fullName})`,
+        gender: schema.profiles.gender,
+      })
+      .from(schema.users)
+      .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+      .where(
+        and(
+          eq(schema.users.id, userId),
+          eligibleRosterAccountCondition(tx),
+          sql`btrim(${schema.profiles.fullName}) <> ''`,
+        ),
+      )
+      .for('update')
+      .limit(1);
+    return candidate;
   }
 
   async addDirectAthlete(

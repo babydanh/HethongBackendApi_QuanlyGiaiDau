@@ -591,6 +591,7 @@ export class PaymentsService {
       }
       const registrationIsPaid = isRegistrationFeePaid({
         persistedIsPaid: participant.isPaid,
+        organizerWaivedFee: participant.organizerWaivedFee,
         feeSnapshot: amount,
         hasCompletedPayment: Boolean(completedPayment),
         isLiteRegistration: isLiteRegistrationTournament(
@@ -836,6 +837,7 @@ export class PaymentsService {
     ]);
     const registrationIsPaid = isRegistrationFeePaid({
       persistedIsPaid: participant.isPaid,
+      organizerWaivedFee: participant.organizerWaivedFee,
       feeSnapshot: payment.amount,
       hasCompletedPayment: Boolean(completedPayment),
       isLiteRegistration: isLiteRegistrationTournament(

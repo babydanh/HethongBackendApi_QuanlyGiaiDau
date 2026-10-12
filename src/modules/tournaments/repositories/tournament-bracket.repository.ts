@@ -708,7 +708,10 @@ export class TournamentBracketRepository {
             eq(schema.tournamentParticipants.isMock, true),
             and(
               eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-              eq(schema.tournamentParticipants.isPaid, true),
+              or(
+                eq(schema.tournamentParticipants.isPaid, true),
+                eq(schema.tournamentParticipants.organizerWaivedFee, true),
+              ),
             ),
           ),
         ),

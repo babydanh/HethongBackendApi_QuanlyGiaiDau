@@ -7,6 +7,7 @@ import {
   AddAthleteDirectDto,
   ListAddAthleteCandidatesQueryDto,
 } from '../dto/add-athlete.dto';
+import { AddAthletePairsDto } from '../dto/add-athlete-pairs.dto';
 import { TournamentImportRepository } from './tournament-import.repository';
 import { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
 import { fingerprintRosterImportBatch } from '../validation/roster-import-batch';
@@ -1463,5 +1464,317 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
     expect(
       harness.inserts.filter((insert) => insert.table === 'rosters'),
     ).toHaveLength(0);
+  });
+});
+
+describe('TournamentImportRepository organizer add-athlete pairs flow', () => {
+  const pairsDto = (userIds: string[]) =>
+    Object.assign(new AddAthletePairsDto(), {
+      source: 'FRIENDS',
+      tournamentDivisionId: 'division-1',
+      userIds,
+    });
+
+  function addAthletePairsQueues(options: {
+    userIds: string[];
+    matchType?: string;
+    genderRestriction?: string | null;
+    genders?: Array<string | null>;
+    fullNames?: string[];
+    tournamentConfig?: unknown;
+    divisionLimit?: number;
+    duplicateRows?: Row[][];
+    relationRows?: Row[];
+    occupancyRows?: Row[];
+    isRegistrationLocked?: boolean;
+  }): Record<string, Row[][]> {
+    const matchType = options.matchType ?? 'DOUBLES';
+    const tournament: Row = {
+      id: 'tournament-1',
+      communityId: 'community-1',
+      status: 'REGISTRATION_OPEN',
+      isRegistrationLocked: options.isRegistrationLocked ?? false,
+      matchType,
+      maxParticipants: 8,
+      tournamentConfig: options.tournamentConfig ?? null,
+      entryFee: 150000,
+    };
+    const division: Row = {
+      id: 'division-1',
+      tournamentId: 'tournament-1',
+      matchType,
+      genderRestriction: options.genderRestriction ?? null,
+      maxParticipants: options.divisionLimit ?? 8,
+      tournamentConfig: null,
+    };
+    const duplicates = options.duplicateRows ?? [];
+    return {
+      tournaments: [[tournament], [tournament]],
+      divisions: [[division], [division]],
+      'divisions+tournaments': [[division]],
+      friendships: [options.relationRows ?? [{ id: 'friendship-1' }]],
+      'profiles+users': options.userIds.map((id, index) => [
+        {
+          id,
+          fullName: options.fullNames?.[index] ?? `VĐV ${index + 1}`,
+          gender: options.genders?.[index] ?? null,
+        },
+      ]),
+      'participants+rosters': [
+        ...options.userIds.map((_, index) => duplicates[index] ?? []),
+        options.occupancyRows ?? [],
+      ],
+    };
+  }
+
+  function createPairsRepository(tx: unknown): TournamentImportRepository {
+    return createRepository(tx, {
+      resolveDivisionEntryFee: jest.fn().mockResolvedValue(150000),
+    }) as unknown as TournamentImportRepository;
+  }
+
+  it('creates two COMPLETE pairs from four users with the organizer fee waived', async () => {
+    const userIds = ['user-1', 'user-2', 'user-3', 'user-4'];
+    const harness = createHarness(addAthletePairsQueues({ userIds }));
+
+    const result = await createPairsRepository(harness.tx).addAthletePairs(
+      'tournament-1',
+      'organizer-1',
+      pairsDto(userIds),
+    );
+
+    expect(result.pairs).toEqual([
+      expect.objectContaining({
+        teamStatus: 'COMPLETE',
+        userIds: ['user-1', 'user-2'],
+      }),
+      expect.objectContaining({
+        teamStatus: 'COMPLETE',
+        userIds: ['user-3', 'user-4'],
+      }),
+    ]);
+    const participants = harness.inserts
+      .filter((row) => row.table === 'participants')
+      .map((row) => row.values);
+    expect(participants).toEqual([
+      expect.objectContaining({
+        teamStatus: 'COMPLETE',
+        organizerWaivedFee: true,
+        pairingSource: 'MANUAL',
+        entryFeeAtRegistration: '150000.00',
+      }),
+      expect.objectContaining({
+        teamStatus: 'COMPLETE',
+        organizerWaivedFee: true,
+        pairingSource: 'MANUAL',
+        entryFeeAtRegistration: '150000.00',
+      }),
+    ]);
+    const rosters = harness.inserts
+      .filter((row) => row.table === 'rosters')
+      .map((row) => [row.values.userId, row.values.role]);
+    expect(rosters).toEqual(userIds.map((id) => [id, 'MAIN']));
+  });
+
+  it('cuts a generated pair team name to the 255-character column limit', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({
+        userIds,
+        fullNames: ['A'.repeat(200), 'B'.repeat(200)],
+      }),
+    );
+
+    await createPairsRepository(harness.tx).addAthletePairs(
+      'tournament-1',
+      'organizer-1',
+      pairsDto(userIds),
+    );
+
+    const [participant] = harness.inserts.filter((row) => row.table === 'participants');
+    expect(participant?.values.teamName).toBe(`${'A'.repeat(200)} / ${'B'.repeat(52)}`);
+  });
+
+  it('leaves an unpaired trailing athlete as PENDING_PARTNER with no fee', async () => {
+    const userIds = ['user-1', 'user-2', 'user-3'];
+    const harness = createHarness(addAthletePairsQueues({ userIds }));
+
+    const result = await createPairsRepository(harness.tx).addAthletePairs(
+      'tournament-1',
+      'organizer-1',
+      pairsDto(userIds),
+    );
+
+    expect(
+      result.pairs.map((pair) => [pair.teamStatus, pair.userIds]),
+    ).toEqual([
+      ['COMPLETE', ['user-1', 'user-2']],
+      ['PENDING_PARTNER', ['user-3']],
+    ]);
+    const participants = harness.inserts
+      .filter((row) => row.table === 'participants')
+      .map((row) => row.values);
+    expect(participants.map((values) => values.teamStatus)).toEqual([
+      'COMPLETE',
+      'PENDING_PARTNER',
+    ]);
+    expect(
+      participants.every((values) => values.organizerWaivedFee === true),
+    ).toBe(true);
+  });
+
+  it('rejects a division that is not a doubles format', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({ userIds, matchType: 'SINGLES' }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects a team-sport division', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({
+        userIds,
+        tournamentConfig: { teamSize: 11, minTeamSize: 7 },
+      }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects a MIXED_DOUBLES pair whose genders are not mixed', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({
+        userIds,
+        matchType: 'MIXED_DOUBLES',
+        genderRestriction: 'MIXED',
+        genders: ['MALE', 'MALE'],
+      }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects a MIXED_DOUBLES pair when one athlete has no gender on file', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({
+        userIds,
+        matchType: 'MIXED_DOUBLES',
+        genderRestriction: 'MIXED',
+        genders: ['MALE', null],
+      }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects the whole batch when a later athlete already has an active roster', async () => {
+    const userIds = ['user-1', 'user-2', 'user-3', 'user-4'];
+    const harness = createHarness(
+      addAthletePairsQueues({
+        userIds,
+        duplicateRows: [[], [{ id: 'roster-9' }]],
+      }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects the batch when an athlete is no longer a friend of the organizer', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({ userIds, relationRows: [] }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects a pair batch that needs more team slots than the locked division has', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({
+        userIds,
+        divisionLimit: 1,
+        occupancyRows: [
+          {
+            teamStatus: 'PENDING_APPROVAL',
+            rosterMemberCount: 1,
+            tournamentId: 'tournament-1',
+            divisionId: 'division-1',
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('rejects the batch when registration is locked for the tournament', async () => {
+    const userIds = ['user-1', 'user-2'];
+    const harness = createHarness(
+      addAthletePairsQueues({ userIds, isRegistrationLocked: true }),
+    );
+
+    await expect(
+      createPairsRepository(harness.tx).addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        pairsDto(userIds),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(harness.inserts).toHaveLength(0);
   });
 });

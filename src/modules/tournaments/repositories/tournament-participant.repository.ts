@@ -432,7 +432,10 @@ export class TournamentParticipantRepository {
               ...(onlyEligible
                 ? [
                     eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
+                    or(
+                      eq(schema.tournamentParticipants.isPaid, true),
+                      eq(schema.tournamentParticipants.organizerWaivedFee, true),
+                    ),
                   ]
                 : []),
             )
@@ -444,7 +447,10 @@ export class TournamentParticipantRepository {
               ...(onlyEligible
                 ? [
                     eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-                    eq(schema.tournamentParticipants.isPaid, true),
+                    or(
+                      eq(schema.tournamentParticipants.isPaid, true),
+                      eq(schema.tournamentParticipants.organizerWaivedFee, true),
+                    ),
                   ]
                 : []),
             ),
