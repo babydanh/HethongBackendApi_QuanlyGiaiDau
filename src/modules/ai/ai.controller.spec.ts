@@ -405,3 +405,91 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-layout', () => 
     expect(analyzeRosterLayout).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining({ locale: 'vi' }));
   });
 });
+
+describe('AiController POST /ai/tournaments/:tournamentId/roster-review (deprecated alias)', () => {
+  let app: INestApplication;
+  let analyzeRosterLayout: jest.Mock;
+  let assertTournamentManager: jest.Mock;
+  const ALIAS_PATH = `/api/v1/ai/tournaments/${TOURNAMENT_ID}/roster-review`;
+
+  beforeEach(async () => {
+    analyzeRosterLayout = jest.fn();
+    assertTournamentManager = jest.fn().mockResolvedValue(undefined);
+    const roleLookup = createRoleLookup([UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER]);
+
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      controllers: [AiController],
+      providers: [
+        { provide: AiService, useValue: { analyzeRosterLayout } },
+        { provide: TournamentsService, useValue: { assertTournamentManager } },
+      ],
+    }).compile();
+
+    const reflector = new Reflector();
+    const config = {
+      get: jest.fn((key: string) => (key === 'NODE_ENV' ? 'test' : undefined)),
+    } as unknown as ConfigService;
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
+    );
+    app.useGlobalGuards(
+      new BearerAuthGuard(reflector),
+      new RolesGuard(reflector, roleLookup as never),
+      new VerifiedGuard(reflector, config),
+    );
+    await app.init();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('answers the unavailable envelope for a manager with an opaque body, without the layout service', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ALIAS_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ opaque: 'alias does not read the body' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, data: null, aiAvailable: false });
+    expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
+  });
+
+  it('answers the same envelope when the request has no body', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ALIAS_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ success: true, data: null, aiAvailable: false });
+  });
+
+  it('refuses a verified player by role before the manager check runs', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ALIAS_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.PLAYER)))
+      .send({ opaque: 'alias does not read the body' });
+
+    expect(response.status).toBe(403);
+    expect(assertTournamentManager).not.toHaveBeenCalled();
+    expect(response.body).not.toHaveProperty('aiAvailable');
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
+  });
+
+  it('refuses an organizer when the manager check rejects, and does not answer the envelope', async () => {
+    assertTournamentManager.mockRejectedValueOnce(new ForbiddenException('not a manager of this tournament'));
+
+    const response = await request(app.getHttpServer())
+      .post(ALIAS_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ opaque: 'alias does not read the body' });
+
+    expect(response.status).toBe(403);
+    expect(response.body).not.toHaveProperty('aiAvailable');
+    expect(analyzeRosterLayout).not.toHaveBeenCalled();
+  });
+});
