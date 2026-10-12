@@ -1637,6 +1637,7 @@ export class TournamentCatalogRepository {
       .where(
         and(
           eq(schema.tournamentRosters.userId, userId),
+          isNotNull(schema.tournamentRosters.accountLinkConfirmedAt),
           sql`${schema.tournaments.deletedAt} IS NULL`,
         ),
       );

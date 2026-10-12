@@ -132,7 +132,10 @@ export class TournamentParticipantRepository {
 
     const [updated] = await this.db
       .update(schema.tournamentRosters)
-      .set({ rankingConsentAt: new Date() })
+      .set({
+        rankingConsentAt: new Date(),
+        accountLinkConfirmedAt: sql`coalesce(${schema.tournamentRosters.accountLinkConfirmedAt}, now())`,
+      })
       .where(
         and(
           eq(schema.tournamentRosters.participantId, participant.id),
@@ -143,12 +146,14 @@ export class TournamentParticipantRepository {
       .returning({
         participantId: schema.tournamentRosters.participantId,
         rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+        accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
       });
 
     if (updated) {
       return {
         participantId: updated.participantId,
         consentedAt: updated.rankingConsentAt,
+        accountLinkConfirmedAt: updated.accountLinkConfirmedAt,
         alreadyConfirmed: false as const,
       };
     }
@@ -161,6 +166,7 @@ export class TournamentParticipantRepository {
       .select({
         participantId: schema.tournamentRosters.participantId,
         rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+        accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
       })
       .from(schema.tournamentRosters)
       .where(
@@ -175,6 +181,7 @@ export class TournamentParticipantRepository {
     return {
       participantId: existing.participantId,
       consentedAt: existing.rankingConsentAt,
+      accountLinkConfirmedAt: existing.accountLinkConfirmedAt,
       alreadyConfirmed: true as const,
     };
   }
@@ -1778,6 +1785,7 @@ export class TournamentParticipantRepository {
           participantId: participant.id,
           userId: dto.userId,
           role: dto.role,
+          accountLinkConfirmedAt: null,
         })
         .returning({ id: schema.tournamentRosters.id });
       await tx.insert(schema.tournamentTeamRosterSnapshots).values({
@@ -2066,6 +2074,17 @@ export class TournamentParticipantRepository {
         );
       }
 
+      // Giữ mốc xác nhận liên kết của người đã có trong đội. Người mới do đội trưởng thêm có mốc NULL, chờ chính họ xác nhận.
+      const previousRosters = await tx
+        .select({
+          userId: schema.tournamentRosters.userId,
+          accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
+        })
+        .from(schema.tournamentRosters)
+        .where(eq(schema.tournamentRosters.participantId, participantId));
+      const linkedAtByUser = new Map(
+        previousRosters.map((row) => [row.userId, row.accountLinkConfirmedAt] as const),
+      );
       await tx
         .delete(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, participantId));
@@ -2074,6 +2093,7 @@ export class TournamentParticipantRepository {
           participantId,
           userId,
           role: 'MAIN' as const,
+          accountLinkConfirmedAt: linkedAtByUser.get(userId) ?? null,
         })),
       );
       if (roster.reserveMemberIds.length > 0) {
@@ -2082,6 +2102,7 @@ export class TournamentParticipantRepository {
             participantId,
             userId,
             role: 'RESERVE' as const,
+            accountLinkConfirmedAt: linkedAtByUser.get(userId) ?? null,
           })),
         );
       }
@@ -2312,9 +2333,10 @@ export class TournamentParticipantRepository {
         if (Number(count) >= maxTeamSize)
           throw new BadRequestException('Đội đã đạt số thành viên tối đa.');
       }
+      // Đội trưởng thêm người: mốc xác nhận NULL, chờ người đó tự xác nhận liên kết.
       const [row] = await tx
         .insert(schema.tournamentRosters)
-        .values({ participantId, userId, role })
+        .values({ participantId, userId, role, accountLinkConfirmedAt: null })
         .returning();
       return row;
     });
@@ -2439,6 +2461,7 @@ export class TournamentParticipantRepository {
         participantId: participant.id,
         userId: userId,
         role: 'MAIN',
+        accountLinkConfirmedAt: null,
       });
 
       if (isDoubles && partnerId) {
@@ -2446,6 +2469,7 @@ export class TournamentParticipantRepository {
           participantId: participant.id,
           userId: partnerId,
           role: 'MAIN',
+          accountLinkConfirmedAt: null,
         });
       }
 

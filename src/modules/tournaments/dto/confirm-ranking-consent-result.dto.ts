@@ -18,6 +18,15 @@ export class ConfirmRankingConsentResultDto {
 
   @ApiProperty({
     description:
+      'Mốc VĐV được gắn tài khoản (xác nhận liên kết). Null khi BTC gán tài khoản và VĐV chưa xác nhận.',
+    type: String,
+    format: 'date-time',
+    nullable: true,
+  })
+  accountLinkConfirmedAt!: string | null;
+
+  @ApiProperty({
+    description:
       'true nghĩa là người này đã xác nhận từ trước và lần gọi này không làm thay đổi ' +
       'mốc thời gian. Mốc không bao giờ được ghi lại, nên bấm lại không thể đẩy ranh giới ' +
       'tính điểm ra xa hơn.',

@@ -21,6 +21,7 @@ import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { TournamentsService } from '../tournaments/tournaments.service';
 
 import type { Request, Response } from 'express';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
@@ -29,7 +30,10 @@ import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guar
 @ApiTags('ai')
 @Controller('ai')
 export class AiController {
-  constructor(private readonly aiService: AiService) {}
+  constructor(
+    private readonly aiService: AiService,
+    private readonly tournamentsService: TournamentsService,
+  ) {}
 
   private getUserFromRequest(request: Request): { id?: string; sub?: string; roles?: string[] } | undefined {
     return (request as Request & { user?: { id?: string; sub?: string; roles?: string[] } }).user;
@@ -154,7 +158,13 @@ export class AiController {
   async reviewRoster(
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
     @Body() dto: RosterReviewRequestDto,
+    @CurrentUser() user: JwtPayload,
   ) {
+    await this.tournamentsService.assertTournamentManager(
+      tournamentId,
+      user.sub,
+      user.roles ?? (user.role ? [user.role] : []),
+    );
     const result = await this.aiService.reviewRosterSource(tournamentId, dto);
 
     return { success: true, data: result.data, aiAvailable: result.aiAvailable };

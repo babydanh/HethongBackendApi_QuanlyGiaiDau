@@ -208,6 +208,25 @@ export class TournamentsService {
     );
   }
 
+  /**
+   * Chặn route không phải quản lý giải (ví dụ AI roster-review): 404 nếu giải không tồn tại, 403 nếu không có quyền quản lý.
+   */
+  async assertTournamentManager(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ): Promise<void> {
+    const tournament = await this.tournamentsRepository.findById(
+      tournamentId,
+    );
+    if (!tournament) {
+      throw new NotFoundException('Không tìm thấy giải đấu');
+    }
+    if (!(await this.isManager(tournament, userId, systemRoles))) {
+      throw new ForbiddenException('Bạn không có quyền quản lý giải đấu này');
+    }
+  }
+
   private isSystemTournamentCreator(systemRoles: string[] = []): boolean {
     return this.tournamentAccessService.isSystemTournamentCreator(systemRoles);
   }

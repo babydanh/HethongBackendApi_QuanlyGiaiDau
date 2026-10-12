@@ -1778,3 +1778,167 @@ describe('TournamentImportRepository organizer add-athlete pairs flow', () => {
     expect(harness.inserts).toHaveLength(0);
   });
 });
+
+describe('TournamentImportRepository.roster batch account name and identity', () => {
+  const tournament = {
+    id: 'tournament-1',
+    matchType: 'SINGLES',
+    maxParticipants: null,
+    tournamentConfig: null,
+    entryFee: 0,
+  };
+  const divisions = [
+    {
+      id: 'division-1',
+      tournamentId: 'tournament-1',
+      name: 'Singles A',
+      matchType: 'SINGLES',
+      maxParticipants: 4,
+      tournamentConfig: null,
+    },
+    {
+      id: 'division-2',
+      tournamentId: 'tournament-1',
+      name: 'Singles B',
+      matchType: 'SINGLES',
+      maxParticipants: 4,
+      tournamentConfig: null,
+    },
+  ];
+  const makeBatch = (participant: Record<string, unknown>, divisionId = 'division-1') =>
+    Object.assign(new RosterImportBatchDto(), {
+      groups: [{ divisionId, participants: [participant] }],
+    });
+  const makeQueues = (overrides: Record<string, Row[][]> = {}) => ({
+    rosterBatches: [[]],
+    tournaments: [[tournament]],
+    divisions: [divisions],
+    'participants+rosters': [[], []],
+    'divisions+tournaments': [divisions],
+    'profiles+users': [
+      [{ id: 'linked-user', email: 'linked@example.test', fullName: 'Nguyễn Linked' }],
+    ],
+    ...overrides,
+  });
+  const linkedParticipant = {
+    teamName: 'Đội Linked',
+    player1Name: '',
+    player1Email: 'linked@example.test',
+    source: 'EXCEL',
+  };
+
+  it('preview lets a row with a confirmed linked account omit the name', async () => {
+    const harness = createHarness(makeQueues());
+    const preview = await createRepository(harness.tx).previewRosterImportBatch(
+      'tournament-1',
+      makeBatch({ ...linkedParticipant, confirmedPlayer1UserId: 'linked-user' }),
+    );
+
+    const row = preview.groups[0].rows[0];
+    expect(row.status).not.toContain('MISSING_NAME');
+    expect(row.status).toContain('FOUND');
+  });
+
+  it('preview still requires a name when the email matches an account that was not confirmed', async () => {
+    const harness = createHarness(makeQueues());
+    const preview = await createRepository(harness.tx).previewRosterImportBatch(
+      'tournament-1',
+      makeBatch({ ...linkedParticipant }),
+    );
+
+    expect(preview.groups[0].rows[0].status).toContain('MISSING_NAME');
+  });
+
+  it('preview requires a name for a row with no address and no account', async () => {
+    const harness = createHarness(makeQueues());
+    const preview = await createRepository(harness.tx).previewRosterImportBatch(
+      'tournament-1',
+      makeBatch({ teamName: 'Đội Trống', player1Name: '', source: 'EXCEL' }),
+    );
+
+    expect(preview.groups[0].rows[0].status).toContain('MISSING_NAME');
+  });
+
+  it('preview flags a no-address row whose identity already exists in the same division', async () => {
+    const harness = createHarness(
+      makeQueues({
+        participants: [
+          [{ divisionId: 'division-1', teamName: 'Đội Trùng', player1Name: 'Trần Trùng' }],
+        ],
+      }),
+    );
+    const preview = await createRepository(harness.tx).previewRosterImportBatch(
+      'tournament-1',
+      makeBatch({
+        teamName: 'Đội Trùng',
+        player1Name: 'Trần Trùng',
+        source: 'EXCEL',
+      }),
+    );
+
+    expect(preview.groups[0].rows[0].status).toContain('DUPLICATE_IN_TOURNAMENT');
+  });
+
+  it('preview does not treat the same identity in another division as a duplicate', async () => {
+    const harness = createHarness(
+      makeQueues({
+        participants: [
+          [{ divisionId: 'division-1', teamName: 'Đội Trùng', player1Name: 'Trần Trùng' }],
+        ],
+      }),
+    );
+    const preview = await createRepository(harness.tx).previewRosterImportBatch(
+      'tournament-1',
+      makeBatch(
+        { teamName: 'Đội Trùng', player1Name: 'Trần Trùng', source: 'EXCEL' },
+        'division-2',
+      ),
+    );
+
+    expect(preview.groups[0].rows[0].status).not.toContain('DUPLICATE_IN_TOURNAMENT');
+  });
+
+  it('preview flags a named row against an entry of the same team stored without a name', async () => {
+    const harness = createHarness(
+      makeQueues({
+        participants: [[{ divisionId: 'division-1', teamName: 'Đội Trùng', player1Name: null }]],
+      }),
+    );
+    const preview = await createRepository(harness.tx).previewRosterImportBatch(
+      'tournament-1',
+      makeBatch({ teamName: 'Đội Trùng', player1Name: 'Trần Mới', source: 'EXCEL' }),
+    );
+
+    expect(preview.groups[0].rows[0].status).toContain('DUPLICATE_IN_TOURNAMENT');
+  });
+
+  it('commit stores the account name for a confirmed linked row with a blank name', async () => {
+    const harness = createHarness(makeQueues());
+    await createRepository(harness.tx).importRosterBatch(
+      'tournament-1',
+      'organizer-1',
+      makeBatch({ ...linkedParticipant, confirmedPlayer1UserId: 'linked-user' }),
+      'key-linked-name',
+    );
+
+    const participant = harness.inserts.find((insert) => insert.table === 'participants');
+    expect(participant?.values.registeredBy).toBe('linked-user');
+    expect(participant?.values.customResponses).toMatchObject({
+      player1Name: 'Nguyễn Linked',
+    });
+  });
+
+  it('commit rejects a blank-name row whose account was never confirmed and writes no participant', async () => {
+    const harness = createHarness(makeQueues());
+
+    await expect(
+      createRepository(harness.tx).importRosterBatch(
+        'tournament-1',
+        'organizer-1',
+        makeBatch({ ...linkedParticipant }),
+        'key-unconfirmed-blank',
+      ),
+    ).rejects.toThrow('thiếu tên VĐV 1');
+    expect(harness.inserts.filter((insert) => insert.table === 'participants')).toHaveLength(0);
+  });
+});

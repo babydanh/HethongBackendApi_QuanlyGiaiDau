@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   INestApplication,
   UnauthorizedException,
   ValidationPipe,
@@ -16,6 +17,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { VerifiedGuard } from '../../common/guards/verified.guard';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
+import { TournamentsService } from '../tournaments/tournaments.service';
 
 const PARSE_PATH = '/api/v1/ai/parse-tournament-source';
 const INSTRUCTION = 'Tạo giải cầu lông cho CLB Minh Đức, khai mạc 14/03/2026 tại Đồng Nai';
@@ -108,7 +110,10 @@ describe('AiController POST /ai/parse-tournament-source', () => {
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [AiController],
-      providers: [{ provide: AiService, useValue: { parseTournamentSource } }],
+      providers: [
+        { provide: AiService, useValue: { parseTournamentSource } },
+        { provide: TournamentsService, useValue: {} },
+      ],
     }).compile();
 
     const reflector = new Reflector();
@@ -270,14 +275,19 @@ const ROSTER_REVIEW = {
 describe('AiController POST /ai/tournaments/:tournamentId/roster-review', () => {
   let app: INestApplication;
   let reviewRosterSource: jest.Mock;
+  let assertTournamentManager: jest.Mock;
 
   beforeEach(async () => {
     reviewRosterSource = jest.fn().mockResolvedValue({ data: ROSTER_REVIEW, aiAvailable: true });
+    assertTournamentManager = jest.fn().mockResolvedValue(undefined);
     const roleLookup = createRoleLookup([UserRole.ORGANIZER, UserRole.ADMIN, UserRole.PLAYER]);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [AiController],
-      providers: [{ provide: AiService, useValue: { reviewRosterSource } }],
+      providers: [
+        { provide: AiService, useValue: { reviewRosterSource } },
+        { provide: TournamentsService, useValue: { assertTournamentManager } },
+      ],
     }).compile();
 
     const reflector = new Reflector();
@@ -316,6 +326,21 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review', () => 
       .send(ROSTER_BODY);
 
     expect(response.status).toBe(403);
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
+  it('refuses an organizer who does not manage this tournament before the model is ever asked', async () => {
+    assertTournamentManager.mockRejectedValueOnce(
+      new ForbiddenException('Bạn không có quyền quản lý giải đấu này'),
+    );
+
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(403);
+    expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
     expect(reviewRosterSource).not.toHaveBeenCalled();
   });
 

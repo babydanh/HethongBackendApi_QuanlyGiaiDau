@@ -364,4 +364,22 @@ describeIfDb('addAthletePairs integration (Postgres thật)', () => {
     );
     expect(seeded.map((p) => p.id)).toContain(participantId);
   });
+
+  test('LINK-001: roster do BTC ghép ghi accountLinkConfirmedAt = NULL', async () => {
+    const { tournamentId, divisionId } = await seedTournament(organizerId, 10);
+    const u1 = await seedUser('link1-a');
+    const u2 = await seedUser('link1-b');
+    const result = await repo.addAthletePairs(tournamentId, organizerId, {
+      source: 'EMAIL',
+      tournamentDivisionId: divisionId,
+      userIds: [u1, u2],
+    });
+    const rosters = await db
+      .select({ linkedAt: schema.tournamentRosters.accountLinkConfirmedAt })
+      .from(schema.tournamentRosters)
+      .where(
+        eq(schema.tournamentRosters.participantId, result.pairs[0].participantId),
+      );
+    expect(rosters.map((r) => r.linkedAt)).toEqual([null, null]);
+  });
 });

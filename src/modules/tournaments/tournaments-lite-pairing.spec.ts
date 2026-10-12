@@ -1198,5 +1198,42 @@ describe('TournamentsService — Lite pairing guards', () => {
       expect(result.leader.teamStatus).toBe('PENDING_PARTNER');
     });
   });
+  describe('assertTournamentManager (quyền quản lý cho route AI roster-review)', () => {
+    const tournament = { id: 'tournament-1', createdBy: 'owner-1', communityId: null };
+
+    it('lets the tournament creator through', async () => {
+      mockRepo.findById.mockResolvedValue(tournament);
+
+      await expect(
+        service.assertTournamentManager('tournament-1', 'owner-1', ['ORGANIZER']),
+      ).resolves.toBeUndefined();
+    });
+
+    it('refuses an organizer who neither created nor co-organizes the tournament', async () => {
+      mockRepo.findById.mockResolvedValue(tournament);
+      mockRepo.isCoOrganizer.mockResolvedValue(false);
+
+      await expect(
+        service.assertTournamentManager('tournament-1', 'stranger-1', ['ORGANIZER']),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets an ADMIN through without creating the tournament', async () => {
+      mockRepo.findById.mockResolvedValue(tournament);
+      mockRepo.isCoOrganizer.mockResolvedValue(false);
+
+      await expect(
+        service.assertTournamentManager('tournament-1', 'admin-1', ['ADMIN']),
+      ).resolves.toBeUndefined();
+    });
+
+    it('reports a missing tournament as not found, not as forbidden', async () => {
+      mockRepo.findById.mockResolvedValue(null);
+
+      await expect(
+        service.assertTournamentManager('missing', 'owner-1', ['ORGANIZER']),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
 });
 

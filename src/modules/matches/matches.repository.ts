@@ -16,6 +16,7 @@ import {
   inArray,
   notInArray,
   isNull,
+  isNotNull,
   sql,
   gte,
   lte,
@@ -451,12 +452,25 @@ export class MatchesRepository {
     }
 
     if (userId) {
+      // Feed theo user: chỉ tính trận đã kết thúc SAU lúc xác nhận liên kết tài khoản (không hồi tố). Trận chưa kết thúc theo dòng đã xác nhận.
       const rosters = await this.db
-        .select({ participantId: schema.tournamentRosters.participantId })
+        .select({
+          participantId: schema.tournamentRosters.participantId,
+          accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
+        })
         .from(schema.tournamentRosters)
-        .where(eq(schema.tournamentRosters.userId, userId));
-      const pIds = rosters.map((r) => r.participantId);
-      if (pIds.length === 0) {
+        .where(
+          and(
+            eq(schema.tournamentRosters.userId, userId),
+            isNotNull(schema.tournamentRosters.accountLinkConfirmedAt),
+          ),
+        );
+      const linked = rosters.flatMap((r) =>
+        r.accountLinkConfirmedAt
+          ? [{ participantId: r.participantId, confirmedAt: r.accountLinkConfirmedAt }]
+          : [],
+      );
+      if (linked.length === 0) {
         return {
           data: [],
           meta: {
@@ -471,8 +485,18 @@ export class MatchesRepository {
       }
       conditions.push(
         or(
-          inArray(schema.matches.participant1Id, pIds),
-          inArray(schema.matches.participant2Id, pIds),
+          ...linked.map((r) =>
+            and(
+              or(
+                eq(schema.matches.participant1Id, r.participantId),
+                eq(schema.matches.participant2Id, r.participantId),
+              ),
+              or(
+                isNull(schema.matches.completedAt),
+                gte(schema.matches.completedAt, r.confirmedAt),
+              ),
+            ),
+          ),
         ) as SQL,
       );
 

@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { AppDb } from '../../database/db.types';
-import { eq, or, and, ilike, desc, asc, isNull, count, inArray, aliasedTable, gt, gte, lt, notExists, sql, type AnyColumn, type SQL } from 'drizzle-orm';
+import { eq, or, and, ilike, desc, asc, isNull, isNotNull, count, inArray, aliasedTable, gt, gte, lt, notExists, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { AdminUserStatusFilter, QueryUserDto } from './dto/query-user.dto';
@@ -747,6 +747,7 @@ export class UsersRepository {
       .where(
         and(
           eq(schema.tournamentRosters.userId, userId),
+          isNotNull(schema.tournamentRosters.accountLinkConfirmedAt),
           eq(schema.tournaments.isRanked, true),
           eq(schema.tournaments.status, 'COMPLETED'),
           isNull(schema.tournaments.deletedAt),
@@ -798,18 +799,33 @@ export class UsersRepository {
         )
         .orderBy(asc(schema.tournamentStages.order), asc(schema.matches.roundNumber), asc(schema.matches.matchOrder));
 
-      const userParticipantIds = new Set(
-        (
-          await this.db
-            .select({ participantId: schema.tournamentRosters.participantId })
-            .from(schema.tournamentRosters)
-            .where(eq(schema.tournamentRosters.userId, userId))
-        ).map((row) => row.participantId),
-      );
+      // Trận chỉ tính cho user khi đã kết thúc SAU lúc xác nhận liên kết (không hồi tố).
+      const linkedRosters = await this.db
+        .select({
+          participantId: schema.tournamentRosters.participantId,
+          accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
+        })
+        .from(schema.tournamentRosters)
+        .where(
+          and(
+            eq(schema.tournamentRosters.userId, userId),
+            isNotNull(schema.tournamentRosters.accountLinkConfirmedAt),
+          ),
+        );
+      const linkedAtByParticipant = new Map<string, Date>();
+      for (const row of linkedRosters) {
+        if (row.accountLinkConfirmedAt) {
+          linkedAtByParticipant.set(row.participantId, row.accountLinkConfirmedAt);
+        }
+      }
+      const userParticipantIds = new Set(linkedAtByParticipant.keys());
 
       const userMatches = matches.filter((match) =>
-        userParticipantIds.has(match.participant1Id || '') ||
-        userParticipantIds.has(match.participant2Id || ''),
+        [match.participant1Id, match.participant2Id].some((participantId) => {
+          const linkedAt = participantId ? linkedAtByParticipant.get(participantId) : undefined;
+          if (!linkedAt) return false;
+          return match.completedAt === null || match.completedAt.getTime() >= linkedAt.getTime();
+        }),
       );
       if (userMatches.length === 0) continue;
 
@@ -836,6 +852,13 @@ export class UsersRepository {
             (inP2 && match.winnerId === match.participant2Id),
         };
       };
+      // Trận quyết định (chung kết/hạng ba) chỉ tính khi đã kết thúc sau mốc xác nhận của chính user (không hồi tố). Thành tích giải không suy ra từ một trận muộn.
+      const afterLink = (match: typeof matches[number]) => {
+        const linkedAt = [match.participant1Id, match.participant2Id]
+          .map((participantId) => (participantId ? linkedAtByParticipant.get(participantId) : undefined))
+          .find((date) => date !== undefined);
+        return linkedAt !== undefined && match.completedAt !== null && match.completedAt.getTime() >= linkedAt.getTime();
+      };
 
       const finalUserMatch = finalMatches.find((match) => {
         const state = userInMatch(match);
@@ -844,13 +867,16 @@ export class UsersRepository {
 
       if (finalUserMatch) {
         const state = userInMatch(finalUserMatch);
-        achievements.push({
-          tournamentId: tournament.tournamentId,
-          tournamentName: tournament.tournamentName,
-          rank: state.isWinner ? 1 : 2,
-          completedAt: finalUserMatch.completedAt ? finalUserMatch.completedAt.toISOString() : null,
-          tournamentDate: (tournament.endDate || tournament.startDate)?.toISOString() || null,
-        });
+        // Không hồi tố: chung kết kết thúc trước mốc xác nhận thì không cấp thành tích giải.
+        if (afterLink(finalUserMatch)) {
+          achievements.push({
+            tournamentId: tournament.tournamentId,
+            tournamentName: tournament.tournamentName,
+            rank: state.isWinner ? 1 : 2,
+            completedAt: finalUserMatch.completedAt ? finalUserMatch.completedAt.toISOString() : null,
+            tournamentDate: (tournament.endDate || tournament.startDate)?.toISOString() || null,
+          });
+        }
         continue;
       }
 
@@ -860,7 +886,7 @@ export class UsersRepository {
       });
       if (bronzeUserMatch) {
         const state = userInMatch(bronzeUserMatch);
-        if (state.isWinner) {
+        if (state.isWinner && afterLink(bronzeUserMatch)) {
           achievements.push({
             tournamentId: tournament.tournamentId,
             tournamentName: tournament.tournamentName,

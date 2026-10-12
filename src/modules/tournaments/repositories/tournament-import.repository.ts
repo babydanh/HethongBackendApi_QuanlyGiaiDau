@@ -38,6 +38,7 @@ import { normalizeProfileGender, type NormalizedGender } from '../utils/profile-
 import {
   findEligibleRosterAccountIds,
   findExistingRosterImportEmails,
+  findExistingRosterImportIdentityKeys,
   eligibleRosterAccountCondition,
   isBlockingRosterStatus,
   normalizeRosterEmail,
@@ -840,7 +841,7 @@ export class TournamentImportRepository {
         .returning();
       const [roster] = await tx
         .insert(schema.tournamentRosters)
-        .values({ participantId: participant.id, userId: dto.userId, role: 'MAIN' })
+        .values({ participantId: participant.id, userId: dto.userId, role: 'MAIN', accountLinkConfirmedAt: null })
         .returning({ id: schema.tournamentRosters.id });
 
       return {
@@ -954,6 +955,7 @@ export class TournamentImportRepository {
               participantId: participant.id,
               userId: member.userId,
               role: 'MAIN',
+              accountLinkConfirmedAt: null,
             })
             .returning({ id: schema.tournamentRosters.id });
         }
@@ -1435,6 +1437,12 @@ export class TournamentImportRepository {
       emails,
       tx,
     );
+    const needsIdentityKeys = groups.some((group) =>
+      group.participants.some((item) => !item.player1Email?.trim()),
+    );
+    const identityKeysByDivision = needsIdentityKeys
+      ? await findExistingRosterImportIdentityKeys(tournamentId, tx)
+      : new Map<string, Set<string>>();
     const candidatesByEmail = await findRosterBatchAccountCandidates(
       emails,
       tx,
@@ -1472,14 +1480,45 @@ export class TournamentImportRepository {
       const divisionId = group.divisionId ?? null;
       const division = divisionId ? divisions.get(divisionId) ?? null : null;
       const matchType = division?.matchType ?? tournament.matchType;
+      const confirmedAccountEmails = new Set<string>();
+      for (const item of group.participants) {
+        const player1Email = item.player1Email ?? '';
+        if (
+          player1Email &&
+          resolveConfirmedRosterUserId(
+            player1Email,
+            item.confirmedPlayer1UserId,
+            candidatesByEmail,
+          )
+        ) {
+          confirmedAccountEmails.add(normalizeRosterEmail(player1Email));
+        }
+        const player2Email = item.player2Email ?? '';
+        if (
+          player2Email &&
+          resolveConfirmedRosterUserId(
+            player2Email,
+            item.confirmedPlayer2UserId,
+            candidatesByEmail,
+          )
+        ) {
+          confirmedAccountEmails.add(normalizeRosterEmail(player2Email));
+        }
+      }
       const validation = validateRosterRows({
-        items: group.participants,
+        items: group.participants.map((item) => ({
+          ...item,
+          divisionName: item.divisionName?.trim() ? item.divisionName : division?.name,
+        })),
         isDoubles:
           matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES',
         matchType,
         tournamentConfig: tournament.tournamentConfig,
         divisionNames: division ? [division.name] : [],
         existingEmails,
+        existingIdentityKeys: identityKeysByDivision.get(divisionId ?? '') ?? new Set<string>(),
+        accountEmails: confirmedAccountEmails,
+        identityFallback: true,
       });
       applyAccountStatuses(validation.rows, eligibleEmails);
       const customResponses: Array<{
@@ -1810,8 +1849,21 @@ export class TournamentImportRepository {
         const rows: ImportPersistRow[] = group.items.map((item, index) => {
           const previewRow = group.rows[index];
           const customResponses = previewRow.customResponses;
-          const player1Name = item.player1Name.trim();
-          const player2Name = item.player2Name?.trim() || '';
+          const confirmedPlayer1Name = previewRow.confirmedPlayer1UserId
+            ? previewRow.accountCandidates.player1[0]?.fullName
+            : undefined;
+          const player1Name =
+            item.player1Name.trim() || confirmedPlayer1Name?.trim() || '';
+          if (!player1Name) {
+            throw new BadRequestException(
+              `Dòng ${previewRow.clientRowIndex ?? index + 1} thiếu tên VĐV 1`,
+            );
+          }
+          const confirmedPlayer2Name = previewRow.confirmedPlayer2UserId
+            ? previewRow.accountCandidates.player2[0]?.fullName
+            : undefined;
+          const player2Name =
+            item.player2Name?.trim() || confirmedPlayer2Name?.trim() || '';
           const player1Email = normalizeRosterEmail(item.player1Email ?? '');
           const player2Email = item.player2Email
             ? normalizeRosterEmail(item.player2Email)
@@ -1827,6 +1879,7 @@ export class TournamentImportRepository {
           const player2Phone = item.player2Phone?.trim();
           if (player1Phone) importMetadata.player1Phone = player1Phone;
           if (player2Name) importMetadata.player2Name = player2Name;
+          if (player1Name) importMetadata.player1Name = player1Name;
           if (player2Email) importMetadata.player2Email = player2Email;
           if (player2Phone) importMetadata.player2Phone = player2Phone;
           const sourceRowIndex =
@@ -2305,6 +2358,7 @@ export class TournamentImportRepository {
             participantId: participant.id,
             userId: linkedUserId,
             role: 'MAIN',
+            accountLinkConfirmedAt: null,
           })
           .returning({ id: schema.tournamentRosters.id });
         linkedAccountNotifications.push({

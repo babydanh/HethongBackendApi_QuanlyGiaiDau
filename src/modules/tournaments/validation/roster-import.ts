@@ -88,6 +88,13 @@ export async function resolveRosterAccountStatuses(
   );
 }
 
+const activeParticipant = and(
+  ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+  ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+  ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+  ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
+);
+
 export async function findExistingRosterImportEmails(
   tournamentId: string,
   emails: readonly string[],
@@ -96,12 +103,6 @@ export async function findExistingRosterImportEmails(
   const normalizedEmails = normalizeCandidateEmails(emails);
   if (normalizedEmails.length === 0) return new Set();
 
-  const activeParticipant = and(
-    ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-    ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-    ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-    ne(schema.tournamentParticipants.teamStatus, 'EXPIRED'),
-  );
   const player1Email =
     sql<string | null>`lower(${schema.tournamentParticipants.customResponses}->>'player1Email')`;
   const player2Email =
@@ -152,6 +153,44 @@ export async function findExistingRosterImportEmails(
   ]);
 }
 
+/**
+ * Identity keys (see rosterExistingIdentityKeys) of entries already in the
+ * tournament, grouped by division id ('' when there is no division). Used only
+ * by the batch path for rows that carry no address.
+ */
+export async function findExistingRosterImportIdentityKeys(
+  tournamentId: string,
+  db: AppDbOrTx,
+): Promise<Map<string, Set<string>>> {
+  const player1Name =
+    sql<string | null>`${schema.tournamentParticipants.customResponses}->>'player1Name'`;
+  const rows = await db
+    .select({
+      tournamentDivisionId: schema.tournamentParticipants.tournamentDivisionId,
+      teamName: schema.tournamentParticipants.teamName,
+      player1Name,
+    })
+    .from(schema.tournamentParticipants)
+    .where(
+      and(
+        eq(schema.tournamentParticipants.tournamentId, tournamentId),
+        eq(schema.tournamentParticipants.isMock, false),
+        activeParticipant,
+      ),
+    );
+
+  const keysByDivision = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const divisionKey = row.tournamentDivisionId ?? '';
+    const keys = keysByDivision.get(divisionKey) ?? new Set<string>();
+    for (const key of rosterExistingIdentityKeys(row.teamName, row.player1Name)) {
+      keys.add(key);
+    }
+    keysByDivision.set(divisionKey, keys);
+  }
+  return keysByDivision;
+}
+
 export type RosterRowStatus =
   | 'FOUND'
   | 'NOT_FOUND'
@@ -199,6 +238,12 @@ export interface ValidateRosterRowsInput {
   tournamentConfig?: unknown;
   divisionNames?: readonly string[];
   existingEmails?: ReadonlySet<string>;
+  /** Batch only: addresses owned by an eligible account. */
+  accountEmails?: ReadonlySet<string>;
+  /** Batch only: identity keys already in the tournament. */
+  existingIdentityKeys?: ReadonlySet<string>;
+  /** Batch only: enables the account-aware name rule and identity fallback. */
+  identityFallback?: boolean;
 }
 
 export interface ValidatedRosterRows {
@@ -214,9 +259,9 @@ const BLOCKING_STATUSES: ReadonlySet<RosterRowStatus> = new Set<RosterRowStatus>
   // paper all the time. The row still imports, is still a real athlete rather
   // than mock data, and the preview shows a note.
   //
-  // The cost is identity. Nothing can later match this row to a user, to an
-  // existing entry, or to a notification, so it cannot complete its own profile.
-  // That trade belongs to the organizer, not to the system.
+  // Identity is weaker without an address. The batch path matches such a row by
+  // team and name (rosterRowMatchesExistingIdentity). The strict
+  // and legacy paths never use that fallback.
   'MISSING_NAME',
   'DUPLICATE_IN_FILE',
   'DUPLICATE_IN_TOURNAMENT',
@@ -235,29 +280,63 @@ export function normalizeRosterEmail(value: string): string {
 }
 
 /**
+ * Fallback identity for a row that carries no address, used to spot duplicates
+ * inside the same file. Weaker than an address on purpose: it cannot tell two
+ * different athletes with the same team name and division apart. Entries already
+ * in the tournament are matched with rosterRowMatchesExistingIdentity.
+ */
+export function rosterIdentityKey(item: {
+  teamName?: string;
+  divisionName?: string;
+  player1Name?: string;
+}): string {
+  return JSON.stringify(
+    [item.teamName ?? '', item.divisionName ?? '', item.player1Name ?? ''].map(
+      (part) => part.trim().toLowerCase(),
+    ),
+  );
+}
+
+/**
+ * Keys an existing entry is matched under. `team|*` matches any row of that
+ * team; `team|name` (or `team|?` when no name was stored) matches a named row.
+ * Returns [] without a team name, so an entry without one never matches.
+ */
+export function rosterExistingIdentityKeys(
+  teamName: string,
+  player1Name: string | null,
+): string[] {
+  const team = teamName.trim().toLowerCase();
+  if (!team) return [];
+  const name = player1Name?.trim().toLowerCase() ?? '';
+  return [`${team}|*`, name ? `${team}|${name}` : `${team}|?`];
+}
+
+/**
+ * Whether a row without an address matches an existing entry, using keys from
+ * rosterExistingIdentityKeys. A row with no team falls back to its name.
+ */
+export function rosterRowMatchesExistingIdentity(
+  keys: ReadonlySet<string>,
+  teamName: string,
+  player1Name: string,
+): boolean {
+  const name = player1Name.trim().toLowerCase();
+  const team = (teamName.trim() || player1Name.trim()).toLowerCase();
+  if (!team) return false;
+  if (name) {
+    return keys.has(`${team}|${name}`) || keys.has(`${team}|?`);
+  }
+  return keys.has(`${team}|*`);
+}
+
+/**
  * Validate a batch of roster rows without touching the database.
  *
  * `FOUND`/`NOT_FOUND` are deliberately absent here: account eligibility is a
  * database question answered by `resolveRosterAccountStatuses`, so this stays
  * pure and the preview and commit share one rule set.
  */
-/**
- * Fallback identity for a row that carries no address.
- *
- * Weaker than an address on purpose: it cannot tell two different athletes with
- * the same team name apart, and it cannot be compared against entries already
- * in the tournament. But it is the only thing left when the address is blank,
- * and without it importing the same file twice silently doubles the roster.
- */
-const rosterIdentityKey = (item: {
-  teamName?: string;
-  divisionName?: string;
-  player1Name?: string;
-}): string =>
-  [item.teamName ?? '', item.divisionName ?? '', item.player1Name ?? '']
-    .map((part) => part.trim().toLowerCase())
-    .join(' ');
-
 export function validateRosterRows(
   input: ValidateRosterRowsInput,
 ): ValidatedRosterRows {
@@ -268,6 +347,9 @@ export function validateRosterRows(
     tournamentConfig,
     divisionNames,
     existingEmails,
+    accountEmails,
+    existingIdentityKeys,
+    identityFallback,
   } = input;
 
   // An address claimed by more than one row is a file-level duplicate, so it
@@ -299,8 +381,17 @@ export function validateRosterRows(
     const player2Email = item.player2Email?.trim()
       ? normalizeRosterEmail(item.player2Email)
       : null;
+    const player1HasAccount =
+      accountEmails?.has(player1Email) === true;
+    const player2HasAccount =
+      player2Email !== null && accountEmails?.has(player2Email) === true;
 
-    if (!item.player1Name?.trim()) status.add('MISSING_NAME');
+    // Only an account-linked row may omit the name: the commit fills it from
+    // the account. Anything else without a name stays blocked, because the
+    // commit persists player1Name as given.
+    if (!item.player1Name?.trim() && !(identityFallback === true && player1HasAccount)) {
+      status.add('MISSING_NAME');
+    }
     if (!player1Email) status.add('MISSING_EMAIL');
     else if (!ROSTER_EMAIL_PATTERN.test(player1Email)) {
       status.add('INVALID_EMAIL');
@@ -308,6 +399,7 @@ export function validateRosterRows(
 
     if (
       isDoubles &&
+      !player2HasAccount &&
       !item.player2Name?.trim() &&
       (item.player2Email?.trim() || item.player2Phone?.trim())
     ) {
@@ -360,10 +452,22 @@ export function validateRosterRows(
     if (player2Email && existingEmails?.has(player2Email)) {
       status.add('DUPLICATE_IN_TOURNAMENT');
     }
+    if (
+      identityFallback &&
+      !player1Email &&
+      existingIdentityKeys &&
+      rosterRowMatchesExistingIdentity(
+        existingIdentityKeys,
+        item.teamName ?? '',
+        item.player1Name ?? '',
+      )
+    ) {
+      status.add('DUPLICATE_IN_TOURNAMENT');
+    }
 
     const capacityDelta = calculateRequestedTeamSlots(
       matchType,
-      item.player2Name?.trim() ? 2 : 1,
+      (item.player2Name?.trim() || player2HasAccount) ? 2 : 1,
       { tournamentConfig },
     );
 

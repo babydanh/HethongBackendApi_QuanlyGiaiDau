@@ -1,4 +1,8 @@
-import { validateRosterRows } from './roster-import';
+import {
+  rosterExistingIdentityKeys,
+  rosterRowMatchesExistingIdentity,
+  validateRosterRows,
+} from './roster-import';
 
 /**
  * Roster row validation is the single rule set the organizer's read-only
@@ -234,5 +238,184 @@ describe('validateRosterRows', () => {
 
     expect(rows[0].status).toContain('DIVISION_UNKNOWN');
     expect(rows[0].isEligible).toBe(false);
+  });
+
+  describe('batch rules (identityFallback)', () => {
+    const batch = { identityFallback: true } as const;
+
+    it('lets an account-linked row omit the name, because the commit fills it from the account', () => {
+      const { rows } = validateRosterRows({
+        ...SINGLES,
+        ...batch,
+        accountEmails: new Set(['linked@example.test']),
+        items: [
+          { teamName: 'Đội A', player1Name: '', player1Email: 'linked@example.test' },
+        ],
+      });
+
+      expect(rows[0].status).not.toContain('MISSING_NAME');
+    });
+
+    it('still requires a name when the row has no linked account', () => {
+      const { rows } = validateRosterRows({
+        ...SINGLES,
+        ...batch,
+        accountEmails: new Set(['linked@example.test']),
+        items: [
+          { teamName: 'Đội B', player1Name: '', player1Email: 'unlinked@example.test' },
+        ],
+      });
+
+      expect(rows[0].status).toContain('MISSING_NAME');
+    });
+
+    it('flags a no-address row whose identity already exists in the tournament', () => {
+      const existingKeys = rosterExistingIdentityKeys('Đội C', 'Trần Văn C');
+      const { rows } = validateRosterRows({
+        ...SINGLES,
+        ...batch,
+        divisionNames: ['Đơn nam'],
+        existingIdentityKeys: new Set(existingKeys),
+        items: [{ teamName: 'Đội C', divisionName: 'Đơn nam', player1Name: 'Trần Văn C' }],
+      });
+
+      expect(rows[0].status).toContain('DUPLICATE_IN_TOURNAMENT');
+    });
+
+    it('flags a named row against an entry stored without a name for the same team', () => {
+      const existingKeys = rosterExistingIdentityKeys('Đội E', null);
+      const { rows } = validateRosterRows({
+        ...SINGLES,
+        ...batch,
+        divisionNames: ['Đơn nam'],
+        existingIdentityKeys: new Set(existingKeys),
+        items: [{ teamName: 'Đội E', divisionName: 'Đơn nam', player1Name: 'Nguyễn Văn E' }],
+      });
+
+      expect(rows[0].status).toContain('DUPLICATE_IN_TOURNAMENT');
+    });
+
+    it('does not flag a different athlete from the same team', () => {
+      const existingKeys = rosterExistingIdentityKeys('Đội F', 'Lê Văn F');
+      const { rows } = validateRosterRows({
+        ...SINGLES,
+        ...batch,
+        divisionNames: ['Đơn nam'],
+        existingIdentityKeys: new Set(existingKeys),
+        items: [{ teamName: 'Đội F', divisionName: 'Đơn nam', player1Name: 'Phạm Văn F' }],
+      });
+
+      expect(rows[0].status).not.toContain('DUPLICATE_IN_TOURNAMENT');
+    });
+
+    it('does not apply the identity check without the batch flag', () => {
+      const existingKeys = rosterExistingIdentityKeys('Đội C', 'Trần Văn C');
+      const { rows } = validateRosterRows({
+        ...SINGLES,
+        divisionNames: ['Đơn nam'],
+        existingIdentityKeys: new Set(existingKeys),
+        items: [{ teamName: 'Đội C', divisionName: 'Đơn nam', player1Name: 'Trần Văn C' }],
+      });
+
+      expect(rows[0].status).not.toContain('DUPLICATE_IN_TOURNAMENT');
+    });
+
+    it('does not require a typed name for player two when player two has an account', () => {
+      const { rows } = validateRosterRows({
+        ...DOUBLES,
+        ...batch,
+        accountEmails: new Set(['partner@example.test']),
+        items: [
+          {
+            teamName: 'Đôi D',
+            player1Name: 'Lê Văn D',
+            player1Email: 'lead@example.test',
+            player2Email: 'partner@example.test',
+            player2Name: '',
+          },
+        ],
+      });
+
+      expect(rows[0].status).not.toContain('PLAYER2_REQUIRED');
+    });
+
+    it('still requires a typed name for player two when player two has no account', () => {
+      const { rows } = validateRosterRows({
+        ...DOUBLES,
+        ...batch,
+        accountEmails: new Set(['someone-else@example.test']),
+        items: [
+          {
+            teamName: 'Đôi E',
+            player1Name: 'Phạm Văn E',
+            player1Email: 'lead2@example.test',
+            player2Email: 'unlinked2@example.test',
+            player2Name: '',
+          },
+        ],
+      });
+
+      expect(rows[0].status).toContain('PLAYER2_REQUIRED');
+    });
+
+    it('counts a player two backed by an account as a second athlete in requested slots', () => {
+      const withAccount = validateRosterRows({
+        ...DOUBLES,
+        ...batch,
+        accountEmails: new Set(['partner3@example.test']),
+        items: [
+          {
+            teamName: 'Đôi F',
+            player1Name: 'Hoàng Văn F',
+            player1Email: 'lead3@example.test',
+            player2Email: 'partner3@example.test',
+            player2Name: '',
+          },
+        ],
+      });
+      const withName = validateRosterRows({
+        ...DOUBLES,
+        ...batch,
+        items: [
+          {
+            teamName: 'Đôi F',
+            player1Name: 'Hoàng Văn F',
+            player1Email: 'lead3@example.test',
+            player2Email: 'partner3@example.test',
+            player2Name: 'Đinh Văn F',
+          },
+        ],
+      });
+
+      expect(withAccount.requestedTeamSlots).toBe(withName.requestedTeamSlots);
+    });
+  });
+});
+
+describe('existing identity matching', () => {
+  it('never matches a row against an entry that has no team name', () => {
+    const keys = new Set(rosterExistingIdentityKeys('   ', 'Trần Văn C'));
+
+    expect(rosterRowMatchesExistingIdentity(keys, 'Đội C', 'Trần Văn C')).toBe(false);
+  });
+
+  it('matches a row without a name against any entry of the same team', () => {
+    const keys = new Set(rosterExistingIdentityKeys('Đội G', 'Trần Văn G'));
+
+    expect(rosterRowMatchesExistingIdentity(keys, 'Đội G', '')).toBe(true);
+    expect(rosterRowMatchesExistingIdentity(keys, 'Đội khác', '')).toBe(false);
+  });
+
+  it('matches a named row against an entry stored without a name for the same team', () => {
+    const keys = new Set(rosterExistingIdentityKeys('Đội I', null));
+
+    expect(rosterRowMatchesExistingIdentity(keys, 'Đội I', 'Ai đó')).toBe(true);
+    expect(rosterRowMatchesExistingIdentity(keys, 'Đội khác', 'Ai đó')).toBe(false);
+  });
+
+  it('compares team and name case-insensitively', () => {
+    const keys = new Set(rosterExistingIdentityKeys('Đội H', 'Trần Văn H'));
+
+    expect(rosterRowMatchesExistingIdentity(keys, 'ĐỘI H', 'trần văn h')).toBe(true);
   });
 });

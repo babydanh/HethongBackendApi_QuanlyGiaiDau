@@ -1146,7 +1146,10 @@ export class TournamentRegistrationRepository {
       if (data.rankingConsent === true) {
         await tx
           .update(schema.tournamentRosters)
-          .set({ rankingConsentAt: new Date() })
+          .set({
+            rankingConsentAt: new Date(),
+            accountLinkConfirmedAt: sql`coalesce(${schema.tournamentRosters.accountLinkConfirmedAt}, now())`,
+          })
           .where(
             and(
               eq(schema.tournamentRosters.participantId, participant.id),
@@ -2390,7 +2393,11 @@ export class TournamentRegistrationRepository {
     divisionId?: string,
   ) {
     const userRoster = await this.db
-      .select({ participantId: schema.tournamentRosters.participantId })
+      .select({
+        participantId: schema.tournamentRosters.participantId,
+        accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
+        rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+      })
       .from(schema.tournamentRosters)
       .innerJoin(
         schema.tournamentParticipants,
@@ -2562,6 +2569,8 @@ export class TournamentRegistrationRepository {
         tournamentDivisionId: participant.tournamentDivisionId,
         entryFeeAtRegistration: participant.entryFeeAtRegistration,
         registeredAt: participant.registeredAt,
+        viewerAccountLinkConfirmedAt: userRoster[0].accountLinkConfirmedAt ?? null,
+        viewerRankingConsentAt: userRoster[0].rankingConsentAt ?? null,
 
         teamInviteToken: participant.teamInviteToken,
         partnerInviteExpiresAt: participant.partnerInviteExpiresAt,
