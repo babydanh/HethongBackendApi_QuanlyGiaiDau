@@ -887,6 +887,37 @@ describe('AiService.reviewRosterSource', () => {
       aiAvailable: false,
     });
   });
+  it.each([
+    { locale: 'en', language: 'English' },
+    { locale: 'vi', language: 'Vietnamese' },
+    { locale: undefined, language: 'Vietnamese' },
+  ] as const)('instructs the model to write explanations in $language', async ({ locale, language }) => {
+    const service = createService('test-key');
+    const create = attachProvider(service, JSON.stringify({ suggestions: [], fileNotes: [] }));
+
+    await service.reviewRosterSource('tournament-1', { ...ROSTER_DTO, locale });
+
+    const prompt = providerMessagesOf(create.mock.calls[0][0]).map((message) => message.content).join('\n');
+    expect(prompt).toMatch(new RegExp(`reason[^\\n]*${language}`, 'i'));
+    expect(prompt).toMatch(new RegExp(`fileNotes[^\\n]*${language}`, 'i'));
+  });
+
+  it('never sends participant row values to the model, even when an older caller includes them', async () => {
+    const service = createService('test-key');
+    const create = attachProvider(service, JSON.stringify({ suggestions: [], fileNotes: [] }));
+    const input = {
+      ...ROSTER_DTO,
+      sampleRows: [{ 'Email VĐV 1': 'roster-privacy-sentinel@example.test' }],
+    };
+
+    await service.reviewRosterSource('tournament-1', input);
+
+    const providerPayload = JSON.stringify(create.mock.calls[0][0]);
+    expect(providerPayload).not.toContain('roster-privacy-sentinel@example.test');
+    expect(providerPayload).not.toContain('r***@example.test');
+    expect(providerPayload).not.toContain('[CÁC DÒNG MẪU');
+  });
+
 
   it('keeps the fuzzy job in the prompt and frames the uploaded sheet as data, not instructions', async () => {
     const service = createService('test-key');

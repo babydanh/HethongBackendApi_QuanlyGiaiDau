@@ -5,6 +5,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsObject,
   IsOptional,
@@ -44,7 +45,7 @@ const trimValue = ({ value }: { value: unknown }): unknown => (typeof value === 
 const trimHeaderList = ({ value }: { value: unknown }): unknown =>
   Array.isArray(value) ? value.map((header) => (typeof header === 'string' ? header.trim() : header)) : value;
 
-/** Read-only request body: an uploaded sheet's shape, never its file bytes. */
+/** Read-only metadata request; legacy sampleRows are accepted for compatibility but never sent to the provider. */
 export class RosterReviewRequestDto {
   @ApiPropertyOptional({ description: 'Sheet name shown in the workbook, for disambiguating repeated headers', maxLength: 120 })
   @Transform(trimValue)
@@ -71,13 +72,27 @@ export class RosterReviewRequestDto {
   @MaxLength(120, { each: true })
   headers!: string[];
 
-  @ApiProperty({ description: 'Up to 8 sample data rows, keyed by the same header text; used only as layout evidence', type: [Object], maxItems: 8 })
+  @ApiPropertyOptional({
+    description: 'Legacy field accepted for client compatibility; ignored and never sent to the AI provider',
+    type: [Object],
+    maxItems: 8,
+  })
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(8)
   @IsObject({ each: true })
-  sampleRows!: Record<string, unknown>[];
+  sampleRows?: Record<string, unknown>[];
 
   @ApiProperty({ description: 'Whether this sheet holds doubles entries; singles sheets have no second player' })
   @IsBoolean()
   isDoubles!: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Language for model-generated explanations; defaults to Vietnamese',
+    enum: ['vi', 'en'],
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['vi', 'en'])
+  locale?: 'vi' | 'en';
 }

@@ -340,6 +340,32 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review', () => 
     expect(reviewRosterSource).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining(ROSTER_BODY));
   });
 
+  it('accepts an optional supported explanation locale', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ ...ROSTER_BODY, locale: 'en' });
+
+    expect(response.status).toBe(200);
+    expect(reviewRosterSource).toHaveBeenCalledWith(
+      TOURNAMENT_ID,
+      expect.objectContaining({ locale: 'en' }),
+    );
+  });
+
+  it('rejects an unsupported explanation locale through the locale validator', async () => {
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_REVIEW_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send({ ...ROSTER_BODY, locale: 'fr' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toEqual(expect.arrayContaining([
+      expect.stringContaining('locale must be one of the following values'),
+    ]));
+    expect(reviewRosterSource).not.toHaveBeenCalled();
+  });
+
   it('reports an unavailable model without failing, so the wizard keeps its keyword mapping', async () => {
     reviewRosterSource.mockResolvedValue({ data: null, aiAvailable: false });
 
