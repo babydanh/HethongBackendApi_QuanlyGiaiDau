@@ -172,8 +172,8 @@ export class AiController {
 
   /**
    * Deprecated alias for clients built before roster-layout (approved plan decision D-4). Same
-   * guards as roster-layout. The legacy body is not read: while ROSTER_LAYOUT_PROVIDER_APPROVED is
-   * false no provider call happens, so the payload is the unavailable outcome. Remove with the alias.
+   * guards as roster-layout. The legacy body is not read and no provider call happens here, so old
+   * clients always get the unavailable outcome and fall back to manual mapping. Remove with the alias.
    */
   @Post('tournaments/:tournamentId/roster-review')
   @HttpCode(HttpStatus.OK)

@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { BadRequestException, HttpException } from '@nestjs/common';
+import { BadRequestException, HttpException, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import * as http from 'node:http';
 import * as https from 'node:https';
@@ -1067,15 +1067,42 @@ describe('parseRosterLayout', () => {
 });
 
 describe('AiService.analyzeRosterLayout', () => {
-  it('answers unavailable without calling the provider while the layout gate is closed', async () => {
+  it('sends the sheets to the provider once and returns the parsed layout', async () => {
     const service = createService('test-key');
-    const create = attachProvider(service, JSON.stringify({ sheets: [], notes: [] }));
+    const modelOutput = { sheets: [rosterSheet({})], notes: ['Có dòng tiêu đề ở dòng 3'] };
+    const create = attachProvider(service, JSON.stringify(modelOutput));
+
+    await expect(service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST)).resolves.toEqual({
+      data: {
+        sheets: [expect.objectContaining({ sheetName: 'Danh sách thi', kind: 'ROSTER' })],
+        notes: ['Có dòng tiêu đề ở dòng 3'],
+      },
+      aiAvailable: true,
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers unavailable when no provider key is configured', async () => {
+    const service = createService(undefined);
 
     await expect(service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST)).resolves.toEqual({
       data: null,
       aiAvailable: false,
     });
-    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('maps a provider rate limit to 429 and any other provider failure to 503', async () => {
+    const service = createService('test-key');
+    const create = attachProvider(service, '');
+    create.mockRejectedValueOnce(providerError(429, 'sk-roster-secret'));
+    create.mockRejectedValueOnce(providerError(500, 'sk-roster-secret'));
+
+    const rateLimited = await service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST).catch((e: unknown) => e);
+    expect(rateLimited).toBeInstanceOf(HttpException);
+    expect((rateLimited as HttpException).getStatus()).toBe(429);
+    await expect(service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
   });
 
   it('rejects a raw email address in any cell before anything is sent', async () => {

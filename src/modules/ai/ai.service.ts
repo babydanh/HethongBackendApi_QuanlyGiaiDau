@@ -141,10 +141,11 @@ export interface RosterLayoutOutcome {
 }
 
 /**
- * Cổng gửi bố cục bảng tính lên nhà cung cấp AI. Chỉ đặt `true` sau khi có duyệt Legal bằng văn bản
- * và PII scope (xem 05-security-delta.md). Không suy ra từ việc có API key.
+ * Cổng gửi bố cục bảng tính (đã che ở trình duyệt) lên nhà cung cấp AI. Bật ngày 2026-10-12 theo
+ * quyết định của chủ sản phẩm; chưa có duyệt Legal bằng văn bản (compliance-scope-record.md vẫn
+ * LEGAL_REVIEW_REQUIRED). Đặt lại `false` để dừng mọi lệnh gọi provider. Không suy ra từ API key.
  */
-export const ROSTER_LAYOUT_PROVIDER_APPROVED = false;
+export const ROSTER_LAYOUT_PROVIDER_APPROVED = true;
 
 const ROSTER_LAYOUT_JSON_SCHEMA = {
   type: 'object',
