@@ -17,6 +17,7 @@ import {
 } from '../../notifications/notification-builder';
 import type { ImportParticipantsDto } from '../dto/import-participants.dto';
 import type { RosterImportDto } from '../dto/roster-import.dto';
+import type { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
 import type {
   AddAthleteCandidate,
   AddAthleteCandidateDto,
@@ -151,6 +152,68 @@ export class TournamentImportService {
     return {
       message: `Đã thêm ${result.importedCount} VĐV / Đội vào giải đấu!`,
       importedCount: result.importedCount,
+    };
+  }
+  async importRosterBatchFromForm(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: RosterImportBatchDto,
+    idempotencyKey: string | undefined,
+    broadcastRegistrationChanged: RegistrationChangedBroadcaster,
+  ): Promise<{ importedCount: number; replayed: boolean; message?: string }> {
+    const tournament = await this.assertTournamentManager(
+      tournamentId,
+      userId,
+      systemRoles,
+    );
+    const replay = await this.tournamentsRepository.findRosterImportBatchReplay(
+      tournamentId,
+      userId,
+      dto,
+      idempotencyKey,
+    );
+    if (replay) return replay;
+
+    await assertSpreadsheetRosterEligible(tournament, {
+      hasStartedMatch: () =>
+        this.tournamentsRepository.hasStartedMatch(tournamentId),
+      hasActiveBracketStage: async () =>
+        Boolean(
+          (await this.tournamentsRepository.findBracket(tournamentId))?.stages
+            ?.length,
+        ),
+    });
+    const result = await this.tournamentsRepository.importRosterBatch(
+      tournamentId,
+      userId,
+      dto,
+      idempotencyKey,
+    );
+    if (result.replayed) {
+      return { importedCount: result.importedCount, replayed: true };
+    }
+
+    await this.notifyLinkedAccounts(
+      tournamentId,
+      tournament.name,
+      dto.notifyLinkedAccounts === true,
+      result.linkedAccountNotifications,
+    );
+    await this.sendConsentRequests(result.linkedAccountNotifications);
+    for (const divisionId of new Set(
+      dto.groups.map((group) => group.divisionId ?? null),
+    )) {
+      broadcastRegistrationChanged(tournamentId, {
+        divisionId,
+        action: 'IMPORT_PARTICIPANTS',
+      });
+    }
+
+    return {
+      message: `Đã thêm ${result.importedCount} VĐV / Đội vào giải đấu!`,
+      importedCount: result.importedCount,
+      replayed: false,
     };
   }
   async listAddAthleteCandidates(

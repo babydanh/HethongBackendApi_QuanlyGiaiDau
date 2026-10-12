@@ -28,7 +28,9 @@ import { TournamentPaymentRepository } from './tournament-payment.repository';
 import {
   assertCapacityHasRoom,
   lockCapacityOwner,
+  readCapacitiesForDivisions,
   readEffectiveCapacity,
+  readTournamentCapacity,
 } from '../services/tournament-capacity.service';
 import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
@@ -47,8 +49,30 @@ import type {
   RosterPreviewRow,
   RosterRowStatus,
 } from '../validation/roster-import';
+import {
+  assertRosterBatchCapacityHasRoom,
+  fingerprintRosterImportBatch,
+  groupRosterBatchCapacityClaims,
+  markRosterBatchDuplicateEmails,
+  resolveConfirmedRosterUserId,
+  validateRosterImportBatchGroups,
+  validateRosterImportCustomResponses,
+  validateRosterImportIdempotencyKey,
+} from '../validation/roster-import-batch';
+import type {
+  RegistrationFormForRosterImport,
+  RosterAccountCandidate,
+  RosterImportBatchGroup,
+  RosterImportBatchParticipant,
+  RosterBatchCapacityClaim,
+  ValidatedRosterImportBatchGroup,
+} from '../validation/roster-import-batch';
 import type { ImportSource, RosterEntryType } from '../dto/roster-import.dto';
 import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
+import type {
+  RosterImportBatchDto,
+  RosterImportBatchItemDto,
+} from '../dto/roster-import-batch.dto';
 import type {
   AddAthleteCandidate,
   AddAthleteCandidateDto,
@@ -139,6 +163,49 @@ function applyAccountStatuses(
   }
 }
 
+type RosterBatchAccountCandidate = RosterAccountCandidate & {
+  fullName: string;
+};
+
+async function findRosterBatchAccountCandidates(
+  emails: readonly string[],
+  tx: AppTx,
+  lockRows = false,
+): Promise<Map<string, RosterBatchAccountCandidate>> {
+  const normalizedEmails = [
+    ...new Set(
+      emails
+        .map(normalizeRosterEmail)
+        .filter((email) => ROSTER_EMAIL_PATTERN.test(email)),
+    ),
+  ];
+  if (normalizedEmails.length === 0) return new Map();
+
+  const query = tx
+    .select({
+      id: schema.users.id,
+      email: sql<string>`lower(${schema.users.email})`,
+      fullName: sql<string>`btrim(${schema.profiles.fullName})`,
+    })
+    .from(schema.users)
+    .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+    .where(
+      and(
+        inArray(sql`lower(${schema.users.email})`, normalizedEmails),
+        eq(schema.users.isEmailVerified, true),
+        eligibleRosterAccountCondition(tx),
+        sql`btrim(${schema.profiles.fullName}) <> ''`,
+      ),
+    );
+  const rows = lockRows ? await query.for('update') : await query;
+  return new Map(
+    rows.map((row) => [
+      normalizeRosterEmail(row.email),
+      { id: row.id, email: normalizeRosterEmail(row.email), fullName: row.fullName },
+    ]),
+  );
+}
+
 /**
  * Legacy `POST /tournaments/:id/import-participants` payloads predate roster
  * import: emails are optional and provenance is not declared. They stay
@@ -206,6 +273,44 @@ type AddAthleteRepositoryResult = {
     divisionId: string | null;
     userId: string;
   };
+};
+
+type RosterBatchCandidateView = {
+  userId: string;
+  email: string;
+  fullName: string;
+};
+
+type RosterBatchPreviewRow = RosterPreviewRow & {
+  clientRowIndex: number;
+  sourceRowIndex?: number;
+  sourceSheetName?: string;
+  customResponses: Record<string, unknown>;
+  customResponseError?: string;
+  accountCandidates: {
+    player1: RosterBatchCandidateView[];
+    player2: RosterBatchCandidateView[];
+  };
+  confirmedPlayer1UserId: string | null;
+  confirmedPlayer2UserId: string | null;
+};
+
+type PreparedRosterBatchGroup =
+  ValidatedRosterImportBatchGroup<RosterImportBatchParticipant> & {
+    items: RosterImportBatchItemDto[];
+    division: typeof schema.tournamentDivisions.$inferSelect | null;
+    capacity: {
+      occupiedTeamSlots: number;
+      maxTeamSlots: number | null;
+    };
+    capacityOwnerKey: string;
+    rows: RosterBatchPreviewRow[];
+  };
+
+type PreparedRosterBatch = {
+  totalParticipants: number;
+  groups: PreparedRosterBatchGroup[];
+  capacityClaims: RosterBatchCapacityClaim[];
 };
 
 async function findLegacyUser(
@@ -1060,6 +1165,562 @@ export class TournamentImportRepository {
           capacity.maxTeamSlots === null
             ? null
             : Math.max(0, capacity.maxTeamSlots - capacity.occupiedTeamSlots),
+      };
+    });
+  }
+
+  async previewRosterImportBatch(
+    tournamentId: string,
+    dto: RosterImportBatchDto,
+  ) {
+    const prepared = await this.db.transaction((tx) =>
+      this.prepareRosterImportBatch(tournamentId, dto.groups, tx, false),
+    );
+    const capacityByOwner = new Map(
+      groupRosterBatchCapacityClaims(prepared.capacityClaims).map((claim) => [
+        claim.ownerKey,
+        claim,
+      ]),
+    );
+
+    return {
+      totalParticipants: prepared.totalParticipants,
+      groups: prepared.groups.map((group) => {
+        const claim = capacityByOwner.get(group.capacityOwnerKey);
+        const capacityRemaining =
+          group.capacity.maxTeamSlots === null
+            ? null
+            : Math.max(
+                0,
+                group.capacity.maxTeamSlots - group.capacity.occupiedTeamSlots,
+              );
+        return {
+          divisionId: group.divisionId,
+          divisionName: group.division?.name ?? null,
+          divisionMatched: Boolean(group.divisionId),
+          rows: group.rows,
+          requestedTeamSlots: group.requestedTeamSlots,
+          capacityRemaining,
+          capacityRemainingAfterBatch:
+            capacityRemaining === null || !claim
+              ? capacityRemaining
+              : Math.max(
+                  0,
+                  capacityRemaining - claim.requestedTeamSlots,
+                ),
+          capacityFits:
+            claim?.maxTeamSlots == null ||
+            claim.occupiedTeamSlots + claim.requestedTeamSlots <=
+              claim.maxTeamSlots,
+        };
+      }),
+    };
+  }
+
+  private async prepareRosterImportBatch(
+    tournamentId: string,
+    groups: RosterImportBatchDto['groups'],
+    tx: AppTx,
+    lockCapacity: boolean,
+  ): Promise<PreparedRosterBatch> {
+    const [tournament] = lockCapacity
+      ? await tx
+          .select()
+          .from(schema.tournaments)
+          .where(eq(schema.tournaments.id, tournamentId))
+          .for('update')
+          .limit(1)
+      : await tx
+          .select()
+          .from(schema.tournaments)
+          .where(eq(schema.tournaments.id, tournamentId))
+          .limit(1);
+    if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
+
+    const requestGroups: RosterImportBatchGroup[] = groups.map((group) => ({
+      divisionId: group.divisionId ?? null,
+      participants:
+        group.participants as unknown as RosterImportBatchParticipant[],
+    }));
+    const totalParticipants =
+      validateRosterImportBatchGroups(requestGroups);
+    let divisions = await this.resolveRosterBatchDivisions(
+      tournamentId,
+      groups,
+      tx,
+    );
+    const divisionIds = [...divisions.keys()].sort();
+
+    if (lockCapacity) {
+      for (const divisionId of divisionIds) {
+        await lockCapacityOwner(tx, { tournamentId, divisionId });
+      }
+      divisions = await this.resolveRosterBatchDivisions(
+        tournamentId,
+        groups,
+        tx,
+      );
+    }
+
+    const emails = groups.flatMap((group) => getRosterEmails(group.participants));
+    const existingEmails = await findExistingRosterImportEmails(
+      tournamentId,
+      emails,
+      tx,
+    );
+    const candidatesByEmail = await findRosterBatchAccountCandidates(
+      emails,
+      tx,
+      lockCapacity,
+    );
+    const eligibleEmails = new Set(candidatesByEmail.keys());
+    let nextClientRowIndex = 0;
+    const validatedGroups: Array<
+      ValidatedRosterImportBatchGroup<RosterImportBatchParticipant> & {
+        items: RosterImportBatchItemDto[];
+        division: typeof schema.tournamentDivisions.$inferSelect | null;
+        capacity: {
+          occupiedTeamSlots: number;
+          maxTeamSlots: number | null;
+        };
+        capacityOwnerKey: string;
+      }
+    > = [];
+
+    const capacityByDivision = await readCapacitiesForDivisions(
+      tx,
+      divisionIds,
+    );
+    const hasDivisionlessGroup = groups.some((group) => !group.divisionId);
+    const tournamentCapacity = hasDivisionlessGroup
+      ? await readTournamentCapacity(tx, tournamentId)
+      : null;
+    const registrationForm = (
+      tournament.tournamentConfig as
+        | { registrationForm?: RegistrationFormForRosterImport }
+        | null
+    )?.registrationForm;
+
+    for (const group of groups) {
+      const divisionId = group.divisionId ?? null;
+      const division = divisionId ? divisions.get(divisionId) ?? null : null;
+      const matchType = division?.matchType ?? tournament.matchType;
+      const validation = validateRosterRows({
+        items: group.participants,
+        isDoubles:
+          matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES',
+        matchType,
+        tournamentConfig: tournament.tournamentConfig,
+        divisionNames: division ? [division.name] : [],
+        existingEmails,
+      });
+      applyAccountStatuses(validation.rows, eligibleEmails);
+      const customResponses: Array<{
+        values: Record<string, unknown>;
+        error?: string;
+      }> = group.participants.map((item) => {
+        try {
+          return {
+            values: validateRosterImportCustomResponses(
+              item.customResponses,
+              registrationForm,
+              divisionId,
+            ),
+          };
+        } catch (error) {
+          if (!(error instanceof BadRequestException)) throw error;
+          return { values: {}, error: error.message };
+        }
+      });
+      const rows: RosterBatchPreviewRow[] = validation.rows.map(
+        (row, rowIndex) => {
+          const item = group.participants[rowIndex];
+          const candidatesFor = (email?: string) => {
+            if (!email) return [];
+            const candidate = candidatesByEmail.get(
+              normalizeRosterEmail(email),
+            );
+            return candidate
+              ? [
+                  {
+                    userId: candidate.id,
+                    email: candidate.email,
+                    fullName: candidate.fullName,
+                  },
+                ]
+              : [];
+          };
+          const customResponse = customResponses[rowIndex];
+          const sourceRowIndex =
+            item.sourceRowIndex ??
+            (typeof customResponse.values.sourceRowIndex === 'number'
+              ? customResponse.values.sourceRowIndex
+              : undefined);
+          const sourceSheetName =
+            item.sourceSheetName ??
+            (typeof customResponse.values.sourceSheetName === 'string'
+              ? customResponse.values.sourceSheetName
+              : undefined);
+          const clientRowIndex = item.clientRowIndex ?? nextClientRowIndex;
+          nextClientRowIndex += 1;
+          return {
+            ...row,
+            clientRowIndex,
+            ...(sourceRowIndex !== undefined ? { sourceRowIndex } : {}),
+            ...(sourceSheetName ? { sourceSheetName } : {}),
+            customResponses: customResponse.values,
+            ...(customResponse.error
+              ? { customResponseError: customResponse.error }
+              : {}),
+            confirmedPlayer1UserId: resolveConfirmedRosterUserId(
+              item.player1Email ?? '',
+              item.confirmedPlayer1UserId,
+              candidatesByEmail,
+            ),
+            confirmedPlayer2UserId: resolveConfirmedRosterUserId(
+              item.player2Email ?? '',
+              item.confirmedPlayer2UserId,
+              candidatesByEmail,
+            ),
+            accountCandidates: {
+              player1: candidatesFor(item.player1Email),
+              player2: candidatesFor(item.player2Email),
+            },
+          };
+        },
+      );
+      const capacity = divisionId
+        ? capacityByDivision[divisionId]
+        : tournamentCapacity;
+      if (!capacity) {
+        throw new BadRequestException(
+          'Không thể xác định sức chứa của nội dung nhập.',
+        );
+      }
+      const capacityOwnerKey =
+        division && division.maxParticipants !== null
+          ? `division:${division.id}`
+          : `tournament:${tournamentId}`;
+      validatedGroups.push({
+        divisionId,
+        participants:
+          group.participants as unknown as RosterImportBatchParticipant[],
+        items: group.participants,
+        rows,
+        requestedTeamSlots: validation.requestedTeamSlots,
+        division,
+        capacity: {
+          occupiedTeamSlots: capacity.occupiedTeamSlots,
+          maxTeamSlots: capacity.maxTeamSlots,
+        },
+        capacityOwnerKey,
+      });
+    }
+
+    const markedGroups = markRosterBatchDuplicateEmails(validatedGroups);
+    const preparedGroups = markedGroups.map((group, index) => ({
+      ...group,
+      ...validatedGroups[index],
+      rows: group.rows as RosterBatchPreviewRow[],
+      requestedTeamSlots: group.requestedTeamSlots,
+    }));
+    return {
+      totalParticipants,
+      groups: preparedGroups,
+      capacityClaims: preparedGroups.map((group) => ({
+        ownerKey: group.capacityOwnerKey,
+        occupiedTeamSlots: group.capacity.occupiedTeamSlots,
+        maxTeamSlots: group.capacity.maxTeamSlots,
+        requestedTeamSlots: group.requestedTeamSlots,
+      })),
+    };
+  }
+
+  private async resolveRosterBatchDivisions(
+    tournamentId: string,
+    groups: RosterImportBatchDto['groups'],
+    tx: AppTx,
+  ): Promise<Map<string, typeof schema.tournamentDivisions.$inferSelect>> {
+    const requestedIds = [
+      ...new Set(
+        groups
+          .map((group) => group.divisionId)
+          .filter((divisionId): divisionId is string => Boolean(divisionId)),
+      ),
+    ];
+    if (requestedIds.length && groups.some((group) => !group.divisionId)) {
+      throw new BadRequestException(
+        'Không thể trộn nhóm có division với nhóm không có division.',
+      );
+    }
+
+    const rows = requestedIds.length
+      ? await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(
+            and(
+              eq(schema.tournamentDivisions.tournamentId, tournamentId),
+              inArray(schema.tournamentDivisions.id, requestedIds),
+            ),
+          )
+      : await tx
+          .select()
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.tournamentId, tournamentId));
+    const divisions = new Map(
+      rows.map((division) => [division.id, division] as const),
+    );
+
+    if (
+      (!requestedIds.length && divisions.size > 0) ||
+      requestedIds.some((divisionId) => !divisions.has(divisionId))
+    ) {
+      throw new BadRequestException(
+        'Chỉ được nhập vào division hiện có thuộc giải đấu này.',
+      );
+    }
+    return divisions;
+  }
+  async findRosterImportBatchReplay(
+    tournamentId: string,
+    managerUserId: string,
+    dto: RosterImportBatchDto,
+    idempotencyKey: string | undefined,
+  ): Promise<{ importedCount: number; replayed: true } | null> {
+    const key = validateRosterImportIdempotencyKey(idempotencyKey);
+    const requestFingerprint = fingerprintRosterImportBatch(dto);
+    const [batch] = await this.db
+      .select({
+        requestFingerprint:
+          schema.tournamentRosterImportBatches.requestFingerprint,
+        importedCount: schema.tournamentRosterImportBatches.importedCount,
+      })
+      .from(schema.tournamentRosterImportBatches)
+      .where(
+        and(
+          eq(schema.tournamentRosterImportBatches.tournamentId, tournamentId),
+          eq(schema.tournamentRosterImportBatches.managerUserId, managerUserId),
+          eq(schema.tournamentRosterImportBatches.idempotencyKey, key),
+        ),
+      )
+      .limit(1);
+    if (!batch) return null;
+    if (batch.requestFingerprint !== requestFingerprint) {
+      throw new ConflictException(
+        'Idempotency-Key đã được dùng cho một nội dung nhập khác.',
+      );
+    }
+    return { importedCount: batch.importedCount, replayed: true };
+  }
+
+  async importRosterBatch(
+    tournamentId: string,
+    managerUserId: string,
+    dto: RosterImportBatchDto,
+    idempotencyKey: string | undefined,
+  ) {
+    const key = validateRosterImportIdempotencyKey(idempotencyKey);
+    const requestFingerprint = fingerprintRosterImportBatch(dto);
+    return this.db.transaction(async (tx) => {
+      const findExistingBatch = async () => {
+        const [batch] = await tx
+          .select({
+            id: schema.tournamentRosterImportBatches.id,
+            requestFingerprint:
+              schema.tournamentRosterImportBatches.requestFingerprint,
+            importedCount: schema.tournamentRosterImportBatches.importedCount,
+          })
+          .from(schema.tournamentRosterImportBatches)
+          .where(
+            and(
+              eq(
+                schema.tournamentRosterImportBatches.tournamentId,
+                tournamentId,
+              ),
+              eq(
+                schema.tournamentRosterImportBatches.managerUserId,
+                managerUserId,
+              ),
+              eq(schema.tournamentRosterImportBatches.idempotencyKey, key),
+            ),
+          )
+          .limit(1);
+        return batch;
+      };
+      const replay = (batch: {
+        requestFingerprint: string;
+        importedCount: number;
+      }) => {
+        if (batch.requestFingerprint !== requestFingerprint) {
+          throw new ConflictException(
+            'Idempotency-Key đã được dùng cho một nội dung nhập khác.',
+          );
+        }
+        return { importedCount: batch.importedCount, replayed: true as const };
+      };
+
+      const existing = await findExistingBatch();
+      if (existing) return replay(existing);
+      const [claim] = await tx
+        .insert(schema.tournamentRosterImportBatches)
+        .values({
+          tournamentId,
+          managerUserId,
+          idempotencyKey: key,
+          requestFingerprint,
+        })
+        .onConflictDoNothing()
+        .returning({ id: schema.tournamentRosterImportBatches.id });
+      if (!claim) {
+        const concurrentBatch = await findExistingBatch();
+        if (concurrentBatch) return replay(concurrentBatch);
+        throw new ConflictException('Không thể xác nhận trạng thái lần nhập.');
+      }
+
+      const prepared = await this.prepareRosterImportBatch(
+        tournamentId,
+        dto.groups,
+        tx,
+        true,
+      );
+      for (const group of prepared.groups) {
+        for (let index = 0; index < group.rows.length; index += 1) {
+          const row = group.rows[index];
+          if (row.customResponseError) {
+            throw new BadRequestException(row.customResponseError);
+          }
+          if (row.isEligible) continue;
+          const status = row.status.find(isBlockingRosterStatus);
+          if (!status) {
+            throw new BadRequestException(
+              'Một hoặc nhiều dòng không đủ điều kiện nhập.',
+            );
+          }
+          const item = group.items[index];
+          const sourceRowIndex =
+            item.sourceRowIndex ??
+            (typeof row.customResponses.sourceRowIndex === 'number'
+              ? row.customResponses.sourceRowIndex
+              : undefined);
+          const message = getRosterValidationMessage(row.rowIndex, status);
+          throw new BadRequestException(
+            sourceRowIndex
+              ? message.replace(
+                  `Dòng ${row.rowIndex + 1}`,
+                  `Dòng ${sourceRowIndex}`,
+                )
+              : message,
+          );
+        }
+      }
+
+      const capacityClaims = groupRosterBatchCapacityClaims(
+        prepared.capacityClaims,
+      );
+      assertRosterBatchCapacityHasRoom(capacityClaims);
+      const tournament = await tx
+        .select()
+        .from(schema.tournaments)
+        .where(eq(schema.tournaments.id, tournamentId))
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
+      const allParticipants: (typeof schema.tournamentParticipants.$inferSelect)[] =
+        [];
+      const linkedAccountNotifications: Array<{
+        rosterId: string;
+        userId: string;
+        status: 'COMPLETE' | 'PENDING_APPROVAL';
+        divisionId: string | null;
+      }> = [];
+
+      for (const group of prepared.groups) {
+        const isDoubles =
+          (group.division?.matchType ?? tournament.matchType) === 'DOUBLES' ||
+          (group.division?.matchType ?? tournament.matchType) ===
+            'MIXED_DOUBLES';
+        const rows: ImportPersistRow[] = group.items.map((item, index) => {
+          const previewRow = group.rows[index];
+          const customResponses = previewRow.customResponses;
+          const player1Name = item.player1Name.trim();
+          const player2Name = item.player2Name?.trim() || '';
+          const player1Email = normalizeRosterEmail(item.player1Email ?? '');
+          const player2Email = item.player2Email
+            ? normalizeRosterEmail(item.player2Email)
+            : '';
+          const importMetadata: Record<string, unknown> = {
+            importedFrom: item.source,
+            player1Email,
+          };
+          if (item.entryType === 'WILD_CARD_REQUEST') {
+            importMetadata.entryType = 'WILD_CARD_REQUEST';
+          }
+          const player1Phone = item.player1Phone?.trim();
+          const player2Phone = item.player2Phone?.trim();
+          if (player1Phone) importMetadata.player1Phone = player1Phone;
+          if (player2Name) importMetadata.player2Name = player2Name;
+          if (player2Email) importMetadata.player2Email = player2Email;
+          if (player2Phone) importMetadata.player2Phone = player2Phone;
+          const sourceRowIndex =
+            item.sourceRowIndex ??
+            (typeof customResponses.sourceRowIndex === 'number'
+              ? customResponses.sourceRowIndex
+              : undefined);
+          const sourceSheetName =
+            item.sourceSheetName ??
+            (typeof customResponses.sourceSheetName === 'string'
+              ? customResponses.sourceSheetName
+              : undefined);
+          if (sourceRowIndex !== undefined) {
+            importMetadata.sourceRowIndex = sourceRowIndex;
+          }
+          if (sourceSheetName) {
+            importMetadata.sourceSheetName = sourceSheetName;
+          }
+          return {
+            teamName: item.teamName.trim() || player1Name,
+            player1Name,
+            player1Email,
+            player1Phone,
+            player2Name,
+            player2Email,
+            player2Phone,
+            elo: item.elo,
+            isPaid: item.isPaid,
+            autoApprove: item.autoApprove,
+            customResponses,
+            importMetadata,
+            registeredByUserId: previewRow.confirmedPlayer1UserId,
+            partnerUserId:
+              isDoubles && player2Email
+                ? previewRow.confirmedPlayer2UserId
+                : null,
+          };
+        });
+        const persisted = await this.persistImportRows(tx, {
+          tournamentId,
+          managerUserId,
+          tournament,
+          divisionId: group.divisionId ?? undefined,
+          rows,
+          strippedResponseKeys: IMPORT_OWNED_RESPONSE_KEYS,
+        });
+        allParticipants.push(...persisted.participants);
+        linkedAccountNotifications.push(
+          ...persisted.linkedAccountNotifications,
+        );
+      }
+
+      await tx
+        .update(schema.tournamentRosterImportBatches)
+        .set({ importedCount: allParticipants.length })
+        .where(eq(schema.tournamentRosterImportBatches.id, claim.id));
+      return {
+        importedCount: allParticipants.length,
+        replayed: false,
+        linkedAccountNotifications,
+        participants: allParticipants,
       };
     });
   }

@@ -9,6 +9,7 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { TournamentsRepository } from '../tournaments.repository';
 import type { TournamentPaymentRepository } from '../repositories/tournament-payment.repository';
 import { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
+import { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
 import { TournamentAccessService } from './tournament-access.service';
 import { TournamentParticipantAdminService } from './tournament-participant-admin.service';
 
@@ -23,6 +24,7 @@ describe('TournamentParticipantAdminService', () => {
     assignNextAvailableSeed: jest.fn(),
     getParticipantRosters: jest.fn(),
     previewRosterImport: jest.fn(),
+    previewRosterImportBatch: jest.fn(),
     findBracket: jest.fn(),
     hasStartedMatch: jest.fn(),
   };
@@ -656,6 +658,10 @@ describe('TournamentParticipantAdminService', () => {
     const previewDto = Object.assign(new RosterImportPreviewDto(), {
       participants: [{ teamName: 'VĐV 1', player1Name: 'VĐV 1' }],
     } as never);
+    const batchDto = Object.assign(new RosterImportBatchDto(), {
+      groups: [],
+    });
+    const batchPreviewResult = { totalParticipants: 1, groups: [] };
     const previewResult = {
       divisionMatched: false,
       rows: [],
@@ -669,6 +675,9 @@ describe('TournamentParticipantAdminService', () => {
       repositoryMock.hasStartedMatch.mockResolvedValue(false);
       repositoryMock.findBracket.mockResolvedValue({ stages: [] });
       repositoryMock.previewRosterImport.mockResolvedValue(previewResult);
+      repositoryMock.previewRosterImportBatch.mockResolvedValue(
+        batchPreviewResult,
+      );
     });
 
     it('previews while registration is closed and the bracket does not exist yet', async () => {
@@ -725,6 +734,37 @@ describe('TournamentParticipantAdminService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
 
       expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
+    });
+
+    it('uses the same manager and tournament-state gate for batch preview', async () => {
+      await expect(
+        admin.previewRosterImportBatch(
+          'tournament-1',
+          'organizer-1',
+          [],
+          batchDto,
+        ),
+      ).resolves.toEqual(batchPreviewResult);
+
+      expect(repositoryMock.previewRosterImportBatch).toHaveBeenCalledWith(
+        'tournament-1',
+        batchDto,
+      );
+    });
+
+    it('rejects batch preview for a user without tournament access', async () => {
+      accessMock.isManager.mockResolvedValue(false);
+
+      await expect(
+        admin.previewRosterImportBatch(
+          'tournament-1',
+          'organizer-1',
+          [],
+          batchDto,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(repositoryMock.previewRosterImportBatch).not.toHaveBeenCalled();
     });
   });
 

@@ -10,6 +10,7 @@ import {
   Query,
   ParseUUIDPipe,
   ParseIntPipe,
+  Headers,
   Req,
   UnauthorizedException,
   UseInterceptors,
@@ -39,6 +40,7 @@ import { SeedMockParticipantsDto } from './dto/seed-mock-participants.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
 import { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
 import { RosterImportDto } from './dto/roster-import.dto';
+import { RosterImportBatchDto } from './dto/roster-import-batch.dto';
 import { ReopenRegistrationDto } from './dto/reopen-registration.dto';
 import { UploadGalleryDto } from './dto/gallery.dto';
 import { CreateParentTournamentDto } from './dto/create-parent-tournament.dto';
@@ -66,6 +68,7 @@ import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
+  ApiHeader,
   ApiResponse,
 } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -1571,6 +1574,49 @@ export class TournamentsController {
       user.sub,
       this.getSystemRoles(user),
       dto,
+    );
+  }
+
+  @Post(':id/roster-import-batches/preview')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xem trước toàn bộ workbook nhiều division' })
+  async previewRosterImportBatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RosterImportBatchDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.previewRosterImportBatch(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/roster-import-batches')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Nhập nguyên workbook nhiều division một giao dịch' })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'Khóa ổn định để phát lại an toàn cùng một workbook.',
+  })
+  async importRosterBatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RosterImportBatchDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.importRosterBatchFromForm(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+      idempotencyKey,
     );
   }
 

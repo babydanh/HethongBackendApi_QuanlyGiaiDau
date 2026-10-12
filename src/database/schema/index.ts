@@ -3,6 +3,7 @@ export * from './categories.schema';
 export * from './communities.schema';
 export * from './venues.schema';
 export * from './tournaments.schema';
+export * from './tournament-roster-import-batches.schema';
 export * from './tournament_divisions.schema';
 export * from './matches.schema';
 export * from './payments.schema';

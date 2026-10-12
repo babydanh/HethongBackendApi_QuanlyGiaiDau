@@ -572,6 +572,28 @@ export class TournamentsRepository {
   ) {
     return this.tournamentImportRepository.previewRosterImport(...args);
   }
+
+  previewRosterImportBatch(
+    ...args: Parameters<
+      TournamentImportRepository['previewRosterImportBatch']
+    >
+  ) {
+    return this.tournamentImportRepository.previewRosterImportBatch(...args);
+  }
+
+  findRosterImportBatchReplay(
+    ...args: Parameters<
+      TournamentImportRepository['findRosterImportBatchReplay']
+    >
+  ) {
+    return this.tournamentImportRepository.findRosterImportBatchReplay(...args);
+  }
+
+  importRosterBatch(
+    ...args: Parameters<TournamentImportRepository['importRosterBatch']>
+  ) {
+    return this.tournamentImportRepository.importRosterBatch(...args);
+  }
   importRosterRows(
     ...args: Parameters<TournamentImportRepository['importRosterRows']>
   ) {

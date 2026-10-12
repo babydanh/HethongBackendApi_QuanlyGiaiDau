@@ -52,6 +52,7 @@ import { UpdateParentTournamentDto } from './dto/update-parent-tournament.dto';
 import { ImportParticipantsDto } from './dto/import-participants.dto';
 import type { RosterImportPreviewDto } from './dto/roster-import-preview.dto';
 import type { RosterImportDto } from './dto/roster-import.dto';
+import type { RosterImportBatchDto } from './dto/roster-import-batch.dto';
 import type {
   AddAthleteCandidateDto,
   AddAthleteDirectDto,
@@ -825,6 +826,20 @@ export class TournamentsService {
       dto,
     );
   }
+
+  async previewRosterImportBatch(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: RosterImportBatchDto,
+  ) {
+    return this.tournamentParticipantAdminService.previewRosterImportBatch(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+    );
+  }
   async seedMockParticipants(
     tournamentId: string,
     userId: string,
@@ -969,6 +984,23 @@ export class TournamentsService {
       userId,
       systemRoles,
       dto,
+      (id, payload) => this.broadcastRegistrationChanged(id, payload),
+    );
+  }
+
+  async importRosterBatchFromForm(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: RosterImportBatchDto,
+    idempotencyKey: string | undefined,
+  ) {
+    return this.tournamentImportService.importRosterBatchFromForm(
+      tournamentId,
+      userId,
+      systemRoles,
+      dto,
+      idempotencyKey,
       (id, payload) => this.broadcastRegistrationChanged(id, payload),
     );
   }

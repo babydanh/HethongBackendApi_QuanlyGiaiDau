@@ -3,6 +3,7 @@ import { validate } from 'class-validator';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { ImportParticipantsDto } from '../dto/import-participants.dto';
 import { RosterImportDto } from '../dto/roster-import.dto';
+import { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
 import {
   AddAthleteCandidateDto,
   AddAthleteDirectDto,
@@ -61,6 +62,8 @@ describe('TournamentImportService import contracts', () => {
     findById: jest.fn(),
     importParticipants: jest.fn(),
     importRosterRows: jest.fn(),
+    importRosterBatch: jest.fn(),
+    findRosterImportBatchReplay: jest.fn(),
     listAddAthleteCandidates: jest.fn(),
     addAthleteCandidate: jest.fn(),
     addDirectAthlete: jest.fn(),
@@ -81,6 +84,8 @@ describe('TournamentImportService import contracts', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    repositoryMock.findRosterImportBatchReplay.mockResolvedValue(null);
+    repositoryMock.importRosterBatch.mockReset();
     repositoryMock.findById.mockResolvedValue(openTournament);
     accessMock.isManager.mockResolvedValue(true);
     mailMock.sendMail.mockResolvedValue(undefined);
@@ -201,6 +206,135 @@ describe('TournamentImportService import contracts', () => {
       divisionId: undefined,
       action: 'IMPORT_PARTICIPANTS',
     });
+  });
+
+  type BatchImportService = {
+    importRosterBatchFromForm(
+      tournamentId: string,
+      userId: string,
+      systemRoles: string[],
+      dto: RosterImportBatchDto,
+      idempotencyKey: string,
+      broadcast: AddAthleteBroadcast,
+    ): Promise<{ importedCount: number; replayed: boolean }>;
+  };
+
+  it('replays a completed batch before checking changed tournament state or side effects', async () => {
+    repositoryMock.findRosterImportBatchReplay.mockResolvedValue({
+      importedCount: 1,
+      replayed: true,
+    });
+    repositoryMock.findBracket.mockResolvedValue({ stages: [{ id: 'stage-1' }] });
+    const broadcast = jest.fn();
+    const dto = Object.assign(new RosterImportBatchDto(), {
+      groups: [{ divisionId: '11111111-1111-4111-8111-111111111111', participants: [] }],
+      notifyLinkedAccounts: true,
+    });
+    const service = buildImporter() as unknown as BatchImportService;
+
+    const result = await service.importRosterBatchFromForm(
+      'tournament-1',
+      'organizer-1',
+      [],
+      dto,
+      'stable-retry-key',
+      broadcast,
+    );
+
+    expect(result).toMatchObject({ importedCount: 1, replayed: true });
+    expect(repositoryMock.findRosterImportBatchReplay).toHaveBeenCalledWith(
+      'tournament-1',
+      'organizer-1',
+      dto,
+      'stable-retry-key',
+    );
+    expect(repositoryMock.importRosterBatch).not.toHaveBeenCalled();
+    expect(repositoryMock.hasStartedMatch).not.toHaveBeenCalled();
+    expect(notificationsMock.sendNotification).not.toHaveBeenCalled();
+    expect(consentMock.sendConfirmationRequest).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it('checks manager access before returning an idempotent replay', async () => {
+    accessMock.isManager.mockResolvedValue(false);
+    const dto = Object.assign(new RosterImportBatchDto(), {
+      groups: [],
+    });
+    const service = buildImporter() as unknown as BatchImportService;
+
+    await expect(
+      service.importRosterBatchFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        dto,
+        'stable-retry-key',
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(repositoryMock.findRosterImportBatchReplay).not.toHaveBeenCalled();
+    expect(repositoryMock.importRosterBatch).not.toHaveBeenCalled();
+  });
+
+  it('commits once and broadcasts every imported division after repository success', async () => {
+    repositoryMock.importRosterBatch.mockResolvedValue({
+      importedCount: 2,
+      replayed: false,
+      linkedAccountNotifications: [],
+    });
+    const dto = Object.assign(new RosterImportBatchDto(), {
+      groups: [
+        { divisionId: 'division-1', participants: [] },
+        { divisionId: 'division-2', participants: [] },
+      ],
+    });
+    const broadcast = jest.fn();
+
+    const result = await buildImporter().importRosterBatchFromForm(
+      'tournament-1',
+      'organizer-1',
+      [],
+      dto,
+      'stable-key',
+      broadcast,
+    );
+
+    expect(result).toMatchObject({ importedCount: 2, replayed: false });
+    expect(repositoryMock.importRosterBatch).toHaveBeenCalledWith(
+      'tournament-1',
+      'organizer-1',
+      dto,
+      'stable-key',
+    );
+    expect(broadcast).toHaveBeenNthCalledWith(1, 'tournament-1', {
+      divisionId: 'division-1',
+      action: 'IMPORT_PARTICIPANTS',
+    });
+    expect(broadcast).toHaveBeenNthCalledWith(2, 'tournament-1', {
+      divisionId: 'division-2',
+      action: 'IMPORT_PARTICIPANTS',
+    });
+  });
+
+  it('re-checks match state before the atomic batch commit', async () => {
+    repositoryMock.hasStartedMatch.mockResolvedValue(true);
+    const dto = Object.assign(new RosterImportBatchDto(), {
+      groups: [{ divisionId: 'division-1', participants: [] }],
+    });
+
+    await expect(
+      buildImporter().importRosterBatchFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        dto,
+        'stable-key',
+        jest.fn(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(repositoryMock.importRosterBatch).not.toHaveBeenCalled();
   });
 
   it('never invites unregistered contacts from the strict roster path', async () => {

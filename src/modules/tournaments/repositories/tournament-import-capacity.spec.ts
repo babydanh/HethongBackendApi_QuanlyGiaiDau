@@ -8,6 +8,8 @@ import {
   ListAddAthleteCandidatesQueryDto,
 } from '../dto/add-athlete.dto';
 import { TournamentImportRepository } from './tournament-import.repository';
+import { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
+import { fingerprintRosterImportBatch } from '../validation/roster-import-batch';
 
 // Drizzle tables are object keys, so the lookup must be by identity.
 const TABLE_KEYS = new Map<unknown, string>([
@@ -21,6 +23,7 @@ const TABLE_KEYS = new Map<unknown, string>([
 [schema.communities, 'communities'],
 [schema.communityMembers, 'communityMembers'],
 [schema.userBans, 'userBans'],
+  [schema.tournamentRosterImportBatches, 'rosterBatches'],
 ]);
 const dialect = new PgDialect();
 
@@ -28,6 +31,7 @@ type Row = Record<string, unknown>;
 
 function createHarness(queues: Record<string, Row[][]>) {
   const inserts: Array<{ table: string; values: Row }> = [];
+  const updates: Array<{ table: string; values: Row }> = [];
   const selections: Array<{ key: string; locked: boolean }> = [];
   const whereConditions: Array<{ key: string; predicate: SQL }> = [];
   const lockCounter = { count: 0 };
@@ -108,29 +112,67 @@ function createHarness(queues: Record<string, Row[][]>) {
       return {
         values: (values: Row) => {
           inserts.push({ table: name, values });
-          return {
+          const builder = {
+            onConflictDoNothing: () => builder,
             returning: async () => [
-              { id: `participant-${inserts.length}`, ...values },
+              {
+                id:
+                  name === 'rosterBatches'
+                    ? `batch-${inserts.length}`
+                    : `participant-${inserts.length}`,
+                ...values,
+              },
             ],
           };
+          return builder;
         },
       };
+    },
+    update: (table: unknown) => {
+      const name = TABLE_KEYS.get(table) ?? 'unknown';
+      return {
+        set: (values: Row) => ({
+          where: async () => updates.push({ table: name, values }),
+        }),
+      };
+    },
+    __snapshot: () => ({ inserts: inserts.length, updates: updates.length }),
+    __rollback: (snapshot: { inserts: number; updates: number }) => {
+      inserts.length = snapshot.inserts;
+      updates.length = snapshot.updates;
     },
   };
 
   return {
     tx: tx as unknown as Record<string, unknown>,
     inserts,
+    updates,
     selections,
     whereConditions,
     lockCount: () => lockCounter.count,
   };
 }
 
-function createRepository(tx: unknown) {
+function createRepository(
+  tx: unknown,
+  paymentRepository = {
+    resolveDivisionEntryFee: jest.fn().mockResolvedValue(0),
+  },
+) {
+  const transactional = tx as {
+    __snapshot: () => { inserts: number; updates: number };
+    __rollback: (snapshot: { inserts: number; updates: number }) => void;
+  };
   const db = {
-    transaction: async (callback: (inner: unknown) => unknown) =>
-      callback(tx),
+    transaction: async (callback: (inner: unknown) => unknown) => {
+      const snapshot = transactional.__snapshot();
+      try {
+        return await callback(tx);
+      } catch (error) {
+        transactional.__rollback(snapshot);
+        throw error;
+      }
+    },
     select: (fields?: Record<string, unknown>) =>
       (
         tx as {
@@ -138,14 +180,11 @@ function createRepository(tx: unknown) {
         }
       ).select(fields),
   };
-  const paymentRepository = {
-    resolveDivisionEntryFee: jest.fn().mockResolvedValue(0),
-  };
-
   return new TournamentImportRepository(
     db as never,
     paymentRepository as never,
   );
+
 }
 
 describe('TournamentImportRepository.previewRosterImport', () => {
@@ -186,6 +225,406 @@ describe('TournamentImportRepository.previewRosterImport', () => {
     expect(result.capacityRemaining).toBe(4);
     expect(lockCount()).toBe(0);
     expect(inserts).toHaveLength(0);
+  });
+});
+
+describe('TournamentImportRepository.previewRosterImportBatch', () => {
+  it('previews divisions together and blocks duplicate email identities without linking accounts', async () => {
+    const tournament = {
+      id: 'tournament-1',
+      matchType: 'SINGLES',
+      maxParticipants: null,
+      tournamentConfig: null,
+      entryFee: 0,
+    };
+    const divisionRows = [
+      {
+        id: 'division-1',
+        tournamentId: 'tournament-1',
+        name: 'Singles A',
+        matchType: 'SINGLES',
+        maxParticipants: 4,
+        tournamentConfig: null,
+      },
+      {
+        id: 'division-2',
+        tournamentId: 'tournament-1',
+        name: 'Singles B',
+        matchType: 'SINGLES',
+        maxParticipants: 4,
+        tournamentConfig: null,
+      },
+    ];
+    const harness = createHarness({
+      tournaments: [[tournament]],
+      divisions: [divisionRows],
+      'participants+rosters': [[], []],
+      'divisions+tournaments': [divisionRows],
+      'profiles+users': [[
+        {
+          id: 'eligible-user',
+          email: 'shared@example.test',
+          fullName: 'Exact candidate',
+        },
+      ]],
+    });
+    const repository = createRepository(harness.tx) as unknown as {
+      previewRosterImportBatch: (
+        tournamentId: string,
+        dto: unknown,
+      ) => Promise<{
+        totalParticipants: number;
+        groups: Array<{
+          rows: Array<{
+            clientRowIndex: number;
+            status: string[];
+            isEligible: boolean;
+            accountCandidates: {
+              player1: Array<{ userId: string; email: string }>;
+            };
+          }>;
+        }>;
+      }>;
+    };
+
+    const result = await repository.previewRosterImportBatch('tournament-1', {
+      groups: [
+        {
+          divisionId: 'division-1',
+          participants: [
+            {
+              teamName: 'Entrant one',
+              player1Name: 'Player one',
+              player1Email: 'shared@example.test',
+              source: 'EXCEL',
+              clientRowIndex: 11,
+            },
+          ],
+        },
+        {
+          divisionId: 'division-2',
+          participants: [
+            {
+              teamName: 'Entrant two',
+              player1Name: 'Player two',
+              player1Email: 'SHARED@example.test',
+              source: 'EXCEL',
+              clientRowIndex: 17,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.totalParticipants).toBe(2);
+    expect(result.groups.map((group) => group.rows[0])).toEqual([
+      expect.objectContaining({
+        clientRowIndex: 11,
+        status: expect.arrayContaining(['DUPLICATE_IN_FILE']),
+        isEligible: false,
+        accountCandidates: {
+          player1: [
+            {
+              userId: 'eligible-user',
+              email: 'shared@example.test',
+              fullName: 'Exact candidate',
+            },
+          ],
+          player2: [],
+        },
+      }),
+      expect.objectContaining({
+        clientRowIndex: 17,
+        status: expect.arrayContaining(['DUPLICATE_IN_FILE']),
+        isEligible: false,
+      }),
+    ]);
+  });
+
+  it('returns published-form validation errors on the affected preview row', async () => {
+    const division = {
+      id: 'division-1',
+      tournamentId: 'tournament-1',
+      name: 'Singles A',
+      matchType: 'SINGLES',
+      maxParticipants: 4,
+      tournamentConfig: null,
+    };
+    const tournament = {
+      id: 'tournament-1',
+      matchType: 'SINGLES',
+      maxParticipants: null,
+      entryFee: 0,
+      tournamentConfig: {
+        registrationForm: {
+          status: 'PUBLISHED',
+          divisionIds: ['division-1'],
+          fields: [
+            {
+              id: 'contact_note',
+              type: 'TEXT',
+              label: 'Thông tin liên hệ',
+              required: true,
+            },
+          ],
+        },
+      },
+    };
+    const harness = createHarness({
+      tournaments: [[tournament]],
+      divisions: [[division]],
+      'participants+rosters': [[], []],
+      'divisions+tournaments': [[division]],
+      'profiles+users': [[]],
+    });
+    const dto = Object.assign(new RosterImportBatchDto(), {
+      groups: [
+        {
+          divisionId: 'division-1',
+          participants: [
+            {
+              teamName: 'Guest',
+              player1Name: 'Player',
+              player1Email: 'player@example.test',
+              source: 'EXCEL',
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await createRepository(harness.tx).previewRosterImportBatch(
+      'tournament-1',
+      dto,
+    );
+
+    expect(result.groups[0].rows[0].customResponseError).toBe(
+      'Vui lòng điền trường “Thông tin liên hệ”.',
+    );
+  });
+});
+
+describe('TournamentImportRepository.importRosterBatch', () => {
+  const tournament = {
+    id: 'tournament-1',
+    matchType: 'SINGLES',
+    maxParticipants: null,
+    tournamentConfig: null,
+    entryFee: 0,
+  };
+  const divisions = [
+    {
+      id: 'division-1',
+      tournamentId: 'tournament-1',
+      name: 'Singles A',
+      matchType: 'SINGLES',
+      maxParticipants: 4,
+      tournamentConfig: null,
+    },
+    {
+      id: 'division-2',
+      tournamentId: 'tournament-1',
+      name: 'Singles B',
+      matchType: 'SINGLES',
+      maxParticipants: 4,
+      tournamentConfig: null,
+    },
+  ];
+  const makeDto = (secondCustomResponses?: Record<string, unknown>) =>
+    Object.assign(new RosterImportBatchDto(), {
+      groups: [
+        {
+          divisionId: 'division-1',
+          participants: [
+            {
+              teamName: 'Confirmed by email',
+              player1Name: 'Exact candidate',
+              player1Email: 'eligible@example.test',
+              source: 'EXCEL',
+              confirmedPlayer1UserId: 'eligible-user',
+              customResponses: { notes: 'Checked by organizer' },
+            },
+          ],
+        },
+        {
+          divisionId: 'division-2',
+          participants: [
+            {
+              teamName: 'Same name, different email',
+              player1Name: 'Exact candidate',
+              player1Email: 'unmatched@example.test',
+              source: 'EXCEL',
+              customResponses: secondCustomResponses,
+            },
+          ],
+        },
+      ],
+    });
+  const makeQueues = (rosterBatches: Row[][] = [[]]) => ({
+    rosterBatches,
+    tournaments: [[tournament]],
+    divisions: [divisions],
+    'participants+rosters': [[], []],
+    'divisions+tournaments': [divisions],
+    'profiles+users': [[
+      {
+        id: 'eligible-user',
+        email: 'eligible@example.test',
+        fullName: 'Exact candidate',
+      },
+    ]],
+  });
+
+  it('commits all divisions atomically and links only the explicitly confirmed exact-email account', async () => {
+    const dto = makeDto();
+    const harness = createHarness(makeQueues());
+
+    const result = await createRepository(harness.tx).importRosterBatch(
+      'tournament-1',
+      'organizer-1',
+      dto,
+      'stable-key',
+    );
+
+    const participantRows = harness.inserts
+      .filter((insert) => insert.table === 'participants')
+      .map((insert) => insert.values);
+    expect(result).toMatchObject({ importedCount: 2, replayed: false });
+    expect(participantRows.map((row) => row.registeredBy)).toEqual([
+      'eligible-user',
+      'organizer-1',
+    ]);
+    expect(participantRows.map((row) => row.tournamentDivisionId)).toEqual([
+      'division-1',
+      'division-2',
+    ]);
+    expect(harness.inserts.filter((insert) => insert.table === 'rosters')).toHaveLength(1);
+    expect(harness.updates).toEqual([
+      { table: 'rosterBatches', values: { importedCount: 2 } },
+    ]);
+    expect(harness.lockCount()).toBeGreaterThan(0);
+  });
+
+  it('aggregates inherited division claims before inserting any part of a workbook', async () => {
+    const tournamentWithCap = { ...tournament, maxParticipants: 1 };
+    const inheritedDivisions = divisions.map((division) => ({
+      ...division,
+      maxParticipants: null,
+    }));
+    const harness = createHarness({
+      rosterBatches: [[]],
+      tournaments: [[tournamentWithCap]],
+      divisions: [inheritedDivisions],
+      'participants+rosters': [[]],
+      'divisions+tournaments': [inheritedDivisions],
+      'divisions+participants+rosters': [[]],
+      'profiles+users': [[
+        {
+          id: 'eligible-user',
+          email: 'eligible@example.test',
+          fullName: 'Exact candidate',
+        },
+      ]],
+    });
+
+    await expect(
+      createRepository(harness.tx).importRosterBatch(
+        'tournament-1',
+        'organizer-1',
+        makeDto(),
+        'stable-key',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(harness.inserts).toEqual([]);
+    expect(harness.lockCount()).toBeGreaterThan(0);
+  });
+
+  it('validates every division custom response before inserting the workbook', async () => {
+    const dto = makeDto({ unapprovedField: 'must reject' });
+    const harness = createHarness(makeQueues());
+
+    await expect(
+      createRepository(harness.tx).importRosterBatch(
+        'tournament-1',
+        'organizer-1',
+        dto,
+        'stable-key',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(harness.inserts).toEqual([]);
+    expect(harness.updates).toEqual([]);
+  });
+
+  it('rolls back completed earlier divisions when a later insert-stage operation fails', async () => {
+    const harness = createHarness(makeQueues());
+    const resolveDivisionEntryFee = jest
+      .fn()
+      .mockResolvedValueOnce(0)
+      .mockRejectedValueOnce(new Error('fee lookup failed'));
+
+    await expect(
+      createRepository(harness.tx, { resolveDivisionEntryFee }).importRosterBatch(
+        'tournament-1',
+        'organizer-1',
+        makeDto(),
+        'stable-key',
+      ),
+    ).rejects.toThrow('fee lookup failed');
+
+    expect(harness.inserts).toEqual([]);
+    expect(harness.updates).toEqual([]);
+  });
+
+  it('replays the stored count without writing rows again', async () => {
+    const dto = makeDto();
+    const harness = createHarness(
+      makeQueues([
+        [
+          {
+            id: 'batch-1',
+            requestFingerprint: fingerprintRosterImportBatch(dto),
+            importedCount: 2,
+          },
+        ],
+      ]),
+    );
+
+    await expect(
+      createRepository(harness.tx).importRosterBatch(
+        'tournament-1',
+        'organizer-1',
+        dto,
+        'stable-key',
+      ),
+    ).resolves.toMatchObject({ importedCount: 2, replayed: true });
+    expect(harness.inserts).toEqual([]);
+    expect(harness.updates).toEqual([]);
+  });
+
+  it('rejects reuse of an idempotency key for a different workbook', async () => {
+    const dto = makeDto();
+    const changedDto = makeDto({ notes: 'different workbook' });
+    const harness = createHarness(
+      makeQueues([
+        [
+          {
+            requestFingerprint: fingerprintRosterImportBatch(dto),
+            importedCount: 2,
+          },
+        ],
+      ]),
+    );
+
+    await expect(
+      createRepository(harness.tx).findRosterImportBatchReplay(
+        'tournament-1',
+        'organizer-1',
+        changedDto,
+        'stable-key',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });
 

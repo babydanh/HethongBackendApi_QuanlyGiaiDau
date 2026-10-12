@@ -18,6 +18,7 @@ import {
   buildParticipantRegistrationSuccessNotification,
 } from '../../notifications/notification-builder';
 import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
+import type { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
 import { isLiteRegistrationTournament } from '../utils/registration-payment-eligibility';
 import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
 import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
@@ -49,9 +50,38 @@ export class TournamentParticipantAdminService {
     systemRoles: string[],
     dto: RosterImportPreviewDto,
   ) {
+    await this.assertRosterImportPreviewAvailable(
+      tournamentId,
+      userId,
+      systemRoles,
+    );
+    return this.tournamentsRepository.previewRosterImport(tournamentId, dto);
+  }
+
+  async previewRosterImportBatch(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+    dto: RosterImportBatchDto,
+  ) {
+    await this.assertRosterImportPreviewAvailable(
+      tournamentId,
+      userId,
+      systemRoles,
+    );
+    return this.tournamentsRepository.previewRosterImportBatch(
+      tournamentId,
+      dto,
+    );
+  }
+
+  private async assertRosterImportPreviewAvailable(
+    tournamentId: string,
+    userId: string,
+    systemRoles: string[],
+  ) {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
-
     const isAuthorized = await this.tournamentAccessService.isManager(
       tournament,
       userId,
@@ -62,10 +92,6 @@ export class TournamentParticipantAdminService {
         'Bạn không có quyền xem trước danh sách VĐV',
       );
     }
-
-    // Spreadsheet preview keeps working while registration is closed/locked as
-    // long as the bracket does not exist yet and no match has started; the
-    // manager authorization above is unchanged.
     await assertSpreadsheetRosterEligible(tournament, {
       hasStartedMatch: () =>
         this.tournamentsRepository.hasStartedMatch(tournamentId),
@@ -75,8 +101,7 @@ export class TournamentParticipantAdminService {
             ?.length,
         ),
     });
-
-    return this.tournamentsRepository.previewRosterImport(tournamentId, dto);
+    return tournament;
   }
   async seedMockParticipants(
     tournamentId: string,
