@@ -133,14 +133,19 @@ export class TournamentParticipantRepository {
     const [updated] = await this.db
       .update(schema.tournamentRosters)
       .set({
-        rankingConsentAt: new Date(),
+        rankingConsentAt: sql`coalesce(${schema.tournamentRosters.rankingConsentAt}, now())`,
         accountLinkConfirmedAt: sql`coalesce(${schema.tournamentRosters.accountLinkConfirmedAt}, now())`,
       })
       .where(
         and(
           eq(schema.tournamentRosters.participantId, participant.id),
           eq(schema.tournamentRosters.userId, userId),
-          isNull(schema.tournamentRosters.rankingConsentAt),
+          // Khớp khi còn thiếu một trong hai mốc. Đăng ký có đồng ý xếp hạng chỉ đặt
+          // rankingConsentAt; người dùng vẫn phải xác nhận liên kết tài khoản riêng.
+          or(
+            isNull(schema.tournamentRosters.rankingConsentAt),
+            isNull(schema.tournamentRosters.accountLinkConfirmedAt),
+          ),
         ),
       )
       .returning({

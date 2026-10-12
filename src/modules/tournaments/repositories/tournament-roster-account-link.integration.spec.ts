@@ -1,10 +1,13 @@
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '../../../database/schema';
 import { MatchesRepository } from '../../matches/matches.repository';
+import type { RegisterTournamentDto } from '../dto/register-tournament.dto';
 import { TournamentParticipantRepository } from './tournament-participant.repository';
+import { TournamentPaymentRepository } from './tournament-payment.repository';
+import { TournamentRegistrationRepository } from './tournament-registration.repository';
 
 // Runs only when CON_TEST_DATABASE_URL points at a disposable, migrated database.
 // Fixtures follow the convention of the other CON integration specs: tournaments
@@ -22,6 +25,12 @@ const repo = new TournamentParticipantRepository(
   null as never,
 );
 const matchesRepo = new MatchesRepository(db, null as never);
+
+const registrationRepo = new TournamentRegistrationRepository(
+  db,
+  noopAudit,
+  new TournamentPaymentRepository(db),
+);
 
 afterAll(async () => {
   await client.end();
@@ -344,5 +353,83 @@ describeIfDb('roster account-link confirmation (Postgres thật)', () => {
     const ids = (result.data as Array<{ id: string }>).map((match) => match.id);
     expect(ids).toContain(fixture.afterLinkMatchId);
     expect(ids).not.toContain(fixture.beforeLinkMatchId);
+  });
+});
+
+async function seedOpenRankedTournament(organizerId: string) {
+  const seeded = await seedTournamentWithDivision(organizerId);
+  // Registration is gated on REGISTRATION_OPEN; the fixture defaults to DRAFT.
+  await db
+    .update(schema.tournaments)
+    .set({ status: 'REGISTRATION_OPEN', matchType: 'SINGLES', isRanked: true })
+    .where(eq(schema.tournaments.id, seeded.tournamentId));
+  return seeded;
+}
+
+// Goes through the real registration path (no mocks) with rankingConsent: true.
+async function registerWithRankingConsent() {
+  const organizerId = await seedUser('organizer');
+  const userId = await seedUser('player');
+  const { tournamentId, divisionId } =
+    await seedOpenRankedTournament(organizerId);
+  const { participant } = await registrationRepo.registerParticipant(
+    tournamentId,
+    userId,
+    {
+      tournamentDivisionId: divisionId,
+      rankingConsent: true,
+    } as RegisterTournamentDto,
+  );
+  const [roster] = await db
+    .select({ id: schema.tournamentRosters.id })
+    .from(schema.tournamentRosters)
+    .where(
+      and(
+        eq(schema.tournamentRosters.participantId, participant.id),
+        eq(schema.tournamentRosters.userId, userId),
+      ),
+    );
+  return { tournamentId, userId, rosterId: roster.id };
+}
+
+describeIfDb('registration ranking consent does not confirm the account link (Postgres thật)', () => {
+  it('registration with rankingConsent sets only the consent instant', async () => {
+    const { rosterId } = await registerWithRankingConsent();
+
+    const row = await readRoster(rosterId);
+    expect(row.consentAt).not.toBeNull();
+    expect(row.linkedAt).toBeNull();
+  });
+
+  it('the confirm endpoint is a separate step that stamps the account link', async () => {
+    const { tournamentId, userId, rosterId } =
+      await registerWithRankingConsent();
+
+    const result = await repo.confirmRankingConsent(tournamentId, userId);
+
+    expect(result?.alreadyConfirmed).toBe(false);
+    const row = await readRoster(rosterId);
+    expect(row.linkedAt).not.toBeNull();
+    expect(result?.accountLinkConfirmedAt?.getTime()).toBe(
+      row.linkedAt!.getTime(),
+    );
+  });
+
+  it('a second confirm reports alreadyConfirmed and keeps the stored link instant', async () => {
+    const { tournamentId, userId, rosterId } =
+      await registerWithRankingConsent();
+    await repo.confirmRankingConsent(tournamentId, userId);
+    const firstLinkedAt = (await readRoster(rosterId)).linkedAt;
+    expect(firstLinkedAt).not.toBeNull();
+
+    const second = await repo.confirmRankingConsent(tournamentId, userId);
+
+    expect(second?.alreadyConfirmed).toBe(true);
+    expect((await readRoster(rosterId)).linkedAt?.getTime()).toBe(
+      firstLinkedAt!.getTime(),
+    );
+    expect(second?.accountLinkConfirmedAt?.getTime()).toBe(
+      firstLinkedAt!.getTime(),
+    );
   });
 });

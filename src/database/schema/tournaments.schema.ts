@@ -273,13 +273,15 @@ export const tournamentRosters = pgTable('tournament_rosters', {
   rankingConsentAt: timestamp('ranking_consent_at', { withTimezone: true }),
   // When THIS user's account link to the roster was confirmed (email consent).
   //
-  // NULL = an organizer assigned this account and the user has not confirmed.
-  // Read only by history and achievements (matches feed, users ranked
-  // achievements, my-registration). Scheduling, pairing and brackets never
-  // read it. The migration backfills existing rows to now().
+  // NULL = not confirmed. Default NULL on purpose: every new row (self-registration,
+  // organizer or captain assignment) starts unconfirmed, and only the user's own
+  // ranking-consent confirmation sets it. Read only by history and achievements
+  // (matches feed, users ranked achievements, my-registration). Scheduling, pairing
+  // and brackets never read it. Migration 2026-10-12 backfilled existing rows to the
+  // epoch so their history stays visible.
   accountLinkConfirmedAt: timestamp('account_link_confirmed_at', {
     withTimezone: true,
-  }).defaultNow(),
+  }),
   joinedAt: timestamp('joined_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

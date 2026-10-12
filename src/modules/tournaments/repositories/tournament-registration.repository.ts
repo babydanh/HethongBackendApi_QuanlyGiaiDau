@@ -1141,14 +1141,14 @@ export class TournamentRegistrationRepository {
       // user (MAIN/RESERVE) thì consent phải tách ra từng người, nếu không một
       // người xác nhận sẽ kéo cả đội qua gate.
       //
-      // Chỉ người đăng ký tự xác nhận ở đây. Thành viên khác giữ NULL và phải tự
-      // bấm xác nhận — không thừa hưởng consent của người đăng ký.
+      // Chỉ người đăng ký tự đồng ý xếp hạng ở đây. Thành viên khác giữ NULL và phải tự
+      // bấm xác nhận — không thừa hưởng consent của người đăng ký. Đồng ý xếp hạng KHÔNG
+      // đặt accountLinkConfirmedAt: liên kết tài khoản được xác nhận riêng qua endpoint ranking-consent.
       if (data.rankingConsent === true) {
         await tx
           .update(schema.tournamentRosters)
           .set({
             rankingConsentAt: new Date(),
-            accountLinkConfirmedAt: sql`coalesce(${schema.tournamentRosters.accountLinkConfirmedAt}, now())`,
           })
           .where(
             and(
