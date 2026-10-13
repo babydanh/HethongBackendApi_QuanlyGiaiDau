@@ -191,6 +191,43 @@ describe('AqvisionAgencyApiClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('falls back to the shared AQVISION_API_SECRET when no dedicated agency secret is set', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: { token: TOKEN, expiresAt: new Date(now + 3_600_000).toISOString() },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 200, data: [] }));
+
+    await makeClient({
+      AQVISION_AGENCY_SECRET: '',
+      AQVISION_API_SECRET: 'shared-sk',
+    }).listStreamKeys();
+
+    expect(fetchMock.mock.calls[0][1].body).toBe(
+      JSON.stringify({ agency_id: 'agency-test', api_secret: 'shared-sk' }),
+    );
+  });
+
+  it('prefers the dedicated agency secret over AQVISION_API_SECRET', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: { token: TOKEN, expiresAt: new Date(now + 3_600_000).toISOString() },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 200, data: [] }));
+
+    await makeClient({ AQVISION_API_SECRET: 'shared-sk' }).listStreamKeys();
+
+    expect(fetchMock.mock.calls[0][1].body).toBe(
+      JSON.stringify({ agency_id: 'agency-test', api_secret: SECRET }),
+    );
+  });
+
   it('preserves the explicit revoked-but-not-disconnected DELETE outcome for service reconciliation', async () => {
     fetchMock
       .mockResolvedValueOnce(

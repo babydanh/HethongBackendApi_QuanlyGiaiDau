@@ -199,7 +199,11 @@ export class AqvisionAgencyApiClient {
 
   private async requestAccessToken(): Promise<string> {
     const agencyId = (this.configService.get<string>('AQVISION_AGENCY_ID') ?? '').trim();
-    const apiSecret = (this.configService.get<string>('AQVISION_AGENCY_SECRET') ?? '').trim();
+    const agencySecret = (this.configService.get<string>('AQVISION_AGENCY_SECRET') ?? '').trim();
+    // Triển khai dùng chung một SK_ từ dashboard AQP cho cả Agency API và native API:
+    // chưa đặt AQVISION_AGENCY_SECRET thì dùng AQVISION_API_SECRET.
+    const apiSecret =
+      agencySecret || (this.configService.get<string>('AQVISION_API_SECRET') ?? '').trim();
     if (!agencyId || !apiSecret) {
       throw new AqvisionAgencyApiException(
         'Tích hợp Agency API chưa được cấu hình trên máy chủ.',
