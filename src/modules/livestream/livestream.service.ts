@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { AssignCameraCourtDto } from './dto/assign-camera-court.dto';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { PublishQrDto } from './dto/publish-qr.dto';
@@ -572,6 +573,104 @@ export class LivestreamService {
       // PULL không có URL ingest để BTC cấu hình ở OBS/Camera Station.
       publish: mode === 'PULL' ? null : this.buildPublishInfo(protocol, streamName),
     };
+  }
+
+  /**
+   * Đổi sân của một camera PUSH (null = bỏ gán sân).
+   *
+   * - Trận CHƯA có camera ở sân đích tự dùng camera này (như lúc tạo camera).
+   * - Trận CHƯA phát (IDLE) ở sân cũ đang trỏ camera này quay về camera còn lại của sân
+   *   cũ, hoặc bỏ gán nếu sân cũ hết camera. Trận đã/đang phát và trận ở sân khác giữ
+   *   nguyên liên kết: `match_livestreams` không phân biệt gán tay với gán theo sân, và
+   *   gán lại sẽ xoá `startedAt`/`endedAt` của lịch sử phát.
+   * - Camera đang phát một trận LIVE thì từ chối (409).
+   * - Camera PULL không dùng đường này: sân của nó đi theo URL phát của sân.
+   */
+  async assignCameraCourt(cameraId: string, user: JwtPayload, data: AssignCameraCourtDto) {
+    const camera = await this.livestreamRepository.findCameraById(cameraId);
+    if (!camera) {
+      throw new NotFoundException('Camera không tồn tại');
+    }
+
+    await this.assertTournamentOperator(camera.tournamentId, user);
+
+    if (camera.mode !== 'PUSH') {
+      throw new BadRequestException(
+        'Chỉ camera PUSH đổi sân được; camera PULL đi theo URL phát của sân.',
+      );
+    }
+
+    const courtId = data.courtId;
+    if ((camera.courtId ?? null) === courtId) {
+      return this.toPublicCamera(camera);
+    }
+    if (courtId) {
+      await this.assertCourtUsableByTournament(courtId, camera.tournamentId);
+    }
+
+    const updated = await this.livestreamHealthQueue.runWithCameraLock(
+      camera.id,
+      async (lease) => {
+        if (!lease.isOwned()) {
+          throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+        }
+        if (await this.livestreamRepository.hasLiveMatchOnCamera(camera.id)) {
+          throw new ConflictException('Camera đang phát một trận; dừng phát trước khi đổi sân.');
+        }
+        if (!lease.isOwned()) {
+          throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+        }
+
+        const moved = await this.livestreamRepository.updateCameraCourt(camera.id, courtId);
+        if (!moved) {
+          throw new NotFoundException('Camera không tồn tại');
+        }
+        if (camera.courtId) {
+          await this.releaseIdleCourtMatches(camera.id, camera.courtId, camera.tournamentId);
+        }
+        if (courtId) {
+          await this.backfillCourtCameraAssignments(courtId, camera.tournamentId, moved);
+        }
+        return moved;
+      },
+    );
+    if (!updated) {
+      throw new ServiceUnavailableException('Camera đang được xử lý; thử lại sau.');
+    }
+
+    return this.toPublicCamera(updated);
+  }
+
+  /**
+   * Sau khi camera rời sân, các trận CHƯA phát của sân đó đang trỏ nó chuyển sang camera
+   * còn lại của sân (theo quy tắc `findActiveCameraByCourt`), hoặc bỏ gán nếu hết camera.
+   */
+  private async releaseIdleCourtMatches(
+    cameraId: string,
+    oldCourtId: string,
+    tournamentId: string,
+  ) {
+    const matchIds = await this.livestreamRepository.listIdleMatchIdsUsingCameraOnCourt(
+      cameraId,
+      oldCourtId,
+      tournamentId,
+    );
+    if (matchIds.length === 0) return;
+
+    const remaining = await this.livestreamRepository.findActiveCameraByCourt(
+      oldCourtId,
+      tournamentId,
+    );
+    const playbackUrl = remaining
+      ? (this.normalizePublicPlaybackUrl(remaining.playbackUrl) ?? '')
+      : '';
+    for (const matchId of matchIds) {
+      if (remaining) {
+        await this.livestreamRepository.assignCameraToMatch(matchId, remaining.id, playbackUrl);
+      } else {
+        await this.livestreamRepository.clearMatchCamera(matchId);
+      }
+    }
   }
 
   /**

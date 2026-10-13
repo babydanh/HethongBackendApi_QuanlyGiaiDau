@@ -22,6 +22,7 @@ import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { AssignCameraCourtDto } from './dto/assign-camera-court.dto';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { UpdateAqpStreamNameDto } from './dto/update-aqp-stream-name.dto';
@@ -456,6 +457,24 @@ export class LivestreamController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.livestreamService.deleteCamera(cameraId, user);
+  }
+
+  @Patch('cameras/:cameraId/court')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'BTC gán camera PUSH cho một sân hoặc bỏ gán sân',
+    description:
+      'Trận chưa có camera ở sân đích tự dùng camera này; trận chưa phát ở sân cũ đang dùng ' +
+      'camera này quay về camera còn lại của sân cũ hoặc bỏ gán. Trận đã/đang phát giữ nguyên. ' +
+      'Camera đang phát trận LIVE trả 409; camera PULL trả 400.',
+  })
+  assignCameraCourt(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() data: AssignCameraCourtDto,
+  ) {
+    return this.livestreamService.assignCameraCourt(cameraId, user, data);
   }
 
   @Post('matches/:matchId/assign-camera')

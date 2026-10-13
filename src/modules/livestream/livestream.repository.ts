@@ -326,6 +326,72 @@ export class LivestreamRepository {
     return rows.map((row) => row.id);
   }
 
+  /** Đổi sân của camera (null = bỏ gán). `updatedAt` mới khiến camera PUSH này thành camera hiện hành của sân đích. */
+  async updateCameraCourt(cameraId: string, courtId: string | null) {
+    const [camera] = await this.db
+      .update(schema.livestreamCameras)
+      .set({ courtId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.livestreamCameras.id, cameraId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .returning();
+
+    return camera ?? null;
+  }
+
+  /** Camera đang phát một trận LIVE (đổi sân lúc này sẽ cắt luồng đang chạy). */
+  async hasLiveMatchOnCamera(cameraId: string) {
+    const [row] = await this.db
+      .select({ id: schema.matchLivestreams.id })
+      .from(schema.matchLivestreams)
+      .innerJoin(schema.matches, eq(schema.matchLivestreams.matchId, schema.matches.id))
+      .where(
+        and(
+          eq(schema.matchLivestreams.cameraId, cameraId),
+          eq(schema.matchLivestreams.streamStatus, 'LIVE'),
+          isNull(schema.matches.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    return Boolean(row);
+  }
+
+  /**
+   * Trận CHƯA phát (IDLE) của một sân đang trỏ camera này.
+   *
+   * Chỉ IDLE: `clearMatchCamera` và `assignCameraToMatch` đặt lại `startedAt`/`endedAt`/
+   * `playbackUrl`, nên trận đã phát (LIVE/OFFLINE/ERROR) phải giữ nguyên liên kết để
+   * không mất lịch sử phát. Bảng không phân biệt gán tay với gán theo sân.
+   */
+  async listIdleMatchIdsUsingCameraOnCourt(
+    cameraId: string,
+    courtId: string,
+    tournamentId: string,
+  ) {
+    const rows = await this.db
+      .select({ id: schema.matches.id })
+      .from(schema.matches)
+      .innerJoin(
+        schema.matchLivestreams,
+        eq(schema.matchLivestreams.matchId, schema.matches.id),
+      )
+      .where(
+        and(
+          eq(schema.matchLivestreams.cameraId, cameraId),
+          eq(schema.matchLivestreams.streamStatus, 'IDLE'),
+          eq(schema.matches.courtId, courtId),
+          eq(schema.matches.tournamentId, tournamentId),
+          isNull(schema.matches.deletedAt),
+        ),
+      );
+
+    return rows.map((row) => row.id);
+  }
+
   async findCameraById(cameraId: string) {
     const [camera] = await this.db
       .select()
