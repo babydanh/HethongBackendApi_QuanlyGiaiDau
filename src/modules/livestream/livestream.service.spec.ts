@@ -863,28 +863,31 @@ describe('LivestreamService match recording catalog', () => {
     }
   });
 
-  it.each([
-    [-100, 'AQP_AUTH'],
-    [502, 'AQP_HTTP'],
-    [404, 'AQP_HTTP'],
-    [599, 'AQP_HTTP'],
-    // A positive envelope code from the provider is NOT an HTTP status.
-    [1, 'AQP_REJECTED'],
-    [200, 'AQP_REJECTED'],
-    [-1, 'AQP_UNAVAILABLE'],
-    [-300, 'AQP_REJECTED'],
+  // The diagnostic group is decided by WHERE the failure came from, not by the
+  // number: provider `code:404` is not an HTTP 404 and a missing local secret is
+  // not a provider auth rejection, although both share the number.
+  it.each<[number, AqvisionApiException['source'], string]>([
+    [-100, 'config', 'AQP_NOT_CONFIGURED'],
+    [502, 'http', 'AQP_HTTP'],
+    [404, 'http', 'AQP_HTTP'],
+    [-1, 'transport', 'AQP_UNREACHABLE'],
+    [-100, undefined, 'AQP_AUTH'],
+    [404, undefined, 'AQP_REJECTED'],
+    [502, undefined, 'AQP_REJECTED'],
+    [-1, undefined, 'AQP_REJECTED'],
+    [-300, undefined, 'AQP_REJECTED'],
   ])(
-    'tags a provider failure with code %s as %s and still hides the provider message',
-    async (providerCode, diagnosticCode) => {
+    'tags a failure (code %s, source %s) as %s and still hides the provider message',
+    async (providerCode, source, diagnosticCode) => {
       const secretProviderMessage = 'provider-credential-or-rootPath';
       const { recordingService, service } = makeService(
         cameraStreamForRecording,
       );
       recordingService.listRecordDays.mockRejectedValue(
-        new AqvisionApiException(providerCode, secretProviderMessage),
+        new AqvisionApiException(providerCode, secretProviderMessage, source),
       );
       recordingService.listRecordFiles.mockRejectedValue(
-        new AqvisionApiException(providerCode, secretProviderMessage),
+        new AqvisionApiException(providerCode, secretProviderMessage, source),
       );
 
       for (const error of [
@@ -901,6 +904,7 @@ describe('LivestreamService match recording catalog', () => {
         // code or HTTP status. Neither carries the provider's own text.
         expect(response).toMatchObject({ code: diagnosticCode, providerCode });
         expect(JSON.stringify(response)).not.toContain(secretProviderMessage);
+        expect(JSON.stringify(response)).not.toContain('source');
       }
     },
   );

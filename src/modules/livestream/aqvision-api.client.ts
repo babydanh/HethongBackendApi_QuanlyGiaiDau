@@ -2,6 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 /**
+ * Nơi phát sinh lỗi, vì cùng một con số có thể đến từ nhiều chỗ:
+ * - `config`: thiếu cấu hình phía mình (chưa gọi AQP lần nào).
+ * - `http`: AQP/proxy trả HTTP không phải 2xx; `providerCode` là HTTP status.
+ * - `transport`: không có phản hồi (mạng, timeout) sau mọi lần thử.
+ * Không có `source`: AQP đã trả một envelope (`providerCode` là `code` của vendor,
+ * kể cả khi trùng số với một HTTP status) hoặc phản hồi không đọc được.
+ */
+export type AqvisionFailureSource = 'config' | 'http' | 'transport';
+
+/**
  * Lỗi từ lớp gọi API AQP (media server bên thứ ba — fork ZLMediaKit).
  * Mã lỗi giữ nguyên theo envelope vendor: -400/-300/-200/-100/-1.
  */
@@ -9,6 +19,7 @@ export class AqvisionApiException extends Error {
   constructor(
     public readonly providerCode: number,
     message: string,
+    public readonly source?: AqvisionFailureSource,
   ) {
     super(message);
     this.name = 'AqvisionApiException';
@@ -220,6 +231,7 @@ export class AqvisionApiClient {
       throw new AqvisionApiException(
         response.status,
         `Máy chủ media AQP trả lỗi HTTP ${response.status}.`,
+        'http',
       );
     }
 
@@ -249,6 +261,7 @@ export class AqvisionApiClient {
       throw new AqvisionApiException(
         response.status,
         `Máy chủ media AQP trả lỗi HTTP ${response.status}.`,
+        'http',
       );
     }
 
@@ -297,6 +310,7 @@ export class AqvisionApiClient {
           lastError = new AqvisionApiException(
             response.status,
             `Máy chủ media AQP trả lỗi HTTP ${response.status}.`,
+            'http',
           );
           continue;
         }
@@ -321,7 +335,11 @@ export class AqvisionApiClient {
     );
     throw lastError instanceof AqvisionApiException
       ? lastError
-      : new AqvisionApiException(-1, 'Máy chủ media AQP hiện không khả dụng.');
+      : new AqvisionApiException(
+          -1,
+          'Máy chủ media AQP hiện không khả dụng.',
+          'transport',
+        );
   }
 
   private resolveBaseUrl(): string {
@@ -341,6 +359,7 @@ export class AqvisionApiClient {
       throw new AqvisionApiException(
         -100,
         'Tích hợp media AQP chưa được cấu hình.',
+        'config',
       );
     }
 

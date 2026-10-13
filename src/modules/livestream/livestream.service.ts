@@ -1572,30 +1572,33 @@ export class LivestreamService {
   /**
    * Lỗi gọi AQP khi đọc danh mục bản ghi → 503 CHUNG, kèm mã chẩn đoán thuộc một
    * tập đóng để BTC/vận hành biết lỗi thuộc nhóm nào mà không cần log VPS.
-   * Chỉ dùng mã số (mã provider hoặc HTTP status); TUYỆT ĐỐI không đưa message
-   * của provider vào phản hồi vì nó có thể chứa credential/rootPath.
+   * TUYỆT ĐỐI không đưa message của provider vào phản hồi vì nó có thể chứa
+   * credential/rootPath; chỉ có nhóm và một con số.
    *
-   * Ý nghĩa mã (theo `aqvision-api.client.ts`):
-   * - `-100`: thiếu secret phía mình, hoặc AQP trả `code:-100` (sai secret).
-   * - 400-599: client ném HTTP status khi AQP trả non-2xx.
-   * - `-1`: không phản hồi sau các lần thử, thân phản hồi không phải JSON/không có
-   *   `code` (ví dụ trang HTML của proxy), hoặc AQP báo thất bại chung.
-   * - còn lại (`-300`, mã dương ngoài dải HTTP...): AQP từ chối yêu cầu.
-   * Mã dương ngoài 400-599 KHÔNG được coi là HTTP status vì có thể là mã envelope.
+   * Nhóm được quyết định bởi NGUỒN lỗi (`AqvisionApiException.source`), KHÔNG bởi
+   * con số, vì cùng một số có thể đến từ nhiều chỗ (provider `code:404` khác HTTP
+   * 404; thiếu secret cục bộ khác `code:-100` do provider trả):
+   * - `config`: `AQP_NOT_CONFIGURED`. Chưa gọi AQP lần nào.
+   * - `http`: `AQP_HTTP`; `providerCode` là HTTP status.
+   * - `transport`: `AQP_UNREACHABLE`. Không có phản hồi sau các lần thử.
+   * - không có nguồn và `providerCode === -100`: `AQP_AUTH`; AQP trả `code:-100`.
+   * - còn lại: `AQP_REJECTED`; envelope khác của AQP hoặc phản hồi không đọc được
+   *   (kể cả `-1`, vì client dùng `-1` cho cả thất bại chung lẫn thân không phải JSON).
    */
   private toRecordingCatalogError(error: unknown): unknown {
     if (!(error instanceof AqvisionApiException)) return error;
 
-    const { providerCode } = error;
-    const isHttpStatus = providerCode >= 400 && providerCode <= 599;
+    const { providerCode, source } = error;
     const code =
-      providerCode === -100
-        ? 'AQP_AUTH'
-        : isHttpStatus
+      source === 'config'
+        ? 'AQP_NOT_CONFIGURED'
+        : source === 'http'
           ? 'AQP_HTTP'
-          : providerCode === -1
-            ? 'AQP_UNAVAILABLE'
-            : 'AQP_REJECTED';
+          : source === 'transport'
+            ? 'AQP_UNREACHABLE'
+            : providerCode === -100
+              ? 'AQP_AUTH'
+              : 'AQP_REJECTED';
 
     return new ServiceUnavailableException({
       code,

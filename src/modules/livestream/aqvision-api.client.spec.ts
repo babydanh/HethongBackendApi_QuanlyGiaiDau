@@ -446,4 +446,58 @@ describe('AqvisionApiClient', () => {
       expect(logged).not.toContain('api.media.aqvision.net');
     });
   });
+
+  // The same number can come from different places, so the exception carries
+  // where it came from. Without it a provider `code:404` is indistinguishable
+  // from an HTTP 404 and a local missing secret from a provider `code:-100`.
+  describe('failure source', () => {
+    it('a missing local secret is tagged config', async () => {
+      await expect(
+        makeClient({ AQVISION_API_SECRET: '   ' }).isMediaOnline('camera01'),
+      ).rejects.toMatchObject({ providerCode: -100, source: 'config' });
+    });
+
+    it.each([-100, 404, 502, -1])(
+      'provider envelope code %i has no source (it is not an HTTP status)',
+      async (code) => {
+        fetchSpy.mockResolvedValue(jsonResponse({ code, msg: 'x' }));
+
+        const error = await makeClient()
+          .isMediaOnline('camera01')
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(AqvisionApiException);
+        expect(error).toMatchObject({ providerCode: code });
+        expect((error as AqvisionApiException).source).toBeUndefined();
+      },
+    );
+
+    it.each([404, 502])('a real HTTP %i is tagged http', async (status) => {
+      fetchSpy.mockResolvedValue(jsonResponse({}, status));
+
+      await expect(
+        makeClient().getMp4RecordFile({ stream: 'camera01' }),
+      ).rejects.toMatchObject({ providerCode: status, source: 'http' });
+    });
+
+    it('no response from the network is tagged transport', async () => {
+      fetchSpy.mockRejectedValue(new Error('connect ECONNREFUSED'));
+
+      await expect(
+        makeClient().startRecordMp4('camera01'),
+      ).rejects.toMatchObject({ providerCode: -1, source: 'transport' });
+    });
+
+    it('a 200 body that is not JSON has no source and code -1', async () => {
+      // binaryResponse's json() throws, like an HTML page from a proxy.
+      fetchSpy.mockResolvedValue(binaryResponse(new Uint8Array(), 200));
+
+      const error = await makeClient()
+        .isMediaOnline('camera01')
+        .catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ providerCode: -1 });
+      expect(error).not.toHaveProperty('source', expect.any(String));
+    });
+  });
 });
