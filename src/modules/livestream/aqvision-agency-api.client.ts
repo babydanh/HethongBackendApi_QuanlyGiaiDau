@@ -252,7 +252,9 @@ export class AqvisionAgencyApiClient {
 
   private parseStreamKey(value: unknown, includePush: boolean): AqvisionAgencyStreamKey {
     const data = this.readObject(value);
-    const id = data?.id;
+    // Agency API trả id dạng số (ví dụ 30); giữ id là chuỗi ở phía mình.
+    const rawId = data?.id;
+    const id = typeof rawId === 'number' && Number.isSafeInteger(rawId) ? String(rawId) : rawId;
     const app = data?.app;
     const stream = data?.stream;
     const status = data?.status;

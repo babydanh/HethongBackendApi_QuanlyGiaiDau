@@ -121,6 +121,59 @@ describe('AqvisionAgencyApiClient', () => {
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: `Bearer ${TOKEN}` }) }),
     );
   });
+
+  it('accepts the numeric stream-key ids the real Agency API returns', async () => {
+    const push = { rtmpServer: 'rtmp://push.example/live', streamKey: 'cam_1?key=secret' };
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: { token: TOKEN, expiresAt: new Date(now + 3_600_000).toISOString() },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { code: 201, data: { id: 31, app: 'live', stream: 'cam_1', status: 'Offline', push } },
+          201,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: [{ id: 30, app: 'live', stream: 'cam_0', status: 'Offline' }],
+        }),
+      );
+
+    const client = makeClient();
+    await expect(client.createStreamKey({ app: 'live', stream: 'cam_1' })).resolves.toEqual({
+      id: '31',
+      app: 'live',
+      stream: 'cam_1',
+      status: 'Offline',
+      push,
+    });
+    await expect(client.listStreamKeys()).resolves.toEqual([
+      { id: '30', app: 'live', stream: 'cam_0', status: 'Offline', push: null },
+    ]);
+  });
+
+  it('rejects a stream key whose id is neither a string nor a safe integer', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: { token: TOKEN, expiresAt: new Date(now + 3_600_000).toISOString() },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: [{ id: { nested: 1 }, app: 'live', stream: 'cam_0', status: 'Offline' }],
+        }),
+      );
+
+    await expect(makeClient().listStreamKeys()).rejects.toThrow('stream key không hợp lệ');
+  });
   it('updates a revoked stream name with PATCH or full PUT payload', async () => {
     fetchMock
       .mockResolvedValueOnce(
