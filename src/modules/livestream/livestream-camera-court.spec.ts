@@ -280,6 +280,56 @@ describe('LivestreamService.assignCameraCourt', () => {
       expect.any(String),
     );
   });
+
+  // The camera is read once before the lock, then its court may change while this request
+  // waits. Everything that depends on "the old court" must come from a read inside the lock.
+  it('releases the court the camera is on once it holds the lock, not the one it read before waiting', async () => {
+    const { service, repository } = makeService({ oldCourtIdleMatches: ['m-mid-1'] });
+    repository.findCameraById
+      .mockResolvedValueOnce(baseCamera)
+      .mockResolvedValueOnce({ ...baseCamera, courtId: 'court-x' });
+
+    await service.assignCameraCourt('camera-1', owner, { courtId: 'court-b' });
+
+    expect(repository.listIdleMatchIdsUsingCameraOnCourt).toHaveBeenCalledWith(
+      'camera-1',
+      'court-x',
+      'tournament-1',
+    );
+    expect(repository.listIdleMatchIdsUsingCameraOnCourt).not.toHaveBeenCalledWith(
+      'camera-1',
+      'court-a',
+      expect.anything(),
+    );
+  });
+
+  it('does nothing when a concurrent request already put the camera on the requested court', async () => {
+    const { service, repository } = makeService();
+    repository.findCameraById
+      .mockResolvedValueOnce(baseCamera)
+      .mockResolvedValueOnce({ ...baseCamera, courtId: 'court-b' });
+
+    const result = await service.assignCameraCourt('camera-1', owner, {
+      courtId: 'court-b',
+    });
+
+    expect(result).toMatchObject({ id: 'camera-1', courtId: 'court-b' });
+    expect(repository.updateCameraCourt).not.toHaveBeenCalled();
+    expect(repository.assignCameraToMatch).not.toHaveBeenCalled();
+    expect(repository.clearMatchCamera).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 when the camera was deleted while waiting for the lock', async () => {
+    const { service, repository } = makeService();
+    repository.findCameraById
+      .mockResolvedValueOnce(baseCamera)
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.assignCameraCourt('camera-1', owner, { courtId: 'court-b' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(repository.updateCameraCourt).not.toHaveBeenCalled();
+  });
 });
 
 describe('AssignCameraCourtDto', () => {

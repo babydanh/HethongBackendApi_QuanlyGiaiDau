@@ -614,6 +614,16 @@ export class LivestreamService {
         if (!lease.isOwned()) {
           throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
         }
+        // The read above happened before the lock. Another request may have moved (or
+        // deleted) the camera while this one waited, so the "old court" to release, and
+        // whether there is anything left to do, must come from a read made while holding it.
+        const current = await this.livestreamRepository.findCameraById(camera.id);
+        if (!current) {
+          throw new NotFoundException('Camera không tồn tại');
+        }
+        if ((current.courtId ?? null) === courtId) {
+          return current;
+        }
         if (await this.livestreamRepository.hasLiveMatchOnCamera(camera.id)) {
           throw new ConflictException('Camera đang phát một trận; dừng phát trước khi đổi sân.');
         }
@@ -625,8 +635,8 @@ export class LivestreamService {
         if (!moved) {
           throw new NotFoundException('Camera không tồn tại');
         }
-        if (camera.courtId) {
-          await this.releaseIdleCourtMatches(camera.id, camera.courtId, camera.tournamentId);
+        if (current.courtId) {
+          await this.releaseIdleCourtMatches(camera.id, current.courtId, camera.tournamentId);
         }
         if (courtId) {
           await this.backfillCourtCameraAssignments(courtId, camera.tournamentId, moved);
