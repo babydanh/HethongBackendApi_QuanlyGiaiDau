@@ -265,15 +265,20 @@ export class AqvisionAgencyApiClient {
       const pushData = this.readObject(rawPush);
       const rtmpServer = pushData?.rtmpServer;
       const streamKey = pushData?.streamKey;
-      if (
-        typeof rtmpServer !== 'string' ||
-        !rtmpServer.trim() ||
-        typeof streamKey !== 'string' ||
-        !streamKey.trim()
-      ) {
-        throw new AqvisionAgencyApiException('Agency API trả về cấu hình RTMP không hợp lệ.');
+      // Tài liệu Agency: sau thu hồi/đổi tên, key và URL chứa key là null. Chỉ `streamKey: null`
+      // tường minh mới là key đã thu hồi; trường thiếu hoặc rỗng vẫn là phản hồi hỏng.
+      const isRevokedPush = streamKey === null;
+      if (!isRevokedPush) {
+        if (
+          typeof rtmpServer !== 'string' ||
+          !rtmpServer.trim() ||
+          typeof streamKey !== 'string' ||
+          !streamKey.trim()
+        ) {
+          throw new AqvisionAgencyApiException('Agency API trả về cấu hình RTMP không hợp lệ.');
+        }
+        push = { rtmpServer: rtmpServer.trim(), streamKey: streamKey.trim() };
       }
-      push = { rtmpServer: rtmpServer.trim(), streamKey: streamKey.trim() };
     }
 
     if (

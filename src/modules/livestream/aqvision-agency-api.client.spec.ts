@@ -174,6 +174,106 @@ describe('AqvisionAgencyApiClient', () => {
 
     await expect(makeClient().listStreamKeys()).rejects.toThrow('stream key không hợp lệ');
   });
+
+  it('reads a revoked key whose push block carries null credentials as having no active push config', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: { token: TOKEN, expiresAt: new Date(now + 3_600_000).toISOString() },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: {
+            id: 7,
+            app: 'live',
+            stream: 'cam_1',
+            status: 'Offline',
+            push: { rtmpServer: 'rtmp://push.example/live', streamKey: null },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: {
+            id: 7,
+            app: 'live',
+            stream: 'cam_1',
+            status: 'Offline',
+            push: { rtmpServer: null, streamKey: null },
+          },
+        }),
+      );
+
+    const client = makeClient();
+    await expect(client.getStreamKey('7')).resolves.toMatchObject({ id: '7', push: null });
+    await expect(client.getStreamKey('7')).resolves.toMatchObject({ id: '7', push: null });
+  });
+
+  it('still rejects a push block that has a stream key but no usable RTMP server', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: { token: TOKEN, expiresAt: new Date(now + 3_600_000).toISOString() },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: {
+            id: 7,
+            app: 'live',
+            stream: 'cam_1',
+            status: 'Offline',
+            push: { rtmpServer: null, streamKey: 'cam_1?key=secret' },
+          },
+        }),
+      );
+
+    await expect(makeClient().getStreamKey('7')).rejects.toThrow('cấu hình RTMP không hợp lệ');
+  });
+
+  it('does not read a missing or blank stream key as a revoked key', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: { token: TOKEN, expiresAt: new Date(now + 3_600_000).toISOString() },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: {
+            id: 7,
+            app: 'live',
+            stream: 'cam_1',
+            status: 'Offline',
+            push: { rtmpServer: 'rtmp://push.example/live' },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: 200,
+          data: {
+            id: 7,
+            app: 'live',
+            stream: 'cam_1',
+            status: 'Offline',
+            push: { rtmpServer: 'rtmp://push.example/live', streamKey: '   ' },
+          },
+        }),
+      );
+
+    const client = makeClient();
+    await expect(client.getStreamKey('7')).rejects.toThrow('cấu hình RTMP không hợp lệ');
+    await expect(client.getStreamKey('7')).rejects.toThrow('cấu hình RTMP không hợp lệ');
+  });
   it('updates a revoked stream name with PATCH or full PUT payload', async () => {
     fetchMock
       .mockResolvedValueOnce(
