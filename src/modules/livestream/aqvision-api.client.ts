@@ -241,6 +241,11 @@ export class AqvisionApiClient {
     const payload = await this.parseJson(response);
 
     if (!response.ok) {
+      // Trước đây nhánh này ném mà không log nên 503 phía API rất khó chẩn đoán.
+      // Chỉ log tên operation + HTTP status: KHÔNG log URL/query (chứa secret).
+      this.logger.warn(
+        `AQP ${operation} bị từ chối: HTTP ${response.status} (không phải mã lỗi của provider).`,
+      );
       throw new AqvisionApiException(
         response.status,
         `Máy chủ media AQP trả lỗi HTTP ${response.status}.`,

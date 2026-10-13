@@ -429,5 +429,21 @@ describe('AqvisionApiClient', () => {
       expect(logged).not.toContain('secret=');
       expect(logged).not.toContain('api.media.aqvision.net');
     });
+
+    it('HTTP loi => log operation + status, khong chua secret hay URL', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+      fetchSpy.mockResolvedValue(jsonResponse({}, 502));
+
+      await expect(
+        makeClient().getMp4RecordFile({ stream: 'camera01' }),
+      ).rejects.toMatchObject({ providerCode: 502 });
+
+      const logged = warnSpy.mock.calls.flat().join(' ');
+      expect(logged).toContain('getMP4RecordFile');
+      expect(logged).toContain('HTTP 502');
+      expect(logged).not.toContain(SECRET);
+      expect(logged).not.toContain('secret=');
+      expect(logged).not.toContain('api.media.aqvision.net');
+    });
   });
 });
