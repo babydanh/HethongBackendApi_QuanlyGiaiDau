@@ -471,7 +471,7 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review (depreca
       .send({ opaque: 'alias does not read the body' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: { aiAvailable: false, layout: null } });
+    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: null });
     expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
     expect(analyzeRosterLayout).not.toHaveBeenCalled();
   });
@@ -482,7 +482,7 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review (depreca
       .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)));
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: { aiAvailable: false, layout: null } });
+    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: null });
   });
 
   it('refuses a verified player by role before the manager check runs', async () => {

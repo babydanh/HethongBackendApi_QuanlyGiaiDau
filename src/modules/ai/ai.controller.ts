@@ -195,6 +195,7 @@ export class AiController {
       user.roles ?? (user.role ? [user.role] : []),
     );
 
-    return { success: true, data: { aiAvailable: false, layout: null } };
+    // Wire shape unchanged for old clients: `data: null`. Decision D-1 applies to roster-layout only.
+    return { success: true, data: null };
   }
 }
