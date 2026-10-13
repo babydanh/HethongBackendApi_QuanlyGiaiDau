@@ -1535,12 +1535,7 @@ export class LivestreamService {
         a < b ? 1 : a > b ? -1 : 0,
       );
     } catch (error) {
-      if (error instanceof AqvisionApiException) {
-        throw new ServiceUnavailableException(
-          'Không thể tải danh sách bản ghi MP4.',
-        );
-      }
-      throw error;
+      throw this.toRecordingCatalogError(error);
     }
   }
 
@@ -1570,13 +1565,43 @@ export class LivestreamService {
           : [{ name: file.name }];
       });
     } catch (error) {
-      if (error instanceof AqvisionApiException) {
-        throw new ServiceUnavailableException(
-          'Không thể tải danh sách bản ghi MP4.',
-        );
-      }
-      throw error;
+      throw this.toRecordingCatalogError(error);
     }
+  }
+
+  /**
+   * Lỗi gọi AQP khi đọc danh mục bản ghi → 503 CHUNG, kèm mã chẩn đoán thuộc một
+   * tập đóng để BTC/vận hành biết lỗi thuộc nhóm nào mà không cần log VPS.
+   * Chỉ dùng mã số (mã provider hoặc HTTP status); TUYỆT ĐỐI không đưa message
+   * của provider vào phản hồi vì nó có thể chứa credential/rootPath.
+   *
+   * Ý nghĩa mã (theo `aqvision-api.client.ts`):
+   * - `-100`: thiếu secret phía mình, hoặc AQP trả `code:-100` (sai secret).
+   * - 400-599: client ném HTTP status khi AQP trả non-2xx.
+   * - `-1`: không phản hồi sau các lần thử, thân phản hồi không phải JSON/không có
+   *   `code` (ví dụ trang HTML của proxy), hoặc AQP báo thất bại chung.
+   * - còn lại (`-300`, mã dương ngoài dải HTTP...): AQP từ chối yêu cầu.
+   * Mã dương ngoài 400-599 KHÔNG được coi là HTTP status vì có thể là mã envelope.
+   */
+  private toRecordingCatalogError(error: unknown): unknown {
+    if (!(error instanceof AqvisionApiException)) return error;
+
+    const { providerCode } = error;
+    const isHttpStatus = providerCode >= 400 && providerCode <= 599;
+    const code =
+      providerCode === -100
+        ? 'AQP_AUTH'
+        : isHttpStatus
+          ? 'AQP_HTTP'
+          : providerCode === -1
+            ? 'AQP_UNAVAILABLE'
+            : 'AQP_REJECTED';
+
+    return new ServiceUnavailableException({
+      code,
+      message: 'Không thể tải danh sách bản ghi MP4.',
+      providerCode,
+    });
   }
 
   private async getRecordingStreamName(

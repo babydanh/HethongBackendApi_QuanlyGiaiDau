@@ -862,4 +862,46 @@ describe('LivestreamService match recording catalog', () => {
       ).not.toContain(secretProviderMessage);
     }
   });
+
+  it.each([
+    [-100, 'AQP_AUTH'],
+    [502, 'AQP_HTTP'],
+    [404, 'AQP_HTTP'],
+    [599, 'AQP_HTTP'],
+    // A positive envelope code from the provider is NOT an HTTP status.
+    [1, 'AQP_REJECTED'],
+    [200, 'AQP_REJECTED'],
+    [-1, 'AQP_UNAVAILABLE'],
+    [-300, 'AQP_REJECTED'],
+  ])(
+    'tags a provider failure with code %s as %s and still hides the provider message',
+    async (providerCode, diagnosticCode) => {
+      const secretProviderMessage = 'provider-credential-or-rootPath';
+      const { recordingService, service } = makeService(
+        cameraStreamForRecording,
+      );
+      recordingService.listRecordDays.mockRejectedValue(
+        new AqvisionApiException(providerCode, secretProviderMessage),
+      );
+      recordingService.listRecordFiles.mockRejectedValue(
+        new AqvisionApiException(providerCode, secretProviderMessage),
+      );
+
+      for (const error of [
+        await catalog(service)
+          .listMatchRecordingDays('match-1', owner)
+          .catch((caught: unknown) => caught),
+        await catalog(service)
+          .listMatchRecordings('match-1', '2026-10-09', owner)
+          .catch((caught: unknown) => caught),
+      ]) {
+        expect(error).toBeInstanceOf(ServiceUnavailableException);
+        const response = (error as ServiceUnavailableException).getResponse();
+        // The code is a closed set the UI can map; the number is the provider
+        // code or HTTP status. Neither carries the provider's own text.
+        expect(response).toMatchObject({ code: diagnosticCode, providerCode });
+        expect(JSON.stringify(response)).not.toContain(secretProviderMessage);
+      }
+    },
+  );
 });
