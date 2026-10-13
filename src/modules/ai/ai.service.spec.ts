@@ -1120,6 +1120,11 @@ describe('AiService.analyzeRosterLayout', () => {
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[0][0]).toHaveProperty('response_format');
     expect(create.mock.calls[1][0]).not.toHaveProperty('response_format');
+    // Both attempts share one deadline (50 s), so together they stay under the browser's 60 s wait.
+    const [firstTimeout, secondTimeout] = [create.mock.calls[0][1].timeout, create.mock.calls[1][1].timeout];
+    expect(firstTimeout).toBeLessThanOrEqual(50_000);
+    expect(secondTimeout).toBeLessThanOrEqual(firstTimeout);
+    expect(create.mock.calls[0][1].maxRetries).toBe(0);
   });
 
   it('rejects a raw email address in any cell before anything is sent', async () => {

@@ -198,8 +198,8 @@ const ROSTER_LAYOUT_MAX_NOTES = 5;
 const ROSTER_LAYOUT_NOTE_CHARS = 200;
 const ROSTER_LAYOUT_LABEL_CHARS = 100;
 const ROSTER_LAYOUT_SEPARATOR_CHARS = 5;
-/** One provider attempt, below the browser's 60 s wait, so the organizer gets an answer instead of a timeout. */
-const ROSTER_LAYOUT_TIMEOUT_MS = 45_000;
+/** Total budget for both provider attempts, below the browser's 60 s wait, so the organizer gets an answer instead of a timeout. */
+const ROSTER_LAYOUT_TIMEOUT_MS = 50_000;
 /** Statuses a provider answers with when it refuses a request parameter such as `response_format`. */
 const ROSTER_LAYOUT_SCHEMA_REFUSED_STATUSES = new Set([400, 404, 422]);
 
@@ -1497,6 +1497,8 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
         { role: 'user', content: userContent },
       ],
     };
+    // One deadline shared by the schema attempt and its fallback: they can never add up past the browser's wait.
+    const deadline = Date.now() + ROSTER_LAYOUT_TIMEOUT_MS;
     const complete = async (withSchema: boolean): Promise<string> => {
       const completion = await openai.chat.completions.create(
         withSchema
@@ -1508,8 +1510,8 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
               },
             }
           : request,
-        // No SDK retries: two silent retries of a slow call would outlast the browser's wait.
-        { timeout: ROSTER_LAYOUT_TIMEOUT_MS, maxRetries: 0 },
+        // No SDK retries: silent retries of a slow call would outlast the browser's wait.
+        { timeout: Math.max(1_000, deadline - Date.now()), maxRetries: 0 },
       );
       return completion.choices[0]?.message?.content?.trim() ?? '';
     };
