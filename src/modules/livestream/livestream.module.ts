@@ -12,6 +12,7 @@ import { FacebookTokenCryptoService } from './facebook-token-crypto.service';
 import { LiveSessionService } from './live-session.service';
 import { CameraDeviceService } from './camera-device.service';
 import { AqvisionApiClient } from './aqvision-api.client';
+import { AqvisionAgencyApiClient } from './aqvision-agency-api.client';
 import { AqvisionHealthService } from './aqvision-health.service';
 import { AqvisionRecordingService } from './aqvision-recording.service';
 import { AqvisionSnapshotService } from './aqvision-snapshot.service';
@@ -36,6 +37,7 @@ import { LivestreamHealthQueue } from './livestream-health.queue';
     LiveSessionService,
     CameraDeviceService,
     AqvisionApiClient,
+    AqvisionAgencyApiClient,
     AqvisionHealthService,
     AqvisionRecordingService,
     AqvisionSnapshotService,

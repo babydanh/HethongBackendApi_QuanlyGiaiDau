@@ -4,6 +4,8 @@ import {
   Delete,
   Get,
   Header,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -22,6 +24,7 @@ import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guar
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
+import { UpdateAqpStreamNameDto } from './dto/update-aqp-stream-name.dto';
 import { PublishQrDto } from './dto/publish-qr.dto';
 import { SetCourtPlaybackUrlDto } from './dto/set-court-playback-url.dto';
 import { LivestreamService } from './livestream.service';
@@ -347,15 +350,67 @@ export class LivestreamController {
     return this.livestreamService.createCamera(tournamentId, user, data);
   }
 
+  @Get('cameras/:cameraId/aqp-stream-key')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Xem trạng thái key AQP và cấu hình QR RTMP của camera PUSH' })
+  getCameraAqpStreamKey(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.getCameraAqpStreamKey(cameraId, user);
+  }
+
+  @Post('cameras/:cameraId/aqp-stream-key')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Tạo hoặc khôi phục stream key AQP cho camera PUSH' })
+  createCameraAqpStreamKey(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.createCameraAqpStreamKey(cameraId, user);
+  }
+  @Patch('cameras/:cameraId/aqp-stream-key')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Đổi tên stream key AQP sau khi thu hồi key và chưa có bản ghi' })
+  renameCameraAqpStreamKey(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() data: UpdateAqpStreamNameDto,
+  ) {
+    return this.livestreamService.renameCameraAqpStreamKey(cameraId, user, data.stream);
+  }
+
+  @Post('cameras/:cameraId/aqp-stream-key/rotate')
+  @HttpCode(HttpStatus.OK)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cấp lại key AQP và ngắt publisher đang dùng key cũ' })
+  rotateCameraAqpStreamKey(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.rotateCameraAqpStreamKey(cameraId, user);
+  }
+
+  @Delete('cameras/:cameraId/aqp-stream-key')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Thu hồi key AQP và ngắt publisher của camera' })
+  revokeCameraAqpStreamKey(
+    @Param('cameraId', ParseUUIDPipe) cameraId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.livestreamService.revokeCameraAqpStreamKey(cameraId, user);
+  }
+
   @Post('cameras/:cameraId/publish-qr')
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Dựng QR publish (docx §2.2) + cặp RTMP cho camera PUSH',
-    description:
-      'Trả payload 5 field để app Camera Station của AQP quét, kèm cặp RTMP ' +
-      '(server + streamKey) để nhập tay vào OBS. `publishKey` do AQP cấp và ' +
-      'phải gửi trong request: key là per-stream, KHÔNG lưu lại, KHÔNG ghi log.',
+    summary: 'Tương thích client cũ: dựng QR publish từ thông tin AQP được gửi lên',
   })
   buildPublishQr(
     @Param('cameraId', ParseUUIDPipe) cameraId: string,
@@ -368,12 +423,7 @@ export class LivestreamController {
   @Post('cameras/:cameraId/rotate-stream-key')
   @Verified()
   @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Cấp lại stream key nội bộ của camera PUSH (pipeline SportO)',
-    description:
-      'Sinh streamName/streamKey mới cho media server của SportO. KHÔNG phải ' +
-      'publish key của AQP — key AQP được cấp và rotate tại panel AQP.',
-  })
+  @ApiOperation({ summary: 'Tương thích client cũ: xoay key theo mapping AQP của camera' })
   rotateStreamKey(
     @Param('cameraId', ParseUUIDPipe) cameraId: string,
     @CurrentUser() user: JwtPayload,

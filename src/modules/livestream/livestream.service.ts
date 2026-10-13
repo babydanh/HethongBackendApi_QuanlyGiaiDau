@@ -21,6 +21,12 @@ import {
 } from './aqvision-publish.service';
 import { AqvisionApiClient, AqvisionApiException } from './aqvision-api.client';
 import {
+  AqvisionAgencyApiClient,
+  AqvisionAgencyApiException,
+  type AqvisionAgencyDeleteResult,
+  type AqvisionAgencyStreamKey,
+} from './aqvision-agency-api.client';
+import {
   AqvisionRecordingService,
   type RecordingStatus,
 } from './aqvision-recording.service';
@@ -36,6 +42,34 @@ import {
 } from './livestream.repository';
 
 type MatchStreamControlStatus = 'IDLE' | 'LIVE' | 'OFFLINE' | 'ERROR' | null;
+type AqpStreamKeyCamera = {
+  readonly id: string;
+  readonly name: string;
+  readonly streamName: string;
+  readonly aqpStreamKeyId: string | null;
+};
+type AqvisionAgencyStreamKeyWithPush = AqvisionAgencyStreamKey & {
+  readonly push: NonNullable<AqvisionAgencyStreamKey['push']>;
+};
+
+export interface AqpCameraStreamKeyResponse {
+  readonly camera: {
+    readonly id: string;
+    readonly name: string;
+    readonly streamName: string;
+  };
+  readonly streamKeyId: string | null;
+  readonly status: string | null;
+  readonly qrPayload: {
+    readonly stream_url: string;
+    readonly match_id: string;
+    readonly match_title: string;
+    readonly protocol: 'rtmp';
+    readonly auto_start: false;
+  } | null;
+  readonly qrPayloadString: string | null;
+  readonly rtmp: { readonly server: string; readonly streamKey: string } | null;
+}
 
 // Only the statuses the toggle understands are published. `hasCamera` stays
 // true so the client knows a camera is assigned even if a row carries a status
@@ -102,6 +136,7 @@ export class LivestreamService {
     private readonly aqvisionRecordingService: AqvisionRecordingService,
     private readonly livestreamHealthQueue: LivestreamHealthQueue,
     private readonly cameraSourceCrypto: LivestreamCameraSourceCryptoService,
+    private readonly aqvisionAgencyApiClient: AqvisionAgencyApiClient,
   ) {}
 
   private isAdmin(user: JwtPayload) {
@@ -345,6 +380,7 @@ export class LivestreamService {
     playbackUrl: string | null;
     createdAt: Date;
     updatedAt: Date;
+    aqpStreamKeyId?: string | null;
   }) {
     return {
       id: camera.id,
@@ -363,6 +399,7 @@ export class LivestreamService {
         camera.mode === 'PULL'
           ? null
           : { rtmp: this.tryAqvisionIngestServer(), srt: this.getSrtBaseUrl() },
+      hasAqpStreamKey: Boolean(camera.aqpStreamKeyId),
       createdAt: camera.createdAt,
       updatedAt: camera.updatedAt,
     };
@@ -582,47 +619,80 @@ export class LivestreamService {
   }
 
   /**
-   * Cấp lại danh tính stream của một camera PUSH (nút "Cấp lại stream key" của
-   * pipeline SportO).
-   *
-   * PHẠM VI: đây là key NỘI BỘ trong `livestream_cameras`, dùng cho media
-   * server của SportO. Publish key của AQP (panel AQP, dạng `<stream>?<key>`)
-   * do AQP cấp và chỉ rotate được ở panel/AQP — endpoint này KHÔNG đụng tới nó.
-   *
-   * `streamName` có unique index nên lần ghi có thể trùng; thử lại với tên mới
-   * thay vì để lỗi ràng buộc nổi lên thành 500.
+   * Keep the legacy response shape for older clients. AQP-linked cameras rotate
+   * through Agency; unlinked cameras retain local identity rotation.
    */
   async rotateCameraStreamKey(cameraId: string, user: JwtPayload) {
     const camera = await this.getPushCamera(cameraId, user);
     const maxAttempts = 5;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const streamName = `camera_${randomUUID().replace(/-/g, '')}`;
+      const streamName = camera.aqpStreamKeyId
+        ? camera.streamName
+        : `camera_${randomUUID().replace(/-/g, '')}`;
       const streamKey = randomUUID().replace(/-/g, '');
       try {
-        const rotated = await this.livestreamRepository.updateCameraStreamIdentity(
+        const result = await this.runWithAqpCameraAndStreamNameLocks(
           camera.id,
-          { streamName, streamKey, playbackUrl: this.buildAqvisionHlsUrl(streamName) },
+          streamName,
+          async (lease) => {
+            const current = await this.getPushCamera(cameraId, user);
+            this.assertAqpLeaseOwned(lease);
+            if (current.aqpStreamKeyId) {
+              const rotated = await this.rotateLinkedAqpStreamKey(current, lease);
+              return {
+                collision: false as const,
+                response: {
+                  ...this.toPublicCamera({ ...current, aqpStreamKeyId: rotated.id }),
+                  publish: {
+                    ...this.buildPublishInfo(
+                      current.protocol === 'SRT' ? 'SRT' : 'RTMP',
+                      current.streamName,
+                    ),
+                    rtmpServer: rotated.push.rtmpServer,
+                    streamKey: rotated.push.streamKey,
+                  },
+                },
+              };
+            }
+            if (camera.aqpStreamKeyId) {
+              throw new ServiceUnavailableException(
+                'Camera vừa thay đổi trạng thái AQP; vui lòng thử lại.',
+              );
+            }
+            const nameTaken = await this.livestreamRepository.isCameraStreamNameTaken(
+              streamName,
+              current.id,
+            );
+            this.assertAqpLeaseOwned(lease);
+            if (nameTaken) return { collision: true as const };
+
+            const rotated = await this.livestreamRepository.updateCameraStreamIdentity(
+              current.id,
+              { streamName, streamKey, playbackUrl: this.buildAqvisionHlsUrl(streamName) },
+            );
+            if (!rotated) throw new NotFoundException('Camera không tồn tại');
+            this.assertAqpLeaseOwned(lease);
+            return {
+              collision: false as const,
+              response: {
+                ...this.toPublicCamera(rotated),
+                publish: this.buildPublishInfo(
+                  rotated.protocol === 'SRT' ? 'SRT' : 'RTMP',
+                  rotated.streamName,
+                ),
+              },
+            };
+          },
         );
-        if (!rotated) {
-          throw new NotFoundException('Camera không tồn tại');
-        }
-        return {
-          ...this.toPublicCamera(rotated),
-          publish: this.buildPublishInfo(
-            rotated.protocol === 'SRT' ? 'SRT' : 'RTMP',
-            rotated.streamName,
-          ),
-        };
+        if (result.collision) continue;
+        return result.response;
       } catch (error) {
         const isLastAttempt = attempt === maxAttempts;
-        if (!this.isUniqueViolation(error) || isLastAttempt) {
-          throw error;
-        }
+        if (!this.isUniqueViolation(error) || isLastAttempt) throw error;
       }
     }
 
-    // Không thể tới đây: vòng lặp hoặc return, hoặc ném ở lần thử cuối.
     throw new ConflictException('Không cấp được stream key mới, vui lòng thử lại.');
   }
 
@@ -668,6 +738,393 @@ export class LivestreamService {
       );
     }
     return camera;
+  }
+
+  async getCameraAqpStreamKey(cameraId: string, user: JwtPayload): Promise<AqpCameraStreamKeyResponse> {
+    const camera = await this.getPushCamera(cameraId, user);
+    const streamKeyId = camera.aqpStreamKeyId;
+    if (!streamKeyId) return this.toAqpCameraStreamKeyResponse(camera, null);
+
+    return this.runWithAqpCameraLock(camera.id, async (lease) => {
+      let key: AqvisionAgencyStreamKey;
+      try {
+        key = await this.aqvisionAgencyApiClient.getStreamKey(streamKeyId);
+      } catch (error) {
+        if (error instanceof AqvisionAgencyApiException && error.httpStatus === 404) {
+          await this.saveAqpStreamKeyId(camera.id, null, lease);
+          return this.toAqpCameraStreamKeyResponse(camera, null);
+        }
+        throw this.toAqpServiceUnavailable(error);
+      }
+      this.assertAqpCameraKeyMatches(camera.streamName, key);
+      this.assertAqpLeaseOwned(lease);
+      return this.toAqpCameraStreamKeyResponse(camera, key);
+    });
+  }
+
+  async createCameraAqpStreamKey(
+    cameraId: string,
+    user: JwtPayload,
+  ): Promise<AqpCameraStreamKeyResponse> {
+    const camera = await this.getPushCamera(cameraId, user);
+    return this.runWithAqpCameraLock(camera.id, async (lease) => {
+      const key = await this.ensureCameraAqpStreamKey(camera, lease);
+      return this.toAqpCameraStreamKeyResponse(camera, key);
+    });
+  }
+
+  async rotateCameraAqpStreamKey(
+    cameraId: string,
+    user: JwtPayload,
+  ): Promise<AqpCameraStreamKeyResponse> {
+    const camera = await this.getPushCamera(cameraId, user);
+    return this.runWithAqpCameraLock(camera.id, async (lease) => {
+      const current = await this.getPushCamera(cameraId, user);
+      this.assertAqpLeaseOwned(lease);
+      const rotated = await this.rotateLinkedAqpStreamKey(current, lease);
+      return this.toAqpCameraStreamKeyResponse(current, rotated);
+    });
+  }
+
+  private async rotateLinkedAqpStreamKey(
+    camera: AqpStreamKeyCamera,
+    lease: CameraLeaseHandle,
+  ): Promise<AqvisionAgencyStreamKeyWithPush> {
+    const current = await this.ensureCameraAqpStreamKey(camera, lease);
+    this.assertAqpLeaseOwned(lease);
+    const rotated = await this.aqvisionAgencyApiClient.rotateStreamKey(current.id);
+    this.assertAqpLeaseOwned(lease);
+    this.assertAqpCameraKeyMatches(camera.streamName, rotated);
+    if (!rotated.push) {
+      throw new ServiceUnavailableException('AQP chưa trả cấu hình RTMP mới.');
+    }
+    await this.saveAqpStreamKeyId(camera.id, rotated.id, lease);
+    return rotated as AqvisionAgencyStreamKeyWithPush;
+  }
+
+  async renameCameraAqpStreamKey(
+    cameraId: string,
+    user: JwtPayload,
+    requestedStreamName: string,
+  ): Promise<AqpCameraStreamKeyResponse> {
+    const camera = await this.getPushCamera(cameraId, user);
+    const streamName = requestedStreamName.trim();
+    if (!/^[A-Za-z0-9_-]{1,255}$/.test(streamName)) {
+      throw new BadRequestException('Tên stream chỉ được gồm chữ, số, gạch dưới và gạch ngang.');
+    }
+    if (streamName === camera.streamName) return this.getCameraAqpStreamKey(camera.id, user);
+    return this.runWithAqpCameraAndStreamNameLocks(camera.id, streamName, async (lease) => {
+      if (await this.livestreamRepository.hasCameraRecordings(camera.id)) {
+        throw new ConflictException('Không thể đổi tên stream sau khi camera đã có bản ghi.');
+      }
+      if (await this.livestreamRepository.isCameraStreamNameTaken(streamName, camera.id)) {
+        throw new ConflictException('Tên stream này đã được camera khác sử dụng.');
+      }
+
+      let streamKeyId = camera.aqpStreamKeyId;
+      if (streamKeyId) {
+        const linkedStreamKeyId = streamKeyId;
+        let current: AqvisionAgencyStreamKey | null;
+        try {
+          current = await this.aqvisionAgencyApiClient.getStreamKey(linkedStreamKeyId);
+          this.assertAqpCameraKeyMatches(camera.streamName, current);
+        } catch (error) {
+          if (error instanceof AqvisionAgencyApiException && error.httpStatus === 404) {
+            await this.saveAqpStreamKeyId(camera.id, null, lease);
+            streamKeyId = null;
+            current = null;
+          } else {
+            throw this.toAqpServiceUnavailable(error);
+          }
+        }
+
+        if (current) {
+          if (current.push) await this.revokeAqpProviderStreamKey(linkedStreamKeyId, lease);
+          let renamed: AqvisionAgencyStreamKey;
+          this.assertAqpLeaseOwned(lease);
+          try {
+            renamed = await this.aqvisionAgencyApiClient.updateStreamKey(
+              linkedStreamKeyId,
+              { stream: streamName },
+              'PATCH',
+            );
+          } catch (error) {
+            if (error instanceof AqvisionAgencyApiException && error.httpStatus === 409) {
+              throw new ConflictException('AQP không cho đổi tên stream có bản ghi.');
+            }
+            if (!(error instanceof AqvisionAgencyApiException) || !error.mayHaveApplied) {
+              throw this.toAqpServiceUnavailable(error);
+            }
+            try {
+              renamed = await this.aqvisionAgencyApiClient.getStreamKey(linkedStreamKeyId);
+            } catch (reconcileError) {
+              throw this.toAqpServiceUnavailable(reconcileError);
+            }
+            if (renamed.stream !== streamName) {
+              throw new ServiceUnavailableException(
+                'Chưa xác định được kết quả đổi tên trên AQP; tải lại trước khi thử tiếp.',
+              );
+            }
+          }
+          this.assertAqpCameraKeyMatches(streamName, renamed);
+          if (renamed.push) {
+            throw new ServiceUnavailableException('AQP chưa giữ key ở trạng thái thu hồi sau đổi tên.');
+          }
+        }
+      }
+
+      this.assertAqpLeaseOwned(lease);
+      const playbackUrl = this.buildAqvisionHlsUrl(streamName);
+      const updated = await this.livestreamRepository.updateCameraStreamName(
+        camera.id,
+        streamName,
+        playbackUrl,
+      );
+      if (!updated) throw new NotFoundException('Camera không tồn tại');
+      const renamedCamera = { ...camera, streamName };
+      if (!streamKeyId) return this.toAqpCameraStreamKeyResponse(renamedCamera, null);
+
+      const key = await this.ensureCameraAqpStreamKey(
+        { ...renamedCamera, aqpStreamKeyId: streamKeyId },
+        lease,
+      );
+      return this.toAqpCameraStreamKeyResponse(renamedCamera, key);
+    });
+  }
+
+  async revokeCameraAqpStreamKey(cameraId: string, user: JwtPayload) {
+    const camera = await this.getPushCamera(cameraId, user);
+    const streamKeyId = camera.aqpStreamKeyId;
+    if (!streamKeyId) {
+      return { cameraId: camera.id, keyRevoked: false, disconnected: true };
+    }
+
+    return this.runWithAqpCameraLock(camera.id, async (lease) => {
+      const result = await this.revokeAqpProviderStreamKey(streamKeyId, lease);
+      return { cameraId: camera.id, ...result };
+    });
+  }
+
+  private async ensureCameraAqpStreamKey(
+    camera: AqpStreamKeyCamera,
+    lease: CameraLeaseHandle,
+  ): Promise<AqvisionAgencyStreamKey> {
+    let existingId = camera.aqpStreamKeyId;
+    if (existingId) {
+      try {
+        const current = await this.aqvisionAgencyApiClient.getStreamKey(existingId);
+        this.assertAqpCameraKeyMatches(camera.streamName, current);
+        this.assertAqpLeaseOwned(lease);
+        if (current.push) return current;
+      } catch (error) {
+        if (!(error instanceof AqvisionAgencyApiException) || error.httpStatus !== 404) {
+          throw this.toAqpServiceUnavailable(error);
+        }
+        await this.saveAqpStreamKeyId(camera.id, null, lease);
+        existingId = null;
+      }
+    }
+
+    if (!existingId) {
+      const discovered = await this.findAqpStreamKey(camera.streamName);
+      this.assertAqpLeaseOwned(lease);
+      if (discovered?.push) {
+        await this.saveAqpStreamKeyId(camera.id, discovered.id, lease);
+        return discovered;
+      }
+      if (discovered) existingId = discovered.id;
+    }
+
+    this.assertAqpLeaseOwned(lease);
+    let key: AqvisionAgencyStreamKey;
+    try {
+      key = await this.aqvisionAgencyApiClient.createStreamKey({
+        app: 'live',
+        stream: camera.streamName,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof AqvisionAgencyApiException) ||
+        (error.httpStatus !== 409 && !error.mayHaveApplied)
+      ) {
+        throw this.toAqpServiceUnavailable(error);
+      }
+      key = await this.reconcileAqpStreamKey(camera.streamName);
+    }
+
+    this.assertAqpCameraKeyMatches(camera.streamName, key);
+    if (!key.push) {
+      throw new ServiceUnavailableException('AQP chưa trả cấu hình RTMP cho stream key.');
+    }
+    await this.saveAqpStreamKeyId(camera.id, key.id, lease);
+    return key;
+  }
+
+  private async findAqpStreamKey(streamName: string): Promise<AqvisionAgencyStreamKey | null> {
+    try {
+      const keys = await this.aqvisionAgencyApiClient.listStreamKeys();
+      const existing = keys.find((key) => key.app === 'live' && key.stream === streamName);
+      return existing ? await this.aqvisionAgencyApiClient.getStreamKey(existing.id) : null;
+    } catch (error) {
+      throw this.toAqpServiceUnavailable(error);
+    }
+  }
+
+  private async reconcileAqpStreamKey(streamName: string): Promise<AqvisionAgencyStreamKey> {
+    const existing = await this.findAqpStreamKey(streamName);
+    if (!existing) {
+      throw new ServiceUnavailableException(
+        'AQP chưa xác nhận kết quả tạo stream key; tải lại trước khi thử lại.',
+      );
+    }
+    return existing;
+  }
+
+  private async saveAqpStreamKeyId(
+    cameraId: string,
+    streamKeyId: string | null,
+    lease: CameraLeaseHandle,
+  ): Promise<void> {
+    this.assertAqpLeaseOwned(lease);
+    const saved = await this.livestreamRepository.setAqpStreamKeyId(cameraId, streamKeyId);
+    if (!saved) throw new NotFoundException('Camera không tồn tại');
+    this.assertAqpLeaseOwned(lease);
+  }
+  private async revokeAqpProviderStreamKey(
+    streamKeyId: string,
+    lease: CameraLeaseHandle,
+  ): Promise<AqvisionAgencyDeleteResult> {
+    const deleteKey = async (): Promise<AqvisionAgencyDeleteResult> => {
+      try {
+        return await this.aqvisionAgencyApiClient.deleteStreamKey(streamKeyId);
+      } catch (error) {
+        if (error instanceof AqvisionAgencyApiException && error.httpStatus === 404) {
+          return { keyRevoked: true, disconnected: true };
+        }
+        throw this.toAqpServiceUnavailable(error);
+      }
+    };
+    this.assertAqpLeaseOwned(lease);
+    let result = await deleteKey();
+    if (result.keyRevoked && !result.disconnected) {
+      this.assertAqpLeaseOwned(lease);
+      result = await deleteKey();
+    }
+    if (!result.keyRevoked || !result.disconnected) {
+      throw new ServiceUnavailableException(
+        'AQP chưa xác nhận đã thu hồi key và ngắt publisher; key vẫn được liên kết để thử lại.',
+      );
+    }
+    this.assertAqpLeaseOwned(lease);
+    return result;
+  }
+
+
+
+  private async runWithAqpCameraAndStreamNameLocks<T>(
+    cameraId: string,
+    streamName: string,
+    operation: (lease: CameraLeaseHandle) => Promise<T>,
+  ): Promise<T> {
+    return this.runWithAqpStreamNameLock(cameraId, streamName, (nameLease) =>
+      this.runWithAqpCameraLock(cameraId, (cameraLease) =>
+        operation({
+          cameraId,
+          isOwned: () => nameLease.isOwned() && cameraLease.isOwned(),
+        }),
+      ),
+    );
+  }
+  private async runWithAqpCameraLock<T>(
+    cameraId: string,
+    operation: (lease: CameraLeaseHandle) => Promise<T>,
+  ): Promise<T> {
+    const result = await this.livestreamHealthQueue.runWithCameraLock(cameraId, operation);
+    if (result === null) {
+      throw new ServiceUnavailableException('Camera đang được xử lý; vui lòng thử lại.');
+    }
+    return result;
+  }
+
+  private async runWithAqpStreamNameLock<T>(
+    cameraId: string,
+    streamName: string,
+    operation: (lease: CameraLeaseHandle) => Promise<T>,
+  ): Promise<T> {
+    const result = await this.livestreamHealthQueue.runWithStreamNameLock(
+      cameraId,
+      streamName,
+      operation,
+    );
+    if (result === null) {
+      throw new ServiceUnavailableException('Tên stream đang được xử lý; vui lòng thử lại.');
+    }
+    return result;
+  }
+
+  private assertAqpLeaseOwned(lease: CameraLeaseHandle): void {
+    if (!lease.isOwned()) {
+      throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+    }
+  }
+
+  private assertAqpCameraKeyMatches(
+    streamName: string,
+    key: AqvisionAgencyStreamKey,
+  ): void {
+    if (key.app !== 'live' || key.stream !== streamName) {
+      throw new ServiceUnavailableException('Stream key AQP không khớp với camera.');
+    }
+  }
+
+  private toAqpCameraStreamKeyResponse(
+    camera: AqpStreamKeyCamera,
+    key: AqvisionAgencyStreamKey | null,
+  ): AqpCameraStreamKeyResponse {
+    const push = key?.push ?? null;
+    let qrPayload: AqpCameraStreamKeyResponse['qrPayload'] = null;
+    let qrPayloadString: string | null = null;
+    let rtmp: AqpCameraStreamKeyResponse['rtmp'] = null;
+
+    if (push) {
+      const server = push.rtmpServer.replace(/\/+$/, '');
+      const streamKey = push.streamKey.replace(/^\/+/, '');
+      let url: URL;
+      try {
+        url = new URL(`${server}/${streamKey}`);
+      } catch {
+        throw new ServiceUnavailableException('AQP trả về URL RTMP không hợp lệ.');
+      }
+      if (url.protocol !== 'rtmp:' || url.username || url.password || url.hash) {
+        throw new ServiceUnavailableException('AQP trả về URL RTMP không hợp lệ.');
+      }
+      qrPayload = {
+        stream_url: `${server}/${streamKey}`,
+        match_id: camera.streamName,
+        match_title: camera.name,
+        protocol: 'rtmp',
+        auto_start: false,
+      };
+      qrPayloadString = JSON.stringify(qrPayload);
+      rtmp = { server: push.rtmpServer, streamKey: push.streamKey };
+    }
+
+    return {
+      camera: { id: camera.id, name: camera.name, streamName: camera.streamName },
+      streamKeyId: key?.id ?? null,
+      status: key?.status ?? null,
+      qrPayload,
+      qrPayloadString,
+      rtmp,
+    };
+  }
+
+  private toAqpServiceUnavailable(error: unknown): ServiceUnavailableException {
+    if (error instanceof ServiceUnavailableException) return error;
+    if (error instanceof AqvisionAgencyApiException) {
+      return new ServiceUnavailableException(error.message);
+    }
+    return new ServiceUnavailableException('Agency API hiện không khả dụng.');
   }
 
   /** Vi phạm unique index của Postgres (SQLSTATE 23505). */
@@ -928,6 +1385,9 @@ export class LivestreamService {
         await this.stopAqvisionPull(camera.pullProxyKey);
         if (!lease.isOwned()) {
           throw new ServiceUnavailableException('Đã mất quyền xử lý camera.');
+        }
+        if (camera.aqpStreamKeyId) {
+          await this.revokeAqpProviderStreamKey(camera.aqpStreamKeyId, lease);
         }
 
         const archived = await this.livestreamRepository.deleteCamera(cameraId);

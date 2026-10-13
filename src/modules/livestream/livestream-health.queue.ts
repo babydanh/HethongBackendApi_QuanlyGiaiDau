@@ -35,20 +35,20 @@ export interface CameraLeaseHandle {
 }
 
 /**
- * Queue sức khoẻ livestream: sweep 30s hiện có + job xác nhận
- * offline 60s + khoá phân tán theo camera.
+ * Queue sức khoẻ livestream: sweep 30s hiện có, job xác nhận
+ * offline 60s, và lease phân tán theo camera hoặc tên stream.
  *
- * Mọi provider read/side effect cho cùng một camera phải chạy
- * dưới `runWithCameraLock` để được tuần tự hoá qua request API,
- * sweep và job xác nhận. Lease dùng owner token (SET NX PX),
- * gia hạn token-checked mỗi 10s và release compare-and-delete;
- * chỉ bên giữ lease mới được gọi provider.
+ * `runWithCameraLock` tuần tự hoá thao tác một camera qua API,
+ * sweep và job xác nhận. `runWithStreamNameLock` bảo vệ tên đích
+ * duy nhất toàn cục trong suốt luồng đổi tên. Lease dùng owner token
+ * (SET NX PX), gia hạn mỗi 10s và release compare-and-delete; chỉ
+ * bên đang giữ lease mới được tiếp tục side effect.
  */
 @Injectable()
 export class LivestreamHealthQueue implements OnModuleInit {
   private readonly logger = new Logger(LivestreamHealthQueue.name);
-  /** Lease đang giữ trong tiến trình này, để operation kiểm tra quyền sở hữu giữa các bước. */
-  private readonly cameraLeases = new Map<string, CameraLease>();
+  /** Lease đang giữ, được lập chỉ mục theo khóa Redis của từng tài nguyên. */
+  private readonly resourceLeases = new Map<string, CameraLease>();
 
   constructor(
     @InjectQueue('livestream-health')
@@ -89,24 +89,40 @@ export class LivestreamHealthQueue implements OnModuleInit {
     cameraId: string,
     operation: (lease: CameraLeaseHandle) => Promise<T>,
   ): Promise<T | null> {
-    const key = `livestream:camera-lock:${cameraId}`;
+    return this.runWithLease(`livestream:camera-lock:${cameraId}`, cameraId, operation);
+  }
+
+  /** Khoá tên stream chung giữa các camera và backend instances. */
+  async runWithStreamNameLock<T>(
+    cameraId: string,
+    streamName: string,
+    operation: (lease: CameraLeaseHandle) => Promise<T>,
+  ): Promise<T | null> {
+    return this.runWithLease(
+      `livestream:stream-name-lock:${streamName}`,
+      cameraId,
+      operation,
+    );
+  }
+
+  private async runWithLease<T>(
+    key: string,
+    cameraId: string,
+    operation: (lease: CameraLeaseHandle) => Promise<T>,
+  ): Promise<T | null> {
     const token = randomUUID();
     const client = this.redisService.getClient();
 
     const acquired = await client.set(key, token, 'PX', CAMERA_LOCK_TTL_MS, 'NX');
-    if (acquired !== 'OK') {
-      return null;
-    }
+    if (acquired !== 'OK') return null;
 
     const lease: CameraLease = { token, lost: false };
-    this.cameraLeases.set(cameraId, lease);
+    this.resourceLeases.set(key, lease);
     const leaseHandle: CameraLeaseHandle = {
       cameraId,
-      isOwned: () =>
-        !lease.lost && this.cameraLeases.get(cameraId) === lease,
+      isOwned: () => !lease.lost && this.resourceLeases.get(key) === lease,
     };
 
-    let renewTimer: ReturnType<typeof setInterval> | undefined;
     let signalLeaseLost: (() => void) | undefined;
     const leaseLost = new Promise<void>((resolve) => {
       signalLeaseLost = resolve;
@@ -116,14 +132,14 @@ export class LivestreamHealthQueue implements OnModuleInit {
       if (lease.lost) return;
       lease.lost = true;
       clearInterval(renewTimer);
-      if (this.cameraLeases.get(cameraId) === lease) {
-        this.cameraLeases.delete(cameraId);
+      if (this.resourceLeases.get(key) === lease) {
+        this.resourceLeases.delete(key);
       }
-      this.logger.warn(`Camera lock lost during operation: camera=${cameraId}`);
+      this.logger.warn(`Resource lock lost during operation: camera=${cameraId}`);
       signalLeaseLost?.();
     };
 
-    renewTimer = setInterval(() => {
+    const renewTimer = setInterval(() => {
       void (async () => {
         try {
           const renewed = await client.eval(
@@ -153,11 +169,11 @@ export class LivestreamHealthQueue implements OnModuleInit {
           await client.eval(RELEASE_CAMERA_LOCK_SCRIPT, 1, key, token);
         } catch {
           // Lease hết hạn là lưới an toàn; không fail operation vì cleanup.
-          this.logger.debug(`Camera lock release skipped: camera=${cameraId}`);
+          this.logger.debug(`Resource lock release skipped: camera=${cameraId}`);
         }
       }
-      if (this.cameraLeases.get(cameraId) === lease) {
-        this.cameraLeases.delete(cameraId);
+      if (this.resourceLeases.get(key) === lease) {
+        this.resourceLeases.delete(key);
       }
     }
   }

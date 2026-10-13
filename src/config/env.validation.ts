@@ -87,6 +87,10 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .default('https://api.media.aqvision.net'),
   AQVISION_API_SECRET: Joi.string().allow('').optional().default(''),
+  AQVISION_AGENCY_BASE_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .default('https://media.aqvision.net'),
+  AQVISION_AGENCY_SECRET: Joi.string().allow('').optional().default(''),
   AQVISION_API_TIMEOUT_SECONDS: Joi.number()
     .integer()
     .min(1)
@@ -134,11 +138,6 @@ export const envValidationSchema = Joi.object({
     .max(65535)
     .allow('')
     .optional(),
-  // Cổng Agency Gateway (:3003) + Agency ID — dùng cho luồng đăng ký camera và JWT.
-  AQVISION_GATEWAY_URL: Joi.string()
-    .uri()
-    .optional()
-    .default('http://aqvision.net:3003/api/v1'),
   AQVISION_AGENCY_ID: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_ID: Joi.string().allow('').optional().default(''),
   FACEBOOK_APP_SECRET: Joi.string().allow('').optional().default(''),

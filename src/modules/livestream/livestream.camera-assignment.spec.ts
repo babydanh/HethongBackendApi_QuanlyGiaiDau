@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import type { AqvisionAgencyApiClient } from './aqvision-agency-api.client';
 import { AqvisionApiClient } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -63,6 +64,7 @@ function makeService(overrides: Record<string, unknown> = {}) {
     {} as unknown as AqvisionRecordingService,
     {} as unknown as LivestreamHealthQueue,
     {} as LivestreamCameraSourceCryptoService,
+    {} as AqvisionAgencyApiClient,
   );
   return { repository, service };
 }
@@ -117,6 +119,7 @@ describe('LivestreamService camera projection', () => {
       playbackUrl: 'https://media.example.com/hls/cam1/index.m3u8',
       // PULL has no ingest: the broadcaster publishes elsewhere.
       ingest: null,
+      hasAqpStreamKey: false,
       createdAt: new Date('2026-10-01T00:00:00.000Z'),
       updatedAt: new Date('2026-10-01T00:00:00.000Z'),
     });

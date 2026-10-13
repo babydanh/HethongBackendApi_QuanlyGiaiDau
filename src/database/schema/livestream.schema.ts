@@ -37,6 +37,8 @@ export const livestreamCameras = pgTable(
     // bị xoá. KHÔNG trả ra API công khai — cùng nhóm với `stream_key` và các cột
     // `*_encrypted`.
     pullProxyKey: varchar('pull_proxy_key', { length: 255 }),
+    // Mã AQP Agency của stream-key đã liên kết; không lưu push key hoặc URL có key.
+    aqpStreamKeyId: varchar('aqp_stream_key_id', { length: 255 }),
     rtspUrlEncrypted: text('rtsp_url_encrypted'),
     usernameEncrypted: text('username_encrypted'),
     passwordEncrypted: text('password_encrypted'),
@@ -47,6 +49,9 @@ export const livestreamCameras = pgTable(
   },
   (table) => ({
     uniqueStreamName: uniqueIndex('livestream_cameras_stream_name_unique_idx').on(table.streamName),
+    uniqueAqpStreamKeyId: uniqueIndex('livestream_cameras_aqp_stream_key_id_unique_idx').on(
+      table.aqpStreamKeyId,
+    ),
     idxLivestreamCamerasCourt: index('idx_livestream_cameras_court').on(table.courtId),
     idxLivestreamCamerasTournament: index('idx_livestream_cameras_tournament').on(table.tournamentId),
   }),

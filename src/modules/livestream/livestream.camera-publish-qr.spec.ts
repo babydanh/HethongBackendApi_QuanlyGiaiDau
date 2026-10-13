@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import type { AqvisionAgencyApiClient } from './aqvision-agency-api.client';
 import type { ConfigService } from '@nestjs/config';
 import { AqvisionApiClient } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
@@ -66,6 +67,8 @@ function makeService(options: {
   env?: Record<string, string>;
   isStaff?: boolean;
   onRotate?: jest.Mock;
+  agencyClient?: Partial<AqvisionAgencyApiClient>;
+  nameLockBusy?: boolean;
 } = {}) {
   const camera = options.camera === undefined ? pushCamera : options.camera;
   const env = options.env ?? PUSH_ENV;
@@ -77,11 +80,34 @@ function makeService(options: {
     findCameraById: jest.fn().mockResolvedValue(camera),
     updateCameraStreamIdentity:
       options.onRotate ??
-      jest.fn(async (id: string, values: Record<string, string>) => ({
-        ...pushCamera,
-        id,
-        ...values,
-      })),
+      jest.fn((id: string, values: Record<string, string>) =>
+        Promise.resolve({
+          ...pushCamera,
+          id,
+          ...values,
+        }),
+      ),
+    isCameraStreamNameTaken: jest.fn().mockResolvedValue(false),
+    setAqpStreamKeyId: jest.fn().mockResolvedValue(true),
+  };
+  const lockOrder: string[] = [];
+  const healthQueue = {
+    runWithCameraLock: async (
+      cameraId: string,
+      operation: (lease: { cameraId: string; isOwned: () => boolean }) => Promise<unknown>,
+    ) => {
+      lockOrder.push('camera');
+      return operation({ cameraId, isOwned: () => true });
+    },
+    runWithStreamNameLock: (
+      cameraId: string,
+      _streamName: string,
+      operation: (lease: { cameraId: string; isOwned: () => boolean }) => Promise<unknown>,
+    ) => {
+      lockOrder.push('name');
+      if (options.nameLockBusy) return null;
+      return operation({ cameraId, isOwned: () => true });
+    },
   };
   const service = new LivestreamService(
     repo as unknown as LivestreamRepository,
@@ -91,10 +117,11 @@ function makeService(options: {
     } as unknown as ConfigService),
     {} as AqvisionApiClient,
     {} as unknown as AqvisionRecordingService,
-    {} as unknown as LivestreamHealthQueue,
+    healthQueue as unknown as LivestreamHealthQueue,
     {} as LivestreamCameraSourceCryptoService,
+    (options.agencyClient ?? {}) as AqvisionAgencyApiClient,
   );
-  return { repo, service };
+  return { repo, service, lockOrder };
 }
 
 /**
@@ -213,9 +240,8 @@ describe('LivestreamService camera publish QR', () => {
 });
 
 /**
- * Nút "Cấp lại stream key" của pipeline SportO. Lưu ý: đây là key NỘI BỘ
- * (cột `livestream_cameras`), KHÔNG phải publish_key của AQP — key AQP do AQP
- * cấp và rotate ở panel AQP.
+ * Route cũ chỉ xoay identity nội bộ cho camera chưa liên kết AQP; với camera
+ * đã liên kết, route phải từ chối để caller dùng API AQP mà không lệch state.
  */
 describe('LivestreamService rotate stream key', () => {
   it('sinh streamName/streamKey mới, giữ nguyên id và trả publish info mới', async () => {
@@ -248,6 +274,31 @@ describe('LivestreamService rotate stream key', () => {
     const [, values] = repo.updateCameraStreamIdentity.mock.calls[0];
     expect(values.streamName).not.toBe(pushCamera.streamName);
   });
+  it('tên đích đang dùng ⇒ thử tên khác trước khi ghi', async () => {
+    const { repo, service } = makeService();
+    repo.isCameraStreamNameTaken
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const result = await service.rotateCameraStreamKey('camera-push-1', owner);
+
+    expect(repo.isCameraStreamNameTaken).toHaveBeenCalledTimes(2);
+    expect(repo.updateCameraStreamIdentity).toHaveBeenCalledTimes(1);
+    expect(result.streamName).toBe(
+      repo.updateCameraStreamIdentity.mock.calls[0][1].streamName,
+    );
+  });
+
+  it('khóa tên bận ⇒ không xoay identity local', async () => {
+    const { repo, service, lockOrder } = makeService({ nameLockBusy: true });
+
+    await expect(
+      service.rotateCameraStreamKey('camera-push-1', owner),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(lockOrder).toEqual(['name']);
+    expect(repo.updateCameraStreamIdentity).not.toHaveBeenCalled();
+  });
 
   it('trùng unique index streamName ⇒ thử lại rồi mới thành công', async () => {
     const onRotate = jest
@@ -255,11 +306,13 @@ describe('LivestreamService rotate stream key', () => {
       .mockRejectedValueOnce(
         Object.assign(new Error('duplicate key value'), { code: '23505' }),
       )
-      .mockImplementation(async (id: string, values: Record<string, string>) => ({
-        ...pushCamera,
-        id,
-        ...values,
-      }));
+      .mockImplementation((id: string, values: Record<string, string>) =>
+        Promise.resolve({
+          ...pushCamera,
+          id,
+          ...values,
+        }),
+      );
     const { repo, service } = makeService({ onRotate });
 
     const result = await service.rotateCameraStreamKey('camera-push-1', owner);
@@ -285,5 +338,42 @@ describe('LivestreamService rotate stream key', () => {
     await expect(
       service.rotateCameraStreamKey('camera-push-1', stranger),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+  it('route rotate v1 xoay key AQP và trả push credential giữ nguyên identity', async () => {
+    const linkedCamera = { ...pushCamera, aqpStreamKeyId: 'aqp-key-1' };
+    const currentKey = {
+      id: 'aqp-key-1',
+      app: 'live',
+      stream: linkedCamera.streamName,
+      status: 'Offline',
+      push: { rtmpServer: 'rtmp://push.example/live', streamKey: 'old-secret' },
+    };
+    const rotatedKey = {
+      ...currentKey,
+      push: { rtmpServer: 'rtmp://push.example/live', streamKey: 'rotated-secret' },
+    };
+    const agencyClient = {
+      getStreamKey: jest.fn().mockResolvedValue(currentKey),
+      rotateStreamKey: jest.fn().mockResolvedValue(rotatedKey),
+    };
+    const { repo, service, lockOrder } = makeService({
+      camera: linkedCamera,
+      agencyClient,
+    });
+    repo.findCameraById
+      .mockReset()
+      .mockResolvedValueOnce(pushCamera)
+      .mockResolvedValueOnce(linkedCamera);
+
+    const result = await service.rotateCameraStreamKey(linkedCamera.id, owner);
+    expect(lockOrder).toEqual(['name', 'camera']);
+
+    expect(agencyClient.rotateStreamKey).toHaveBeenCalledWith('aqp-key-1');
+    expect(repo.updateCameraStreamIdentity).not.toHaveBeenCalled();
+    expect(result.streamName).toBe(linkedCamera.streamName);
+    expect(result.publish).toMatchObject({
+      rtmpServer: 'rtmp://push.example/live',
+      streamKey: 'rotated-secret',
+    });
   });
 });

@@ -17,25 +17,35 @@ export class GoogleAuthGuard extends AuthGuard('google') {
     const response = http.getResponse<Response>();
 
     if (err || !user) {
-      const query = request.query as Record<string, unknown>;
-      const errorMessage = err?.message || err?.name || 'unknown';
-      const infoMessage =
-        typeof info === 'string'
-          ? info
-          : info && typeof info.message === 'string'
-            ? info.message
-            : undefined;
+      const error =
+        typeof err === 'object' && err !== null
+          ? (err as {
+              name?: unknown;
+              code?: unknown;
+              cause?: { code?: unknown };
+            })
+          : undefined;
+      const errorCode = [error?.code, error?.cause?.code].find(
+        (code): code is string =>
+          typeof code === 'string' && /^[A-Z0-9]{5}$/.test(code),
+      );
+      const rawMsg =
+        error && 'message' in error && typeof error.message === 'string'
+          ? error.message
+          : typeof info === 'string'
+            ? info
+            : info && typeof info.message === 'string'
+              ? info.message
+              : typeof request.query?.error === 'string'
+                ? request.query.error
+                : '';
 
-      this.logger.error('Google OAuth error in guard:', {
-        err: errorMessage,
-        info: infoMessage,
-        hasCode: typeof query.code === 'string' && query.code.length > 0,
-        providerError:
-          typeof query.error === 'string' ? query.error : undefined,
-        providerErrorDescription:
-          typeof query.error_description === 'string'
-            ? query.error_description
-            : undefined,
+      this.logger.error('Google OAuth authentication failed', {
+        errorName: typeof error?.name === 'string' ? error.name : undefined,
+        errorCode,
+        hasCode:
+          typeof request.query.code === 'string' &&
+          request.query.code.length > 0,
         path: request.path,
       });
 
@@ -44,20 +54,13 @@ export class GoogleAuthGuard extends AuthGuard('google') {
           this.configService.get<string>('FRONTEND_URL') ||
           this.configService.get<string>('auth.frontendUrl') ||
           'https://sporto.asia';
-
-        const rawMsg =
-          err?.message ||
-          (typeof info === 'object' ? info?.message : info) ||
-          (typeof request.query?.error === 'string' ? request.query.error : '') ||
-          '';
-
-        let errorMessage = 'Đăng nhập Google không thành công. Vui lòng thử lại.';
+        let errorMessage =
+          'Đăng nhập Google không thành công. Vui lòng thử lại.';
         if (rawMsg.includes('access_denied')) {
           errorMessage = 'Bạn đã hủy đăng nhập Google.';
         } else if (rawMsg.includes('redirect_uri_mismatch')) {
-          errorMessage = 'Lỗi cấu hình Redirect URI trên Google Cloud Console.';
-        } else if (rawMsg) {
-          errorMessage = `Lỗi xác thực Google: ${rawMsg}`;
+          errorMessage =
+            'Lỗi cấu hình Redirect URI trên Google Cloud Console.';
         }
 
         response.redirect(
@@ -65,7 +68,7 @@ export class GoogleAuthGuard extends AuthGuard('google') {
         );
       }
       // Throw exception to stop NestJS from continuing to controller and causing ERR_HTTP_HEADERS_SENT
-      throw new UnauthorizedException(err?.message || 'Google OAuth failed');
+      throw new UnauthorizedException('Google OAuth failed');
     }
     return user;
   }

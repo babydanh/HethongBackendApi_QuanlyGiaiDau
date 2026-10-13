@@ -1,16 +1,20 @@
+import { ExecutionContext, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { GoogleAuthGuard } from './google-auth.guard';
 
 describe('GoogleAuthGuard', () => {
-  it('does not log the OAuth authorization code on callback failure', () => {
+  it('hides database query details from the OAuth redirect and logs only the SQLSTATE', () => {
     const configService = {
       get: jest.fn().mockReturnValue('https://sporto.asia'),
     } as unknown as ConfigService;
     const guard = new GoogleAuthGuard(configService);
     const loggerError = jest
-      .spyOn((guard as any).logger, 'error')
+      .spyOn(Reflect.get(guard, 'logger') as Logger, 'error')
       .mockImplementation(() => undefined);
+    const sqlError = Object.assign(
+      new Error('Failed query: select * from auth_providers; params: GOOGLE, private-provider-id'),
+      { code: '42P01' },
+    );
     const request = {
       query: { code: 'one-time-secret-code', scope: 'email' },
       path: '/api/v1/auth/google/callback',
@@ -27,7 +31,7 @@ describe('GoogleAuthGuard', () => {
       }),
     } as unknown as ExecutionContext;
 
-    expect(() => guard.handleRequest(null, false, undefined, context)).toThrow(
+    expect(() => guard.handleRequest(sqlError, false, undefined, context)).toThrow(
       UnauthorizedException,
     );
 
@@ -41,5 +45,12 @@ describe('GoogleAuthGuard', () => {
     });
     expect(loggedDetails).not.toHaveProperty('query');
     expect(JSON.stringify(loggedDetails)).not.toContain('one-time-secret-code');
+    const redirectUrl = (response.redirect as jest.Mock).mock.calls[0][0] as string;
+    expect(redirectUrl).not.toContain('Failed query');
+    expect(redirectUrl).not.toContain('private-provider-id');
+    expect(JSON.stringify(loggedDetails)).not.toContain('private-provider-id');
+    expect(loggedDetails).toMatchObject({
+      errorCode: '42P01',
+    });
   });
 });

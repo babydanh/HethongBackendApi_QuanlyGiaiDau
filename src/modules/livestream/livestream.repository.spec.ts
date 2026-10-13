@@ -68,6 +68,29 @@ describe('LivestreamRepository camera recording targets', () => {
   });
 });
 
+describe('LivestreamRepository stream-name uniqueness', () => {
+  it('checks archived cameras because the database unique index is global', async () => {
+    const query = {
+      from: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue([{ id: 'archived-camera' }]),
+    };
+    const repository = new LivestreamRepository({
+      select: jest.fn().mockReturnValue(query),
+    } as never);
+
+    await expect(
+      repository.isCameraStreamNameTaken('camera_new', 'camera-current'),
+    ).resolves.toBe(true);
+
+    const predicate = new PgDialect().sqlToQuery(query.where.mock.calls[0][0] as SQL);
+    expect(predicate.sql).toContain('"stream_name" = $1');
+    expect(predicate.sql).toContain('"id" <> $2');
+    expect(predicate.sql).not.toMatch(/deleted_at/i);
+    expect(predicate.params).toEqual(['camera_new', 'camera-current']);
+  });
+});
+
 describe('LivestreamRepository camera-guarded stream updates', () => {
   it('conditions a LIVE transition on the expected camera assignment', async () => {
     const query = {

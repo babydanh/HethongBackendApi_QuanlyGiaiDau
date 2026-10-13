@@ -7,6 +7,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  ne,
   sql,
 } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../database/database.module';
@@ -91,6 +92,7 @@ export class LivestreamRepository {
         playbackUrl: schema.livestreamCameras.playbackUrl,
         createdAt: schema.livestreamCameras.createdAt,
         updatedAt: schema.livestreamCameras.updatedAt,
+        aqpStreamKeyId: schema.livestreamCameras.aqpStreamKeyId,
       })
       .from(schema.livestreamCameras)
       .where(
@@ -333,6 +335,76 @@ export class LivestreamRepository {
 
     return camera ?? null;
   }
+
+  async setAqpStreamKeyId(cameraId: string, aqpStreamKeyId: string | null): Promise<boolean> {
+    const [camera] = await this.db
+      .update(schema.livestreamCameras)
+      .set({ aqpStreamKeyId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.livestreamCameras.id, cameraId),
+          isNull(schema.livestreamCameras.deletedAt),
+        ),
+      )
+      .returning({ id: schema.livestreamCameras.id });
+
+    return Boolean(camera);
+  }
+  async hasCameraRecordings(cameraId: string): Promise<boolean> {
+    const [recording] = await this.db
+      .select({ id: schema.matchLivestreams.id })
+      .from(schema.matchLivestreams)
+      .where(
+        and(
+          eq(schema.matchLivestreams.cameraId, cameraId),
+          isNotNull(schema.matchLivestreams.recordingUrl),
+        ),
+      )
+      .limit(1);
+    return Boolean(recording);
+  }
+
+  async isCameraStreamNameTaken(streamName: string, cameraId: string): Promise<boolean> {
+    const [camera] = await this.db
+      .select({ id: schema.livestreamCameras.id })
+      .from(schema.livestreamCameras)
+      .where(
+        and(
+          eq(schema.livestreamCameras.streamName, streamName),
+          ne(schema.livestreamCameras.id, cameraId),
+        ),
+      )
+      .limit(1);
+    return Boolean(camera);
+  }
+
+  async updateCameraStreamName(cameraId: string, streamName: string, playbackUrl: string) {
+    return this.db.transaction(async (tx) => {
+      const [camera] = await tx
+        .update(schema.livestreamCameras)
+        .set({ streamName, playbackUrl, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.livestreamCameras.id, cameraId),
+            isNull(schema.livestreamCameras.deletedAt),
+          ),
+        )
+        .returning();
+      if (!camera) return null;
+
+      await tx
+        .update(schema.matchLivestreams)
+        .set({ playbackUrl, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.matchLivestreams.cameraId, cameraId),
+            eq(schema.matchLivestreams.streamStatus, 'LIVE'),
+          ),
+        );
+      return camera;
+    });
+  }
+
 
   /** Ghi trạng thái phát hiện được từ media server (IDLE / LIVE / OFFLINE). */
   async updateCameraStatus(cameraId: string, status: string) {

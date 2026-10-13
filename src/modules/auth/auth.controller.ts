@@ -9,6 +9,8 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  HttpException,
+  Logger,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { ConfigService } from '@nestjs/config';
@@ -31,6 +33,7 @@ import { OAuthProfileDto } from './dto/oauth-profile.dto';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
@@ -230,11 +233,33 @@ export class AuthController {
       this.setTokensCookies(res, tokens.accessToken, tokens.refreshToken);
 
       res.redirect(`${frontendUrl}/auth/callback`);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorDetails =
+        error && typeof error === 'object'
+          ? (error as {
+              name?: unknown;
+              code?: unknown;
+              cause?: { code?: unknown };
+            })
+          : undefined;
+      const errorCode = [errorDetails?.code, errorDetails?.cause?.code].find(
+        (code): code is string =>
+          typeof code === 'string' && /^[A-Z0-9]{5}$/.test(code),
+      );
+      this.logger.error(
+        'Google OAuth callback failed',
+        JSON.stringify({
+          errorName:
+            errorDetails && typeof errorDetails.name === 'string'
+              ? errorDetails.name
+              : 'unknown',
+          errorCode,
+        }),
+      );
       const errorMessage =
-        error?.response?.message ||
-        error?.message ||
-        'Đăng nhập Google không thành công. Vui lòng thử lại.';
+        error instanceof HttpException
+          ? error.message
+          : 'Đăng nhập Google không thành công. Vui lòng thử lại.';
       res.redirect(
         `${frontendUrl}/login?error=${encodeURIComponent(errorMessage)}`,
       );

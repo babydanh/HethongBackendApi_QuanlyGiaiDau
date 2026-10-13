@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import type { AqvisionAgencyApiClient } from './aqvision-agency-api.client';
 import { AqvisionApiClient } from './aqvision-api.client';
 import { AqvisionPublishService } from './aqvision-publish.service';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -54,6 +55,7 @@ describe('LivestreamService camera publish info', () => {
       {} as unknown as AqvisionRecordingService,
       {} as unknown as LivestreamHealthQueue,
       {} as LivestreamCameraSourceCryptoService,
+      {} as AqvisionAgencyApiClient,
     );
     return { repository, service };
   }
@@ -139,6 +141,7 @@ describe('LivestreamService court camera assignment', () => {
       {} as unknown as AqvisionRecordingService,
       {} as unknown as LivestreamHealthQueue,
       {} as LivestreamCameraSourceCryptoService,
+      {} as AqvisionAgencyApiClient,
     );
     return { repository, service };
   }

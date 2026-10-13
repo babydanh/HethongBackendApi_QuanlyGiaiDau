@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import * as path from 'path';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { SentryModule } from '@sentry/nestjs/setup';
@@ -56,6 +57,7 @@ import { SocialLocationsModule } from './modules/social-locations/social-locatio
     SentryModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: path.resolve(__dirname, '..', '.env'),
       load: [databaseConfig, authConfig, aiConfig],
       validationSchema: envValidationSchema,
     }),

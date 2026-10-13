@@ -13,6 +13,9 @@ const CONFIRMATION_JOB_ID_PREFIX = 'livestream-camera-offline-confirmation-';
 function cameraLockKey(cameraId: string): string {
   return `livestream:camera-lock:${cameraId}`;
 }
+function streamNameLockKey(streamName: string): string {
+  return `livestream:stream-name-lock:${streamName}`;
+}
 
 function offlineConfirmationJobId(cameraId: string): string {
   return `${CONFIRMATION_JOB_ID_PREFIX}${cameraId}`;
@@ -97,7 +100,7 @@ describe('LivestreamHealthQueue — camera lock', () => {
     const { client } = makeRedisClient();
     const queue = makeQueue(client);
 
-    const result = await queue.runWithCameraLock('camera-1', async () => 'done');
+    const result = await queue.runWithCameraLock('camera-1', () => Promise.resolve('done'));
 
     expect(result).toBe('done');
     expect(client.set).toHaveBeenCalledTimes(1);
@@ -145,6 +148,41 @@ describe('LivestreamHealthQueue — camera lock', () => {
     expect(second).toBeNull();
     // Khoá theo camera tuần tự hoá side effect: operation chỉ chạy đúng 1 lần.
     expect(sideEffects).toEqual(['begin', 'end']);
+  });
+  it('same target stream name lock blocks another camera before provider work', async () => {
+    const { client } = makeRedisClient();
+    const queue = makeQueue(client);
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseFirst!: () => void;
+    const holdFirst = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = queue.runWithStreamNameLock('camera-1', 'camera_new', async () => {
+      markStarted();
+      await holdFirst;
+      return 'first';
+    });
+    await started;
+    const secondOperation = jest.fn(() => Promise.resolve('second'));
+
+    await expect(
+      queue.runWithStreamNameLock('camera-2', 'camera_new', secondOperation),
+    ).resolves.toBeNull();
+
+    expect(client.set).toHaveBeenCalledWith(
+      streamNameLockKey('camera_new'),
+      expect.any(String),
+      'PX',
+      LOCK_TTL_MS,
+      'NX',
+    );
+    expect(secondOperation).not.toHaveBeenCalled();
+    releaseFirst();
+    await expect(first).resolves.toBe('first');
   });
 
   it('hai operation khac camera: chay dong thoi (khoá theo camera, không toàn cục)', async () => {
