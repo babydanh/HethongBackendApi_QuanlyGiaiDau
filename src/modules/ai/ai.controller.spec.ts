@@ -17,6 +17,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { VerifiedGuard } from '../../common/guards/verified.guard';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
+import { TransformInterceptor } from '../../common/interceptors/transform.interceptor';
 import { TournamentsService } from '../tournaments/tournaments.service';
 
 const PARSE_PATH = '/api/v1/ai/parse-tournament-source';
@@ -299,6 +300,8 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-layout', () => 
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
     );
+    // Production wraps every answer in this interceptor; without it the spec would assert a shape no client ever sees.
+    app.useGlobalInterceptors(new TransformInterceptor());
     app.useGlobalGuards(
       new BearerAuthGuard(reflector),
       new RolesGuard(reflector, roleLookup as never),
@@ -400,9 +403,22 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-layout', () => 
       .send(ROSTER_BODY);
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, data: null, aiAvailable: false });
+    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: { aiAvailable: false, layout: null } });
     expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
     expect(analyzeRosterLayout).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining({ locale: 'vi' }));
+  });
+
+  it('keeps aiAvailable and the layout on the wire when the model answered', async () => {
+    const layout = { sheets: [], notes: ['đã đọc xong'] };
+    analyzeRosterLayout.mockResolvedValueOnce({ data: layout, aiAvailable: true });
+
+    const response = await request(app.getHttpServer())
+      .post(ROSTER_LAYOUT_PATH)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: { aiAvailable: true, layout } });
   });
 });
 
@@ -435,6 +451,7 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review (depreca
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
     );
+    app.useGlobalInterceptors(new TransformInterceptor());
     app.useGlobalGuards(
       new BearerAuthGuard(reflector),
       new RolesGuard(reflector, roleLookup as never),
@@ -454,7 +471,7 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review (depreca
       .send({ opaque: 'alias does not read the body' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, data: null, aiAvailable: false });
+    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: { aiAvailable: false, layout: null } });
     expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
     expect(analyzeRosterLayout).not.toHaveBeenCalled();
   });
@@ -465,7 +482,7 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-review (depreca
       .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)));
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, data: null, aiAvailable: false });
+    expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: { aiAvailable: false, layout: null } });
   });
 
   it('refuses a verified player by role before the manager check runs', async () => {

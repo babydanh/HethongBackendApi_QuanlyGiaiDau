@@ -167,7 +167,9 @@ export class AiController {
     );
     const result = await this.aiService.analyzeRosterLayout(tournamentId, dto);
 
-    return { success: true, data: result.data, aiAvailable: result.aiAvailable };
+    // Contract D-1: the flag and the layout travel together inside `data`. TransformInterceptor keeps only
+    // data/message/meta, so a sibling field such as `aiAvailable` would never reach the client.
+    return { success: true, data: { aiAvailable: result.aiAvailable, layout: result.data } };
   }
 
   /**
@@ -193,6 +195,6 @@ export class AiController {
       user.roles ?? (user.role ? [user.role] : []),
     );
 
-    return { success: true, data: null, aiAvailable: false };
+    return { success: true, data: { aiAvailable: false, layout: null } };
   }
 }
