@@ -1103,6 +1103,23 @@ describe('AiService.analyzeRosterLayout', () => {
     await expect(service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST)).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
+    // An outage is not a schema refusal: neither failure is retried.
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once without the JSON schema when the provider refuses it, then reads the plain JSON', async () => {
+    const service = createService('test-key');
+    const modelOutput = { sheets: [rosterSheet({})], notes: [] };
+    const create = attachProvider(service, `\`\`\`json\n${JSON.stringify(modelOutput)}\n\`\`\``);
+    create.mockRejectedValueOnce(providerError(400, 'sk-roster-secret'));
+
+    await expect(service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST)).resolves.toMatchObject({
+      data: { sheets: [expect.objectContaining({ sheetName: 'Danh sách thi', kind: 'ROSTER' })] },
+      aiAvailable: true,
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0][0]).toHaveProperty('response_format');
+    expect(create.mock.calls[1][0]).not.toHaveProperty('response_format');
   });
 
   it('rejects a raw email address in any cell before anything is sent', async () => {
