@@ -79,6 +79,7 @@ function makeService(options: Options = {}) {
       .mockResolvedValue(options.newCourtMatchesWithoutCamera ?? []),
     assignCameraToMatch: jest.fn().mockResolvedValue({}),
     clearMatchCamera: jest.fn().mockResolvedValue({}),
+    moveIdleMatchCamera: jest.fn().mockResolvedValue(true),
   };
   const lock = options.lock ?? 'owned';
   const livestreamHealthQueue = {
@@ -214,21 +215,27 @@ describe('LivestreamService.assignCameraCourt', () => {
       'court-a',
       'tournament-1',
     );
-    expect(repository.assignCameraToMatch).toHaveBeenCalledWith(
+    expect(repository.moveIdleMatchCamera).toHaveBeenCalledWith(
       'm-old-1',
+      'camera-1',
       'camera-2',
       'https://media.aqvision.net/live/camera_two/hls.m3u8',
     );
-    expect(repository.assignCameraToMatch).toHaveBeenCalledWith(
+    expect(repository.moveIdleMatchCamera).toHaveBeenCalledWith(
       'm-old-2',
+      'camera-1',
       'camera-2',
       'https://media.aqvision.net/live/camera_two/hls.m3u8',
     );
+    // Matches that had no camera on the new court adopt this one (existing backfill).
+    expect(repository.assignCameraToMatch).toHaveBeenCalledTimes(1);
     expect(repository.assignCameraToMatch).toHaveBeenCalledWith(
       'm-new-1',
       'camera-1',
       'https://media.aqvision.net/live/camera_abc/hls.m3u8',
     );
+    // The old court's matches are released with a conditional write, never with the
+    // unconditional ones that reset startedAt/endedAt.
     expect(repository.clearMatchCamera).not.toHaveBeenCalled();
   });
 
@@ -240,12 +247,14 @@ describe('LivestreamService.assignCameraCourt', () => {
 
     await service.assignCameraCourt('camera-1', owner, { courtId: 'court-b' });
 
-    expect(repository.clearMatchCamera).toHaveBeenCalledWith('m-old-1');
-    expect(repository.assignCameraToMatch).not.toHaveBeenCalledWith(
+    expect(repository.moveIdleMatchCamera).toHaveBeenCalledWith(
       'm-old-1',
-      expect.anything(),
-      expect.anything(),
+      'camera-1',
+      null,
+      null,
     );
+    expect(repository.clearMatchCamera).not.toHaveBeenCalled();
+    expect(repository.assignCameraToMatch).not.toHaveBeenCalled();
   });
 
   it('clearing the court releases the old court and never backfills a new one', async () => {
@@ -260,7 +269,12 @@ describe('LivestreamService.assignCameraCourt', () => {
 
     expect(result).toMatchObject({ id: 'camera-1', courtId: null });
     expect(repository.updateCameraCourt).toHaveBeenCalledWith('camera-1', null);
-    expect(repository.clearMatchCamera).toHaveBeenCalledWith('m-old-1');
+    expect(repository.moveIdleMatchCamera).toHaveBeenCalledWith(
+      'm-old-1',
+      'camera-1',
+      null,
+      null,
+    );
     expect(repository.listMatchIdsWithoutCameraOnCourt).not.toHaveBeenCalled();
     expect(repository.assignCameraToMatch).not.toHaveBeenCalled();
   });

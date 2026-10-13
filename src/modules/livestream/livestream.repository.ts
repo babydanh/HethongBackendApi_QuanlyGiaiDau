@@ -392,6 +392,43 @@ export class LivestreamRepository {
     return rows.map((row) => row.id);
   }
 
+  /**
+   * Chuyển liên kết camera của MỘT trận khỏi `fromCameraId`, bằng đúng một câu UPDATE có điều kiện.
+   *
+   * Chỉ ghi khi dòng vẫn đang `IDLE` và vẫn trỏ `fromCameraId`: giữa lúc liệt kê trận và lúc ghi,
+   * người vận hành có thể đã bấm Phát (thao tác này không giữ khoá camera), và
+   * `assignCameraToMatch`/`clearMatchCamera` vô điều kiện sẽ đè trạng thái LIVE đó về IDLE.
+   * Chỉ đổi `cameraId`/`playbackUrl`, không đụng `startedAt`/`endedAt`.
+   *
+   * @returns `true` nếu đã ghi; `false` nếu trận không còn thoả điều kiện (bỏ qua, không phải lỗi).
+   */
+  async moveIdleMatchCamera(
+    matchId: string,
+    fromCameraId: string,
+    toCameraId: string | null,
+    playbackUrl: string | null,
+  ): Promise<boolean> {
+    const rows = await this.db
+      .update(schema.matchLivestreams)
+      .set({ cameraId: toCameraId, playbackUrl, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.matchLivestreams.matchId, matchId),
+          eq(schema.matchLivestreams.cameraId, fromCameraId),
+          eq(schema.matchLivestreams.streamStatus, 'IDLE'),
+        ),
+      )
+      .returning({ matchId: schema.matchLivestreams.matchId });
+
+    if (rows.length === 0) return false;
+
+    await this.syncCameraStatus(fromCameraId);
+    if (toCameraId) {
+      await this.syncCameraStatus(toCameraId);
+    }
+    return true;
+  }
+
   async findCameraById(cameraId: string) {
     const [camera] = await this.db
       .select()

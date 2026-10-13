@@ -654,6 +654,10 @@ export class LivestreamService {
   /**
    * Sau khi camera rời sân, các trận CHƯA phát của sân đó đang trỏ nó chuyển sang camera
    * còn lại của sân (theo quy tắc `findActiveCameraByCourt`), hoặc bỏ gán nếu hết camera.
+   *
+   * Mỗi trận được chuyển bằng một UPDATE có điều kiện (còn IDLE và còn trỏ camera này), vì
+   * thao tác Phát không giữ khoá camera: trận vừa bấm Phát sau lúc liệt kê sẽ bị bỏ qua thay
+   * vì bị ghi đè về IDLE.
    */
   private async releaseIdleCourtMatches(
     cameraId: string,
@@ -671,15 +675,17 @@ export class LivestreamService {
       oldCourtId,
       tournamentId,
     );
+    const targetCameraId = remaining?.id ?? null;
     const playbackUrl = remaining
       ? (this.normalizePublicPlaybackUrl(remaining.playbackUrl) ?? '')
-      : '';
+      : null;
     for (const matchId of matchIds) {
-      if (remaining) {
-        await this.livestreamRepository.assignCameraToMatch(matchId, remaining.id, playbackUrl);
-      } else {
-        await this.livestreamRepository.clearMatchCamera(matchId);
-      }
+      await this.livestreamRepository.moveIdleMatchCamera(
+        matchId,
+        cameraId,
+        targetCameraId,
+        playbackUrl,
+      );
     }
   }
 

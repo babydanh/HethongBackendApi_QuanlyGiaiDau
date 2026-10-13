@@ -118,3 +118,57 @@ describe('LivestreamRepository camera-guarded stream updates', () => {
     expect(predicate.params).toEqual(['match-1', 'camera-1']);
   });
 });
+
+describe('LivestreamRepository.moveIdleMatchCamera', () => {
+  function build(returned: unknown[]) {
+    const query = {
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      returning: jest.fn().mockResolvedValue(returned),
+    };
+    const repository = new LivestreamRepository({
+      update: jest.fn().mockReturnValue(query),
+    } as never);
+    const sync = jest
+      .spyOn(
+        repository as unknown as { syncCameraStatus: (id: string) => Promise<void> },
+        'syncCameraStatus',
+      )
+      .mockResolvedValue(undefined);
+    return { repository, query, sync };
+  }
+
+  it('writes only while the match is still IDLE on the camera it is leaving', async () => {
+    const { repository, query } = build([{ matchId: 'match-1' }]);
+
+    await repository.moveIdleMatchCamera('match-1', 'camera-1', 'camera-2', 'https://p/h.m3u8');
+
+    const predicate = new PgDialect().sqlToQuery(query.where.mock.calls[0][0] as SQL);
+    expect(predicate.sql).toContain('"match_id" = $1');
+    expect(predicate.sql).toContain('"camera_id" = $2');
+    expect(predicate.sql).toContain('"stream_status" = $3');
+    expect(predicate.params).toEqual(['match-1', 'camera-1', 'IDLE']);
+    // Only the link changes: nothing resets startedAt/endedAt of a row.
+    expect(query.set.mock.calls[0][0]).not.toHaveProperty('startedAt');
+    expect(query.set.mock.calls[0][0]).not.toHaveProperty('endedAt');
+  });
+
+  it('reports false and syncs nothing when the match is no longer IDLE on that camera', async () => {
+    const { repository, sync } = build([]);
+
+    await expect(
+      repository.moveIdleMatchCamera('match-1', 'camera-1', null, null),
+    ).resolves.toBe(false);
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it('syncs the camera it left and the one it joined after a successful move', async () => {
+    const { repository, sync } = build([{ matchId: 'match-1' }]);
+
+    await expect(
+      repository.moveIdleMatchCamera('match-1', 'camera-1', 'camera-2', 'https://p/h.m3u8'),
+    ).resolves.toBe(true);
+    expect(sync).toHaveBeenCalledWith('camera-1');
+    expect(sync).toHaveBeenCalledWith('camera-2');
+  });
+});
