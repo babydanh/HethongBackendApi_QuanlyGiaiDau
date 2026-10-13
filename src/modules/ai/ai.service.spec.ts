@@ -879,7 +879,6 @@ const ROSTER_LAYOUT_COLUMNS = {
   player2Phone: '',
   divisionName: '',
   elo: '',
-  entryType: '',
   isPaid: '',
   notes: '',
 };

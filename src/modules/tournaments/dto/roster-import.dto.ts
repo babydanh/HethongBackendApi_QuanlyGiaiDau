@@ -21,9 +21,6 @@ export const IMPORT_SOURCES = [
 ] as const;
 export type ImportSource = (typeof IMPORT_SOURCES)[number];
 
-export const ROSTER_ENTRY_TYPES = ['REGULAR', 'WILD_CARD_REQUEST'] as const;
-export type RosterEntryType = (typeof ROSTER_ENTRY_TYPES)[number];
-
 /**
  * Strict roster row for `POST /tournaments/:id/roster-import`.
  *
@@ -78,10 +75,15 @@ export class RosterImportItemDto {
   @IsBoolean()
   autoApprove?: boolean;
 
-  @ApiPropertyOptional({ description: 'Loại nhập, không cấp quyền wildcard' })
+  /**
+   * Retired: the "Đặc cách" import type is gone, so the value is accepted and ignored. It stays declared only
+   * because the global ValidationPipe forbids unknown properties and web builds from before the removal still
+   * send it. Delete once those builds are gone.
+   */
+  @ApiPropertyOptional({ description: 'Đã bỏ: giá trị bị bỏ qua, chỉ giữ để web app cũ vẫn gửi được', deprecated: true })
   @IsOptional()
-  @IsIn(ROSTER_ENTRY_TYPES)
-  entryType?: RosterEntryType;
+  @IsString()
+  entryType?: string;
 
   @ApiProperty({ description: 'Nguồn nhập dữ liệu', enum: IMPORT_SOURCES })
   @IsIn(IMPORT_SOURCES)

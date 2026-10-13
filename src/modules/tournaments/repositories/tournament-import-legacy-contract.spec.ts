@@ -180,7 +180,7 @@ async function validationErrors(
   dtoClass: typeof ImportParticipantsDto | typeof RosterImportDto,
   payload: Record<string, unknown>,
 ): Promise<string[]> {
-  const dto = plainToInstance(dtoClass, payload);
+  const dto = plainToInstance<object, Record<string, unknown>>(dtoClass, payload);
   const errors = await validate(dto as object, {
     whitelist: false,
     forbidNonWhitelisted: false,
@@ -224,7 +224,7 @@ describe('strict roster request contract', () => {
     );
   });
 
-  it('accepts a declared roster row', async () => {
+  it('accepts a declared roster row, including the retired entryType older web builds still send', async () => {
     expect(
       await validationErrors(RosterImportDto, {
         participants: [

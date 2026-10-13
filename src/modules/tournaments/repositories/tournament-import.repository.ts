@@ -69,7 +69,7 @@ import type {
   RosterBatchCapacityClaim,
   ValidatedRosterImportBatchGroup,
 } from '../validation/roster-import-batch';
-import type { ImportSource, RosterEntryType } from '../dto/roster-import.dto';
+import type { ImportSource } from '../dto/roster-import.dto';
 import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import type {
   RosterImportBatchDto,
@@ -1872,9 +1872,6 @@ export class TournamentImportRepository {
             importedFrom: item.source,
             player1Email,
           };
-          if (item.entryType === 'WILD_CARD_REQUEST') {
-            importMetadata.entryType = 'WILD_CARD_REQUEST';
-          }
           const player1Phone = item.player1Phone?.trim();
           const player2Phone = item.player2Phone?.trim();
           if (player1Phone) importMetadata.player1Phone = player1Phone;
@@ -1958,7 +1955,6 @@ export class TournamentImportRepository {
       player1Name: string;
       player1Email: string;
       source: ImportSource;
-      entryType?: RosterEntryType;
     })[],
     divisionId?: string,
   ) {
@@ -2047,9 +2043,6 @@ export class TournamentImportRepository {
           importedFrom: item.source,
           player1Email,
         };
-        if (item.entryType === 'WILD_CARD_REQUEST') {
-          importMetadata.entryType = 'WILD_CARD_REQUEST';
-        }
         const player1Phone = item.player1Phone?.trim();
         const player2Phone = item.player2Phone?.trim();
         if (player1Phone) importMetadata.player1Phone = player1Phone;

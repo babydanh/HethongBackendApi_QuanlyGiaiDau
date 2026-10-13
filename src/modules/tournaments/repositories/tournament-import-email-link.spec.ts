@@ -522,8 +522,8 @@ describe('import rows follow the current one/doubles contract', () => {
   });
 });
 
-describe('wildcard requests stay annotations', () => {
-  it('records the request as metadata without granting a wildcard slot', async () => {
+describe('a caller cannot claim a wildcard slot through form answers', () => {
+  it('drops the is_wildcard answer and creates an ordinary pending participant', async () => {
     const harness = createHarness(importScopes('SINGLES'), [[]]);
 
     await createRepository(harness.tx).importRosterRows(
@@ -531,11 +531,10 @@ describe('wildcard requests stay annotations', () => {
       MANAGER_ID,
       [
         {
-          teamName: 'VĐV đặc cách',
-          player1Name: 'VĐV đặc cách',
+          teamName: 'VĐV khách',
+          player1Name: 'VĐV khách',
           player1Email: UNKNOWN_CONTACT_EMAIL,
           source: 'EXCEL',
-          entryType: 'WILD_CARD_REQUEST',
           customResponses: {
             importedFrom: 'MANUAL_EMAIL',
             is_wildcard: true,
@@ -551,7 +550,6 @@ describe('wildcard requests stay annotations', () => {
       note: 'khách quen',
       importedFrom: 'EXCEL',
       player1Email: UNKNOWN_CONTACT_EMAIL,
-      entryType: 'WILD_CARD_REQUEST',
     });
     expect(participant.values.isWildcard).toBeUndefined();
     expect(participant.values.isMock).toBeUndefined();

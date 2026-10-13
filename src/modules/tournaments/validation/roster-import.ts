@@ -203,8 +203,6 @@ export type RosterRowStatus =
   | 'PLAYER2_NOT_ALLOWED'
   | 'DIVISION_UNKNOWN';
 
-export type RosterEntryType = 'REGULAR' | 'WILD_CARD_REQUEST';
-
 export interface RosterImportItem {
   teamName?: string;
   divisionName?: string;
@@ -217,7 +215,6 @@ export interface RosterImportItem {
   elo?: number;
   isPaid?: boolean;
   autoApprove?: boolean;
-  entryType?: RosterEntryType;
   customResponses?: Record<string, unknown>;
 }
 

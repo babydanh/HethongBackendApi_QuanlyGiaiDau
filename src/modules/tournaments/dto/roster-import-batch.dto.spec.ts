@@ -47,6 +47,15 @@ describe('RosterImportBatchDto', () => {
     ).toHaveLength(0);
   });
 
+  it('still accepts the retired entryType that web builds from before its removal send', async () => {
+    const batch = validBatch();
+    Object.assign(batch.groups[0].participants[0], { entryType: 'WILD_CARD_REQUEST' });
+
+    expect(
+      await validate(batch, { whitelist: true, forbidNonWhitelisted: true }),
+    ).toHaveLength(0);
+  });
+
   it('rejects worksheet provenance outside Excel limits', async () => {
     const batch = validBatch();
     Object.assign(batch.groups[0].participants[0], {

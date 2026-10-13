@@ -18,7 +18,6 @@ export const ROSTER_LAYOUT_SLOTS = [
   'player2Phone',
   'divisionName',
   'elo',
-  'entryType',
   'isPaid',
   'notes',
 ] as const;
