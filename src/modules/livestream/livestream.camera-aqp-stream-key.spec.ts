@@ -54,12 +54,17 @@ const activeKey: AqvisionAgencyStreamKey = {
     streamKey: 'camera_abc?key=provider-secret',
   },
 };
+const defaultPushConfig: Record<string, string> = {
+  AQVISION_PUSH_HOST: 'media.aqvision.net',
+  AQVISION_PUSH_PORT: '18554',
+};
 
 function makeService(options: {
   camera?: typeof camera;
   staff?: boolean;
   lockResult?: boolean;
   agency?: Partial<Record<keyof AqvisionAgencyApiClient, jest.Mock>>;
+  pushConfig?: Record<string, string>;
 } = {}) {
   const currentCamera = options.camera ?? camera;
   const repository = {
@@ -102,10 +107,15 @@ function makeService(options: {
       options.lockResult === false ? null : operation(lock),
     ),
   };
+  const configService = {
+    get: jest.fn(
+      (key: string, fallback?: unknown) => (options.pushConfig ?? defaultPushConfig)[key] ?? fallback,
+    ),
+  } as unknown as ConfigService;
   const service = new LivestreamService(
     repository as unknown as LivestreamRepository,
-    { get: jest.fn((_key: string, fallback?: unknown) => fallback) } as unknown as ConfigService,
-    {} as AqvisionPublishService,
+    configService,
+    new AqvisionPublishService(configService),
     {} as AqvisionApiClient,
     {} as unknown as AqvisionRecordingService,
     healthQueue as unknown as LivestreamHealthQueue,
@@ -116,7 +126,7 @@ function makeService(options: {
 }
 
 describe('LivestreamService AQP stream-key lifecycle', () => {
-  it('creates a provider key, stores only its ID, and returns the RTMP QR from data.push', async () => {
+  it('creates a provider key, stores only its ID, and returns the RTSP QR plus the RTMP OBS fields from data.push', async () => {
     const { service, repository, agencyClient } = makeService();
 
     const result = await service.createCameraAqpStreamKey('camera-1', owner);
@@ -128,13 +138,36 @@ describe('LivestreamService AQP stream-key lifecycle', () => {
       streamKey: activeKey.push?.streamKey,
     });
     expect(result.qrPayload).toEqual({
-      stream_url: 'rtmp://push.aqvision.net:11935/live/camera_abc?key=provider-secret',
+      stream_url: 'rtsp://media.aqvision.net:18554/live/camera_abc?key=provider-secret',
       match_id: 'camera_abc',
       match_title: 'Camera sân 1',
-      protocol: 'rtmp',
+      protocol: 'rtsp',
       auto_start: false,
     });
     expect(JSON.stringify(result)).not.toContain('internal-secret-must-not-leak');
+  });
+
+  it('fails closed with the env names when the RTSP push endpoint is not configured', async () => {
+    const { service } = makeService({ pushConfig: {} });
+
+    await expect(service.createCameraAqpStreamKey('camera-1', owner)).rejects.toThrow(
+      /AQVISION_PUSH_HOST/,
+    );
+  });
+
+  it('refuses to build a QR when the provider stream key carries no publish key', async () => {
+    const { service } = makeService({
+      agency: {
+        createStreamKey: jest.fn().mockResolvedValue({
+          ...activeKey,
+          push: { rtmpServer: 'rtmp://push.aqvision.net:11935/live', streamKey: 'camera_abc' },
+        }),
+      },
+    });
+
+    await expect(service.createCameraAqpStreamKey('camera-1', owner)).rejects.toThrow(
+      ServiceUnavailableException,
+    );
   });
   it('reuses the exact provider stream found by the preflight list before POST', async () => {
     const { service, repository, agencyClient } = makeService({

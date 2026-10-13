@@ -16,6 +16,7 @@ import { PublishQrDto } from './dto/publish-qr.dto';
 import { SetCourtPlaybackUrlDto } from './dto/set-court-playback-url.dto';
 import {
   AqvisionPublishService,
+  type AqvisionQrPayload,
   type PublishQrResult,
   type RtmpPublishTarget,
 } from './aqvision-publish.service';
@@ -60,13 +61,7 @@ export interface AqpCameraStreamKeyResponse {
   };
   readonly streamKeyId: string | null;
   readonly status: string | null;
-  readonly qrPayload: {
-    readonly stream_url: string;
-    readonly match_id: string;
-    readonly match_title: string;
-    readonly protocol: 'rtmp';
-    readonly auto_start: false;
-  } | null;
+  readonly qrPayload: AqvisionQrPayload | null;
   readonly qrPayloadString: string | null;
   readonly rtmp: { readonly server: string; readonly streamKey: string } | null;
 }
@@ -1098,13 +1093,13 @@ export class LivestreamService {
       if (url.protocol !== 'rtmp:' || url.username || url.password || url.hash) {
         throw new ServiceUnavailableException('AQP trả về URL RTMP không hợp lệ.');
       }
-      qrPayload = {
-        stream_url: `${server}/${streamKey}`,
-        match_id: camera.streamName,
-        match_title: camera.name,
-        protocol: 'rtmp',
-        auto_start: false,
-      };
+      // QR dạng RTSP theo docx §2.2 (host/cổng RTSP lấy từ env, khác cổng RTMP).
+      // OBS nhập tay vẫn dùng cặp RTMP server/stream key bên dưới.
+      qrPayload = this.buildAqpRtspQrPayload({
+        stream: url.pathname.split('/').filter(Boolean).pop() ?? '',
+        publishKey: url.searchParams.get('key') ?? '',
+        matchTitle: camera.name,
+      });
       qrPayloadString = JSON.stringify(qrPayload);
       rtmp = { server: push.rtmpServer, streamKey: push.streamKey };
     }
@@ -1117,6 +1112,33 @@ export class LivestreamService {
       qrPayloadString,
       rtmp,
     };
+  }
+
+  private buildAqpRtspQrPayload(input: {
+    readonly stream: string;
+    readonly publishKey: string;
+    readonly matchTitle: string;
+  }): AqvisionQrPayload {
+    if (!input.stream || !input.publishKey) {
+      throw new ServiceUnavailableException('AQP trả về stream key không có publish key.');
+    }
+    try {
+      return this.aqvisionPublishService.buildQrPayloadFromConfig({
+        matchId: input.stream,
+        matchTitle: input.matchTitle,
+        publishKey: input.publishKey,
+        autoStart: false,
+      });
+    } catch (error) {
+      if (error instanceof AqvisionApiException) {
+        // Lỗi cấu hình: chỉ nêu tên biến env, không đưa publish key vào thông báo.
+        throw new ServiceUnavailableException(
+          'Chưa cấu hình máy chủ media AQP để dựng QR RTSP. ' +
+            'Kiểm tra AQVISION_PUSH_HOST và AQVISION_PUSH_PORT.',
+        );
+      }
+      throw error;
+    }
   }
 
   private toAqpServiceUnavailable(error: unknown): ServiceUnavailableException {
