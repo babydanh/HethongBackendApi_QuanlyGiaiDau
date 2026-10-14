@@ -2,9 +2,9 @@
 
 > Tự sinh bởi `npm run db:docs` từ `src/database/schema/*.schema.ts`, không sửa tay. Kiểm tra còn khớp schema: `npm run db:docs:check`.
 
-## Khóa ngoại chưa có index (183)
+## Khóa ngoại chưa có index (183 ứng viên)
 
-JOIN/xóa theo các cột này phải quét cả bảng con. Thêm index nếu bảng con lớn hoặc hay truy vấn theo cột đó.
+Danh sách lấy từ metadata schema, không phải lỗi hiệu năng đã đo. Thiếu index thì JOIN/lọc/xóa theo cột FK có thể phải đọc nhiều dòng của bảng con. Chỉ thêm index khi bảng con lớn hoặc truy vấn thật hay dùng cột đó; xác nhận bằng EXPLAIN (ví dụ tool `sql_sandbox`).
 
 - `verification_tickets`: user_id → users
 - `verification_tickets`: reviewed_by → users

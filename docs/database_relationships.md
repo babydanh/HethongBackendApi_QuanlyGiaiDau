@@ -1,6 +1,6 @@
 # 🔗 Phân Tích Quan Hệ Database (Relationships Analysis)
 
-> ⚠️ Tài liệu viết tay ngày 02/10/2026, mô tả 36 bảng và đã lệch so với schema hiện tại (113 bảng). Cấu trúc bảng và khóa ngoại hiện hành: xem [docs/schema/README.md](./schema/README.md) (tự sinh bằng `npm run db:docs`).
+> ⚠️ Tài liệu viết tay ngày 02/10/2026, mô tả 36 bảng; schema hiện tại có 113 bảng, nên số bảng và danh sách quan hệ ở đây không còn đầy đủ. Phần phân tích loại quan hệ (junction table, 1:N) vẫn dùng để tham khảo. Cấu trúc bảng và khóa ngoại hiện hành: xem [docs/schema/README.md](./schema/README.md) (tự sinh bằng `npm run db:docs`).
 
 > Tài liệu này phân tích **chi tiết từng mối quan hệ** giữa các bảng trong hệ thống.  
 > Quy ước: **Rich Junction Table** = bảng trung gian M:N có thêm cột dữ liệu ngoài 2 FK.
