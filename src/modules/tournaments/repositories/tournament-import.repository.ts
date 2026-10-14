@@ -34,7 +34,7 @@ import {
 } from '../services/tournament-capacity.service';
 import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
-import { normalizeHttpsImageUrl } from '../utils/https-image-url';
+import { normalizeHttpsImageUrl } from '../../../common/helpers/https-image-url.helper';
 import { normalizeProfileGender, type NormalizedGender } from '../utils/profile-gender';
 import {
   findEligibleRosterAccountIds,

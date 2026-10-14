@@ -194,9 +194,12 @@ export class RankingConsentService {
     link: string;
     isReminder: boolean;
   }): string {
+    // Neutral about who added the player: the cron also reaches players who registered themselves
+    // (ranking consent ticked, account link still unconfirmed), and a captain or an organizer may
+    // have added the others.
     const heading = args.isReminder
       ? 'Bạn chưa xác nhận tham gia'
-      : 'Bạn được thêm vào một giải đấu';
+      : 'Xác nhận tham gia giải đấu';
     return `
       <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 560px;">
         <div style="background-color: #0f172a; padding: 20px; border-radius: 8px 8px 0 0;">
@@ -207,7 +210,7 @@ export class RankingConsentService {
             Xin chào ${args.participantName ?? 'bạn'},
           </p>
           <p style="font-size: 14px; color: #334155; margin: 0 0 16px;">
-            Ban tổ chức đã thêm bạn vào giải
+            Bạn có tên trong danh sách tham gia giải
             <strong>${args.tournamentName}</strong>.
           </p>
           <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px 16px; margin-bottom: 20px;">

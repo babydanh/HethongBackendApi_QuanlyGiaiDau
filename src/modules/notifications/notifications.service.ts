@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { SENDER_ATTRIBUTED_NOTIFICATION_TYPES } from './notification-types';
+import { normalizeHttpsImageUrl } from '../../common/helpers/https-image-url.helper';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { RegisterDeviceTokenDto, RemoveDeviceTokenDto } from './dto/register-device-token.dto';
 import { NotificationsGateway } from './notifications.gateway';
@@ -45,11 +46,12 @@ export class NotificationsService {
 
     // 1. Socket.IO (In-app real-time notification)
     // The payload carries the same sender identity the recipient read endpoint
-    // returns, so a live item is attributed exactly like a fetched one.
+    // returns, so a live item is attributed exactly like a fetched one. The avatar is a
+    // free-text profile field, so only a plain https URL ever reaches the recipient's browser.
     this.notificationsGateway.pushNotification(data.receiverId, {
       ...notification,
       senderName: senderProfile?.fullName ?? null,
-      senderAvatarUrl: senderProfile?.avatarUrl ?? null,
+      senderAvatarUrl: normalizeHttpsImageUrl(senderProfile?.avatarUrl),
     });
 
     // 2. Firebase Cloud Messaging (OS Push Notification to lockscreen / system tray)

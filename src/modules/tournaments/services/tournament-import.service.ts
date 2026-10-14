@@ -30,7 +30,7 @@ import type {
 import type { AddAthletePairsDto } from '../dto/add-athlete-pairs.dto';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
 import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
-import { normalizeHttpsImageUrl } from '../utils/https-image-url';
+import { normalizeHttpsImageUrl } from '../../../common/helpers/https-image-url.helper';
 
 type RegistrationChangedBroadcaster = (
   tournamentId: string,

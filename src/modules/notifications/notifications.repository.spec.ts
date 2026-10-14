@@ -25,6 +25,8 @@ const users: Row[] = [
 const profiles: Row[] = [
   { userId: MANAGER_ID, fullName: 'Mai Lan Huong', avatarUrl: MANAGER_AVATAR },
   { userId: REFEREE_ID, fullName: 'Tran Minh Duc', avatarUrl: null },
+  { userId: 'sender-http-avatar', fullName: 'Le Van An', avatarUrl: 'http://cdn.example.test/avatars/an.png' },
+  { userId: 'sender-credential-avatar', fullName: 'Pham Binh', avatarUrl: 'https://user:secret@cdn.example.test/avatars/binh.png' },
 ];
 
 const notifications: Row[] = [
@@ -71,6 +73,28 @@ const notifications: Row[] = [
     redirectUrl: '/tournaments/00000000-0000-4000-8000-000000000001',
     isRead: false,
     createdAt: new Date('2026-10-03T00:00:00.000Z'),
+  },
+  {
+    id: 'notification-http-avatar',
+    receiverId: REFEREE_ID,
+    senderId: 'sender-http-avatar',
+    type: NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+    title: 'Xac nhan tham gia giai dau',
+    content: 'Ban duoc them vao giai Synthetic Tournament.',
+    redirectUrl: '/tournaments/00000000-0000-4000-8000-000000000002',
+    isRead: false,
+    createdAt: new Date('2026-10-04T00:00:00.000Z'),
+  },
+  {
+    id: 'notification-credential-avatar',
+    receiverId: REFEREE_ID,
+    senderId: 'sender-credential-avatar',
+    type: NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+    title: 'Xac nhan tham gia giai dau',
+    content: 'Ban duoc them vao giai Synthetic Tournament.',
+    redirectUrl: '/tournaments/00000000-0000-4000-8000-000000000003',
+    isRead: false,
+    createdAt: new Date('2026-10-05T00:00:00.000Z'),
   },
 ];
 
@@ -227,6 +251,25 @@ describe('NotificationsRepository recipient read sender attribution', () => {
       senderAvatarUrl: MANAGER_AVATAR,
     });
     expect(stringValues(request).filter((value) => EMAIL_SHAPED.test(value))).toEqual([]);
+  });
+
+  it('keeps the sender name but never returns an avatar that is not plain https', async () => {
+    const { data } = await createRepository().getNotificationsByUser(
+      REFEREE_ID,
+      { scope: 'player' } as QueryNotificationsDto,
+    );
+    const byId = (id: string) => data.find((item) => item.id === id);
+
+    expect(byId('notification-http-avatar')).toMatchObject({
+      senderName: 'Le Van An',
+      senderAvatarUrl: null,
+    });
+    expect(byId('notification-credential-avatar')).toMatchObject({
+      senderName: 'Pham Binh',
+      senderAvatarUrl: null,
+    });
+    // The safe avatar of the other sender is untouched.
+    expect(byId('notification-account-link')?.senderAvatarUrl).toBe(MANAGER_AVATAR);
   });
 
   it('does not publish a sender identity on notification types outside the referee invitation', async () => {

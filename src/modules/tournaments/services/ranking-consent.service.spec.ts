@@ -224,6 +224,26 @@ describe('RankingConsentService confirmation marks', () => {
     expect(mailService.sendMail).not.toHaveBeenCalled();
   });
 
+  it('does not say the organizer added a player who registered themselves and only lacks the link mark', async () => {
+    // The reminder cron now also picks rosters whose ranking consent was ticked at registration. The
+    // first mail must not claim someone else added them: it cannot know who did.
+    const { service, mailService } = build({
+      ...detailRow(),
+      consentedAt: marked,
+      linkConfirmedAt: null,
+    });
+
+    await expect(service.sendConfirmationRequest('r1')).resolves.toBe(true);
+
+    const [, subject, html] = mailService.sendMail.mock.calls[0];
+    expect(`${subject} ${html}`).not.toMatch(/Ban tổ chức đã thêm|được thêm vào/);
+    expect(html).toContain('Cup Đông Nam');
+    expect(html).toContain('/tournaments/t-1');
+    // What confirming changes and what leaving it alone does are still stated.
+    expect(html).toMatch(/hoàn thành từ lúc bạn xác nhận/);
+    expect(html).toMatch(/vẫn thi đấu bình thường/);
+  });
+
   it('scans rosters that lack either mark, not only the consent mark', async () => {
     jest.useFakeTimers().setSystemTime(NOW);
     try {

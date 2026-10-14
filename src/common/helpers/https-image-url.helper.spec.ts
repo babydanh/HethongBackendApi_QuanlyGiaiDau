@@ -1,4 +1,4 @@
-import { normalizeHttpsImageUrl } from './https-image-url';
+import { normalizeHttpsImageUrl } from './https-image-url.helper';
 
 describe('normalizeHttpsImageUrl', () => {
   it('keeps a plain https image url', () => {

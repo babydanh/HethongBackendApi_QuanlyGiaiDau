@@ -110,6 +110,32 @@ describe('NotificationsService realtime sender attribution', () => {
     });
   });
 
+  it.each([
+    ['an http url', 'http://cdn.example.test/avatars/a.png'],
+    ['a url that carries credentials', 'https://user:secret@cdn.example.test/avatars/a.png'],
+    ['a javascript url', 'javascript:alert(1)'],
+  ])('keeps the sender name but drops %s from the realtime avatar', async (_label, unsafeAvatar) => {
+    repositoryMock.findSenderProfile.mockResolvedValue({
+      fullName: 'Mai Lan Huong',
+      avatarUrl: unsafeAvatar,
+    });
+
+    await service.sendNotification({
+      receiverId: refereeId,
+      senderId: invitingManagerId,
+      type: NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+      title: 'Xac nhan tham gia giai dau',
+      content: 'Ban duoc them vao giai Synthetic Tournament.',
+      redirectUrl: '/tournaments/tournament-1',
+    });
+
+    const [, payload] = gatewayMock.pushNotification.mock.calls[0];
+    expect(payload).toMatchObject({
+      senderName: 'Mai Lan Huong',
+      senderAvatarUrl: null,
+    });
+  });
+
   it('never puts the inviter email on the realtime item', async () => {
     repositoryMock.findSenderProfile.mockResolvedValue({
       fullName: 'Mai Lan Huong',

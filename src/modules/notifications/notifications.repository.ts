@@ -5,6 +5,7 @@ import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { SENDER_ATTRIBUTED_NOTIFICATION_TYPES } from './notification-types';
+import { normalizeHttpsImageUrl } from '../../common/helpers/https-image-url.helper';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 
@@ -138,7 +139,11 @@ export class NotificationsRepository {
       .$dynamic();
     const rawData = await notificationsQuery;
     const hasMore = rawData.length > limit;
-    const data = hasMore ? rawData.slice(0, limit) : rawData;
+    // The sender avatar is a free-text profile field: only a plain https URL is returned.
+    const data = (hasMore ? rawData.slice(0, limit) : rawData).map((item) => ({
+      ...item,
+      senderAvatarUrl: normalizeHttpsImageUrl(item.senderAvatarUrl),
+    }));
 
     return {
       data,
