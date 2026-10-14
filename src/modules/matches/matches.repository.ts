@@ -1062,6 +1062,37 @@ export class MatchesRepository {
       }
     }
 
+    // Rows may carry a courtId without a courtName. Resolve the canonical
+    // name in one batch, only for venues that are not soft-deleted.
+    const courtIdsMissingName = new Set<string>();
+    for (const match of data) {
+      if (match.courtId && !match.courtName) {
+        courtIdsMissingName.add(match.courtId);
+      }
+    }
+    const courtNamesMap = new Map<string, string>();
+    if (courtIdsMissingName.size > 0) {
+      const courtsData = await this.db
+        .select({
+          id: schema.venueCourts.id,
+          courtName: schema.venueCourts.courtName,
+        })
+        .from(schema.venueCourts)
+        .innerJoin(
+          schema.tournamentVenues,
+          eq(schema.venueCourts.venueId, schema.tournamentVenues.id),
+        )
+        .where(
+          and(
+            inArray(schema.venueCourts.id, Array.from(courtIdsMissingName)),
+            isNull(schema.tournamentVenues.deletedAt),
+          ),
+        );
+      for (const court of courtsData) {
+        courtNamesMap.set(court.id, court.courtName);
+      }
+    }
+
     const mappedData = data.map((match) => {
       const p1 = match.participant1Id
         ? participantsMap.get(match.participant1Id)
@@ -1074,6 +1105,10 @@ export class MatchesRepository {
 
       return {
         ...match,
+        courtName:
+          match.courtName ||
+          courtNamesMap.get(match.courtId ?? '') ||
+          match.courtName,
         cheerCount: match.cheerCount ?? 0,
         divisionId: groupStage?.divisionId ?? matchStage?.divisionId ?? null,
         participant1: p1
