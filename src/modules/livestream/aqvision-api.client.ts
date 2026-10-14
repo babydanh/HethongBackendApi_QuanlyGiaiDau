@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AqvisionAgencyApiClient } from './aqvision-agency-api.client';
 
 /**
  * Nơi phát sinh lỗi, vì cùng một con số có thể đến từ nhiều chỗ:
@@ -84,6 +85,24 @@ type JsonObject = Record<string, unknown>;
 type ParamValue = string | number | boolean | undefined;
 
 /**
+ * Cách xác thực của một lời gọi native: `secret=` trên URL (theo `api.txt`) hoặc token đại lý
+ * trong header `Authorization` (cùng token dùng để tạo stream key).
+ */
+type AuthMode = 'secret' | 'bearer';
+
+/**
+ * Chỉ các thao tác ghi hình mới được thử token đại lý khi `secret=` bị từ chối. Đây là quyết định
+ * của chủ dự án (14/10), thay cho nguyên tắc cũ "Agency token không dùng cho Native"; các thao
+ * tác khác (kéo luồng, trạng thái, snapshot) KHÔNG đổi.
+ */
+const BEARER_FALLBACK_OPERATIONS: Record<string, true> = {
+  startRecord: true,
+  stopRecord: true,
+  isRecording: true,
+  getMP4RecordFile: true,
+};
+
+/**
  * Client server-side cho API AQP.
  *
  * Bất biến (INV-001 trong `00-problem-map.md`):
@@ -97,7 +116,16 @@ type ParamValue = string | number | boolean | undefined;
 export class AqvisionApiClient {
   private readonly logger = new Logger(AqvisionApiClient.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  /**
+   * Cách đã chạy được lần gần nhất cho thao tác ghi hình, giữ trong bộ nhớ tiến trình để khỏi gọi
+   * đôi mỗi lần khi `secret=` luôn bị từ chối. Mất khi khởi động lại, không ảnh hưởng đúng sai.
+   */
+  private preferBearer = false;
+
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() private readonly agencyTokens?: AqvisionAgencyApiClient,
+  ) {}
 
   /** `GET /index/api/isMediaOnline` — trạng thái online của stream. */
   async isMediaOnline(stream: string): Promise<IsMediaOnlineResult> {
@@ -243,15 +271,77 @@ export class AqvisionApiClient {
     return bytes;
   }
 
-  /** Gọi operation bất kỳ và bóc envelope; dùng cho các task T-005…T-009. */
+  /**
+   * Gọi operation bất kỳ và bóc envelope; dùng cho các task T-005…T-009.
+   *
+   * Thao tác ghi hình: nếu AQP từ chối xác thực (`code -100`, hoặc HTTP 401/403), thử lại ĐÚNG
+   * MỘT lần bằng cách xác thực còn lại. Hai cách đều bị từ chối, hoặc không lấy được token, thì
+   * ném lại lỗi của lần đầu: hành vi y hệt khi không có token đại lý.
+   */
   async call<T = JsonObject>(
     operation: string,
     params: Record<string, ParamValue> = {},
     options: AqvisionOperationOptions = {},
   ): Promise<T> {
-    const response = await this.request(operation, params, options);
-    const payload = await this.parseJson(response);
+    const modes = this.authModes(operation);
+    let outcome = await this.attempt(operation, params, options, modes[0]);
 
+    if (modes.length > 1 && this.isAuthRejected(outcome)) {
+      // Lỗi ở lần thử thứ hai (không lấy được token, không có secret, mạng) KHÔNG che lỗi gốc.
+      const retry = await this.attempt(operation, params, options, modes[1]).catch(
+        () => null,
+      );
+      if (retry && !this.isAuthRejected(retry)) {
+        const useBearer = modes[1] === 'bearer';
+        if (this.preferBearer !== useBearer) {
+          this.preferBearer = useBearer;
+          this.logger.warn(
+            `AQP ${operation}: ${modes[0]} bị từ chối, ${modes[1]} được chấp nhận; từ nay dùng ${modes[1]} trước.`,
+          );
+        }
+        outcome = retry;
+      } else {
+        this.logger.warn(
+          `AQP ${operation}: cả ${modes[0]} lẫn ${modes[1]} đều không được chấp nhận.`,
+        );
+      }
+    }
+
+    return this.unwrap<T>(operation, outcome);
+  }
+
+  private authModes(operation: string): AuthMode[] {
+    const allowsBearer = Object.prototype.hasOwnProperty.call(
+      BEARER_FALLBACK_OPERATIONS,
+      operation,
+    );
+    if (!this.agencyTokens || !allowsBearer) {
+      return ['secret'];
+    }
+    return this.preferBearer ? ['bearer', 'secret'] : ['secret', 'bearer'];
+  }
+
+  private async attempt(
+    operation: string,
+    params: Record<string, ParamValue>,
+    options: AqvisionOperationOptions,
+    auth: AuthMode,
+  ): Promise<{ response: Response; payload: JsonObject }> {
+    const response = await this.request(operation, params, options, auth);
+    return { response, payload: await this.parseJson(response) };
+  }
+
+  /** AQP từ chối xác thực: `code -100` trong envelope, hoặc HTTP 401/403. */
+  private isAuthRejected(outcome: { response: Response; payload: JsonObject }): boolean {
+    const { response, payload } = outcome;
+    if (response.status === 401 || response.status === 403) return true;
+    return response.ok && this.readCode(payload) === -100;
+  }
+
+  private unwrap<T>(
+    operation: string,
+    { response, payload }: { response: Response; payload: JsonObject },
+  ): T {
     if (!response.ok) {
       // Trước đây nhánh này ném mà không log nên 503 phía API rất khó chẩn đoán.
       // Chỉ log tên operation + HTTP status: KHÔNG log URL/query (chứa secret).
@@ -284,9 +374,15 @@ export class AqvisionApiClient {
     operation: string,
     params: Record<string, ParamValue>,
     options: AqvisionOperationOptions,
+    auth: AuthMode = 'secret',
   ): Promise<Response> {
-    // Fail-closed: đọc secret TRƯỚC khi dựng URL.
-    const secret = this.resolveSecret(operation);
+    // Fail-closed: lấy credential TRƯỚC khi dựng URL. `secret=` thiếu ⇒ ném lỗi cấu hình;
+    // Bearer: token đại lý do client Agency cấp (có cache, chống gọi trùng).
+    const secret = auth === 'secret' ? this.resolveSecret(operation) : null;
+    const bearerToken =
+      auth === 'bearer' && this.agencyTokens
+        ? await this.agencyTokens.getBearerToken()
+        : null;
     const baseUrl = this.resolveBaseUrl();
     const method = options.method ?? OPERATION_METHODS[operation] ?? 'GET';
     const attemptLimit = Math.max(
@@ -298,6 +394,7 @@ export class AqvisionApiClient {
       options.timeoutMs ?? this.resolveTimeoutMs(),
     );
     const url = `${baseUrl}/index/api/${operation}?${this.buildQuery(params, secret, options.includeScopeParams !== false)}`;
+    const headers = bearerToken ? { Authorization: `Bearer ${bearerToken}` } : undefined;
 
     let lastError: unknown = null;
 
@@ -305,7 +402,7 @@ export class AqvisionApiClient {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const response = await fetch(url, { method, signal: controller.signal });
+        const response = await fetch(url, { method, headers, signal: controller.signal });
         if (response.status >= 500 && attempt < attemptLimit) {
           lastError = new AqvisionApiException(
             response.status,
@@ -381,10 +478,11 @@ export class AqvisionApiClient {
 
   private buildQuery(
     params: Record<string, ParamValue>,
-    secret: string,
+    secret: string | null,
     includeScopeParams: boolean,
   ): string {
-    const search = new URLSearchParams({ secret });
+    // Xác thực bằng Bearer thì `secret` là null: token đi trong header, KHÔNG đi trong URL.
+    const search = new URLSearchParams(secret === null ? {} : { secret });
 
     if (includeScopeParams) {
       search.set(

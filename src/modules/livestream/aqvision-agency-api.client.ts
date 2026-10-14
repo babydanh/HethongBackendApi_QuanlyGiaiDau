@@ -43,6 +43,14 @@ export class AqvisionAgencyApiClient {
 
   constructor(private readonly configService: ConfigService) {}
 
+  /**
+   * Token đại lý còn hạn (có cache, gia hạn trước 60 giây, chống gọi trùng), dùng chung với
+   * `AqvisionApiClient` cho các thao tác ghi hình khi `secret=` bị AQP từ chối. KHÔNG log token.
+   */
+  getBearerToken(): Promise<string> {
+    return this.getAccessToken();
+  }
+
   async createStreamKey(input: {
     readonly app: string;
     readonly stream: string;

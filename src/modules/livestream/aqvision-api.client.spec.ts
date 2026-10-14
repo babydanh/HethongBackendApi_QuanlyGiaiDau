@@ -7,7 +7,13 @@ import {
 
 const SECRET = 'unit-test-secret';
 
-function makeClient(overrides: Record<string, unknown> = {}): AqvisionApiClient {
+/** Stands in for the agency client: hands out a bearer token, or fails like a broken agency setup. */
+type TokenProvider = { getBearerToken: jest.Mock<Promise<string>, []> };
+
+function makeClient(
+  overrides: Record<string, unknown> = {},
+  tokenProvider?: TokenProvider,
+): AqvisionApiClient {
   const values: Record<string, unknown> = {
     AQVISION_API_BASE_URL: 'https://api.media.aqvision.net',
     AQVISION_API_SECRET: SECRET,
@@ -18,7 +24,10 @@ function makeClient(overrides: Record<string, unknown> = {}): AqvisionApiClient 
     get: (key: string, fallback?: unknown) =>
       key in values ? values[key] : fallback,
   };
-  return new AqvisionApiClient(config as unknown as ConfigService);
+  return new AqvisionApiClient(
+    config as unknown as ConfigService,
+    tokenProvider as unknown as ConstructorParameters<typeof AqvisionApiClient>[1],
+  );
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -498,6 +507,145 @@ describe('AqvisionApiClient', () => {
 
       expect(error).toMatchObject({ providerCode: -1 });
       expect(error).not.toHaveProperty('source', expect.any(String));
+    });
+  });
+
+  describe('recording operations fall back to the agency bearer token', () => {
+    const TOKEN = 'agency-jwt-for-test';
+    const rejected = () => jsonResponse({ code: -100, msg: 'Incorrect secret' });
+    const accepted = (data: unknown = { result: true }) => jsonResponse({ code: 0, data });
+    const provider = (): TokenProvider => ({
+      getBearerToken: jest.fn().mockResolvedValue(TOKEN),
+    });
+    const callAt = (index: number): unknown[] => fetchSpy.mock.calls[index] as unknown[];
+    const urlAt = (index: number) => String(callAt(index)[0]);
+    const headersAt = (index: number) =>
+      (callAt(index)[1] as { headers?: Record<string, string> } | undefined)?.headers ?? {};
+
+    it('retries once with Bearer and no secret when AQP rejects the secret', async () => {
+      fetchSpy.mockResolvedValueOnce(rejected()).mockResolvedValueOnce(accepted());
+      const tokens = provider();
+
+      await makeClient({}, tokens).startRecordMp4('camera01');
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(urlAt(0)).toContain(`secret=${SECRET}`);
+      expect(headersAt(0)).not.toHaveProperty('Authorization');
+      expect(urlAt(1)).not.toContain('secret=');
+      expect(urlAt(1)).toContain('/index/api/startRecord');
+      expect(urlAt(1)).toContain('stream=camera01');
+      expect(headersAt(1)).toMatchObject({ Authorization: `Bearer ${TOKEN}` });
+      expect(tokens.getBearerToken).toHaveBeenCalledTimes(1);
+    });
+
+    it('covers all four recording operations and no other operation', async () => {
+      const covered = async (run: (client: AqvisionApiClient) => Promise<unknown>) => {
+        fetchSpy.mockReset();
+        fetchSpy.mockResolvedValue(rejected());
+        await run(makeClient({}, provider())).catch(() => undefined);
+        return fetchSpy.mock.calls.length;
+      };
+
+      expect(await covered((c) => c.startRecordMp4('camera01'))).toBe(2);
+      expect(await covered((c) => c.stopRecordMp4('camera01'))).toBe(2);
+      expect(await covered((c) => c.isRecordingMp4('camera01'))).toBe(2);
+      expect(await covered((c) => c.getMp4RecordFile({ stream: 'camera01' }))).toBe(2);
+      expect(await covered((c) => c.isMediaOnline('camera01'))).toBe(1);
+      expect(
+        await covered((c) => c.addStreamProxy({ stream: 'camera01', url: 'rtsp://x/y' })),
+      ).toBe(1);
+    });
+
+    it('does not fetch a token while the secret is accepted', async () => {
+      fetchSpy.mockResolvedValue(accepted({ status: true }));
+      const tokens = provider();
+
+      await expect(makeClient({}, tokens).isRecordingMp4('camera01')).resolves.toBe(true);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(tokens.getBearerToken).not.toHaveBeenCalled();
+    });
+
+    it('without a token provider the behaviour is unchanged: one request, then -100', async () => {
+      fetchSpy.mockResolvedValue(rejected());
+
+      await expect(makeClient().stopRecordMp4('camera01')).rejects.toMatchObject({
+        providerCode: -100,
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows the original -100 after exactly one retry when Bearer is rejected too', async () => {
+      fetchSpy.mockResolvedValue(rejected());
+
+      await expect(makeClient({}, provider()).startRecordMp4('camera01')).rejects.toMatchObject({
+        providerCode: -100,
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the -100 of the secret attempt when the agency token cannot be obtained', async () => {
+      fetchSpy.mockResolvedValue(rejected());
+      const broken: TokenProvider = {
+        getBearerToken: jest.fn().mockRejectedValue(new Error('agency not configured')),
+      };
+
+      const error = await makeClient({}, broken)
+        .getMp4RecordFile({ stream: 'camera01' })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(AqvisionApiException);
+      expect(error).toMatchObject({ providerCode: -100 });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('remembers that Bearer works, so the next call goes straight to it', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(rejected())
+        .mockResolvedValueOnce(accepted())
+        .mockResolvedValueOnce(accepted({ status: false }));
+      const client = makeClient({}, provider());
+
+      await client.startRecordMp4('camera01');
+      await expect(client.isRecordingMp4('camera01')).resolves.toBe(false);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(urlAt(2)).not.toContain('secret=');
+      expect(headersAt(2)).toMatchObject({ Authorization: `Bearer ${TOKEN}` });
+    });
+
+    it('goes back to the secret first when a remembered Bearer is rejected', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(rejected()) // secret, call 1
+        .mockResolvedValueOnce(accepted()) // bearer, call 1 -> remembered
+        .mockResolvedValueOnce(rejected()) // bearer first, call 2
+        .mockResolvedValueOnce(accepted({ status: true })) // secret, call 2
+        .mockResolvedValueOnce(accepted({ status: true })); // call 3
+      const client = makeClient({}, provider());
+
+      await client.startRecordMp4('camera01');
+      await expect(client.isRecordingMp4('camera01')).resolves.toBe(true);
+      await expect(client.isRecordingMp4('camera01')).resolves.toBe(true);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(5);
+      expect(urlAt(3)).toContain(`secret=${SECRET}`);
+      // The last call starts with the secret again, not with the Bearer that just failed.
+      expect(urlAt(4)).toContain(`secret=${SECRET}`);
+    });
+
+    it('never writes the secret or the token to the log', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+      fetchSpy.mockResolvedValue(rejected());
+
+      await makeClient({}, provider())
+        .startRecordMp4('camera01')
+        .catch(() => undefined);
+
+      const logged = warnSpy.mock.calls.flat().join(' ');
+      expect(logged).not.toContain(SECRET);
+      expect(logged).not.toContain(TOKEN);
+      expect(logged).not.toContain('Bearer');
+      expect(logged).not.toContain('secret=');
     });
   });
 });
