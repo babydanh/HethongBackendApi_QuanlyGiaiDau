@@ -33,6 +33,7 @@ import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { AddLiteClubMemberDto } from './dto/add-lite-club-member.dto';
 import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
+import { PairLiteParticipantsBatchDto } from './dto/pair-lite-participants-batch.dto';
 import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -896,6 +897,25 @@ export class TournamentsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.tournamentsService.pairLiteParticipants(
+      id,
+      user.sub,
+      this.getSystemRoles(user),
+      dto,
+    );
+  }
+
+  @Post(':id/pairing/batch')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'BTC ghép nhiều đôi trong một lần (một transaction, lỗi một cặp hủy cả batch)',
+  })
+  async pairTournamentParticipantsBatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PairLiteParticipantsBatchDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tournamentsService.pairLiteParticipantsBatch(
       id,
       user.sub,
       this.getSystemRoles(user),

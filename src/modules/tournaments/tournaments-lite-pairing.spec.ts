@@ -140,6 +140,7 @@ describe('TournamentsService — Lite pairing guards', () => {
       findLeaderByParticipantId: jest.fn(),
       generateLitePairsTx: jest.fn(),
       lockTournamentAndPair: jest.fn(),
+      lockTournamentAndPairMany: jest.fn(),
       lockTournamentAndUnpair: jest.fn(),
       registerParticipant: jest.fn(),
       countLiteActiveRosterUsers: jest.fn(),
@@ -995,6 +996,94 @@ describe('TournamentsService — Lite pairing guards', () => {
         'user-1',
         'OPEN',
         'An Nguyen / Minh Tran',
+      );
+    });
+  });
+
+  describe('pairLiteParticipantsBatch', () => {
+    const pair = (p1: string, p2: string, teamName?: string) => ({
+      participant1Id: p1,
+      participant2Id: p2,
+      ...(teamName === undefined ? {} : { teamName }),
+    });
+
+    beforeEach(() => {
+      mockRepo.findById!.mockResolvedValue(liteTournament);
+      mockRepo.hasNonDeletedStagesOrMatches!.mockResolvedValue(false);
+    });
+
+    it('TC-FEAT-10 sends all pairs in the chosen order through one repository call', async () => {
+      mockRepo.lockTournamentAndPairMany!.mockResolvedValue([
+        { id: 'a' },
+        { id: 'c' },
+      ]);
+      const result = await service.pairLiteParticipantsBatch(
+        'tournament-1',
+        'user-1',
+        ['ADMIN'],
+        { pairs: [pair('a', 'b', 'Đôi A'), pair('c', 'd', 'Đôi C')] },
+      );
+      expect(mockRepo.lockTournamentAndPairMany).toHaveBeenCalledTimes(1);
+      expect(mockRepo.lockTournamentAndPairMany).toHaveBeenCalledWith(
+        'tournament-1',
+        [
+          { p1Id: 'a', p2Id: 'b', teamName: 'Đôi A' },
+          { p1Id: 'c', p2Id: 'd', teamName: 'Đôi C' },
+        ],
+        'user-1',
+        'OPEN',
+      );
+      expect(result).toEqual({ pairs: [{ id: 'a' }, { id: 'c' }] });
+    });
+
+    it('TC-FEAT-11 rejects a participant that appears in two pairs before writing', async () => {
+      await expect(
+        service.pairLiteParticipantsBatch('tournament-1', 'user-1', ['ADMIN'], {
+          pairs: [pair('a', 'b'), pair('b', 'c')],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.lockTournamentAndPairMany).not.toHaveBeenCalled();
+      expect(mockRepo.findById).not.toHaveBeenCalled();
+    });
+
+    it('TC-FEAT-12 rejects a pair that repeats the same participant', async () => {
+      await expect(
+        service.pairLiteParticipantsBatch('tournament-1', 'user-1', ['ADMIN'], {
+          pairs: [pair('a', 'a')],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.lockTournamentAndPairMany).not.toHaveBeenCalled();
+    });
+
+    it('TC-FEAT-13 rejects a batch on a singles tournament', async () => {
+      mockRepo.findById!.mockResolvedValue({
+        ...liteTournament,
+        matchType: 'SINGLES',
+      });
+      await expect(
+        service.pairLiteParticipantsBatch('tournament-1', 'user-1', ['ADMIN'], {
+          pairs: [pair('a', 'b', 'Đôi A')],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.lockTournamentAndPairMany).not.toHaveBeenCalled();
+    });
+
+    it('TC-FEAT-14 builds a blank pair name from both leaders', async () => {
+      mockRepo.findLeaderByParticipantId!
+        .mockResolvedValueOnce({ userId: 'leader-1' })
+        .mockResolvedValueOnce({ userId: 'leader-2' });
+      mockRepo.findUserBasicById!
+        .mockResolvedValueOnce({ id: 'leader-1', fullName: 'An Nguyen' })
+        .mockResolvedValueOnce({ id: 'leader-2', fullName: 'Minh Tran' });
+      mockRepo.lockTournamentAndPairMany!.mockResolvedValue([]);
+      await service.pairLiteParticipantsBatch('tournament-1', 'user-1', ['ADMIN'], {
+        pairs: [pair('a', 'b', '   ')],
+      });
+      expect(mockRepo.lockTournamentAndPairMany).toHaveBeenCalledWith(
+        'tournament-1',
+        [{ p1Id: 'a', p2Id: 'b', teamName: 'An Nguyen / Minh Tran' }],
+        'user-1',
+        'OPEN',
       );
     });
   });

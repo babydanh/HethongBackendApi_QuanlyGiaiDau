@@ -35,6 +35,12 @@ import { lockCapacityOwner } from '../services/tournament-capacity.service';
 
 type PairingSource = 'MANUAL' | 'SYSTEM';
 
+export interface LitePairInput {
+  p1Id: string;
+  p2Id: string;
+  teamName: string;
+}
+
 @Injectable()
 export class TournamentLiteRepository {
   constructor(
@@ -687,6 +693,32 @@ export class TournamentLiteRepository {
         teamName,
         'MANUAL',
       );
+    });
+  }
+  async lockTournamentAndPairMany(
+    tournamentId: string,
+    pairs: LitePairInput[],
+    userId: string,
+    registrationMode: string,
+  ) {
+    return await this.db.transaction(async (tx) => {
+      await this.assertLitePairableInTx(tx, tournamentId);
+      const results: (typeof schema.tournamentParticipants.$inferSelect)[] = [];
+      for (const pair of pairs) {
+        results.push(
+          await this.pairLiteParticipantsInTx(
+            tx,
+            tournamentId,
+            pair.p1Id,
+            pair.p2Id,
+            userId,
+            registrationMode,
+            pair.teamName,
+            'MANUAL',
+          ),
+        );
+      }
+      return results;
     });
   }
   async lockTournamentAndUnpair(

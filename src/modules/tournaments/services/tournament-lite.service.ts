@@ -12,6 +12,8 @@ import { RegisterTournamentDto } from '../dto/register-tournament.dto';
 import { CreateTournamentDto } from '../dto/create-tournament.dto';
 import { UpdateBracketSlotsDto } from '../dto/update-bracket-slots.dto';
 import { PairLiteParticipantsDto } from '../dto/pair-lite-participants.dto';
+import { PairLiteParticipantsBatchDto } from '../dto/pair-lite-participants-batch.dto';
+import type { LitePairInput } from '../repositories/tournament-lite.repository';
 import { GenerateLitePairsDto } from '../dto/generate-lite-pairs.dto';
 import {
   DivisionBracketType,
@@ -1564,6 +1566,84 @@ export class TournamentLiteService {
       registrationMode,
       teamName,
     );
+  }
+  async pairLiteParticipantsBatch(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+    dto: PairLiteParticipantsBatchDto,
+  ) {
+    const participantIds = dto.pairs.flatMap((pair) => [
+      pair.participant1Id,
+      pair.participant2Id,
+    ]);
+    if (new Set(participantIds).size !== participantIds.length) {
+      throw new BadRequestException(
+        'Mỗi VĐV chỉ được xuất hiện một lần trong lần ghép này.',
+      );
+    }
+
+    const { tournament, config } = await this.checkLiteAuthorization(
+      id,
+      userId,
+      systemRoles,
+    );
+
+    const divisions = await this.tournamentsRepository.getDivisionsByTournament(id);
+    const hasDoublesDivision =
+      tournament.matchType === 'DOUBLES' ||
+      tournament.matchType === 'MIXED_DOUBLES' ||
+      divisions.some(
+        (division) =>
+          division.matchType === 'DOUBLES' ||
+          division.matchType === 'MIXED_DOUBLES',
+      );
+    if (!hasDoublesDivision) {
+      throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
+    }
+
+    const registrationMode =
+      config.registrationMode === 'APPROVAL'
+        ? 'APPROVAL'
+        : config.registrationMode === 'INVITE_ONLY'
+          ? 'INVITE_ONLY'
+          : 'OPEN';
+
+    const pairs: LitePairInput[] = [];
+    for (const pair of dto.pairs) {
+      pairs.push({
+        p1Id: pair.participant1Id,
+        p2Id: pair.participant2Id,
+        teamName: await this.resolveBatchPairTeamName(pair),
+      });
+    }
+
+    const results = await this.tournamentsRepository.lockTournamentAndPairMany(
+      id,
+      pairs,
+      userId,
+      registrationMode,
+    );
+    return { pairs: results };
+  }
+  private async resolveBatchPairTeamName(pair: PairLiteParticipantsDto) {
+    const trimmed = pair.teamName?.trim();
+    if (trimmed) return trimmed;
+    const p1Leader = await this.tournamentsRepository.findLeaderByParticipantId(
+      pair.participant1Id,
+    );
+    const p2Leader = await this.tournamentsRepository.findLeaderByParticipantId(
+      pair.participant2Id,
+    );
+    const p1Profile = await this.tournamentsRepository.findUserBasicById(
+      p1Leader?.userId ?? '',
+    );
+    const p2Profile = await this.tournamentsRepository.findUserBasicById(
+      p2Leader?.userId ?? '',
+    );
+    return [p1Profile?.fullName, p2Profile?.fullName]
+      .filter(Boolean)
+      .join(' / ');
   }
   async generateLitePairs(
     id: string,

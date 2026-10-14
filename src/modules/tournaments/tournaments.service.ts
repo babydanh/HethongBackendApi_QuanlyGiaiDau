@@ -44,6 +44,7 @@ import { QueryMyManagementTournamentsDto } from './dto/query-my-management-tourn
 import { RegisterTournamentDto } from './dto/register-tournament.dto';
 import { UpdateFootballRosterDto } from './dto/update-football-roster.dto';
 import { PairLiteParticipantsDto } from './dto/pair-lite-participants.dto';
+import { PairLiteParticipantsBatchDto } from './dto/pair-lite-participants-batch.dto';
 import { GenerateLitePairsDto } from './dto/generate-lite-pairs.dto';
 import { UpdateStageDto } from './dto/update-stage.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -1552,6 +1553,20 @@ export class TournamentsService {
     dto: PairLiteParticipantsDto,
   ) {
     return this.tournamentLiteService.pairLiteParticipants(
+      id,
+      userId,
+      systemRoles,
+      dto,
+    );
+  }
+
+  async pairLiteParticipantsBatch(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+    dto: PairLiteParticipantsBatchDto,
+  ) {
+    return this.tournamentLiteService.pairLiteParticipantsBatch(
       id,
       userId,
       systemRoles,

@@ -7,6 +7,7 @@ import { TournamentResultsRepository } from './repositories/tournament-results.r
 import { TournamentBracketRepository } from './repositories/tournament-bracket.repository';
 import { TournamentRatingRepository } from './repositories/tournament-rating.repository';
 import { TournamentLiteRepository } from './repositories/tournament-lite.repository';
+import type { LitePairInput } from './repositories/tournament-lite.repository';
 import { TournamentImportRepository } from './repositories/tournament-import.repository';
 import { TournamentOperationsRepository } from './repositories/tournament-operations.repository';
 import { TournamentParticipantRepository } from './repositories/tournament-participant.repository';
@@ -520,6 +521,20 @@ export class TournamentsRepository {
     ...args: Parameters<TournamentLiteRepository['lockTournamentAndPair']>
   ) {
     return this.tournamentLiteRepository.lockTournamentAndPair(...args);
+  }
+
+  lockTournamentAndPairMany(
+    tournamentId: string,
+    pairs: LitePairInput[],
+    userId: string,
+    registrationMode: string,
+  ) {
+    return this.tournamentLiteRepository.lockTournamentAndPairMany(
+      tournamentId,
+      pairs,
+      userId,
+      registrationMode,
+    );
   }
 
   lockTournamentAndUnpair(
