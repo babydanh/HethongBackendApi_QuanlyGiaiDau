@@ -117,7 +117,7 @@ function render(tables: TableDoc[]): Record<string, string> {
     '',
     '- Cột, kiểu, mô tả từng cột: mở file schema của nhóm (JSDoc nằm ngay trên bảng/cột).',
     `- Quan hệ khóa ngoại từng nhóm (Mermaid): [relations.md](./relations.md).`,
-    `- Audit: [audit.md](./audit.md) (${unindexed.length} khóa ngoại chưa có index, ${missingPk.length} bảng thiếu khóa chính, ${missingDescription.length} bảng chưa có mô tả).`,
+    `- Audit: [audit.md](./audit.md) (${unindexed.length} khóa ngoại là ứng viên thiếu index, ${missingPk.length} bảng thiếu khóa chính, ${missingDescription.length} bảng chưa có mô tả).`,
     ''
   ];
   const relations: string[] = ['# Quan hệ khóa ngoại theo nhóm', '', GENERATED_NOTE, '', 'Mỗi cạnh: `bảng cha --o{ bảng con : cột FK`; `|o` là FK cho phép null.', ''];

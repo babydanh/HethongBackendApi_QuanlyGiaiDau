@@ -6,7 +6,7 @@
 
 - Cột, kiểu, mô tả từng cột: mở file schema của nhóm (JSDoc nằm ngay trên bảng/cột).
 - Quan hệ khóa ngoại từng nhóm (Mermaid): [relations.md](./relations.md).
-- Audit: [audit.md](./audit.md) (183 khóa ngoại chưa có index, 0 bảng thiếu khóa chính, 82 bảng chưa có mô tả).
+- Audit: [audit.md](./audit.md) (183 khóa ngoại là ứng viên thiếu index, 0 bảng thiếu khóa chính, 82 bảng chưa có mô tả).
 
 ## admin_tables
 
