@@ -14,12 +14,19 @@ import { provinces } from './regions.schema';
 import { tournaments } from './tournaments.schema';
 
 
+/**
+ * Tài khoản đăng nhập (email, mật khẩu hoặc OAuth). Thông tin hiển thị nằm ở profiles (quan hệ 1-1).
+ * Xóa mềm bằng deletedAt; người dùng đã xóa không còn được tính là active (roles.guard.ts, chat.repository.ts).
+ */
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: varchar('email', { length: 255 }).notNull().unique(),
+  /** Mật khẩu đã băm. Null với tài khoản chỉ đăng nhập bằng OAuth. */
   passwordHash: text('password_hash'),
+  /** Email đã xác minh. VerifiedGuard chặn route yêu cầu xác minh khi false, trừ tài khoản mock ngoài production. */
   isEmailVerified: boolean('is_email_verified').default(false).notNull(),
   isPhoneVerified: boolean('is_phone_verified').default(false).notNull(),
+  /** Tài khoản giả/khách (seed, test, hoặc khách được thêm vào trận CLB). Không tính vào thống kê người dùng thật. */
   isMock: boolean('is_mock').default(false).notNull(),
   acceptedTosAt: timestamp('accepted_tos_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true })

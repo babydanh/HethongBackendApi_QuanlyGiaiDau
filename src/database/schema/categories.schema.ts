@@ -15,14 +15,23 @@ import { sql } from 'drizzle-orm';
 import { users } from './users.schema';
 import { communities } from './communities.schema';
 
+/**
+ * Môn thi đấu, ví dụ Pickleball, Tennis, Badminton, Table Tennis, Football (categories.seed.ts). Giải, ELO và bảng xếp hạng đều gắn với một môn qua categoryId.
+ */
 export const categories = pgTable('categories', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }).notNull().unique(),
   slug: varchar('slug', { length: 255 }).notNull().unique(),
   description: text('description'),
+  /**
+   * Cấu hình luật riêng của môn (jsonb). Ví dụ Pickleball có ruleKind, allowedRuleKinds, defaultSportRules (ví dụ setsToWin, pointsPerSet, mustWinByTwo) và supportedMatchTypes (categories.seed.ts:18-36).
+   */
   categoryConfig: jsonb('category_config').default('{}').notNull(),
 });
 
+/**
+ * Bậc ELO của một môn (ví dụ "Tier S", "High Tier A"), có khoảng minElo–maxElo và icon. Ngưỡng gán bậc cho người chơi nằm cứng trong code (rankings.service.ts:1520-1529), không lấy từ minElo/maxElo.
+ */
 export const eloTiers = pgTable(
   'elo_tiers',
   {
@@ -31,6 +40,9 @@ export const eloTiers = pgTable(
       .references(() => categories.id, { onDelete: 'cascade' })
       .notNull(),
     name: varchar('name', { length: 100 }).notNull(),
+    /**
+     * Khoảng ELO của bậc (minElo < maxElo, CHECK). Bảng xếp hạng cộng đồng ghép bậc theo khoảng này (communities.repository.ts).
+     */
     minElo: integer('min_elo').notNull(),
     maxElo: integer('max_elo').notNull(),
     iconUrl: text('icon_url'),
@@ -105,6 +117,9 @@ export const userRanks = pgTable(
   }),
 );
 
+/**
+ * Nhật ký mỗi lần ELO của một người chơi thay đổi: ELO trước, sau và chênh lệch. Với trận đấu có matchId, unique index (matchId, userId) chặn tính trùng (categories.schema.ts:129-133).
+ */
 export const eloHistoryLogs = pgTable(
   'elo_history_logs',
   {

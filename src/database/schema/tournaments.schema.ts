@@ -39,6 +39,10 @@ export const parentTournaments = pgTable('parent_tournaments', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
 
+/**
+ * Giải đấu do người tổ chức tạo. Là gốc của hạng mục (tournament_divisions), đăng ký (tournament_participants), vòng đấu (tournament_stages), nhân sự, trọng tài và lượt theo dõi.
+ * Có thể thuộc một parent_tournaments và một community.
+ */
 export const tournaments = pgTable(
   'tournaments',
   {
@@ -57,25 +61,44 @@ export const tournaments = pgTable(
       .notNull(),
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
+    /**
+     * Trạng thái vòng đời. Giá trị (update-tournament.dto.ts:12-17): DRAFT, UPCOMING, REGISTRATION_OPEN, REGISTRATION_CLOSED, IN_PROGRESS, COMPLETED, CANCELLED. Admin/hệ thống còn đặt PENDING_APPROVAL, PENDING_DELETE, SUSPENDED (admin.service.ts).
+     * Publish: PENDING_APPROVAL (người không phải admin, visibility PUBLIC), còn lại UPCOMING hoặc REGISTRATION_OPEN. Đóng đăng ký: REGISTRATION_CLOSED, riêng CLUB hoặc phí = 0 thì UPCOMING (tournament-lifecycle.service.ts, methods publish và lock).
+     */
     status: varchar('status', { length: 50 }).default('DRAFT').notNull(),
+    /**
+     * Loại thi đấu của giải: SINGLES hoặc DOUBLES, mặc định DOUBLES (MatchType, common/constants/enums.ts:55-58). Hạng mục còn có MIXED_DOUBLES (create-division.dto.ts).
+     */
     matchType: varchar('match_type', { length: 50 }).default('DOUBLES').notNull(),
     sportRules: jsonb('sport_rules').notNull(),
     tournamentConfig: jsonb('tournament_config').notNull(),
+    /**
+     * Phí đăng ký mặc định của giải. Hạng mục có phí riêng sẽ ghi đè khi entryFeeOverrideEnabled = true và đăng ký chưa có snapshot (payments.service.ts:582-591). Đơn vị tiền tệ không khai báo trong code.
+     */
     entryFee: numeric('entry_fee', { precision: 12, scale: 2 })
       .default('0.00')
       .notNull(),
+    /**
+     * Snapshot % phí nền tảng (0–100), chụp lúc tạo giải từ cấu hình PLATFORM_FEE_PERCENTAGE_* theo loại giải. DTO có thể ghi đè. Thanh toán đọc snapshot này, không đọc cấu hình chung (tournament-catalog.repository.ts:1100-1165, payments.service.ts:694-696).
+     */
     platformFeePercentage: numeric('platform_fee_percentage', {
       precision: 5,
       scale: 2,
     })
       .default('5.00')
       .notNull(),
+    /**
+     * Snapshot ngưỡng phí. entryFee ≥ ngưỡng thì phí = entryFee × platformFeePercentage / 100 (làm tròn); dưới ngưỡng dùng platformFeeFixedAmount (common/helpers/platform-fee.helper.ts:23-43).
+     */
     platformFeeThreshold: numeric('platform_fee_threshold', {
       precision: 12,
       scale: 2,
     })
       .default('100000.00')
       .notNull(),
+    /**
+     * Snapshot phí cố định áp dụng khi entryFee nhỏ hơn platformFeeThreshold. Nhân với số VĐV trong đăng ký (payments.service.ts:611-623).
+     */
     platformFeeFixedAmount: numeric('platform_fee_fixed_amount', {
       precision: 12,
       scale: 2,
@@ -86,10 +109,16 @@ export const tournaments = pgTable(
     registrationEndDate: timestamp('registration_end_date', { withTimezone: true }),
     maxParticipants: integer('max_participants'),
     startDate: timestamp('start_date', { withTimezone: true }),
+    /**
+     * Ngày kết thúc. Khi đã qua, scheduler chuyển giải sang COMPLETED nếu đang ở REGISTRATION_OPEN, REGISTRATION_CLOSED, UPCOMING hoặc IN_PROGRESS (tournament-scheduler.service.ts:100-110).
+     */
     endDate: timestamp('end_date', { withTimezone: true }),
     venueId: uuid('venue_id').references(() => tournamentVenues.id, {
       onDelete: 'set null',
     }),
+    /**
+     * Loại giải: CLUB hoặc PUBLIC (create-tournament.dto.ts:26-27). CLUB dùng khóa cấu hình phí CLUB và khi đóng đăng ký chuyển thẳng sang UPCOMING.
+     */
     tournamentType: varchar('tournament_type', { length: 50 }).default('CLUB').notNull(),
     bannerUrl: text('banner_url'),
     logoUrl: text('logo_url'),
@@ -100,12 +129,24 @@ export const tournaments = pgTable(
     prizeDescription: text('prize_description'),
     prizes: jsonb('prizes').default(sql`'[]'::jsonb`),
     inviteCode: varchar('invite_code', { length: 20 }).unique(),
+    /**
+     * Phạm vi hiển thị, mặc định PUBLIC. Với PUBLIC, người không phải admin khi publish sẽ chuyển sang PENDING_APPROVAL để admin duyệt (tournament-lifecycle.service.ts, method publish).
+     */
     visibility: varchar('visibility', { length: 50 }).default('PUBLIC').notNull(),
+    /**
+     * Giới hạn giới tính: ANY, MALE, FEMALE, MIXED (GenderRestriction, common/constants/enums.ts:60-65).
+     */
     genderRestriction: varchar('gender_restriction', { length: 20 }),
     contactInfo: jsonb('contact_info'),
     city: varchar('city', { length: 100 }),
     reservedSlotsCount: integer('reserved_slots_count').default(0).notNull(),
+    /**
+     * Giải có tính ELO hay không, mặc định true. Bị khóa sau khi publish (tournament-lifecycle.service.ts:666-669). Admin cập nhật ELO thủ công cho trận của giải không ranked sẽ bị từ chối (rankings.service.ts:305-307).
+     */
     isRanked: boolean('is_ranked').default(true).notNull(),
+    /**
+     * Khóa đăng ký ở cấp giải. Mạnh hơn isRegistrationLocked của hạng mục. Được đặt true khi đóng đăng ký (tournament-lifecycle.service.ts, method lock).
+     */
     isRegistrationLocked: boolean('is_registration_locked').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -114,6 +155,9 @@ export const tournaments = pgTable(
       .defaultNow()
       .notNull(),
     // Completed tournaments are archived instead of being hidden by soft-delete.
+    /**
+     * Thời điểm lưu trữ giải, ghi bởi tournament-catalog.repository.ts:1553.
+     */
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -144,6 +188,9 @@ export const tournaments = pgTable(
   }),
 );
 
+/**
+ * Vòng thi đấu của giải, hoặc của một hạng mục khi tournamentDivisionId có giá trị. Thứ tự hiển thị theo cột order.
+ */
 export const tournamentStages = pgTable('tournament_stages', {
   id: uuid('id').primaryKey().defaultRandom(),
   tournamentId: uuid('tournament_id')
@@ -169,6 +216,9 @@ export const tournamentStages = pgTable('tournament_stages', {
   ),
 }));
 
+/**
+ * Bảng (nhóm) thi đấu thuộc một vòng (tournament_stages). Không có FK trực tiếp tới giải; truy cập giải qua stageId.
+ */
 export const tournamentGroups = pgTable('tournament_groups', {
   id: uuid('id').primaryKey().defaultRandom(),
   stageId: uuid('stage_id')
@@ -181,6 +231,9 @@ export const tournamentGroups = pgTable('tournament_groups', {
   idxGroupsStageId: index('idx_groups_stage_id').on(table.stageId),
 }));
 
+/**
+ * Đăng ký tham gia một hạng mục của giải: một đội, một cặp đôi hoặc một VĐV đơn. Trạng thái xử lý nằm ở teamStatus; người chơi thực tế nằm ở tournament_rosters.
+ */
 export const tournamentParticipants = pgTable('tournament_participants', {
   id: uuid('id').primaryKey().defaultRandom(),
   tournamentId: uuid('tournament_id')
@@ -202,11 +255,20 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   footballTeamLogoUrl: varchar('football_team_logo_url', { length: 1000 }),
   seed: integer('seed'),
   points: integer('points').default(0).notNull(),
+  /**
+   * Bản sao cờ isRanked của giải tại lúc đăng ký, KHÔNG phải sự đồng ý của người chơi. Sự đồng ý thật nằm ở tournament_rosters.rankingConsentAt.
+   */
   rankingConsent: boolean('ranking_consent').default(false).notNull(),
   customResponses: jsonb('custom_responses'),
+  /**
+   * Đã đóng phí đăng ký. Chỉ chuyển true khi một payment của đăng ký chuyển sang COMPLETED (payments.repository.ts:364-370).
+   */
   isPaid: boolean('is_paid').default(false).notNull(),
   // Set only by the organizer add-athlete pairs flow. The registration fee is
   // never collected for these rows; entryFeeAtRegistration keeps the real fee.
+  /**
+   * true = organizer miễn phí đăng ký này. Đăng ký như vậy được coi là đã đóng phí (registration-payment-eligibility.ts:20-33).
+   */
   organizerWaivedFee: boolean('organizer_waived_fee').default(false).notNull(),
   // Organizer's own day-of-event mark. Carries no meaning anywhere else: it does
   // not gate roster approval, does not affect ELO, and does not block playing.
@@ -214,12 +276,23 @@ export const tournamentParticipants = pgTable('tournament_participants', {
   // Effective registration fee captured when this participant is created.
   // This is distinct from isPaid: zero means free at registration, while
   // isPaid=true after a paid flow means the payment was captured.
+  /**
+   * Ảnh chụp phí hiệu lực lúc tạo đăng ký. Khi thanh toán, giá trị này được ưu tiên trước phí giải và phí hạng mục (payments.service.ts:582-591).
+   */
   entryFeeAtRegistration: numeric('entry_fee_at_registration', {
     precision: 12,
     scale: 2,
   }).default('0.00').notNull(),
   teamInviteToken: varchar('team_invite_token', { length: 50 }).unique(),
+  /**
+   * Trạng thái đăng ký. Đôi: WAITLISTED, PENDING_APPROVAL, PENDING_PARTNER, COMPLETE. Đơn: WAITLISTED, PENDING, PENDING_APPROVAL, COMPLETE (tournament-participant-status.ts:26-30, 61-65).
+   * Giữ suất trong sức chứa: PENDING, PENDING_APPROVAL, PENDING_PARTNER, COMPLETE (tournament-participant-status.ts:85-90). Mặc định PENDING.
+   */
   teamStatus: varchar('team_status', { length: 50 }).default('PENDING').notNull(),
+  /**
+   * Nguồn ghép cặp: UNKNOWN (mặc định), MANUAL (ghép tay, ví dụ khi nhập danh sách từ file: tournament-import.repository.ts:964-966), SYSTEM.
+   * Ràng buộc CHECK: tournament_participants_pairing_source_check.
+   */
   pairingSource: varchar('pairing_source', { length: 20 }).default('UNKNOWN').notNull(),
   partnerUserId: uuid('partner_user_id').references(() => users.id, { onDelete: 'restrict' }),
   partnerInviteExpiresAt: timestamp('partner_invite_expires_at', { withTimezone: true }),

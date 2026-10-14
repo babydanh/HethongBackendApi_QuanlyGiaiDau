@@ -55,11 +55,16 @@ export const friendships = pgTable(
   }),
 );
 
+/**
+ * Phòng chat. type quyết định loại phòng: DIRECT (mặc định, chat 1-1), GROUP, SUPPORT (hỗ trợ), CLUB (chat của một CLB),
+ * SOCIAL (chat của một kèo Social). CLUB và SOCIAL được tạo tự động theo CLB hoặc kèo (chat.service.ts).
+ */
 export const chatRooms = pgTable(
   'chat_rooms',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: varchar('name', { length: 255 }),
+    /** Loại phòng: DIRECT, GROUP, SUPPORT, CLUB, SOCIAL. Phòng CLUB và SOCIAL không tạo tay được (chat.service.ts). */
     type: varchar('type', { length: 50 }).default('DIRECT').notNull(),
     // P2D.1: Club Chat — communityId nullable, unique khi type=CLUB; clubName/clubAvatar denormalized (snapshot lúc tạo room).
     communityId: uuid('community_id').references(() => communities.id, {
@@ -71,8 +76,11 @@ export const chatRooms = pgTable(
     }),
     clubName: varchar('club_name', { length: 255 }),
     clubAvatar: text('club_avatar'),
+    /** Khi bật, chỉ OWNER, ADMIN hoặc MODERATOR của CLB được gửi tin (chat.service.ts). */
     isAnnouncementOnly: boolean('is_announcement_only').default(false).notNull(),
+    /** Chế độ chậm: số giây tối thiểu giữa hai tin của thành viên thường. 0 = tắt. Vai trò quản trị được miễn (chat.service.ts). */
     slowModeSeconds: integer('slow_mode_seconds').default(0).notNull(),
+    /** ID tin nhắn đang ghim của phòng. Không có khóa ngoại. */
     pinnedMessageId: uuid('pinned_message_id'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

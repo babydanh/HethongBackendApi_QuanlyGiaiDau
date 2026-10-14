@@ -19,12 +19,17 @@ import { tournaments } from './tournaments.schema';
 import { tournamentDivisions } from './tournament_divisions.schema';
 import { matches } from './matches.schema';
 
+/**
+ * Đội bóng trong module bóng đá. Thuộc một danh mục (category) và có thể gắn cộng đồng.
+ * Người tạo lưu ở created_by; lưu trữ bằng archived_at.
+ */
 export const footballTeams = pgTable('football_teams', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 120 }).notNull(),
   logoUrl: text('logo_url'),
   categoryId: uuid('category_id').references(() => categories.id).notNull(),
   communityId: uuid('community_id').references(() => communities.id, { onDelete: 'set null' }),
+  /** Trạng thái đội: ACTIVE, SUSPENDED hoặc ARCHIVED (CHECK). */
   status: varchar('status', { length: 20 }).default('ACTIVE').notNull(),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

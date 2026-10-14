@@ -56,6 +56,10 @@ export const communitySocialSettings = pgTable('community_social_settings', {
     .notNull(),
 });
 
+/**
+ * Bài đăng mạng xã hội. communityId có giá trị là bài của CLB; NULL là bài cá nhân (profile post).
+ * Bài có thể gắn với trận CLB (clubMatchSessionId) hoặc giải đấu (tournamentId), và có thể chia sẻ bài khác (sharedPostId).
+ */
 export const communityPosts = pgTable(
   'community_posts',
   {
@@ -75,7 +79,9 @@ export const communityPosts = pgTable(
       () => clubMatchSessions.id,
       { onDelete: 'cascade' },
     ),
+    /** Loại bài. Mặc định NORMAL; các giá trị khác chưa xác minh trong code. */
     type: varchar('type', { length: 30 }).default('NORMAL').notNull(),
+    /** Phạm vi hiển thị bài, mặc định COMMUNITY. Các giá trị khác chưa xác minh trong code. */
     visibility: varchar('visibility', { length: 20 })
       .default('COMMUNITY')
       .notNull(),
@@ -91,14 +97,20 @@ export const communityPosts = pgTable(
       .array()
       .default(sql`'{}'::text[]`)
       .notNull(),
+    /** Danh sách userId được gắn thẻ trong bài (mảng JSON). Service lọc theo thành viên CLB đang JOINED trước khi lưu (community-social.service.ts). */
     mentions: jsonb('mentions')
       .$type<string[]>()
       .default(sql`'[]'::jsonb`)
       .notNull(),
+    /** Trạng thái bài: PUBLISHED (mặc định), PENDING (chờ duyệt), HIDDEN (BQT ẩn), REJECTED (BQT từ chối). */
     status: varchar('status', { length: 30 }).default('PUBLISHED').notNull(),
+    /** Khóa chống đăng trùng do client gửi. Duy nhất theo (communityId, authorId) khi có giá trị (uq_community_posts_idempotency). */
     idempotencyKey: varchar('idempotency_key', { length: 128 }),
+    /** Dấu vân tay nội dung để nhận diện bài trùng trong khoảng thời gian gần đây (community-social.repository.ts). */
     contentFingerprint: varchar('content_fingerprint', { length: 64 }),
+    /** Số reaction của bài. Được tính lại từ community_post_reactions mỗi khi có người đổi reaction (community-social.repository.ts). */
     reactionCount: integer('reaction_count').default(0).notNull(),
+    /** Số bình luận của bài. Tăng khi thêm bình luận, giảm khi xóa (community-social.repository.ts). */
     commentCount: integer('comment_count').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -171,6 +183,10 @@ export const clubMatchDigestItems = pgTable(
   }),
 );
 
+/**
+ * Bình luận trên bài đăng. parentId trỏ tới bình luận cha khi đây là trả lời.
+ * Bình luận bị BQT ẩn hoặc từ chối vẫn giữ bản ghi (xem status).
+ */
 export const communityPostComments = pgTable(
   'community_post_comments',
   {
@@ -181,9 +197,11 @@ export const communityPostComments = pgTable(
     authorId: uuid('author_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    /** ID bình luận cha khi đây là trả lời. Không có khóa ngoại. */
     parentId: uuid('parent_id'),
     body: text('body').notNull(),
     status: varchar('status', { length: 30 }).default('PUBLISHED').notNull(),
+    /** Lý do BQT ghi khi ẩn hoặc từ chối bình luận (community-social.repository.ts). */
     moderationReason: text('moderation_reason'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -313,6 +331,10 @@ export const communityMemberSocialPreferences = pgTable(
   }),
 );
 
+/**
+ * Bình chọn (poll) gắn với một bài đăng. Poll đóng khi isClosed = true hoặc đã quá expiresAt,
+ * lúc đó không nhận thêm phiếu (community-social.service.ts).
+ */
 export const communityPolls = pgTable(
   'community_polls',
   {
@@ -327,9 +349,11 @@ export const communityPolls = pgTable(
       onDelete: 'set null',
     }),
     question: text('question').notNull(),
+    /** Cho phép chọn nhiều đáp án. Mặc định false: mỗi người chỉ có một phiếu, phiếu mới thay phiếu cũ (community-social.repository.ts). */
     allowMultipleAnswers: boolean('allow_multiple_answers')
       .default(false)
       .notNull(),
+    /** Cho phép người khác thêm đáp án mới. Mặc định true (community-social.service.ts). */
     allowAddOptions: boolean('allow_add_options').default(true).notNull(),
     isClosed: boolean('is_closed').default(false).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),

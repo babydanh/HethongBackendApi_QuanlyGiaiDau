@@ -21,6 +21,10 @@ import { categories } from './categories.schema';
 import { provinces, wards } from './regions.schema';
 import { tournaments } from './tournaments.schema';
 
+/**
+ * Câu lạc bộ (CLB). Trong code, "community" nghĩa là CLB. Mỗi CLB có đúng một môn thể thao (community_sports),
+ * danh sách thành viên (community_members) và trạng thái duyệt riêng.
+ */
 export const communities = pgTable('communities', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }).notNull(),
@@ -35,11 +39,24 @@ export const communities = pgTable('communities', {
   districtCode: varchar('district_code', { length: 20 }),
   wardCode: varchar('ward_code', { length: 20 })
     .references(() => wards.code),
+  /**
+   * Chế độ hiển thị: PUBLIC (mặc định), PRIVATE (giới hạn danh sách thành viên và album),
+   * RESTRICTED (chưa thấy xử lý riêng). Xem create-community.dto.ts.
+   */
   visibility: varchar('visibility', { length: 50 }).default('PUBLIC').notNull(),
+  /**
+   * Cách vào CLB: OPEN (vào ngay), APPROVAL (tạo đơn chờ duyệt, thành viên ở trạng thái PENDING),
+   * INVITE_ONLY (không tự xin vào được). Xem communities.service.ts.
+   */
   joinMode: varchar('join_mode', { length: 50 }).default('OPEN').notNull(),
+  /** Danh sách câu hỏi người xin vào CLB phải trả lời. Câu trả lời lưu ở community_members.join_answers. */
   joinQuestions: jsonb('join_questions').$type<string[]>().default([]).notNull(),
   rules: text('rules'),
   maxMembers: integer('max_members'),
+  /**
+   * Trạng thái duyệt CLB: PENDING (chờ duyệt, lúc tạo CLB), ACTIVE (đã duyệt), REJECTED (bị từ chối, được nộp lại).
+   * Cột mặc định là ACTIVE nhưng service tạo CLB với PENDING (communities.service.ts).
+   */
   status: varchar('status', { length: 50 }).default('ACTIVE').notNull(),
   approvedBy: uuid('approved_by').references(() => users.id, {
     onDelete: 'set null',

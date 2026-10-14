@@ -46,6 +46,7 @@ export const socialSessions = pgTable(
       .notNull(),
     title: varchar('title', { length: 100 }).notNull(),
     description: text('description'),
+    /** Hình thức chơi. Mặc định 'Giao lưu'; giá trị hợp lệ định nghĩa trong social-session.dto.ts (SOCIAL_PLAY_FORMATS). */
     playFormat: varchar('play_format', { length: 30 })
       .default('Giao lưu')
       .notNull(),
@@ -69,22 +70,32 @@ export const socialSessions = pgTable(
     courtId: uuid('court_id').references(() => venueCourts.id, {
       onDelete: 'set null',
     }),
+    /** Yêu cầu giới tính của kèo. Ràng buộc DB: ANY, MALE, FEMALE, MIXED. Chưa thấy kiểm tra lúc tham gia (xem open questions). */
     genderRequirement: varchar('gender_requirement', { length: 20 })
       .default('ANY')
       .notNull(),
+    /** Khóa chống tạo kèo trùng do client gửi, duy nhất theo host. Luôn đi cùng creationFingerprint (social_session_create_idempotency_pair_check). */
     creationIdempotencyKey: varchar('creation_idempotency_key', {
       length: 128,
     }),
     creationFingerprint: varchar('creation_fingerprint', { length: 64 }),
+    /** Số chỗ tối đa, giới hạn 2–64 (social_session_capacity_check). */
     maxSlots: integer('max_slots').default(6).notNull(),
+    /** Số chỗ đã giữ: tổng ticketCount của người có status JOINED (host tính 1). Khi đạt maxSlots, status chuyển FULL (social-sessions.repository.ts:843-845). */
     currentSlots: integer('current_slots').default(1).notNull(),
+    /** Giá 1 vé (VND); 0 = miễn phí (social-session.dto.ts). */
     feePerSlot: integer('fee_per_slot').default(0).notNull(),
     levelRequirement: varchar('level_requirement', { length: 50 })
       .default('ALL')
       .notNull(),
+    /** PUBLIC (ai cũng xem) hoặc CLUB_ONLY (chỉ thành viên JOINED của CLB; bắt buộc có communityId) (social_session_visibility_check). */
     visibility: varchar('visibility', { length: 20 }).default('PUBLIC').notNull(),
     contactPhone: varchar('contact_phone', { length: 20 }),
     zaloGroupUrl: text('zalo_group_url'),
+    /**
+     * Trạng thái kèo: OPEN (đang nhận người), FULL (đủ chỗ), COMPLETED (đã kết thúc), CANCELLED (đã hủy).
+     * OPEN và FULL đổi qua lại theo số chỗ. Kèo đã hủy hoặc kết thúc không nhận người (SESSION_CLOSED).
+     */
     status: varchar('status', { length: 20 }).default('OPEN').notNull(),
     metadata: jsonb('metadata').default('{}').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })

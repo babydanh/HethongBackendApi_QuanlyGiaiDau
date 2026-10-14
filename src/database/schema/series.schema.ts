@@ -16,6 +16,9 @@ import { tournaments, tournamentParticipants } from './tournaments.schema';
 import { categories } from './categories.schema';
 
 // 1. tournament_series
+/**
+ * Chuỗi giải (series): nhóm các chặng (series_legs) và giải con (series_events) để cộng điểm PSR vào bảng xếp hạng chung của chuỗi. Thể thức tính điểm nằm trong cột rules.
+ */
 export const tournamentSeries = pgTable('tournament_series', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }).notNull(),
@@ -26,11 +29,20 @@ export const tournamentSeries = pgTable('tournament_series', {
   organizerId: uuid('organizer_id')
     .references(() => users.id, { onDelete: 'restrict' })
     .notNull(),
+  /**
+   * Trạng thái series: DRAFT (mặc định), ACTIVE, COMPLETED, CANCELLED.
+   */
   status: varchar('status', { length: 50 }).default('DRAFT').notNull(), // DRAFT, ACTIVE, COMPLETED, CANCELLED
   startDate: timestamp('start_date', { withTimezone: true }),
   endDate: timestamp('end_date', { withTimezone: true }),
   totalPrize: numeric('total_prize', { precision: 12, scale: 2 }),
+  /**
+   * Thể thức tính điểm PSR (PsrPointConfig, psr-point-config.interface.ts:1-9): pointsByRank (điểm theo mốc hạng), directEntryThreshold (hạng ≤ ngưỡng thì vào thẳng, mặc định 2), wildcardCount, exclusionRule, exclusionScope (CATEGORY | ALL), minStagesRequired (số chặng tối thiểu, mặc định 1).
+   */
   rules: jsonb('rules').default(sql`'{}'::jsonb`).notNull(), // PsrPointConfig JSON
+  /**
+   * Phạm vi hiển thị: PUBLIC hoặc PRIVATE, mặc định PUBLIC.
+   */
   visibility: varchar('visibility', { length: 50 }).default('PUBLIC').notNull(), // PUBLIC, PRIVATE
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -38,6 +50,9 @@ export const tournamentSeries = pgTable('tournament_series', {
 });
 
 // 2. series_legs
+/**
+ * Chặng của series, có khoảng thời gian và trạng thái riêng. Số suất vào thẳng/wildcard và thể thức PSR có thể cấu hình theo chặng.
+ */
 export const seriesLegs = pgTable('series_legs', {
   id: uuid('id').primaryKey().defaultRandom(),
   seriesId: uuid('series_id')
@@ -47,14 +62,29 @@ export const seriesLegs = pgTable('series_legs', {
   order: integer('order').notNull(),
   startDate: timestamp('start_date', { withTimezone: true }),
   endDate: timestamp('end_date', { withTimezone: true }),
+  /**
+   * Trạng thái chặng: UPCOMING (mặc định), ONGOING, COMPLETED.
+   */
   status: varchar('status', { length: 50 }).default('UPCOMING').notNull(), // UPCOMING, ONGOING, COMPLETED
+  /**
+   * Số suất vào thẳng của chặng, mặc định 2 (series.repository.ts:195).
+   */
   directEntrySlots: integer('direct_entry_slots').default(2).notNull(),
+  /**
+   * Số suất wildcard gốc của chặng, mặc định 16. Khi tính kết quả, cộng thêm phần suất vào thẳng không dùng hết (series.service.ts:482-491).
+   */
   wildcardSlots: integer('wildcard_slots').default(16).notNull(),
+  /**
+   * Thể thức PSR riêng cho chặng. Nếu trống thì dùng rules của series (series.service.ts:456).
+   */
   rulesOverride: jsonb('rules_override'), // Overrides PsrPointConfig if needed
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // 3. series_events
+/**
+ * Gắn một giải vào một chặng của series, kèm hệ số điểm. Mỗi giải chỉ thuộc tối đa một series event (unique tournamentId).
+ */
 export const seriesEvents = pgTable('series_events', {
   id: uuid('id').primaryKey().defaultRandom(),
   legId: uuid('leg_id')
@@ -66,6 +96,9 @@ export const seriesEvents = pgTable('series_events', {
     .unique(), // 1 tournament belongs to 1 series event
   region: varchar('region', { length: 100 }),
   order: integer('order').notNull(),
+  /**
+   * Hệ số nhân điểm của giải, mặc định 1.0 (series.repository.ts:257). Tối thiểu 0.1 theo DTO (leg.dto.ts:72-73).
+   */
   pointMultiplier: real('point_multiplier').default(1.0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -94,6 +127,9 @@ export const seriesStandings = pgTable('series_standings', {
 });
 
 // 5. psr_point_logs
+/**
+ * Nhật ký điểm PSR: mỗi dòng là điểm một VĐV nhận được từ một giải của chuỗi, kèm hạng đạt được, điểm gốc, hệ số và điểm cuối (series.service.ts:265-274).
+ */
 export const psrPointLogs = pgTable('psr_point_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
   standingId: uuid('standing_id')
@@ -106,9 +142,21 @@ export const psrPointLogs = pgTable('psr_point_logs', {
     .references(() => tournamentParticipants.id, { onDelete: 'cascade' })
     .notNull(),
   rankAchieved: integer('rank_achieved').notNull(),
+  /**
+   * Điểm gốc theo mốc hạng, trước khi nhân hệ số. Bằng 0 nếu là walkover (series.service.ts:241-248).
+   */
   basePoints: integer('base_points').notNull(),
+  /**
+   * Điểm thưởng cộng thêm, mặc định 0. Hàm ghi nhật ký hiện không nhận tham số này (series.repository.ts:420-433).
+   */
   bonusPoints: integer('bonus_points').default(0).notNull(),
+  /**
+   * Hệ số đã áp dụng, lấy từ pointMultiplier của giải (series.service.ts:251).
+   */
   multiplier: real('multiplier').default(1.0).notNull(),
+  /**
+   * Điểm cuối = làm tròn(basePoints × multiplier) (series.service.ts:252).
+   */
   totalPoints: integer('total_points').notNull(),
   isDirectEntry: boolean('is_direct_entry').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

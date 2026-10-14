@@ -14,6 +14,7 @@ const geography = customType<{ data: string }>({
   },
 });
 
+/** Tỉnh/thành phố (cấp 1). `code` là mã duy nhất; `wards.province_code` tham chiếu tới `provinces.code`. */
 export const provinces = pgTable('provinces', {
   id: uuid('id').primaryKey().defaultRandom(),
   code: varchar('code', { length: 20 }).notNull().unique(),

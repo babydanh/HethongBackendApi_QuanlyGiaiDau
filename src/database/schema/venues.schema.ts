@@ -20,6 +20,10 @@ const geography = customType<{ data: string }>({
   },
 });
 
+/**
+ * Địa điểm thi đấu (sân) của người dùng. Người sở hữu lưu ở `owner_user_id`.
+ * Xóa mềm bằng `deleted_at`. Tìm kiếm gần đúng theo tên và địa chỉ qua `search_text` (pg_trgm, không dấu).
+ */
 export const tournamentVenues = pgTable(
   'tournament_venues',
   {
@@ -29,9 +33,15 @@ export const tournamentVenues = pgTable(
     }),
     name: varchar('name', { length: 255 }).notNull(),
     locationAddress: text('location_address').notNull(),
+    /**
+     * Tọa độ kiểu geography (Point, SRID 4326), ghi theo thứ tự (lng, lat) qua `geoPoint`.
+     * Có thể NULL. Truy vấn tìm kiếm và khoảng cách chỉ lấy bản ghi có tọa độ. Đọc lat/lng bằng ST_Y/ST_X.
+     */
     locationGeolocation: geography('location_geolocation'),
+    /** Mã tỉnh và mã phường của địa điểm; không có khóa ngoại tới `provinces` hoặc `wards`. */
     provinceCode: varchar('province_code', { length: 20 }),
     wardCode: varchar('ward_code', { length: 20 }),
+    /** Cột sinh tự động: `f_unaccent(lower(name || ' ' || location_address))`, dùng cho tìm kiếm gần đúng. */
     searchText: pgText('search_text').generatedAlwaysAs(
       sql`public.f_unaccent(lower(${sql.identifier('name')} || ' ' || ${sql.identifier('location_address')}))`,
     ),
@@ -42,6 +52,7 @@ export const tournamentVenues = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    /** Xóa mềm: khác NULL là đã xóa. Truy vấn trong venues.repository.ts lọc `deleted_at IS NULL`. */
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
@@ -56,12 +67,14 @@ export const tournamentVenues = pgTable(
   }),
 );
 
+/** Sân con (court) thuộc một địa điểm (`tournament_venues`). */
 export const venueCourts = pgTable('venue_courts', {
   id: uuid('id').primaryKey().defaultRandom(),
   venueId: uuid('venue_id')
     .references(() => tournamentVenues.id, { onDelete: 'cascade' })
     .notNull(),
   courtName: varchar('court_name', { length: 100 }).notNull(),
+  /** Trạng thái sân: AVAILABLE (sẵn sàng) hoặc MAINTENANCE (bảo trì), theo DTO tạo sân. */
   status: varchar('status', { length: 50 }).default('AVAILABLE').notNull(),
 });
 
