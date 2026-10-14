@@ -11,6 +11,7 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { MailService } from '../../../providers/mail/mail.service';
 import { RankingConsentService } from './ranking-consent.service';
 import {
+  buildAccountLinkConfirmationNotification,
   buildFootballRosterConfirmationNotification,
   buildParticipantRegistrationPendingNotification,
   buildParticipantRegistrationSuccessNotification,
@@ -29,6 +30,7 @@ import type {
 import type { AddAthletePairsDto } from '../dto/add-athlete-pairs.dto';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
 import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
+import { normalizeHttpsImageUrl } from '../utils/https-image-url';
 
 type RegistrationChangedBroadcaster = (
   tournamentId: string,
@@ -38,17 +40,6 @@ type RegistrationChangedBroadcaster = (
     action: string;
   },
 ) => void;
-function normalizeHttpsImageUrl(value: string | null | undefined): string | null {
-  if (!value) return null;
-
-  try {
-    const url = new URL(value.trim());
-    if (url.protocol !== 'https:' || url.username || url.password) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
 
 
 @Injectable()
@@ -91,7 +82,11 @@ export class TournamentImportService {
       result.linkedAccountNotifications,
     );
 
-    await this.sendConsentRequests(result.linkedAccountNotifications);
+    await this.sendConsentRequests(result.linkedAccountNotifications, {
+      tournamentId,
+      tournamentName: tournament.name,
+      organizerId: userId,
+    });
 
     await this.sendInvitationEmails(
       tournament.name,
@@ -143,7 +138,11 @@ export class TournamentImportService {
       result.linkedAccountNotifications,
     );
 
-    await this.sendConsentRequests(result.linkedAccountNotifications);
+    await this.sendConsentRequests(result.linkedAccountNotifications, {
+      tournamentId,
+      tournamentName: tournament.name,
+      organizerId: userId,
+    });
 
     broadcastRegistrationChanged(tournamentId, {
       divisionId: dto.divisionId,
@@ -201,7 +200,11 @@ export class TournamentImportService {
       dto.notifyLinkedAccounts === true,
       result.linkedAccountNotifications,
     );
-    await this.sendConsentRequests(result.linkedAccountNotifications);
+    await this.sendConsentRequests(result.linkedAccountNotifications, {
+      tournamentId,
+      tournamentName: tournament.name,
+      organizerId: userId,
+    });
     for (const divisionId of new Set(
       dto.groups.map((group) => group.divisionId ?? null),
     )) {
@@ -313,7 +316,11 @@ export class TournamentImportService {
       dto,
     );
 
-    await this.sendConsentRequests(result.linkedAccountNotifications);
+    await this.sendConsentRequests(result.linkedAccountNotifications, {
+      tournamentId,
+      tournamentName: tournament.name,
+      organizerId: userId,
+    });
     const footballConfirmation = result.footballRosterConfirmation;
     if (footballConfirmation) {
       try {
@@ -376,17 +383,27 @@ export class TournamentImportService {
     dto: AddAthletePairsDto,
     broadcastRegistrationChanged: RegistrationChangedBroadcaster,
   ) {
-    await this.assertImportable(tournamentId, userId, systemRoles);
-    const result = await this.tournamentsRepository.addAthletePairs(
+    const tournament = await this.assertImportable(
       tournamentId,
       userId,
-      dto,
+      systemRoles,
     );
+    const { pairs, linkedAccountNotifications } =
+      await this.tournamentsRepository.addAthletePairs(
+        tournamentId,
+        userId,
+        dto,
+      );
+    await this.sendConsentRequests(linkedAccountNotifications, {
+      tournamentId,
+      tournamentName: tournament.name,
+      organizerId: userId,
+    });
     broadcastRegistrationChanged(tournamentId, {
       divisionId: dto.tournamentDivisionId,
       action: 'IMPORT_PARTICIPANTS',
     });
-    return result;
+    return { pairs };
   }
 
   private assertCandidateFlowMatchesSport(
@@ -532,26 +549,63 @@ export class TournamentImportService {
   }
 
   /**
-   * Gửi yêu cầu xác nhận cho mọi VĐV import có tài khoản.
+   * Gửi yêu cầu xác nhận cho mọi VĐV ban tổ chức thêm có tài khoản: một email và một thông báo
+   * trong ứng dụng có avatar người thêm.
    *
    * Cố ý KHÔNG nằm sau cờ `notifyLinkedAccounts`: đó là tuỳ chọn của ban tổ chức,
-   * còn consent thì không. Gộp chung thì tổ chức chỉ cần bỏ cờ là mọi người im
-   * lặng không consent và trận của họ không tính — đúng loại loại ngầm mà nghiệp vụ
+   * còn xác nhận thì không. Gộp chung thì tổ chức chỉ cần bỏ cờ là mọi người im
+   * lặng không xác nhận và trận của họ không tính — đúng loại loại ngầm mà nghiệp vụ
    * này sinh ra để chặn.
    *
-   * allSettled vì một mail lỗi không được làm hỏng cả lần import đã thành công.
+   * allSettled và try/catch vì một mail hay một thông báo lỗi không được làm hỏng cả lần
+   * thêm đã thành công. Người chưa xác nhận vẫn là người tham gia; chỉ kết quả của họ chưa
+   * được ghi vào tài khoản.
    */
   private async sendConsentRequests(
     rows:
-      | Array<{ rosterId: string; userId: string; status: string }>
+      | Array<{
+          rosterId: string;
+          userId: string;
+          status: string;
+          divisionId?: string | null;
+        }>
       | undefined,
+    context: {
+      tournamentId: string;
+      tournamentName: string;
+      organizerId: string;
+    },
   ): Promise<void> {
     if (!rows?.length) return;
     await Promise.allSettled(
-      rows.map((row) =>
+      rows.flatMap((row) => [
         this.rankingConsentService.sendConfirmationRequest(row.rosterId),
-      ),
+        this.sendAccountLinkNotice(row, context),
+      ]),
     );
+  }
+
+  private async sendAccountLinkNotice(
+    row: { userId: string; divisionId?: string | null },
+    context: {
+      tournamentId: string;
+      tournamentName: string;
+      organizerId: string;
+    },
+  ): Promise<void> {
+    try {
+      await this.notificationsService.sendNotification(
+        buildAccountLinkConfirmationNotification({
+          tournamentId: context.tournamentId,
+          tournamentName: context.tournamentName,
+          receiverId: row.userId,
+          senderId: context.organizerId,
+          divisionId: row.divisionId,
+        }),
+      );
+    } catch {
+      // A notification failure must not roll back a successful add.
+    }
   }
   private async sendInvitationEmails(
     tournamentName: string,

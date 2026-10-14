@@ -266,6 +266,7 @@ describe('TournamentImportRepository.previewRosterImportBatch', () => {
           id: 'eligible-user',
           email: 'shared@example.test',
           fullName: 'Exact candidate',
+          avatarUrl: 'https://cdn.example.test/exact.png',
         },
       ]],
     });
@@ -329,6 +330,7 @@ describe('TournamentImportRepository.previewRosterImportBatch', () => {
               userId: 'eligible-user',
               email: 'shared@example.test',
               fullName: 'Exact candidate',
+              avatarUrl: 'https://cdn.example.test/exact.png',
             },
           ],
           player2: [],
@@ -1574,6 +1576,19 @@ describe('TournamentImportRepository organizer add-athlete pairs flow', () => {
       .filter((row) => row.table === 'rosters')
       .map((row) => [row.values.userId, row.values.role]);
     expect(rosters).toEqual(userIds.map((id) => [id, 'MAIN']));
+
+    // Every added account is handed back with the roster it must confirm, so none is left unasked.
+    expect(result.linkedAccountNotifications).toEqual(
+      userIds.map((userId) => ({
+        rosterId: expect.any(String),
+        userId,
+        status: 'COMPLETE',
+        divisionId: 'division-1',
+      })),
+    );
+    expect(
+      new Set(result.linkedAccountNotifications.map((row) => row.rosterId)).size,
+    ).toBe(userIds.length);
   });
 
   it('cuts a generated pair team name to the 255-character column limit', async () => {

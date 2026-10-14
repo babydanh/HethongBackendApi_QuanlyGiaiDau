@@ -65,9 +65,21 @@ describe('RankingConsentGate', () => {
       }
     ).hasEligibleRankingConsent(MATCH_ID);
 
+  /** Confirmed both ways: agreed to be ranked and confirmed the account link at the same instant. */
   const consented = (participantId: string, iso = '2026-05-01T09:00:00Z') => ({
     participantId,
     rankingConsentAt: at(iso),
+    accountLinkConfirmedAt: at(iso),
+  });
+
+  /** Agreed to be ranked (e.g. ticked the box when registering) but never confirmed the account link. */
+  const consentedWithoutLink = (
+    participantId: string,
+    iso = '2026-05-01T09:00:00Z',
+  ) => ({
+    participantId,
+    rankingConsentAt: at(iso),
+    accountLinkConfirmedAt: null,
   });
 
   it('allows a match completed after every roster user confirmed', async () => {
@@ -96,8 +108,33 @@ describe('RankingConsentGate', () => {
     // score — this is the hole that per-user consent exists to close.
     const { service } = buildService([
       consented(P1),
-      { participantId: P1, rankingConsentAt: null },
+      { participantId: P1, rankingConsentAt: null, accountLinkConfirmedAt: null },
       consented(P2),
+    ]);
+
+    await expect(gate(service)).resolves.toBe(false);
+  });
+
+  it('rejects a user who agreed to be ranked but never confirmed the account link', async () => {
+    // Self-registration stamps only the ranking consent; the link is confirmed by a
+    // separate click. Counting the match would write ELO for an account the player has
+    // not yet claimed, while the match feed and achievements still hide it.
+    const { service } = buildService([
+      consented(P1),
+      consentedWithoutLink(P2),
+    ]);
+
+    await expect(gate(service)).resolves.toBe(false);
+  });
+
+  it('rejects a match completed before the account link was confirmed, even with early consent', async () => {
+    const { service } = buildService([
+      consented(P1),
+      {
+        participantId: P2,
+        rankingConsentAt: at('2026-05-01T09:00:00Z'),
+        accountLinkConfirmedAt: at('2026-06-01T11:00:00Z'),
+      },
     ]);
 
     await expect(gate(service)).resolves.toBe(false);

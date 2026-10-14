@@ -61,6 +61,17 @@ const notifications: Row[] = [
     isRead: true,
     createdAt: new Date('2026-09-30T00:00:00.000Z'),
   },
+  {
+    id: 'notification-account-link',
+    receiverId: REFEREE_ID,
+    senderId: MANAGER_ID,
+    type: NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+    title: 'Xac nhan tham gia giai dau',
+    content: 'Ban duoc them vao giai Synthetic Tournament. Xac nhan de luu tran va ELO.',
+    redirectUrl: '/tournaments/00000000-0000-4000-8000-000000000001',
+    isRead: false,
+    createdAt: new Date('2026-10-03T00:00:00.000Z'),
+  },
 ];
 
 const stringValues = (value: unknown): string[] => {
@@ -109,12 +120,13 @@ function createRepository() {
     }
   };
   registerColumns(schema.notifications, (row, key) => row[key] ?? null);
-  // Joined sender-side columns resolve against the stored sender account.
+  // Joined sender-side columns resolve against the stored sender account, and only for a row whose
+  // type the join was actually bound to: a join that is not restricted to the allowlisted types
+  // would resolve every row and the "outside the allowlist" case below would catch it.
   registerColumns(
     schema.profiles,
     (row, key) =>
-      row.type === NOTIFICATION_TYPES.REFEREE_INVITED &&
-      joinedBoundValues.includes(NOTIFICATION_TYPES.REFEREE_INVITED)
+      typeof row.type === 'string' && joinedBoundValues.includes(row.type)
         ? profiles.find((item) => item.userId === row.senderId)?.[key] ?? null
         : null,
   );
@@ -200,6 +212,21 @@ describe('NotificationsRepository recipient read sender attribution', () => {
       senderName: null,
       senderAvatarUrl: null,
     });
+  });
+
+  it('carries the organizer name and avatar on an account-link confirmation request', async () => {
+    const { data } = await createRepository().getNotificationsByUser(
+      REFEREE_ID,
+      { scope: 'player' } as QueryNotificationsDto,
+    );
+    const request = data.find((item) => item.id === 'notification-account-link');
+
+    expect(request).toMatchObject({
+      senderId: MANAGER_ID,
+      senderName: 'Mai Lan Huong',
+      senderAvatarUrl: MANAGER_AVATAR,
+    });
+    expect(stringValues(request).filter((value) => EMAIL_SHAPED.test(value))).toEqual([]);
   });
 
   it('does not publish a sender identity on notification types outside the referee invitation', async () => {

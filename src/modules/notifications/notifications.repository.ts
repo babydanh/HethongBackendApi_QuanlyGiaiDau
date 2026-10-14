@@ -4,7 +4,7 @@ import type { AppDb } from '../../database/db.types';
 import { PG_CONNECTION } from '../../database/database.module';
 import * as schema from '../../database/schema';
 import { CreateNotificationDto } from './dto/create-notification.dto';
-import { NOTIFICATION_TYPES } from './notification-types';
+import { SENDER_ATTRIBUTED_NOTIFICATION_TYPES } from './notification-types';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { CursorPaginationHelper } from '../../common/helpers/cursor-pagination.helper';
 
@@ -103,10 +103,10 @@ export class NotificationsRepository {
       .from(schema.notifications)
       .where(baseWhereClause);
 
-    // A referee invitation carries the identity of the manager who sent it. The
-    // join is limited to that type so no other notification starts publishing a
-    // sender profile. Only the receiver's own rows are selected, and no sender
-    // contact detail is projected.
+    // A referee invitation and an account-link confirmation request carry the identity of the person
+    // who sent them. The join is limited to those types so no other notification starts publishing a
+    // sender profile. Only the receiver's own rows are selected, and no sender contact detail is
+    // projected.
     const notificationsQuery = this.db
       .select({
         id: schema.notifications.id,
@@ -126,7 +126,10 @@ export class NotificationsRepository {
         schema.profiles,
         and(
           eq(schema.notifications.senderId, schema.profiles.userId),
-          eq(schema.notifications.type, NOTIFICATION_TYPES.REFEREE_INVITED),
+          inArray(
+            schema.notifications.type,
+            SENDER_ATTRIBUTED_NOTIFICATION_TYPES as unknown as string[],
+          ),
         ),
       )
       .where(whereClause)

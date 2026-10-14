@@ -38,6 +38,7 @@ import {
   resolveFootballTeamConfig,
 } from '../utils/football-team-config';
 import { isRegistrationOpenStatus } from '../utils/registration-lifecycle';
+import { carryRosterConfirmationMarks } from '../utils/roster-confirmation-marks';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 import { eligibleRosterAccountCondition } from '../validation/roster-import';
 import type { AddAthleteCandidateDto } from '../dto/add-athlete.dto';
@@ -527,6 +528,7 @@ export class TournamentParticipantRepository {
         eloPoints: schema.userRanks.eloPoints,
         tierName: schema.eloTiers.name,
         footballTeamEloPoints: schema.footballTeamRanks.eloPoints,
+        accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
       })
       .from(schema.tournamentRosters)
       .leftJoin(
@@ -577,6 +579,7 @@ export class TournamentParticipantRepository {
         avatarUrl: r.avatarUrl,
         role: r.role,
         isMock: r.isMock ?? false,
+        accountLinkConfirmedAt: r.accountLinkConfirmedAt,
         elo: r.isMock
           ? {
               eloPoints: 1000,
@@ -2079,17 +2082,21 @@ export class TournamentParticipantRepository {
         );
       }
 
-      // Giữ mốc xác nhận liên kết của người đã có trong đội. Người mới do đội trưởng thêm có mốc NULL, chờ chính họ xác nhận.
+      // Giữ mọi mốc xác nhận của người đã có trong đội: đồng ý xếp hạng, xác nhận liên kết và bộ đếm
+      // email đã gửi. Xóa rồi chèn lại mà chỉ mang một mốc sẽ làm người đó mất mốc còn lại (ELO dừng
+      // cho tới khi họ bấm lại) và đặt lại bộ đếm nhắc. Người mới do đội trưởng thêm có mốc NULL, chờ
+      // chính họ xác nhận.
       const previousRosters = await tx
         .select({
           userId: schema.tournamentRosters.userId,
+          rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
           accountLinkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
+          consentNotifiedAt: schema.tournamentRosters.consentNotifiedAt,
+          consentNotifiedCount: schema.tournamentRosters.consentNotifiedCount,
         })
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, participantId));
-      const linkedAtByUser = new Map(
-        previousRosters.map((row) => [row.userId, row.accountLinkConfirmedAt] as const),
-      );
+      const carriedMarks = carryRosterConfirmationMarks(previousRosters);
       await tx
         .delete(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, participantId));
@@ -2098,7 +2105,7 @@ export class TournamentParticipantRepository {
           participantId,
           userId,
           role: 'MAIN' as const,
-          accountLinkConfirmedAt: linkedAtByUser.get(userId) ?? null,
+          ...carriedMarks(userId),
         })),
       );
       if (roster.reserveMemberIds.length > 0) {
@@ -2107,7 +2114,7 @@ export class TournamentParticipantRepository {
             participantId,
             userId,
             role: 'RESERVE' as const,
-            accountLinkConfirmedAt: linkedAtByUser.get(userId) ?? null,
+            ...carriedMarks(userId),
           })),
         );
       }

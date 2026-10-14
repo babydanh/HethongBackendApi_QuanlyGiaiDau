@@ -26,15 +26,22 @@ describe('recalculateEloChain consent gate', () => {
     tournament: { id: 't-1', categoryId: 'cat', matchType: 'KNOCKOUT' },
   });
 
-  const roster = (userId: string, consentedAt: Date | null) => ({
+  /** `linkedAt` defaults to the consent instant: confirming through the endpoint stamps both together. */
+  const roster = (
+    userId: string,
+    consentedAt: Date | null,
+    linkedAt: Date | null = consentedAt,
+  ) => ({
     userId,
     rankingConsentAt: consentedAt,
+    accountLinkConfirmedAt: linkedAt,
   });
 
   /** tx stub: resolves queued results in await order, [] once exhausted. */
   const createTx = (results: unknown[][]) => {
     const queue = [...results];
     const deletes: unknown[] = [];
+    const inserts: unknown[] = [];
     const chain: Record<string, unknown> = {};
     const self = () => chain;
     chain.select = jest.fn(self);
@@ -42,22 +49,47 @@ describe('recalculateEloChain consent gate', () => {
     chain.innerJoin = jest.fn(self);
     chain.where = jest.fn(self);
     chain.orderBy = jest.fn(self);
+    chain.limit = jest.fn(self);
     chain.delete = jest.fn(() => {
       deletes.push('deleted');
       return { where: jest.fn().mockResolvedValue(undefined) };
     });
+    chain.insert = jest.fn(() => ({
+      values: jest.fn((row: unknown) => {
+        inserts.push(row);
+        return Promise.resolve(undefined);
+      }),
+    }));
+    chain.update = jest.fn(() => ({
+      set: jest.fn(() => ({ where: jest.fn().mockResolvedValue(undefined) })),
+    }));
     chain.then = (resolve: (value: unknown) => unknown) =>
       Promise.resolve().then(() => resolve(queue.shift() ?? []));
-    return { tx: chain, deletes };
+    return { tx: chain, deletes, inserts };
   };
 
-  const runRecalculate = (tx: unknown) => {
+  /** Stands in for the engine only where a test lets a match reach the scoring step. */
+  const scoringEngine = {
+    calculateElo: jest
+      .fn()
+      .mockReturnValue({ newElo: 1016, changedPoints: 16, newWinStreak: 1 }),
+  };
+
+  const runRecalculate = (tx: unknown, eloEngine: unknown = {}) => {
     const service = new RankingsService(
       tx as never,
       {} as never,
-      {} as never,
+      eloEngine as never,
       { delByPattern: jest.fn(), get: jest.fn(), set: jest.fn() } as never,
     );
+    // The tier recompute after the loop takes an advisory lock and rebuilds ranks: not what
+    // these cases are about, so it is stubbed and the assertions stay on the destructive step.
+    jest
+      .spyOn(
+        service as unknown as { recalculateUserRankTier: () => Promise<void> },
+        'recalculateUserRankTier',
+      )
+      .mockResolvedValue(undefined);
     return (
       service as unknown as {
         recalculateEloChain(
@@ -103,6 +135,38 @@ describe('recalculateEloChain consent gate', () => {
     expect(deletes).toHaveLength(0);
   });
 
+  it('never deletes elo history for a player who agreed to be ranked but never confirmed the account link', async () => {
+    // Self-registration stamps only the ranking consent. Re-scoring would write ELO for an
+    // account the player has not claimed, which the match feed and achievements still hide.
+    const { tx, deletes } = createTx([
+      [matchRow()],
+      [roster('u1', new Date('2026-05-01T00:00:00Z'))],
+      [roster('u2', new Date('2026-05-01T00:00:00Z'), null)],
+    ]);
+
+    await runRecalculate(tx);
+
+    expect(deletes).toHaveLength(0);
+  });
+
+  it('never deletes elo history when the account link was confirmed after the match completed', async () => {
+    const { tx, deletes } = createTx([
+      [matchRow()],
+      [roster('u1', new Date('2026-05-01T00:00:00Z'))],
+      [
+        roster(
+          'u2',
+          new Date('2026-05-01T00:00:00Z'),
+          new Date('2026-06-01T11:00:00Z'),
+        ),
+      ],
+    ]);
+
+    await runRecalculate(tx);
+
+    expect(deletes).toHaveLength(0);
+  });
+
   it('never deletes elo history when a participant carries no roster row', async () => {
     // An Excel-imported entrant with no account cannot confirm; `[].every()` style
     // logic would treat "no rows" as "all good" and score them.
@@ -115,5 +179,24 @@ describe('recalculateEloChain consent gate', () => {
     await runRecalculate(tx);
 
     expect(deletes).toHaveLength(0);
+  });
+
+  it('re-scores a match when both marks precede it (the gate does not reject everything)', async () => {
+    // Positive control for the cases above: without it they would also pass if the gate
+    // wrongly rejected every match. Past the gate the loop deletes and re-inserts one
+    // history row per roster user.
+    const { tx, deletes, inserts } = createTx([
+      [matchRow()],
+      [roster('u1', new Date('2026-05-01T00:00:00Z'))],
+      [roster('u2', new Date('2026-05-01T00:00:00Z'))],
+    ]);
+
+    await runRecalculate(tx, scoringEngine);
+
+    expect(deletes).toHaveLength(2);
+    expect(inserts).toMatchObject([
+      { userId: 'u1', reason: 'MATCH_WIN' },
+      { userId: 'u2', reason: 'MATCH_LOSS' },
+    ]);
   });
 });

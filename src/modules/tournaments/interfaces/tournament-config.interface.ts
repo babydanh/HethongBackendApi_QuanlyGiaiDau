@@ -91,6 +91,11 @@ export interface RosterMember {
   invitationToken?: string | null;
   createdAt?: Date | null;
   isMock?: boolean;
+  /**
+   * When this member confirmed the entry is theirs. null = still waiting, so their matches and ELO
+   * are not saved yet; a date = confirmed. Organizer projection only, never the public roster.
+   */
+  accountLinkConfirmedAt?: Date | null;
 
   elo: {
     eloPoints: number;

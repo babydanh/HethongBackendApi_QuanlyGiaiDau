@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { PG_CONNECTION } from '../../../database/database.module';
 import type { AppDb } from '../../../database/db.types';
 import * as schema from '../../../database/schema';
@@ -69,9 +69,14 @@ export class RankingConsentService {
       )
       .where(
         and(
-          isNull(schema.tournamentRosters.rankingConsentAt),
+          // Matches and ELO are saved only once the player confirmed BOTH the ranking consent and
+          // the account link, so a roster missing either mark is still asked.
+          or(
+            isNull(schema.tournamentRosters.rankingConsentAt),
+            isNull(schema.tournamentRosters.accountLinkConfirmedAt),
+          ),
           // A tournament that does not rank scores nothing, so asking its players to
-          // consent would be noise.
+          // confirm would be noise.
           eq(schema.tournaments.isRanked, true),
         ),
       );
@@ -126,6 +131,7 @@ export class RankingConsentService {
         tournamentId: schema.tournaments.id,
         attempts: schema.tournamentRosters.consentNotifiedCount,
         consentedAt: schema.tournamentRosters.rankingConsentAt,
+        linkConfirmedAt: schema.tournamentRosters.accountLinkConfirmedAt,
       })
       .from(schema.tournamentRosters)
       .innerJoin(
@@ -144,7 +150,8 @@ export class RankingConsentService {
       .limit(1);
 
     const row = rows[0];
-    if (!row?.userEmail || row.consentedAt) return false;
+    // Stop only once both marks exist; one mark alone does not save the player's results.
+    if (!row?.userEmail || (row.consentedAt && row.linkConfirmedAt)) return false;
 
     const link = `${this.frontendUrl}/tournaments/${row.tournamentId}`;
     const isReminder = row.attempts > 0;

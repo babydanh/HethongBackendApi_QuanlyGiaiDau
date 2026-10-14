@@ -31,6 +31,7 @@ import {
   normalizeGenderRestriction,
   type GenderRestriction,
 } from '../../common/helpers/gender.helper';
+import { isSideEligibleForElo } from './ranking-eligibility';
 
 const LEADERBOARD_CACHE_VERSION = 'v2';
 
@@ -2035,6 +2036,8 @@ export class RankingsService {
         .select({
           userId: schema.tournamentRosters.userId,
           rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+          accountLinkConfirmedAt:
+            schema.tournamentRosters.accountLinkConfirmedAt,
         })
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, winnerParticipantId));
@@ -2044,32 +2047,29 @@ export class RankingsService {
         .select({
           userId: schema.tournamentRosters.userId,
           rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+          accountLinkConfirmedAt:
+            schema.tournamentRosters.accountLinkConfirmedAt,
         })
         .from(schema.tournamentRosters)
         .where(eq(schema.tournamentRosters.participantId, loserParticipantId));
 
       // Consent gate, reusing the roster rows this loop already loads. A separate
       // lookup per match would turn a batch recalculation into 2N round-trips.
-      // Same rule as hasEligibleRankingConsent: EVERY user must have confirmed
-      // before the match completed, otherwise the delete + reinsert further down
-      // writes elo_history_logs for players who never agreed — which is exactly
-      // how this function used to void the enqueue and apply gates.
+      // Same rule as hasEligibleRankingConsent, through the same helper: EVERY user
+      // must have confirmed BOTH ranking consent and the account link before the
+      // match completed, otherwise the delete + reinsert further down writes
+      // elo_history_logs for players who never agreed — which is exactly how this
+      // function used to void the enqueue and apply gates.
       // Checked per side, not on the combined array: a participant with NO roster
       // row (Excel import, no account — userId is NOT NULL so the row cannot exist)
       // contributes nothing to the union, and testing the union would read that as
-      // "everyone consented". hasEligibleRankingConsent checks per participant for
-      // the same reason; the two must not drift apart.
+      // "everyone consented".
       const completedAtMs = completedAt?.getTime();
-      const sideConsented = (rows: typeof winnerRosters) =>
-        completedAtMs !== undefined &&
-        rows.length > 0 &&
-        rows.every(
-          (r) =>
-            r.rankingConsentAt !== null &&
-            r.rankingConsentAt.getTime() <= completedAtMs,
-        );
-
-      if (!sideConsented(winnerRosters) || !sideConsented(loserRosters)) {
+      if (
+        completedAtMs === undefined ||
+        !isSideEligibleForElo(winnerRosters, completedAtMs) ||
+        !isSideEligibleForElo(loserRosters, completedAtMs)
+      ) {
         continue;
       }
 
@@ -2259,9 +2259,9 @@ export class RankingsService {
 
   /**
    * V7 gate: a match only reaches the ranking board if BOTH participants had
-   * confirmed before the match completed. Deliberately all-or-nothing — scoring
-   * only the consenting side would let a player farm rating by facing opponents
-   * who never confirmed.
+   * confirmed BOTH ranking consent and the account link before the match
+   * completed. Deliberately all-or-nothing — scoring only the consenting side
+   * would let a player farm rating by facing opponents who never confirmed.
    *
    * Runs at APPLY time, not just at enqueue time: an outbox row queued before the
    * player confirmed is still PENDING when they click, and applying it would
@@ -2291,15 +2291,17 @@ export class RankingsService {
     );
     if (participantIds.length === 0) return false;
 
-    // Read consent per USER from tournament_rosters, matching exactly the rows
-    // processMatchResult awards ELO to. No status filter, for the same reason:
-    // a REMOVED/INVITED roster row still receives a delta there, so filtering it
-    // out here would make the gate stricter than the scoring it guards and
-    // silently zero out that participant's ELO.
+    // Read both confirmation marks per USER from tournament_rosters, matching
+    // exactly the rows processMatchResult awards ELO to. No status filter, for the
+    // same reason: a REMOVED/INVITED roster row still receives a delta there, so
+    // filtering it out here would make the gate stricter than the scoring it
+    // guards and silently zero out that participant's ELO.
     const consentRows = await this.db
       .select({
         participantId: schema.tournamentRosters.participantId,
         rankingConsentAt: schema.tournamentRosters.rankingConsentAt,
+        accountLinkConfirmedAt:
+          schema.tournamentRosters.accountLinkConfirmedAt,
       })
       .from(schema.tournamentRosters)
       .where(inArray(schema.tournamentRosters.participantId, participantIds));
@@ -2307,20 +2309,15 @@ export class RankingsService {
     if (consentRows.length === 0) return false;
 
     const completedAt = match.completedAt!.getTime();
-    return participantIds.every((participantId) => {
-      const rows = consentRows.filter(
-        (row) => row.participantId === participantId,
-      );
-      // A participant with no roster row (Excel import, no account) has nobody
-      // to confirm, so nothing about it is eligible.
-      if (rows.length === 0) return false;
-      return rows.every((row) => {
-        const consentedAt = row.rankingConsentAt;
-        return (
-          consentedAt !== null && consentedAt.getTime() <= completedAt
-        );
-      });
-    });
+    // A participant with no roster row (Excel import, no account) has nobody to
+    // confirm, so nothing about it is eligible: isSideEligibleForElo reads an
+    // empty side as not eligible.
+    return participantIds.every((participantId) =>
+      isSideEligibleForElo(
+        consentRows.filter((row) => row.participantId === participantId),
+        completedAt,
+      ),
+    );
   }
 
   /**

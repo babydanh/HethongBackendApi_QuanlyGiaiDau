@@ -34,6 +34,7 @@ import {
 } from '../services/tournament-capacity.service';
 import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
+import { normalizeHttpsImageUrl } from '../utils/https-image-url';
 import { normalizeProfileGender, type NormalizedGender } from '../utils/profile-gender';
 import {
   findEligibleRosterAccountIds,
@@ -102,6 +103,13 @@ export interface AddAthletePairsRepositoryResult {
     participantId: string;
     teamStatus: 'COMPLETE' | 'PENDING_PARTNER';
     userIds: string[];
+  }>;
+  /** One entry per roster row created, so the service can ask each account to confirm. */
+  linkedAccountNotifications: Array<{
+    rosterId: string;
+    userId: string;
+    status: string;
+    divisionId: string | null;
   }>;
 }
 
@@ -207,6 +215,7 @@ function applyAccountStatuses(
 
 type RosterBatchAccountCandidate = RosterAccountCandidate & {
   fullName: string;
+  avatarUrl: string | null;
 };
 
 async function findRosterBatchAccountCandidates(
@@ -228,6 +237,7 @@ async function findRosterBatchAccountCandidates(
       id: schema.users.id,
       email: sql<string>`lower(${schema.users.email})`,
       fullName: sql<string>`btrim(${schema.profiles.fullName})`,
+      avatarUrl: schema.profiles.avatarUrl,
     })
     .from(schema.users)
     .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
@@ -243,7 +253,12 @@ async function findRosterBatchAccountCandidates(
   return new Map(
     rows.map((row) => [
       normalizeRosterEmail(row.email),
-      { id: row.id, email: normalizeRosterEmail(row.email), fullName: row.fullName },
+      {
+        id: row.id,
+        email: normalizeRosterEmail(row.email),
+        fullName: row.fullName,
+        avatarUrl: normalizeHttpsImageUrl(row.avatarUrl),
+      },
     ]),
   );
 }
@@ -321,6 +336,8 @@ type RosterBatchCandidateView = {
   userId: string;
   email: string;
   fullName: string;
+  /** Profile photo of the matching account, shown next to the row so the organizer sees who was found. */
+  avatarUrl: string | null;
 };
 
 type RosterBatchPreviewRow = RosterPreviewRow & {
@@ -931,6 +948,8 @@ export class TournamentImportRepository {
         )
       ).toFixed(2);
       const pairs: AddAthletePairsRepositoryResult['pairs'] = [];
+      const linkedAccountNotifications: AddAthletePairsRepositoryResult['linkedAccountNotifications'] =
+        [];
       for (let start = 0; start < athletes.length; start += 2) {
         const members = athletes.slice(start, start + 2);
         const isComplete = members.length === 2;
@@ -949,7 +968,7 @@ export class TournamentImportRepository {
           })
           .returning({ id: schema.tournamentParticipants.id });
         for (const member of members) {
-          await tx
+          const [roster] = await tx
             .insert(schema.tournamentRosters)
             .values({
               participantId: participant.id,
@@ -958,6 +977,12 @@ export class TournamentImportRepository {
               accountLinkConfirmedAt: null,
             })
             .returning({ id: schema.tournamentRosters.id });
+          linkedAccountNotifications.push({
+            rosterId: roster.id,
+            userId: member.userId,
+            status: teamStatus,
+            divisionId: dto.tournamentDivisionId,
+          });
         }
         pairs.push({
           participantId: participant.id,
@@ -965,7 +990,7 @@ export class TournamentImportRepository {
           userIds: members.map((member) => member.userId),
         });
       }
-      return { pairs };
+      return { pairs, linkedAccountNotifications };
     });
   }
 
@@ -1552,6 +1577,7 @@ export class TournamentImportRepository {
                     userId: candidate.id,
                     email: candidate.email,
                     fullName: candidate.fullName,
+                    avatarUrl: candidate.avatarUrl,
                   },
                 ]
               : [];

@@ -80,6 +80,36 @@ describe('NotificationsService realtime sender attribution', () => {
     });
   });
 
+  it('pushes the organizer identity on an account-link confirmation request', async () => {
+    repositoryMock.createNotification.mockResolvedValue({
+      ...storedNotification,
+      type: NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+      redirectUrl: '/tournaments/tournament-1',
+    });
+    repositoryMock.findSenderProfile.mockResolvedValue({
+      fullName: 'Mai Lan Huong',
+      avatarUrl: 'https://cdn.example.test/avatars/inviter-mai-lan-huong.png',
+    });
+
+    await service.sendNotification({
+      receiverId: refereeId,
+      senderId: invitingManagerId,
+      type: NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+      title: 'Xac nhan tham gia giai dau',
+      content: 'Ban duoc them vao giai Synthetic Tournament.',
+      redirectUrl: '/tournaments/tournament-1',
+    });
+
+    expect(repositoryMock.findSenderProfile).toHaveBeenCalledWith(invitingManagerId);
+    const [, payload] = gatewayMock.pushNotification.mock.calls[0];
+    expect(payload).toMatchObject({
+      senderId: invitingManagerId,
+      senderName: 'Mai Lan Huong',
+      senderAvatarUrl:
+        'https://cdn.example.test/avatars/inviter-mai-lan-huong.png',
+    });
+  });
+
   it('never puts the inviter email on the realtime item', async () => {
     repositoryMock.findSenderProfile.mockResolvedValue({
       fullName: 'Mai Lan Huong',

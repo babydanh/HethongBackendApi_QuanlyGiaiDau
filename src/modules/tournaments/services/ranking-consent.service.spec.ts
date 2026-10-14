@@ -1,3 +1,4 @@
+import { PgDialect } from 'drizzle-orm/pg-core';
 import {
   RankingConsentService,
   CONSENT_MAX_NOTIFICATIONS,
@@ -148,5 +149,94 @@ describe('RankingConsentService.sendDueReminders', () => {
     );
 
     await expect(service.sendDueReminders()).resolves.toBe(0);
+  });
+});
+
+describe('RankingConsentService confirmation marks', () => {
+  // Matches and ELO are saved only once the player confirmed BOTH the ranking consent and the
+  // account link, so a reminder keeps going until both marks exist.
+  const createDb = (detail: Record<string, unknown>, scansFirst = false) => {
+    const wheres: unknown[] = [];
+    let call = scansFirst ? 0 : 1;
+    const chain: Record<string, unknown> = {};
+    const self = () => chain;
+    chain.select = jest.fn(self);
+    chain.from = jest.fn(self);
+    chain.innerJoin = jest.fn(self);
+    chain.where = jest.fn((predicate: unknown) => {
+      wheres.push(predicate);
+      return chain;
+    });
+    chain.limit = jest.fn(self);
+    chain.update = jest.fn(self);
+    chain.set = jest.fn(self);
+    chain.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve().then(() => {
+        const value =
+          call === 0
+            ? [{ id: 'r1', attempts: 0, notifiedAt: null, joinedAt: new Date(0) }]
+            : [detail];
+        call += 1;
+        resolve(value);
+      });
+    return { chain, wheres };
+  };
+
+  const build = (detail: Record<string, unknown>, scansFirst = false) => {
+    const { chain, wheres } = createDb(detail, scansFirst);
+    const mailService = { sendMail: jest.fn().mockResolvedValue(true) };
+    const service = new RankingConsentService(chain as never, mailService as never);
+    return { service, mailService, wheres };
+  };
+
+  const marked = new Date('2026-06-01T00:00:00Z');
+
+  it('keeps reminding a player who consented to ranking but never confirmed the account link', async () => {
+    const { service, mailService } = build({
+      ...detailRow(),
+      consentedAt: marked,
+      linkConfirmedAt: null,
+    });
+
+    await expect(service.sendConfirmationRequest('r1')).resolves.toBe(true);
+    expect(mailService.sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps reminding a player who confirmed the account link but never consented to ranking', async () => {
+    const { service, mailService } = build({
+      ...detailRow(),
+      consentedAt: null,
+      linkConfirmedAt: marked,
+    });
+
+    await expect(service.sendConfirmationRequest('r1')).resolves.toBe(true);
+    expect(mailService.sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops once both marks exist', async () => {
+    const { service, mailService } = build({
+      ...detailRow(),
+      consentedAt: marked,
+      linkConfirmedAt: marked,
+    });
+
+    await expect(service.sendConfirmationRequest('r1')).resolves.toBe(false);
+    expect(mailService.sendMail).not.toHaveBeenCalled();
+  });
+
+  it('scans rosters that lack either mark, not only the consent mark', async () => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    try {
+      const { service, wheres } = build({ ...detailRow() }, true);
+
+      await service.sendDueReminders();
+
+      const { sql } = new PgDialect().sqlToQuery(wheres[0] as never);
+      expect(sql).toMatch(
+        /"ranking_consent_at" is null or "tournament_rosters"\."account_link_confirmed_at" is null|"account_link_confirmed_at" is null or "tournament_rosters"\."ranking_consent_at" is null/,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

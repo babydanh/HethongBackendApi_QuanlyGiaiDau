@@ -24,6 +24,7 @@ export const NOTIFICATION_TYPES = {
   TOURNAMENT_TEAM_COMPLETED: 'TOURNAMENT_TEAM_COMPLETED',
   TOURNAMENT_TEAMMATE_JOINED: 'TOURNAMENT_TEAMMATE_JOINED',
   TOURNAMENT_FOOTBALL_ROSTER_CONFIRMATION: 'TOURNAMENT_FOOTBALL_ROSTER_CONFIRMATION',
+  TOURNAMENT_ACCOUNT_LINK_CONFIRMATION: 'TOURNAMENT_ACCOUNT_LINK_CONFIRMATION',
   TOURNAMENT_WITHDRAWN: 'TOURNAMENT_WITHDRAWN',
   TOURNAMENT_KICKED: 'TOURNAMENT_KICKED',
   TOURNAMENT_FULL_CANCELLED: 'TOURNAMENT_FULL_CANCELLED',
@@ -69,3 +70,14 @@ export const NOTIFICATION_TYPES = {
 
 export type NotificationType =
   (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICATION_TYPES];
+
+/**
+ * Types whose notification shows who sent it (name and avatar). An allowlist on purpose: every other
+ * type keeps its payload, so nothing new is published beyond these. Both the realtime push and the
+ * read endpoint use this list so a live item is attributed exactly like a fetched one.
+ */
+export const SENDER_ATTRIBUTED_NOTIFICATION_TYPES: readonly NotificationType[] =
+  [
+    NOTIFICATION_TYPES.REFEREE_INVITED,
+    NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+  ];

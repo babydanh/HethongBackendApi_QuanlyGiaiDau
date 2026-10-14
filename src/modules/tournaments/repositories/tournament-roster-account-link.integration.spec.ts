@@ -271,7 +271,7 @@ describeIfDb('roster account-link confirmation (Postgres thật)', () => {
     expect(stored?.accountLinkConfirmedAt).not.toBeNull();
   });
 
-  it('captain-added member gets NULL link; existing member keeps its stamp through updateFootballRoster', async () => {
+  it('captain-added member gets NULL link; existing member keeps every mark through updateFootballRoster', async () => {
     const organizerId = await seedUser('organizer');
     const existingId = await seedUser('existing');
     const addedId = await seedUser('added');
@@ -295,11 +295,16 @@ describeIfDb('roster account-link confirmation (Postgres thật)', () => {
       })
       .returning({ id: schema.tournamentParticipants.id });
     const participantId = participant.id;
+    const CONSENTED_AT = new Date('2026-05-15T00:00:00.000Z');
+    const NOTIFIED_AT = new Date('2026-05-16T00:00:00.000Z');
     await db.insert(schema.tournamentRosters).values({
       participantId,
       userId: existingId,
       role: 'MAIN',
+      rankingConsentAt: CONSENTED_AT,
       accountLinkConfirmedAt: LINK_CONFIRMED_AT,
+      consentNotifiedAt: NOTIFIED_AT,
+      consentNotifiedCount: 2,
     });
 
     await repo.updateFootballRoster(
@@ -312,15 +317,27 @@ describeIfDb('roster account-link confirmation (Postgres thật)', () => {
     const rows = await db
       .select({
         userId: schema.tournamentRosters.userId,
+        consentedAt: schema.tournamentRosters.rankingConsentAt,
         linkedAt: schema.tournamentRosters.accountLinkConfirmedAt,
+        notifiedAt: schema.tournamentRosters.consentNotifiedAt,
+        notifiedCount: schema.tournamentRosters.consentNotifiedCount,
       })
       .from(schema.tournamentRosters)
       .where(eq(schema.tournamentRosters.participantId, participantId));
-    const linkedByUser = new Map(rows.map((row) => [row.userId, row.linkedAt]));
-    expect(linkedByUser.get(existingId)?.getTime()).toBe(
-      LINK_CONFIRMED_AT.getTime(),
-    );
-    expect(linkedByUser.get(addedId)).toBeNull();
+    const byUser = new Map(rows.map((row) => [row.userId, row]));
+    const existing = byUser.get(existingId);
+    const added = byUser.get(addedId);
+    // The rewrite deletes and re-inserts the roster: the player who was already in the team must
+    // not lose either confirmation (ELO needs both) nor the reminder counter.
+    expect(existing?.linkedAt?.getTime()).toBe(LINK_CONFIRMED_AT.getTime());
+    expect(existing?.consentedAt?.getTime()).toBe(CONSENTED_AT.getTime());
+    expect(existing?.notifiedAt?.getTime()).toBe(NOTIFIED_AT.getTime());
+    expect(existing?.notifiedCount).toBe(2);
+    // The newly added member has confirmed nothing and has not been mailed yet.
+    expect(added?.linkedAt).toBeNull();
+    expect(added?.consentedAt).toBeNull();
+    expect(added?.notifiedAt).toBeNull();
+    expect(added?.notifiedCount).toBe(0);
   });
 
   it('addRoster by the captain writes a NULL link', async () => {

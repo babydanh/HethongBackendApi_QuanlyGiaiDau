@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { CreateNotificationDto } from './dto/create-notification.dto';
-import { NOTIFICATION_TYPES } from './notification-types';
+import { SENDER_ATTRIBUTED_NOTIFICATION_TYPES } from './notification-types';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
 import { RegisterDeviceTokenDto, RemoveDeviceTokenDto } from './dto/register-device-token.dto';
 import { NotificationsGateway } from './notifications.gateway';
@@ -32,11 +32,14 @@ export class NotificationsService {
 
   async sendNotification(data: CreateNotificationDto) {
     const notification = await this.notificationsRepository.createNotification(data);
-    // A referee invitation shows who invited the referee. Every other type keeps
-    // its existing payload, so nothing new is published beyond that invitation.
-    const isRefereeInvitation = data.type === NOTIFICATION_TYPES.REFEREE_INVITED;
+    // Only the types in SENDER_ATTRIBUTED_NOTIFICATION_TYPES show who sent them (a referee invitation,
+    // an account-link confirmation request). Every other type keeps its existing payload, so nothing
+    // new is published beyond those.
+    const showsSender = (
+      SENDER_ATTRIBUTED_NOTIFICATION_TYPES as readonly string[]
+    ).includes(data.type);
     const senderProfile =
-      isRefereeInvitation && data.senderId
+      showsSender && data.senderId
         ? await this.notificationsRepository.findSenderProfile(data.senderId)
         : null;
 

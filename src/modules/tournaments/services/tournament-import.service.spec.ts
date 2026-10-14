@@ -67,6 +67,7 @@ describe('TournamentImportService import contracts', () => {
     listAddAthleteCandidates: jest.fn(),
     addAthleteCandidate: jest.fn(),
     addDirectAthlete: jest.fn(),
+    addAthletePairs: jest.fn(),
     findBracket: jest.fn(),
     hasStartedMatch: jest.fn(),
   };
@@ -130,6 +131,13 @@ describe('TournamentImportService import contracts', () => {
       userId: string,
       systemRoles: string[],
       dto: AddAthleteDirectDto,
+      broadcast: AddAthleteBroadcast,
+    ): Promise<unknown>;
+    addAthletePairs(
+      tournamentId: string,
+      userId: string,
+      systemRoles: string[],
+      dto: unknown,
       broadcast: AddAthleteBroadcast,
     ): Promise<unknown>;
   };
@@ -799,9 +807,175 @@ describe('TournamentImportService organizer add-athlete flow', () => {
       teamStatus: 'PENDING_APPROVAL',
     });
     expect(consentMock.sendConfirmationRequest).not.toHaveBeenCalled();
+    expect(notificationsMock.sendNotification).not.toHaveBeenCalled();
     expect(broadcast).toHaveBeenCalledWith('tournament-1', {
       divisionId: 'division-1',
       action: 'IMPORT_PARTICIPANTS',
+    });
+  });
+
+  describe('in-app account-link confirmation request', () => {
+    const ACCOUNT_LINK = 'TOURNAMENT_ACCOUNT_LINK_CONFIRMATION';
+    const linked = (rosterId: string, userId: string) => ({
+      rosterId,
+      userId,
+      status: 'COMPLETE' as const,
+      divisionId: 'division-1',
+    });
+
+    it('asks every account added as a pair to confirm, after the commit, and keeps roster ids out of the answer', async () => {
+      const events: string[] = [];
+      const pairs = [
+        {
+          participantId: 'participant-1',
+          teamStatus: 'COMPLETE',
+          userIds: ['athlete-1', 'athlete-2'],
+        },
+      ];
+      repositoryMock.addAthletePairs.mockImplementation(async () => {
+        events.push('committed');
+        return {
+          pairs,
+          linkedAccountNotifications: [
+            linked('roster-1', 'athlete-1'),
+            linked('roster-2', 'athlete-2'),
+          ],
+        };
+      });
+      consentMock.sendConfirmationRequest.mockImplementation(async () => {
+        events.push('mail');
+        return true;
+      });
+      notificationsMock.sendNotification.mockImplementation(async () => {
+        events.push('notice');
+      });
+
+      const result = await buildAddAthleteService().addAthletePairs(
+        'tournament-1',
+        'organizer-1',
+        [],
+        { source: 'EMAIL', tournamentDivisionId: 'division-1', userIds: ['athlete-1', 'athlete-2'] },
+        jest.fn(),
+      );
+
+      expect(events[0]).toBe('committed');
+      expect(events.filter((event) => event === 'mail')).toHaveLength(2);
+      expect(consentMock.sendConfirmationRequest).toHaveBeenCalledWith('roster-1');
+      expect(consentMock.sendConfirmationRequest).toHaveBeenCalledWith('roster-2');
+      const notices = notificationsMock.sendNotification.mock.calls.map(
+        ([notice]) => notice,
+      );
+      expect(notices.map((notice) => notice.receiverId).sort()).toEqual([
+        'athlete-1',
+        'athlete-2',
+      ]);
+      expect(notices).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: ACCOUNT_LINK,
+            senderId: 'organizer-1',
+            redirectUrl: '/tournaments/tournament-1?divisionId=division-1',
+          }),
+        ]),
+      );
+      expect(result).toEqual({ pairs });
+    });
+
+    it('tells a candidate added one by one who added them', async () => {
+      repositoryMock.addAthleteCandidate.mockResolvedValue({
+        participant: { participantId: 'participant-1', teamName: 'VĐV', teamStatus: 'COMPLETE' },
+        divisionId: 'division-1',
+        linkedAccountNotifications: [linked('roster-1', 'athlete-1')],
+      });
+
+      await buildAddAthleteService().addAthleteCandidate(
+        'tournament-1',
+        'organizer-1',
+        [],
+        candidateDto,
+        jest.fn(),
+      );
+
+      expect(notificationsMock.sendNotification).toHaveBeenCalledTimes(1);
+      expect(notificationsMock.sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          receiverId: 'athlete-1',
+          senderId: 'organizer-1',
+          type: ACCOUNT_LINK,
+          title: 'Xác nhận tham gia giải đấu',
+        }),
+      );
+    });
+
+    it('does not fail the add when the in-app notice cannot be sent', async () => {
+      repositoryMock.addAthleteCandidate.mockResolvedValue({
+        participant: { participantId: 'participant-1', teamName: 'VĐV', teamStatus: 'COMPLETE' },
+        divisionId: 'division-1',
+        linkedAccountNotifications: [linked('roster-1', 'athlete-1')],
+      });
+      notificationsMock.sendNotification.mockRejectedValue(new Error('push down'));
+      const broadcast = jest.fn();
+
+      await expect(
+        buildAddAthleteService().addAthleteCandidate(
+          'tournament-1',
+          'organizer-1',
+          [],
+          candidateDto,
+          broadcast,
+        ),
+      ).resolves.toMatchObject({ participantId: 'participant-1' });
+      expect(broadcast).toHaveBeenCalled();
+    });
+
+    it('sends the request for a batch import even when the organizer unticks the registration notice', async () => {
+      repositoryMock.importRosterBatch.mockResolvedValue({
+        importedCount: 1,
+        replayed: false,
+        linkedAccountNotifications: [linked('roster-1', 'athlete-1')],
+      });
+      const dto = Object.assign(new RosterImportBatchDto(), {
+        notifyLinkedAccounts: false,
+        groups: [{ divisionId: 'division-1', participants: [] }],
+      });
+
+      await buildImporter().importRosterBatchFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        dto,
+        'stable-key',
+        jest.fn(),
+      );
+
+      const types = notificationsMock.sendNotification.mock.calls.map(
+        ([notice]) => notice.type,
+      );
+      // The tick controls the registration notice only; the confirmation request is not optional.
+      expect(types).toEqual([ACCOUNT_LINK]);
+      expect(consentMock.sendConfirmationRequest).toHaveBeenCalledWith('roster-1');
+    });
+
+    it('does not send a second request when a completed batch is replayed', async () => {
+      repositoryMock.findRosterImportBatchReplay.mockResolvedValue({
+        importedCount: 1,
+        replayed: true,
+      });
+      const dto = Object.assign(new RosterImportBatchDto(), {
+        groups: [{ divisionId: 'division-1', participants: [] }],
+      });
+
+      await buildImporter().importRosterBatchFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        dto,
+        'stable-key',
+        jest.fn(),
+      );
+
+      expect(notificationsMock.sendNotification).not.toHaveBeenCalled();
+      expect(consentMock.sendConfirmationRequest).not.toHaveBeenCalled();
     });
   });
 });

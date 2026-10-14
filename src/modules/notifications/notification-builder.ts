@@ -395,6 +395,31 @@ export const buildParticipantRegistrationSuccessNotification = (params: {
   }),
 });
 
+/**
+ * Asks a player the organizer just added to confirm that the entry is theirs. The link opens the
+ * tournament page, where the confirmation banner lives; the web notification list also confirms in
+ * place. Carries the organizer as sender so the player sees who added them. Holds no email or phone.
+ */
+export const buildAccountLinkConfirmationNotification = (params: {
+  tournamentId: string;
+  tournamentName: string;
+  receiverId: string;
+  senderId?: string;
+  divisionId?: string | null;
+}): CreateNotificationDto => ({
+  receiverId: params.receiverId,
+  senderId: params.senderId,
+  type: NOTIFICATION_TYPES.TOURNAMENT_ACCOUNT_LINK_CONFIRMATION,
+  title: 'Xác nhận tham gia giải đấu',
+  content:
+    `Ban tổ chức đã thêm bạn vào giải ${params.tournamentName}. ` +
+    'Bấm xác nhận để lưu trận đấu và ELO của giải này vào tài khoản của bạn, tính từ lúc bạn xác nhận. ' +
+    'Chưa xác nhận bạn vẫn thi đấu bình thường, chỉ là kết quả không được ghi vào tài khoản.',
+  redirectUrl: getTournamentRedirect(params.tournamentId, {
+    divisionId: params.divisionId ?? undefined,
+  }),
+});
+
 export const buildParticipantRegistrationRejectedNotification = (params: {
   tournamentId: string;
   tournamentName: string;
