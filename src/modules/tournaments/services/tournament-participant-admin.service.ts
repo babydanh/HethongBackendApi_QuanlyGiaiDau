@@ -94,15 +94,7 @@ export class TournamentParticipantAdminService {
         'Bạn không có quyền xem trước danh sách VĐV',
       );
     }
-    await assertSpreadsheetRosterEligible(tournament, {
-      hasStartedMatch: () =>
-        this.tournamentsRepository.hasStartedMatch(tournamentId),
-      hasActiveBracketStage: async () =>
-        Boolean(
-          (await this.tournamentsRepository.findBracket(tournamentId))?.stages
-            ?.length,
-        ),
-    });
+    assertSpreadsheetRosterEligible(tournament);
     return tournament;
   }
   async seedMockParticipants(

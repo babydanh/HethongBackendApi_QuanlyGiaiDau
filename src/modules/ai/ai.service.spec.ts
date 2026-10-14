@@ -1126,6 +1126,40 @@ describe('AiService.analyzeRosterLayout', () => {
     expect(create.mock.calls[0][1].maxRetries).toBe(0);
   });
 
+  it('logs sheet count, usable block count and the retry reason, never any cell text', async () => {
+    const service = createService('test-key');
+    const logSpy = jest.spyOn((service as unknown as { logger: { log: (message: string) => void } }).logger, 'log');
+    const secretCell = 'Nguyễn Văn Thử';
+    attachProvider(service, JSON.stringify({ sheets: [rosterSheet({})], notes: [] }));
+
+    await service.analyzeRosterLayout('tournament-1', {
+      ...rosterRequestWithCells([secretCell, 'Cặp đấu']),
+      retryReason: 'EMPTY_LAYOUT',
+    });
+
+    const lines = logSpy.mock.calls.map(([message]) => String(message));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('tournament-1');
+    expect(lines[0]).toContain('sheets=1');
+    expect(lines[0]).toContain('blocks=1');
+    expect(lines[0]).toContain('retryReason=EMPTY_LAYOUT');
+    expect(lines[0]).not.toContain(secretCell);
+    expect(lines[0]).not.toContain('Cặp đấu');
+  });
+
+  it('logs retryReason=none and zero blocks for a first attempt whose layout validates to nothing', async () => {
+    const service = createService('test-key');
+    const logSpy = jest.spyOn((service as unknown as { logger: { log: (message: string) => void } }).logger, 'log');
+    attachProvider(service, JSON.stringify({ sheets: [], notes: [] }));
+
+    await service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST);
+
+    const lines = logSpy.mock.calls.map(([message]) => String(message));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('blocks=0');
+    expect(lines[0]).toContain('retryReason=none');
+  });
+
   it('rejects a raw email address in any cell before anything is sent', async () => {
     const service = createService('test-key');
     const create = attachProvider(service, JSON.stringify({ sheets: [], notes: [] }));

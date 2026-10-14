@@ -783,26 +783,65 @@ describe('TournamentParticipantAdminService', () => {
       );
     });
 
-    it('rejects the preview once a bracket stage exists', async () => {
+    it('previews even when a bracket stage already exists', async () => {
       repositoryMock.findBracket.mockResolvedValue({
         stages: [{ id: 'stage-1' }],
       });
 
       await expect(
         admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).resolves.toEqual(previewResult);
 
-      expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
+      expect(repositoryMock.previewRosterImport).toHaveBeenCalledWith(
+        'tournament-1',
+        previewDto,
+      );
     });
 
-    it('rejects the preview once a match has started', async () => {
+    it('previews even after a match has started', async () => {
       repositoryMock.hasStartedMatch.mockResolvedValue(true);
 
       await expect(
         admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+      ).resolves.toEqual(previewResult);
+
+      // The started-match and bracket reads are gone from the import path altogether.
+      expect(repositoryMock.hasStartedMatch).not.toHaveBeenCalled();
+      expect(repositoryMock.findBracket).not.toHaveBeenCalled();
+    });
+
+    it('previews a batch even after a match has started and a bracket exists', async () => {
+      repositoryMock.hasStartedMatch.mockResolvedValue(true);
+      repositoryMock.findBracket.mockResolvedValue({
+        stages: [{ id: 'stage-1' }],
+      });
+
+      await expect(
+        admin.previewRosterImportBatch(
+          'tournament-1',
+          'organizer-1',
+          [],
+          batchDto,
+        ),
+      ).resolves.toEqual(batchPreviewResult);
+    });
+
+    it('still rejects the batch preview for a completed tournament', async () => {
+      repositoryMock.findById.mockResolvedValue({
+        ...closedTournament,
+        status: 'COMPLETED',
+      });
+
+      await expect(
+        admin.previewRosterImportBatch(
+          'tournament-1',
+          'organizer-1',
+          [],
+          batchDto,
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
+      expect(repositoryMock.previewRosterImportBatch).not.toHaveBeenCalled();
     });
 
     it('rejects the preview for a completed tournament even without a bracket', async () => {

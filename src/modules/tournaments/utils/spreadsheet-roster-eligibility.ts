@@ -11,43 +11,23 @@ export type SpreadsheetRosterTournament = {
 };
 
 /**
- * Live state the policy must re-read from the database. Callers pass real
- * repository reads so a stale UI preview never grants commit rights.
- */
-export type SpreadsheetRosterStateProbe = {
-  hasStartedMatch: () => Promise<boolean>;
-  hasActiveBracketStage: () => Promise<boolean>;
-};
-
-/**
- * Shared eligibility policy for the two spreadsheet roster workflows:
- * `POST /tournaments/:id/import-participants/preview` and
- * `POST /tournaments/:id/roster-import`.
+ * Shared eligibility policy for the spreadsheet roster workflows:
+ * `POST /tournaments/:id/import-participants/preview`,
+ * `POST /tournaments/:id/roster-import` and the batch preview/commit.
  *
- * Compared with the legacy Google Form import and the manual add-athlete
- * flows, registration being closed or locked is NOT disqualifying: the roster
- * may still be loaded while the bracket does not exist yet and no match has
- * started. A completed tournament, an existing bracket stage, or a started
- * match always block, so the roster can never drift from a live bracket.
+ * Only a completed tournament blocks. A started match or an existing bracket
+ * no longer does (product owner decision, 2026-10-14): an organizer must be
+ * able to add athletes while the event runs. The import only adds registration
+ * rows; it never edits a bracket, a match or a result, so an athlete added to a
+ * division that already has a bracket is NOT placed into that bracket.
  *
  * Manager authorization stays with the caller; this only covers tournament
  * state.
  */
-export async function assertSpreadsheetRosterEligible(
+export function assertSpreadsheetRosterEligible(
   tournament: SpreadsheetRosterTournament,
-  probe: SpreadsheetRosterStateProbe,
-): Promise<void> {
+): void {
   if (tournament.status === 'COMPLETED') {
     throw new BadRequestException('Giải đấu đã kết thúc');
-  }
-  if (await probe.hasStartedMatch()) {
-    throw new BadRequestException(
-      'Không thể nhập danh sách VĐV sau khi trận đấu đã bắt đầu.',
-    );
-  }
-  if (await probe.hasActiveBracketStage()) {
-    throw new BadRequestException(
-      'Không thể nhập danh sách VĐV sau khi sơ đồ thi đấu đã được tạo. Hãy xử lý lại sơ đồ theo quy trình riêng để tránh kết quả cũ bị lệch.',
-    );
   }
 }

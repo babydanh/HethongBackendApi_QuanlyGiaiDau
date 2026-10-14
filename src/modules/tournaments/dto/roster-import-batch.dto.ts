@@ -77,7 +77,11 @@ export class RosterImportBatchDto {
   @Type(() => RosterImportBatchGroupDto)
   groups: RosterImportBatchGroupDto[];
 
-  @ApiPropertyOptional({ description: 'Gửi thông báo tới tài khoản đã được organizer xác nhận' })
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'Đã bỏ: được nhận và bỏ qua để client cũ không bị 400. Người có tài khoản luôn nhận đúng một thông báo xác nhận.',
+  })
   @IsOptional()
   @IsBoolean()
   notifyLinkedAccounts?: boolean;

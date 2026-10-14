@@ -13,8 +13,6 @@ import { RankingConsentService } from './ranking-consent.service';
 import {
   buildAccountLinkConfirmationNotification,
   buildFootballRosterConfirmationNotification,
-  buildParticipantRegistrationPendingNotification,
-  buildParticipantRegistrationSuccessNotification,
 } from '../../notifications/notification-builder';
 import type { ImportParticipantsDto } from '../dto/import-participants.dto';
 import type { RosterImportDto } from '../dto/roster-import.dto';
@@ -75,13 +73,6 @@ export class TournamentImportService {
       dto.divisionId,
     );
 
-    await this.notifyLinkedAccounts(
-      tournamentId,
-      tournament.name,
-      dto.notifyLinkedAccounts === true,
-      result.linkedAccountNotifications,
-    );
-
     await this.sendConsentRequests(result.linkedAccountNotifications, {
       tournamentId,
       tournamentName: tournament.name,
@@ -131,13 +122,6 @@ export class TournamentImportService {
       dto.divisionId,
     );
 
-    await this.notifyLinkedAccounts(
-      tournamentId,
-      tournament.name,
-      dto.notifyLinkedAccounts === true,
-      result.linkedAccountNotifications,
-    );
-
     await this.sendConsentRequests(result.linkedAccountNotifications, {
       tournamentId,
       tournamentName: tournament.name,
@@ -175,15 +159,7 @@ export class TournamentImportService {
     );
     if (replay) return replay;
 
-    await assertSpreadsheetRosterEligible(tournament, {
-      hasStartedMatch: () =>
-        this.tournamentsRepository.hasStartedMatch(tournamentId),
-      hasActiveBracketStage: async () =>
-        Boolean(
-          (await this.tournamentsRepository.findBracket(tournamentId))?.stages
-            ?.length,
-        ),
-    });
+    assertSpreadsheetRosterEligible(tournament);
     const result = await this.tournamentsRepository.importRosterBatch(
       tournamentId,
       userId,
@@ -194,12 +170,6 @@ export class TournamentImportService {
       return { importedCount: result.importedCount, replayed: true };
     }
 
-    await this.notifyLinkedAccounts(
-      tournamentId,
-      tournament.name,
-      dto.notifyLinkedAccounts === true,
-      result.linkedAccountNotifications,
-    );
     await this.sendConsentRequests(result.linkedAccountNotifications, {
       tournamentId,
       tournamentName: tournament.name,
@@ -501,61 +471,16 @@ export class TournamentImportService {
       userId,
       systemRoles,
     );
-    await assertSpreadsheetRosterEligible(tournament, {
-      hasStartedMatch: () =>
-        this.tournamentsRepository.hasStartedMatch(tournamentId),
-      hasActiveBracketStage: async () =>
-        Boolean(
-          (await this.tournamentsRepository.findBracket(tournamentId))?.stages
-            ?.length,
-        ),
-    });
+    assertSpreadsheetRosterEligible(tournament);
     return tournament;
   }
-  private async notifyLinkedAccounts(
-    tournamentId: string,
-    tournamentName: string,
-    requested: boolean,
-    recipients:
-      | Array<{
-          userId: string;
-          status: 'COMPLETE' | 'PENDING_APPROVAL';
-          divisionId: string | null;
-        }>
-      | undefined,
-  ): Promise<void> {
-    if (!requested || !recipients?.length) return;
-    for (const recipient of recipients) {
-      try {
-        const notification =
-          recipient.status === 'COMPLETE'
-            ? buildParticipantRegistrationSuccessNotification({
-                tournamentId,
-                tournamentName,
-                receiverId: recipient.userId,
-                divisionId: recipient.divisionId,
-              })
-            : buildParticipantRegistrationPendingNotification({
-                tournamentId,
-                tournamentName,
-                receiverId: recipient.userId,
-                divisionId: recipient.divisionId,
-              });
-        await this.notificationsService.sendNotification(notification);
-      } catch {
-        // A notification failure must not roll back a successful import.
-      }
-    }
-  }
-
   /**
    * Gửi yêu cầu xác nhận cho mọi VĐV ban tổ chức thêm có tài khoản: một email và một thông báo
    * trong ứng dụng có avatar người thêm.
    *
-   * Cố ý KHÔNG nằm sau cờ `notifyLinkedAccounts`: đó là tuỳ chọn của ban tổ chức,
-   * còn xác nhận thì không. Gộp chung thì tổ chức chỉ cần bỏ cờ là mọi người im
-   * lặng không xác nhận và trận của họ không tính — đúng loại loại ngầm mà nghiệp vụ
-   * này sinh ra để chặn.
+   * Chạy cho mọi lần ban tổ chức thêm VĐV có tài khoản, không có cờ tắt: yêu cầu xác nhận là
+   * thông báo DUY NHẤT người đó nhận (không còn thông báo «đăng ký thành công/chờ duyệt»). Client
+   * cũ vẫn gửi `notifyLinkedAccounts`, trường đó được nhận ở DTO nhưng bị bỏ qua.
    *
    * allSettled và try/catch vì một mail hay một thông báo lỗi không được làm hỏng cả lần
    * thêm đã thành công. Người chưa xác nhận vẫn là người tham gia; chỉ kết quả của họ chưa

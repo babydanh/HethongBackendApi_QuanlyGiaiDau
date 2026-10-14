@@ -1537,7 +1537,15 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
       throw new ServiceUnavailableException('AI hiện không khả dụng. Vui lòng thử lại sau.');
     }
 
-    return { data: parseRosterLayout(this.parseProviderJson(rawResult), dto), aiAvailable: true };
+    const layout = parseRosterLayout(this.parseProviderJson(rawResult), dto);
+    // Counts and a reason only: no cell text, name, email or phone ever reaches the log. It is what lets
+    // anyone tell "the model returned nothing usable" from "the call failed" when the AI seems to work
+    // only sometimes, and how often the web's single retry fires.
+    const blocks = layout.sheets.reduce((total, sheet) => total + sheet.blocks.length, 0);
+    this.logger.log(
+      `AI roster layout tournament=${tournamentId} sheets=${dto.sheets.length} blocks=${blocks} retryReason=${dto.retryReason ?? 'none'}`,
+    );
+    return { data: layout, aiAvailable: true };
   }
 
   /**

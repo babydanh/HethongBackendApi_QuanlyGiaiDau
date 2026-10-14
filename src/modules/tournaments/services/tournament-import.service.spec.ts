@@ -325,8 +325,39 @@ describe('TournamentImportService import contracts', () => {
     });
   });
 
-  it('re-checks match state before the atomic batch commit', async () => {
+  it('commits a batch even after a match has started', async () => {
     repositoryMock.hasStartedMatch.mockResolvedValue(true);
+    repositoryMock.importRosterBatch.mockResolvedValue({
+      importedCount: 0,
+      replayed: false,
+      linkedAccountNotifications: [],
+    });
+    const dto = Object.assign(new RosterImportBatchDto(), {
+      groups: [{ divisionId: 'division-1', participants: [] }],
+    });
+
+    await expect(
+      buildImporter().importRosterBatchFromForm(
+        'tournament-1',
+        'organizer-1',
+        [],
+        dto,
+        'stable-key',
+        jest.fn(),
+      ),
+    ).resolves.toMatchObject({ replayed: false });
+
+    expect(repositoryMock.importRosterBatch).toHaveBeenCalledTimes(1);
+    // The started-match and bracket reads are gone from the import path altogether.
+    expect(repositoryMock.hasStartedMatch).not.toHaveBeenCalled();
+    expect(repositoryMock.findBracket).not.toHaveBeenCalled();
+  });
+
+  it('still rejects a batch commit for a completed tournament', async () => {
+    repositoryMock.findById.mockResolvedValue({
+      ...openTournament,
+      status: 'COMPLETED',
+    });
     const dto = Object.assign(new RosterImportBatchDto(), {
       groups: [{ divisionId: 'division-1', participants: [] }],
     });
@@ -411,10 +442,14 @@ describe('TournamentImportService import contracts', () => {
     expect(result.importedCount).toBe(1);
   });
 
-  it('rejects the roster commit once a bracket stage exists', async () => {
+  it('commits roster rows even when a bracket stage already exists', async () => {
     repositoryMock.findById.mockResolvedValue(closedTournament);
     repositoryMock.findBracket.mockResolvedValue({
       stages: [{ id: 'stage-1' }],
+    });
+    repositoryMock.importRosterRows.mockResolvedValue({
+      importedCount: 1,
+      linkedAccountNotifications: [],
     });
 
     await expect(
@@ -425,16 +460,18 @@ describe('TournamentImportService import contracts', () => {
         rosterCommitDto,
         jest.fn(),
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).resolves.toMatchObject({ importedCount: 1 });
 
-    expect(repositoryMock.importRosterRows).not.toHaveBeenCalled();
+    expect(repositoryMock.importRosterRows).toHaveBeenCalledTimes(1);
   });
 
-  it('re-checks at commit time and rejects when a match started after a preview', async () => {
+  it('commits roster rows even when a match has started', async () => {
     repositoryMock.findById.mockResolvedValue(closedTournament);
-    repositoryMock.findBracket.mockResolvedValue({ stages: [] });
-    // A concurrent bracket generation plus kickoff lands between preview and commit.
     repositoryMock.hasStartedMatch.mockResolvedValue(true);
+    repositoryMock.importRosterRows.mockResolvedValue({
+      importedCount: 1,
+      linkedAccountNotifications: [],
+    });
 
     await expect(
       buildImporter().importRosterFromForm(
@@ -444,10 +481,10 @@ describe('TournamentImportService import contracts', () => {
         rosterCommitDto,
         jest.fn(),
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).resolves.toMatchObject({ importedCount: 1 });
 
-    expect(repositoryMock.hasStartedMatch).toHaveBeenCalledWith('tournament-1');
-    expect(repositoryMock.importRosterRows).not.toHaveBeenCalled();
+    expect(repositoryMock.hasStartedMatch).not.toHaveBeenCalled();
+    expect(repositoryMock.importRosterRows).toHaveBeenCalledTimes(1);
   });
 
   it('rejects the roster commit for a completed tournament even without a bracket', async () => {
@@ -928,33 +965,92 @@ describe('TournamentImportService organizer add-athlete flow', () => {
       expect(broadcast).toHaveBeenCalled();
     });
 
-    it('sends the request for a batch import even when the organizer unticks the registration notice', async () => {
-      repositoryMock.importRosterBatch.mockResolvedValue({
-        importedCount: 1,
-        replayed: false,
-        linkedAccountNotifications: [linked('roster-1', 'athlete-1')],
-      });
-      const dto = Object.assign(new RosterImportBatchDto(), {
-        notifyLinkedAccounts: false,
-        groups: [{ divisionId: 'division-1', participants: [] }],
-      });
+    // The ignored `notifyLinkedAccounts` flag is still accepted from released clients, but whatever it
+    // holds the account holder gets exactly one notice: the confirmation request.
+    it.each([true, false, undefined])(
+      'sends only the confirmation request for a batch import when notifyLinkedAccounts is %s',
+      async (flag) => {
+        repositoryMock.importRosterBatch.mockResolvedValue({
+          importedCount: 1,
+          replayed: false,
+          linkedAccountNotifications: [linked('roster-1', 'athlete-1')],
+        });
+        const dto = Object.assign(new RosterImportBatchDto(), {
+          ...(flag === undefined ? {} : { notifyLinkedAccounts: flag }),
+          groups: [{ divisionId: 'division-1', participants: [] }],
+        });
 
-      await buildImporter().importRosterBatchFromForm(
-        'tournament-1',
-        'organizer-1',
-        [],
-        dto,
-        'stable-key',
-        jest.fn(),
-      );
+        await buildImporter().importRosterBatchFromForm(
+          'tournament-1',
+          'organizer-1',
+          [],
+          dto,
+          'stable-key',
+          jest.fn(),
+        );
 
-      const types = notificationsMock.sendNotification.mock.calls.map(
-        ([notice]) => notice.type,
-      );
-      // The tick controls the registration notice only; the confirmation request is not optional.
-      expect(types).toEqual([ACCOUNT_LINK]);
-      expect(consentMock.sendConfirmationRequest).toHaveBeenCalledWith('roster-1');
-    });
+        const types = notificationsMock.sendNotification.mock.calls.map(
+          ([notice]) => notice.type,
+        );
+        expect(types).toEqual([ACCOUNT_LINK]);
+        expect(consentMock.sendConfirmationRequest).toHaveBeenCalledWith('roster-1');
+      },
+    );
+
+    it.each([true, false, undefined])(
+      'sends only the confirmation request for the strict roster import when notifyLinkedAccounts is %s',
+      async (flag) => {
+        repositoryMock.importRosterRows.mockResolvedValue({
+          importedCount: 1,
+          linkedAccountNotifications: [linked('roster-1', 'athlete-1')],
+        });
+        const dto = Object.assign(new RosterImportDto(), {
+          participants: [{ teamName: 'VĐV', player1Name: 'VĐV', player1Email: 'a@example.test' }],
+          ...(flag === undefined ? {} : { notifyLinkedAccounts: flag }),
+        });
+
+        await buildImporter().importRosterFromForm(
+          'tournament-1',
+          'organizer-1',
+          [],
+          dto,
+          jest.fn(),
+        );
+
+        const types = notificationsMock.sendNotification.mock.calls.map(
+          ([notice]) => notice.type,
+        );
+        expect(types).toEqual([ACCOUNT_LINK]);
+      },
+    );
+
+    it.each([true, false, undefined])(
+      'sends only the confirmation request for the legacy import when notifyLinkedAccounts is %s',
+      async (flag) => {
+        repositoryMock.importParticipants.mockResolvedValue({
+          importedCount: 1,
+          unregisteredEmails: [],
+          linkedAccountNotifications: [linked('roster-1', 'athlete-1')],
+        });
+        const dto = Object.assign(new ImportParticipantsDto(), {
+          participants: [{ teamName: 'VĐV', player1Name: 'VĐV' }],
+          ...(flag === undefined ? {} : { notifyLinkedAccounts: flag }),
+        });
+
+        await buildImporter().importParticipantsFromForm(
+          'tournament-1',
+          'organizer-1',
+          [],
+          dto,
+          jest.fn(),
+        );
+
+        const types = notificationsMock.sendNotification.mock.calls.map(
+          ([notice]) => notice.type,
+        );
+        expect(types).toEqual([ACCOUNT_LINK]);
+      },
+    );
 
     it('does not send a second request when a completed batch is replayed', async () => {
       repositoryMock.findRosterImportBatchReplay.mockResolvedValue({

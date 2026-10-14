@@ -93,7 +93,9 @@ export class ImportParticipantsDto {
   sendInvitationEmail?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Gửi thông báo trong SportO cho các VĐV đã có tài khoản',
+    deprecated: true,
+    description:
+      'Đã bỏ: được nhận và bỏ qua để client cũ không bị 400. Người có tài khoản luôn nhận đúng một thông báo xác nhận.',
   })
   @IsOptional()
   @IsBoolean()

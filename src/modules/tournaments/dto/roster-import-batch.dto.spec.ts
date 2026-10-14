@@ -56,6 +56,17 @@ describe('RosterImportBatchDto', () => {
     ).toHaveLength(0);
   });
 
+  it.each([true, false])(
+    'still accepts the retired notifyLinkedAccounts=%s that released web builds send',
+    async (flag) => {
+      const batch = Object.assign(validBatch(), { notifyLinkedAccounts: flag });
+
+      expect(
+        await validate(batch, { whitelist: true, forbidNonWhitelisted: true }),
+      ).toHaveLength(0);
+    },
+  );
+
   it('rejects worksheet provenance outside Excel limits', async () => {
     const batch = validBatch();
     Object.assign(batch.groups[0].participants[0], {
