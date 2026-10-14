@@ -1045,6 +1045,25 @@ describe('TournamentsService — Lite pairing guards', () => {
       expect(mockRepo.lockTournamentAndPairMany).not.toHaveBeenCalled();
       expect(mockRepo.findById).not.toHaveBeenCalled();
     });
+    it('TC-FEAT-15 rejects the same pair repeated in one batch', async () => {
+      await expect(
+        service.pairLiteParticipantsBatch('tournament-1', 'user-1', ['ADMIN'], {
+          pairs: [pair('a', 'b'), pair('a', 'b')],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.lockTournamentAndPairMany).not.toHaveBeenCalled();
+      expect(mockRepo.findById).not.toHaveBeenCalled();
+    });
+
+    it('TC-FEAT-16 rejects a pair repeated in reverse order', async () => {
+      await expect(
+        service.pairLiteParticipantsBatch('tournament-1', 'user-1', ['ADMIN'], {
+          pairs: [pair('a', 'b'), pair('b', 'a')],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.lockTournamentAndPairMany).not.toHaveBeenCalled();
+      expect(mockRepo.findById).not.toHaveBeenCalled();
+    });
 
     it('TC-FEAT-12 rejects a pair that repeats the same participant', async () => {
       await expect(
