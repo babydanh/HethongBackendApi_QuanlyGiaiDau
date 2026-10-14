@@ -1981,15 +1981,25 @@ export class LivestreamService {
       };
     }
 
-    // Sân có URL KHÔNG có nghĩa là đang phát. Chỉ trận đã bắt đầu (ONGOING) mới
-    // được trả playbackUrl, nếu không thì khán giả sẽ thấy video dù BTC chưa bấm
-    // "Bắt đầu" — đúng triệu chứng "có URL nhưng màn hình đen/ảo" khó chẩn đoán.
+    // Sân có URL KHÔNG có nghĩa là đang phát. Chỉ trận đã bắt đầu (ONGOING) mới được trả
+    // playbackUrl, nếu không thì khán giả sẽ thấy video dù BTC chưa bấm "Bắt đầu" — đúng
+    // triệu chứng "có URL nhưng màn hình đen/ảo" khó chẩn đoán.
+    //
+    // Ngoại lệ duy nhất: trận ĐÃ kết thúc (COMPLETED) mà BTC bấm "Bắt đầu" lại. LIVE chỉ
+    // được ghi khi BTC bấm Bắt đầu (xếp lịch ghi IDLE), nên nó là hành động chủ động, không
+    // phải "chỉ có URL". Trận bị hủy hoặc chưa bắt đầu vẫn không có hình dù luồng ghi LIVE.
     //
     // Trạng thái trận một mình không đủ để tắt hình: nếu BTC đã bấm Dừng (OFFLINE)
     // thì dừng phải thắng, kể cả khi trận vẫn ONGOING. Không có điều kiện này, nút
     // Dừng không có tác dụng gì với trận dùng camera sân.
     const isStoppedByOperator = stream?.streamStatus === 'OFFLINE';
-    if (courtCamera?.playbackUrl && match.status === 'ONGOING' && !isStoppedByOperator) {
+    const restartedAfterCompletion =
+      match.status === 'COMPLETED' && stream?.streamStatus === 'LIVE';
+    if (
+      courtCamera?.playbackUrl &&
+      (match.status === 'ONGOING' || restartedAfterCompletion) &&
+      !isStoppedByOperator
+    ) {
       const courtUrl = this.normalizePublicPlaybackUrl(courtCamera.playbackUrl);
       return {
         matchId,
