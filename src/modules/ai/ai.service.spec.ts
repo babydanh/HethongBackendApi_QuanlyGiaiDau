@@ -1132,10 +1132,11 @@ describe('AiService.analyzeRosterLayout', () => {
     const secretCell = 'Nguyễn Văn Thử';
     attachProvider(service, JSON.stringify({ sheets: [rosterSheet({})], notes: [] }));
 
-    await service.analyzeRosterLayout('tournament-1', {
-      ...rosterRequestWithCells([secretCell, 'Cặp đấu']),
-      retryReason: 'EMPTY_LAYOUT',
-    });
+    await service.analyzeRosterLayout(
+      'tournament-1',
+      rosterRequestWithCells([secretCell, 'Cặp đấu']),
+      'EMPTY_LAYOUT',
+    );
 
     const lines = logSpy.mock.calls.map(([message]) => String(message));
     expect(lines).toHaveLength(1);
@@ -1145,6 +1146,19 @@ describe('AiService.analyzeRosterLayout', () => {
     expect(lines[0]).toContain('retryReason=EMPTY_LAYOUT');
     expect(lines[0]).not.toContain(secretCell);
     expect(lines[0]).not.toContain('Cặp đấu');
+  });
+
+  it('logs retryReason=none for any value but EMPTY_LAYOUT, so a query string can never put free text in the log', async () => {
+    const service = createService('test-key');
+    const logSpy = jest.spyOn((service as unknown as { logger: { log: (message: string) => void } }).logger, 'log');
+    attachProvider(service, JSON.stringify({ sheets: [], notes: [] }));
+
+    await service.analyzeRosterLayout('tournament-1', ROSTER_LAYOUT_REQUEST, 'x\nFORGED LOG LINE');
+
+    const lines = logSpy.mock.calls.map(([message]) => String(message));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('retryReason=none');
+    expect(lines[0]).not.toContain('FORGED');
   });
 
   it('logs retryReason=none and zero blocks for a first attempt whose layout validates to nothing', async () => {

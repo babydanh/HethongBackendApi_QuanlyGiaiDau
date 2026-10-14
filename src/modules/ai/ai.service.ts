@@ -1455,8 +1455,13 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
    * Gửi bố cục bảng tính đã được che PII ở trình duyệt lên model để mô tả khối, cột và kiểu ghép đôi.
    * Model chỉ mô tả bố cục: không kiểm tra hợp lệ, không quyết định dòng nào được nhập. Khi
    * ROSTER_LAYOUT_PROVIDER_APPROVED còn `false` thì không có lệnh gọi provider nào được thực hiện.
+   * `retryReason` đến từ query string và chỉ để ghi nhật ký: chỉ `EMPTY_LAYOUT` được ghi, mọi giá trị khác thành `none`.
    */
-  async analyzeRosterLayout(tournamentId: string, dto: RosterLayoutRequestDto): Promise<RosterLayoutOutcome> {
+  async analyzeRosterLayout(
+    tournamentId: string,
+    dto: RosterLayoutRequestDto,
+    retryReason?: string,
+  ): Promise<RosterLayoutOutcome> {
     assertRosterLayoutRequestSafe(dto);
     const openai = this.openai;
     if (!ROSTER_LAYOUT_PROVIDER_APPROVED || !openai) {
@@ -1543,7 +1548,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
     // only sometimes, and how often the web's single retry fires.
     const blocks = layout.sheets.reduce((total, sheet) => total + sheet.blocks.length, 0);
     this.logger.log(
-      `AI roster layout tournament=${tournamentId} sheets=${dto.sheets.length} blocks=${blocks} retryReason=${dto.retryReason ?? 'none'}`,
+      `AI roster layout tournament=${tournamentId} sheets=${dto.sheets.length} blocks=${blocks} retryReason=${retryReason === 'EMPTY_LAYOUT' ? 'EMPTY_LAYOUT' : 'none'}`,
     );
     return { data: layout, aiAvailable: true };
   }

@@ -6,6 +6,7 @@ import {
   Res,
   UseGuards,
   Param,
+  Query,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -158,6 +159,9 @@ export class AiController {
   async analyzeRosterLayout(
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
     @Body() dto: RosterLayoutRequestDto,
+    // Query string, not body: a backend that does not know it ignores it, whereas the body is whitelisted and
+    // an unknown property there is a 400. The service accepts one value and ignores the rest.
+    @Query('retryReason') retryReason: string | undefined,
     @CurrentUser() user: JwtPayload,
   ) {
     await this.tournamentsService.assertTournamentManager(
@@ -165,7 +169,7 @@ export class AiController {
       user.sub,
       user.roles ?? (user.role ? [user.role] : []),
     );
-    const result = await this.aiService.analyzeRosterLayout(tournamentId, dto);
+    const result = await this.aiService.analyzeRosterLayout(tournamentId, dto, retryReason);
 
     // Contract D-1: the flag and the layout travel together inside `data`. TransformInterceptor keeps only
     // data/message/meta, so a sibling field such as `aiAvailable` would never reach the client.

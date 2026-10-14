@@ -107,14 +107,4 @@ export class RosterLayoutRequestDto {
   @IsString()
   @IsIn(['vi', 'en'])
   locale?: 'vi' | 'en';
-
-  @ApiPropertyOptional({
-    description:
-      'Chỉ có ở lần gọi lại duy nhất của web khi lần đầu AI trả lời hợp lệ nhưng không có khối nào dùng được. Chỉ để ghi nhật ký, không đổi kết quả.',
-    enum: ['EMPTY_LAYOUT'],
-  })
-  @IsOptional()
-  @IsString()
-  @IsIn(['EMPTY_LAYOUT'])
-  retryReason?: 'EMPTY_LAYOUT';
 }

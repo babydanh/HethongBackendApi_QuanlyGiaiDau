@@ -405,7 +405,30 @@ describe('AiController POST /ai/tournaments/:tournamentId/roster-layout', () => 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ statusCode: 200, message: 'Success', data: { aiAvailable: false, layout: null } });
     expect(assertTournamentManager).toHaveBeenCalledWith(TOURNAMENT_ID, 'organizer-1', [UserRole.ORGANIZER]);
-    expect(analyzeRosterLayout).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining({ locale: 'vi' }));
+    expect(analyzeRosterLayout).toHaveBeenCalledWith(TOURNAMENT_ID, expect.objectContaining({ locale: 'vi' }), undefined);
+  });
+
+  it('reads the retry reason from the query string, so a backend without it ignores it instead of answering 400', async () => {
+    const response = await request(app.getHttpServer())
+      .post(`${ROSTER_LAYOUT_PATH}?retryReason=EMPTY_LAYOUT`)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(200);
+    expect(analyzeRosterLayout).toHaveBeenCalledWith(
+      TOURNAMENT_ID,
+      expect.objectContaining({ locale: 'vi' }),
+      'EMPTY_LAYOUT',
+    );
+  });
+
+  it('does not refuse a request whose retry reason is not one it knows', async () => {
+    const response = await request(app.getHttpServer())
+      .post(`${ROSTER_LAYOUT_PATH}?retryReason=whatever`)
+      .set(...bearerHeader(verifiedUser(UserRole.ORGANIZER)))
+      .send(ROSTER_BODY);
+
+    expect(response.status).toBe(200);
   });
 
   it('keeps aiAvailable and the layout on the wire when the model answered', async () => {
