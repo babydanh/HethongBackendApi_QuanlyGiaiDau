@@ -10,6 +10,7 @@ import { QueryHomeTournamentsDto } from '../dto/query-home-tournaments.dto';
 import { QueryMyManagementTournamentsDto } from '../dto/query-my-management-tournaments.dto';
 import { TournamentsRepository } from '../tournaments.repository';
 import { TournamentAccessService } from './tournament-access.service';
+import { isRegistrationFeePaid } from '../utils/registration-payment-eligibility';
 import {
   mapPublicTournament,
   mapTournamentFormat,
@@ -364,11 +365,21 @@ export class TournamentDiscoveryService {
       true,
     );
 
+    // Cùng quy tắc với luồng thanh toán và màn người chơi: phí lúc đăng ký <= 0,
+    // BTC miễn phí hoặc đã có thanh toán COMPLETED đều là "đã đóng". Chỉ đọc cột
+    // is_paid sẽ báo "Chưa thanh toán" cho giải miễn phí hoặc hồ sơ BTC thêm vào.
+    // isLiteRegistration=false: chỉ thêm trường hợp được coi là đã đóng, không
+    // làm hồ sơ đang "đã đóng" thành "chưa đóng".
     return participants.map((participant) => ({
       ...participant,
-      isPaid:
-        participant.isPaid ||
-        participant.payment?.status === PaymentStatus.COMPLETED,
+      isPaid: isRegistrationFeePaid({
+        persistedIsPaid: participant.isPaid,
+        feeSnapshot: participant.entryFeeAtRegistration,
+        hasCompletedPayment:
+          participant.payment?.status === PaymentStatus.COMPLETED,
+        isLiteRegistration: false,
+        organizerWaivedFee: participant.organizerWaivedFee === true,
+      }),
     }));
   }
 }

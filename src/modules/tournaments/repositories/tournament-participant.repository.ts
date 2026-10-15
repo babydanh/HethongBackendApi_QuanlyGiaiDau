@@ -394,6 +394,12 @@ export class TournamentParticipantRepository {
         currency: string | null;
       } | null;
       eloPoints?: number;
+      /**
+       * Phí hiệu lực lúc đăng ký và dấu BTC miễn phí. Chỉ có khi includePaymentDetails=true
+       * (danh sách của BTC); danh sách công khai không bao giờ mang hai trường này.
+       */
+      entryFeeAtRegistration?: string;
+      organizerWaivedFee?: boolean;
     }[]
   > {
     // 1. Fetch participants and their registeredBy info
@@ -406,6 +412,9 @@ export class TournamentParticipantRepository {
         rosterLockedAt: schema.tournamentParticipants.rosterLockedAt,
         seed: schema.tournamentParticipants.seed,
         isPaid: schema.tournamentParticipants.isPaid,
+        entryFeeAtRegistration:
+          schema.tournamentParticipants.entryFeeAtRegistration,
+        organizerWaivedFee: schema.tournamentParticipants.organizerWaivedFee,
         isPresent: schema.tournamentParticipants.isPresent,
         tournamentDivisionId:
           schema.tournamentParticipants.tournamentDivisionId,
@@ -625,7 +634,8 @@ export class TournamentParticipantRepository {
       }
     }
 
-    return participants.map((p) => {
+    return participants.map((row) => {
+      const { entryFeeAtRegistration, organizerWaivedFee, ...p } = row;
       const members = rostersMap.get(p.id) || [];
       let eloPoints = 1000;
       if (p.footballTeamId) {
@@ -650,6 +660,9 @@ export class TournamentParticipantRepository {
         members,
         payment: includePaymentDetails ? (paymentMap.get(p.id) ?? null) : null,
         eloPoints,
+        ...(includePaymentDetails
+          ? { entryFeeAtRegistration, organizerWaivedFee }
+          : {}),
       };
     });
   }
