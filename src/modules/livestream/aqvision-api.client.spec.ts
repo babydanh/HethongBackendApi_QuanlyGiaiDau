@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
+import { AqvisionAgencyApiException } from './aqvision-agency-api.client';
 import {
   AqvisionApiClient,
   AqvisionApiException,
@@ -521,8 +522,21 @@ describe('AqvisionApiClient', () => {
     const urlAt = (index: number) => String(callAt(index)[0]);
     const headersAt = (index: number) =>
       (callAt(index)[1] as { headers?: Record<string, string> } | undefined)?.headers ?? {};
+    const initAt = (index: number) =>
+      callAt(index)[1] as { method?: string; headers?: Record<string, string>; body?: unknown } | undefined;
+    // AQP's published route for agency (JWT) callers; the secret route lives on api.media.aqvision.net.
+    const RAPID = 'https://media.aqvision.net/api/rapidmedia';
+    /** The secret attempt is rejected, so call #1 (0-based) is the Bearer attempt. */
+    const viaBearer = async (
+      run: (client: AqvisionApiClient) => Promise<unknown>,
+      data: unknown = { result: true },
+      overrides: Record<string, unknown> = {},
+    ) => {
+      fetchSpy.mockResolvedValueOnce(rejected()).mockResolvedValueOnce(accepted(data));
+      await run(makeClient(overrides, provider()));
+    };
 
-    it('retries once with Bearer and no secret when AQP rejects the secret', async () => {
+    it('retries once with Bearer on the rapidmedia route and no secret when AQP rejects the secret', async () => {
       fetchSpy.mockResolvedValueOnce(rejected()).mockResolvedValueOnce(accepted());
       const tokens = provider();
 
@@ -530,12 +544,112 @@ describe('AqvisionApiClient', () => {
 
       expect(fetchSpy).toHaveBeenCalledTimes(2);
       expect(urlAt(0)).toContain(`secret=${SECRET}`);
+      expect(urlAt(0)).toContain('https://api.media.aqvision.net/index/api/startRecord?');
       expect(headersAt(0)).not.toHaveProperty('Authorization');
-      expect(urlAt(1)).not.toContain('secret=');
-      expect(urlAt(1)).toContain('/index/api/startRecord');
-      expect(urlAt(1)).toContain('stream=camera01');
+      expect(urlAt(1)).toBe(`${RAPID}/startRecord`);
+      expect(urlAt(1)).not.toContain('secret');
+      expect(urlAt(1)).not.toContain(TOKEN);
       expect(headersAt(1)).toMatchObject({ Authorization: `Bearer ${TOKEN}` });
       expect(tokens.getBearerToken).toHaveBeenCalledTimes(1);
+    });
+
+    it('isRecording over Bearer is a GET with the documented query and no body', async () => {
+      await viaBearer((c) => c.isRecordingMp4('camera01'), { status: true });
+
+      const url = new URL(urlAt(1));
+      expect(url.origin + url.pathname).toBe(`${RAPID}/isRecording`);
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        type: '1',
+        vhost: '__defaultVhost__',
+        app: 'live',
+        stream: 'camera01',
+      });
+      expect(initAt(1)?.method).toBe('GET');
+      expect(initAt(1)?.body).toBeUndefined();
+      expect(urlAt(1)).not.toContain(TOKEN);
+    });
+
+    it('getMP4RecordFile over Bearer sends vhost, app, stream and with_size, like the vendor sample', async () => {
+      await viaBearer((c) => c.getMp4RecordFile({ stream: 'camera01', withSize: true }), {
+        paths: [],
+        rootPath: '',
+      });
+
+      const url = new URL(urlAt(1));
+      expect(url.origin + url.pathname).toBe(`${RAPID}/getMP4RecordFile`);
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        vhost: '__defaultVhost__',
+        app: 'live',
+        stream: 'camera01',
+        with_size: '1',
+      });
+      expect(initAt(1)?.method).toBe('GET');
+    });
+
+    it.each([
+      ['startRecord', (c: AqvisionApiClient) => c.startRecordMp4('camera01')],
+      ['stopRecord', (c: AqvisionApiClient) => c.stopRecordMp4('camera01')],
+    ])('%s over Bearer is a form POST: no query string, parameters in the body', async (name, run) => {
+      await viaBearer(run);
+
+      expect(urlAt(1)).toBe(`${RAPID}/${name}`);
+      expect(initAt(1)?.method).toBe('POST');
+      expect(headersAt(1)).toMatchObject({
+        Authorization: `Bearer ${TOKEN}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      });
+      const body = String(initAt(1)?.body);
+      expect(Object.fromEntries(new URLSearchParams(body))).toEqual({
+        type: '1',
+        vhost: '__defaultVhost__',
+        app: 'live',
+        stream: 'camera01',
+      });
+      expect(body).not.toContain(SECRET);
+      expect(body).not.toContain(TOKEN);
+    });
+
+    it('the secret attempt still sends a POST with its parameters in the query string', async () => {
+      fetchSpy.mockResolvedValueOnce(accepted());
+
+      await makeClient({}, provider()).stopRecordMp4('camera01');
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(urlAt(0)).toContain('https://api.media.aqvision.net/index/api/stopRecord?');
+      expect(urlAt(0)).toContain('stream=camera01');
+      expect(initAt(0)?.body).toBeUndefined();
+    });
+
+    it('follows AQVISION_AGENCY_BASE_URL for the rapidmedia route', async () => {
+      await viaBearer((c) => c.startRecordMp4('camera01'), { result: true }, {
+        AQVISION_AGENCY_BASE_URL: 'https://media.example.test',
+      });
+
+      expect(urlAt(1)).toBe('https://media.example.test/api/rapidmedia/startRecord');
+    });
+
+    it('never sends the token to an unsafe base URL and keeps the -100 of the secret attempt', async () => {
+      fetchSpy.mockResolvedValue(rejected());
+      const tokens = provider();
+
+      const error = await makeClient({ AQVISION_AGENCY_BASE_URL: 'http://media.example.test' }, tokens)
+        .startRecordMp4('camera01')
+        .catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ providerCode: -100 });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(tokens.getBearerToken).not.toHaveBeenCalled();
+    });
+
+    it('a 401 {"error":"Unauthorized"} from the rapidmedia route keeps the original -100', async () => {
+      fetchSpy
+        .mockResolvedValueOnce(rejected())
+        .mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, 401));
+
+      await expect(makeClient({}, provider()).isRecordingMp4('camera01')).rejects.toMatchObject({
+        providerCode: -100,
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
 
     it('covers all four recording operations and no other operation', async () => {
@@ -646,6 +760,96 @@ describe('AqvisionApiClient', () => {
       expect(logged).not.toContain(TOKEN);
       expect(logged).not.toContain('Bearer');
       expect(logged).not.toContain('secret=');
+    });
+
+    describe('JWT-only setup: AQVISION_API_SECRET is empty, the agency token is configured', () => {
+      const noSecret = { AQVISION_API_SECRET: '' };
+
+      it.each([
+        ['startRecord', (c: AqvisionApiClient) => c.startRecordMp4('camera01'), { result: true }],
+        ['stopRecord', (c: AqvisionApiClient) => c.stopRecordMp4('camera01'), { result: true }],
+        ['isRecording', (c: AqvisionApiClient) => c.isRecordingMp4('camera01'), { status: true }],
+        [
+          'getMP4RecordFile',
+          (c: AqvisionApiClient) => c.getMp4RecordFile({ stream: 'camera01' }),
+          { paths: [], rootPath: '' },
+        ],
+      ])('%s goes straight to Bearer on rapidmedia: one request, no secret attempt', async (name, run, data) => {
+        fetchSpy.mockResolvedValueOnce(accepted(data));
+        const tokens = provider();
+
+        await run(makeClient(noSecret, tokens));
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(urlAt(0).startsWith(`${RAPID}/${name}`)).toBe(true);
+        expect(urlAt(0)).not.toContain('secret');
+        expect(headersAt(0)).toMatchObject({ Authorization: `Bearer ${TOKEN}` });
+        expect(tokens.getBearerToken).toHaveBeenCalledTimes(1);
+      });
+
+      it('stays fail-closed for every other operation: config error, no request, no token fetched', async () => {
+        const tokens = provider();
+
+        const error = await makeClient(noSecret, tokens)
+          .isMediaOnline('camera01')
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(AqvisionApiException);
+        expect(error).toMatchObject({ providerCode: -100, source: 'config' });
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(tokens.getBearerToken).not.toHaveBeenCalled();
+      });
+
+      it('without a token provider a recording call is still a config error with no request', async () => {
+        await expect(makeClient(noSecret).startRecordMp4('camera01')).rejects.toMatchObject({
+          providerCode: -100,
+          source: 'config',
+        });
+        expect(fetchSpy).not.toHaveBeenCalled();
+      });
+
+      it('a rejected Bearer is surfaced as the HTTP error, with no secret retry', async () => {
+        fetchSpy.mockResolvedValueOnce(jsonResponse({ error: 'Unauthorized' }, 401));
+
+        await expect(makeClient(noSecret, provider()).stopRecordMp4('camera01')).rejects.toMatchObject({
+          providerCode: 401,
+          source: 'http',
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([
+        [
+          'agency not configured',
+          new AqvisionAgencyApiException('Tích hợp Agency API chưa được cấu hình.', null, false, true),
+          { providerCode: -100, source: 'config' },
+        ],
+        [
+          'token endpoint refused the credentials (401)',
+          new AqvisionAgencyApiException('Agency API không cấp được access token.', 401),
+          { providerCode: -100, source: undefined },
+        ],
+        [
+          'token endpoint down (503)',
+          new AqvisionAgencyApiException('Agency API không cấp được access token.', 503),
+          { providerCode: 503, source: 'http' },
+        ],
+        [
+          'token endpoint unreachable',
+          new AqvisionAgencyApiException('Không lấy được access token từ Agency API.'),
+          { providerCode: -1, source: 'transport' },
+        ],
+      ])('a failed token request (%s) becomes an AqvisionApiException and sends nothing', async (_label, failure, expected) => {
+        const broken: TokenProvider = { getBearerToken: jest.fn().mockRejectedValue(failure) };
+
+        const error = await makeClient(noSecret, broken)
+          .startRecordMp4('camera01')
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(AqvisionApiException);
+        expect(error).toMatchObject(expected);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      });
     });
   });
 });

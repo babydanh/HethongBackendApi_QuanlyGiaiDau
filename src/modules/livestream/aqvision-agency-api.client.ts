@@ -20,10 +20,15 @@ export interface AqvisionAgencyDeleteResult {
 }
 
 export class AqvisionAgencyApiException extends Error {
+  /**
+   * @param configuration `true` ⇒ lỗi do cấu hình phía mình (thiếu agency id/secret, base URL
+   * sai), chưa gửi gì tới AQP. Khác với `httpStatus === null` do mất kết nối.
+   */
   constructor(
     message: string,
     readonly httpStatus: number | null = null,
     readonly mayHaveApplied = false,
+    readonly configuration = false,
   ) {
     super(message);
     this.name = 'AqvisionAgencyApiException';
@@ -35,6 +40,39 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 const API_VERSION_PATH = '/api/v1';
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
+
+/**
+ * Origin của site AQP (`AQVISION_AGENCY_BASE_URL`, mặc định `https://media.aqvision.net`), dùng cho
+ * Agency API và cho đường `rapidmedia` của thao tác ghi hình. Chỉ nhận origin HTTPS không kèm thông
+ * tin đăng nhập: token đại lý KHÔNG bao giờ được gửi tới địa chỉ khác.
+ */
+export function resolveAqvisionAgencyBaseUrl(configService: ConfigService): string {
+  const configuredUrl = configService
+    .get<string>('AQVISION_AGENCY_BASE_URL', 'https://media.aqvision.net')
+    .trim();
+  let url: URL;
+  try {
+    url = new URL(configuredUrl);
+  } catch {
+    throw new AqvisionAgencyApiException('Cấu hình Agency API base URL không hợp lệ.', null, false, true);
+  }
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    throw new AqvisionAgencyApiException(
+      'Agency API base URL phải là origin HTTPS hợp lệ.',
+      null,
+      false,
+      true,
+    );
+  }
+  return url.origin;
+}
 
 @Injectable()
 export class AqvisionAgencyApiClient {
@@ -215,6 +253,9 @@ export class AqvisionAgencyApiClient {
     if (!agencyId || !apiSecret) {
       throw new AqvisionAgencyApiException(
         'Tích hợp Agency API chưa được cấu hình trên máy chủ.',
+        null,
+        false,
+        true,
       );
     }
 
@@ -318,26 +359,7 @@ export class AqvisionAgencyApiClient {
   }
 
   private resolveBaseUrl(): string {
-    const configuredUrl = this.configService
-      .get<string>('AQVISION_AGENCY_BASE_URL', 'https://media.aqvision.net')
-      .trim();
-    let url: URL;
-    try {
-      url = new URL(configuredUrl);
-    } catch {
-      throw new AqvisionAgencyApiException('Cấu hình Agency API base URL không hợp lệ.');
-    }
-    if (
-      url.protocol !== 'https:' ||
-      url.username ||
-      url.password ||
-      url.pathname !== '/' ||
-      url.search ||
-      url.hash
-    ) {
-      throw new AqvisionAgencyApiException('Agency API base URL phải là origin HTTPS hợp lệ.');
-    }
-    return url.origin;
+    return resolveAqvisionAgencyBaseUrl(this.configService);
   }
 
   private resolveTimeoutMs(): number {

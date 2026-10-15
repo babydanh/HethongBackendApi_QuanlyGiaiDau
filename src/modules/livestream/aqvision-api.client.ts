@@ -1,6 +1,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AqvisionAgencyApiClient } from './aqvision-agency-api.client';
+import {
+  AqvisionAgencyApiClient,
+  AqvisionAgencyApiException,
+  resolveAqvisionAgencyBaseUrl,
+} from './aqvision-agency-api.client';
 
 /**
  * Nơi phát sinh lỗi, vì cùng một con số có thể đến từ nhiều chỗ:
@@ -85,10 +89,21 @@ type JsonObject = Record<string, unknown>;
 type ParamValue = string | number | boolean | undefined;
 
 /**
- * Cách xác thực của một lời gọi native: `secret=` trên URL (theo `api.txt`) hoặc token đại lý
- * trong header `Authorization` (cùng token dùng để tạo stream key).
+ * Cách xác thực của một lời gọi native:
+ * - `secret`: `secret=` trên URL `api.media.aqvision.net/index/api/<lệnh>` (theo `api.txt`);
+ * - `bearer`: token đại lý (cùng token tạo stream key) trong header `Authorization`, gửi tới đường
+ *   AQP công bố cho đại lý `media.aqvision.net/api/rapidmedia/<lệnh>`. KHÔNG có `secret`; `POST`
+ *   gửi tham số trong body form (mẫu chính thức của AQP). Host native bỏ qua header `Authorization`
+ *   (đã thăm dò 15/10) nên Bearer không dùng được ở đó.
  */
 type AuthMode = 'secret' | 'bearer';
+
+/** Nơi gửi và cách gửi của MỘT lần gọi: đường `secret` và đường `bearer` khác cả URL lẫn cách gửi tham số. */
+interface AqvisionRequestTarget {
+  readonly url: string;
+  readonly headers?: Record<string, string>;
+  readonly body?: string;
+}
 
 /**
  * Chỉ các thao tác ghi hình mới được thử token đại lý khi `secret=` bị từ chối. Đây là quyết định
@@ -318,6 +333,11 @@ export class AqvisionApiClient {
     if (!this.agencyTokens || !allowsBearer) {
       return ['secret'];
     }
+    // Cấu hình chỉ-JWT (không có `AQVISION_API_SECRET`): không có lần thử `secret=` nào để chờ bị từ
+    // chối, nên đi thẳng bằng Bearer. Thao tác khác vẫn fail-closed ở `resolveSecret`.
+    if (this.readSecret().length === 0) {
+      return ['bearer'];
+    }
     return this.preferBearer ? ['bearer', 'secret'] : ['secret', 'bearer'];
   }
 
@@ -376,15 +396,9 @@ export class AqvisionApiClient {
     options: AqvisionOperationOptions,
     auth: AuthMode = 'secret',
   ): Promise<Response> {
-    // Fail-closed: lấy credential TRƯỚC khi dựng URL. `secret=` thiếu ⇒ ném lỗi cấu hình;
-    // Bearer: token đại lý do client Agency cấp (có cache, chống gọi trùng).
-    const secret = auth === 'secret' ? this.resolveSecret(operation) : null;
-    const bearerToken =
-      auth === 'bearer' && this.agencyTokens
-        ? await this.agencyTokens.getBearerToken()
-        : null;
-    const baseUrl = this.resolveBaseUrl();
     const method = options.method ?? OPERATION_METHODS[operation] ?? 'GET';
+    // Fail-closed: credential và URL được dựng TRƯỚC khi gửi bất kỳ request nào.
+    const target = await this.buildTarget(operation, params, options, auth, method);
     const attemptLimit = Math.max(
       1,
       options.retryAttempts ?? (method === 'GET' ? 3 : 1),
@@ -393,8 +407,6 @@ export class AqvisionApiClient {
       1_000,
       options.timeoutMs ?? this.resolveTimeoutMs(),
     );
-    const url = `${baseUrl}/index/api/${operation}?${this.buildQuery(params, secret, options.includeScopeParams !== false)}`;
-    const headers = bearerToken ? { Authorization: `Bearer ${bearerToken}` } : undefined;
 
     let lastError: unknown = null;
 
@@ -402,7 +414,12 @@ export class AqvisionApiClient {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const response = await fetch(url, { method, headers, signal: controller.signal });
+        const response = await fetch(target.url, {
+          method,
+          headers: target.headers,
+          ...(target.body === undefined ? {} : { body: target.body }),
+          signal: controller.signal,
+        });
         if (response.status >= 500 && attempt < attemptLimit) {
           lastError = new AqvisionApiException(
             response.status,
@@ -439,15 +456,68 @@ export class AqvisionApiClient {
         );
   }
 
+  private async buildTarget(
+    operation: string,
+    params: Record<string, ParamValue>,
+    options: AqvisionOperationOptions,
+    auth: AuthMode,
+    method: AqvisionMethod,
+  ): Promise<AqvisionRequestTarget> {
+    const includeScopeParams = options.includeScopeParams !== false;
+
+    if (auth === 'secret') {
+      // Thiếu `secret=` ⇒ ném lỗi cấu hình trước khi dựng URL.
+      const secret = this.resolveSecret(operation);
+      return {
+        url: `${this.resolveBaseUrl()}/index/api/${operation}?${this.buildQuery(params, secret, includeScopeParams)}`,
+      };
+    }
+
+    if (!this.agencyTokens) {
+      throw new AqvisionApiException(
+        -100,
+        'Tích hợp media AQP chưa được cấu hình.',
+        'config',
+      );
+    }
+    let origin: string;
+    let token: string;
+    try {
+      // Kiểm tra origin TRƯỚC khi xin token: cấu hình sai thì token không bao giờ được cấp cho lời gọi này.
+      origin = resolveAqvisionAgencyBaseUrl(this.configService);
+      token = await this.agencyTokens.getBearerToken();
+    } catch (error) {
+      const failure = this.toBearerSetupError(error);
+      // Chỉ tên thao tác và nhóm lỗi: KHÔNG log token, secret hay message gốc.
+      this.logger.warn(
+        `AQP ${operation}: chưa chuẩn bị được xác thực bằng token đại lý (${failure.source ?? 'auth'}).`,
+      );
+      throw failure;
+    }
+    const query = this.buildQuery(params, null, includeScopeParams);
+    const url = `${origin}/api/rapidmedia/${operation}`;
+    const headers = { Authorization: `Bearer ${token}` };
+
+    return method === 'POST'
+      ? {
+          url,
+          headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: query,
+        }
+      : { url: `${url}?${query}`, headers };
+  }
+
   private resolveBaseUrl(): string {
     const configured = this.configService.get<string>('AQVISION_API_BASE_URL');
     return (configured ?? 'https://api.media.aqvision.net').replace(/\/+$/, '');
   }
 
+  private readSecret(): string {
+    return (this.configService.get<string>('AQVISION_API_SECRET') ?? '').trim();
+  }
+
   private resolveSecret(operation: string): string {
-    const secret = (
-      this.configService.get<string>('AQVISION_API_SECRET') ?? ''
-    ).trim();
+    const secret = this.readSecret();
 
     if (secret.length === 0) {
       this.logger.warn(
@@ -461,6 +531,38 @@ export class AqvisionApiClient {
     }
 
     return secret;
+  }
+
+  /**
+   * Lỗi khi chuẩn bị đường Bearer (cấu hình đại lý, xin token) ⇒ `AqvisionApiException` có `source`,
+   * vì nơi gọi (`toRecordingCatalogError`, health check) chỉ nhận loại này. Message gốc không đi
+   * tiếp: nó có thể nêu chi tiết cấu hình.
+   */
+  private toBearerSetupError(error: unknown): AqvisionApiException {
+    if (error instanceof AqvisionAgencyApiException) {
+      if (error.configuration) {
+        return new AqvisionApiException(
+          -100,
+          'Tích hợp media AQP chưa được cấu hình.',
+          'config',
+        );
+      }
+      if (error.httpStatus === 401 || error.httpStatus === 403) {
+        return new AqvisionApiException(-100, 'AQP từ chối khoá đại lý (code -100).');
+      }
+      if (error.httpStatus !== null) {
+        return new AqvisionApiException(
+          error.httpStatus,
+          `Máy chủ media AQP trả lỗi HTTP ${error.httpStatus}.`,
+          'http',
+        );
+      }
+    }
+    return new AqvisionApiException(
+      -1,
+      'Máy chủ media AQP hiện không khả dụng.',
+      'transport',
+    );
   }
 
   /** `schema` bắt buộc theo vendor nhưng đã lỗi thời ⇒ để cấu hình được, không hardcode. */
