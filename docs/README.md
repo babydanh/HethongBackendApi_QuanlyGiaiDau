@@ -35,7 +35,7 @@ Trả lời câu hỏi "đọc bản đồ DB ở đâu" và "thêm bảng/cột
 - Bản đồ DB (`docs/schema/README.md`, `npm run db:docs`) nằm ở 3 commit chưa push trên `main` cục bộ; khi đã gộp thì thay dòng này bằng link. Trên `origin/main` không có file này, không có script `db:docs`.
 - Nguồn sự thật cho cấu trúc bảng là code: `src/database/schema/<nhóm>.schema.ts` (30 file nhóm, export qua `src/database/schema/index.ts`; 113 chỗ gọi `pgTable(`). `drizzle.config.ts` trỏ schema tới `src/database/schema/index.ts` và thư mục migration tới `src/database/migrations/`.
 - Đổi schema: sửa `src/database/schema/<nhóm>.schema.ts` → `pnpm exec drizzle-kit generate` (quy trình trong `INSTRUCTIONS.md` và `docs/rules.md`) → dev: `pnpm db:push` (= `npx drizzle-kit push`). Chưa chạy cả hai lệnh (cần PostgreSQL).
-- Production: `.github/workflows/deploy.yml` KHÔNG dùng `drizzle-kit push`. Job schema-smoke chạy `node run-prod-migration.js` hai lần (kiểm lặp lại được) trên PostgreSQL 16 có PostGIS. `pnpm db:migrate` trong `package.json` là cùng lệnh đó. Script này chạy mọi file .sql trong `src/database/migrations/` theo thứ tự tên (131 file; 42 mục trong `src/database/migrations/meta/_journal.json`, 89 file không có trong journal).
+- Production: `.github/workflows/deploy.yml` KHÔNG dùng `drizzle-kit push`. Job Deploy to VPS chạy `docker compose run --rm migrate node run-prod-migration.js --dry-run` rồi `docker compose run --rm migrate` trên VPS, rồi mới khởi động backend. Job seed chạy `seed-regions-v2.js` sau migration. Job schema-smoke chạy `node run-prod-migration.js` hai lần (kiểm lặp lại được) trên PostgreSQL 16 có PostGIS, trong CI. `pnpm db:migrate` trong `package.json` là cùng lệnh `node run-prod-migration.js`. Script này chạy mọi file .sql trong `src/database/migrations/` theo thứ tự tên (131 file; 42 mục trong `src/database/migrations/meta/_journal.json`, 89 file không có trong journal).
 - `pnpm db:setup` (`package.json`) = `drizzle-kit push` rồi chạy `src/database/seeds/seed-prod.ts`. Chưa chạy; nội dung file seed chưa được đọc trong lần kiểm này.
 - Migration cũ có chạy lại từ rỗng được không: **chưa xác minh** (cần PostgreSQL). Tài liệu không nói rõ. `run-prod-migration.js` tự bỏ qua lỗi "đã tồn tại" theo mã nguồn; chưa kiểm chứng bằng chạy.
 - Hai đường (drizzle-kit push và run-prod-migration.js) chưa được tài liệu nào đối chiếu với nhau. `docs/rules.md` và `docs/plan.md` chỉ nhắc `drizzle-kit generate` + `push`.
@@ -45,7 +45,7 @@ Trả lời câu hỏi "đọc bản đồ DB ở đâu" và "thêm bảng/cột
 
 | Lệnh | Kết quả | Ghi chú |
 |---|---|---|
-| `NODE_OPTIONS=--max-old-space-size=4096 pnpm exec tsc --noEmit` | 12 lỗi, tất cả trong 6 file `*.spec.ts`. Exit 2 khi chạy lần đầu (chưa có tsbuildinfo do tsc tạo trong thư mục `dist/`); exit 1 khi chạy lại (đã có buildinfo). Đã đo cả hai: xóa buildinfo rồi chạy → 2; chạy tiếp → 1 | Lỗi sẵn (baseline). Số lỗi không đổi qua các lần chạy. Chưa thử không có `NODE_OPTIONS` |
+| `NODE_OPTIONS=--max-old-space-size=4096 pnpm exec tsc --noEmit` | 12 lỗi, tất cả trong 6 file `*.spec.ts`. Exit 2 khi chạy lần đầu (chưa có tsbuildinfo do tsc tạo trong thư mục build); exit 1 khi chạy lại (đã có buildinfo). Đã đo cả hai: xóa buildinfo rồi chạy → 2; chạy tiếp → 1 | Lỗi sẵn (baseline). Số lỗi không đổi qua các lần chạy. Chưa thử không có `NODE_OPTIONS` |
 | `pnpm exec jest src/common/helpers/gender.helper.spec.ts` | exit 0; 30/30 test pass | 1 file |
 | `pnpm exec eslint src/common/helpers/gender.helper.ts` | exit 0 | 1 file; không có script lint; chưa chạy toàn repo |
 | `pnpm test` (jest toàn bộ, 179 file spec) | chưa chạy | |
@@ -74,10 +74,12 @@ Trả lời câu hỏi "đọc bản đồ DB ở đâu" và "thêm bảng/cột
 - Kiến thức lâu dài: sửa tài liệu chuẩn hoặc tham khảo ở bảng trên, cập nhật nhãn trong cùng commit.
 - Kiểm tài liệu lệch code: ripwire `doc_drift` với `path` = gốc repo.
 
-## Nhãn từng file Markdown theo dõi (37 file trên `origin/main`)
+## Nhãn từng file Markdown theo dõi (37 file trên `origin/main`, cộng 2 file của nhánh này)
 
 | File | Nhãn | Ghi chú |
 |---|---|---|
+| `AGENTS.md` | chuẩn | Bảng chỉ đường cho agent (≤40 dòng); omp tự nạp ở gốc repo |
+| `docs/README.md` | chuẩn | Bản đồ này: câu hỏi → file, nhãn, mục DB, lệnh đã chạy |
 | `INSTRUCTIONS.md` | chuẩn | Luật bắt buộc; thắng khi mâu thuẫn |
 | `README.md` | tham khảo | Mẫu NestJS, không mô tả dự án |
 | `.agents/rules/graphify.md` | tham khảo | Công cụ agent; thư mục graphify-out không có trong repo |
