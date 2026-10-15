@@ -11,7 +11,7 @@ Modal "Bản ghi MP4" ở tab Livestream của trang quản lý giải hiện ch
 - Modal "Bản ghi MP4" thêm trình phát: các đoạn của ngày đã chọn được xếp theo giờ bắt đầu, phát liền nhau, có một thanh thời gian chung cho cả ngày ghi; bấm một đoạn trong danh sách thì nhảy tới đầu đoạn đó.
 - Danh sách file sắp theo giờ bắt đầu (tăng dần) thay vì thứ tự AQP trả về.
 - Câu mô tả "màn hình này không phát hoặc tải video" được thay bằng mô tả trình phát; không thêm nút tải về.
-- **Backend (repo HethongBackendApi_QuanlyGiaiDau)**: thêm endpoint trả danh sách đoạn phát được của một ngày ghi, đã xếp theo giờ, mỗi đoạn kèm URL phát có hạn dùng ngắn; chỉ người có quyền điều khiển trận (BTC/trọng tài được phân công) gọi được. Endpoint danh sách tên file hiện có giữ nguyên.
+- **Backend (repo HethongBackendApi_QuanlyGiaiDau)**: thêm endpoint trả danh sách đoạn phát được của một ngày ghi, đã xếp theo giờ, mỗi đoạn kèm đường dẫn file ghi trực tiếp trên máy media AQP (người dùng chốt 15/10 sau kiểm chứng: trỏ thẳng link AQP, không chuyển tiếp qua VPS); chỉ người có quyền điều khiển trận (BTC/trọng tài được phân công) gọi được. Endpoint danh sách tên file hiện có giữ nguyên.
 
 ## Out of scope (KHÔNG làm)
 
@@ -33,5 +33,5 @@ Modal "Bản ghi MP4" ở tab Livestream của trang quản lý giải hiện ch
 ## Impact
 
 - Web: modal bản ghi trong `src/app/organizer/tournaments/[id]/manage/components/LivestreamTab.tsx` (tách thành component trình phát riêng), API client `src/features/tournaments/api.ts`, `messages/vi.json` + `messages/en.json`.
-- Backend: module `livestream` (controller + service + client AQP), thêm endpoint `GET /livestream/matches/:matchId/recordings/playlist?period=YYYY-MM-DD`; có thể thêm endpoint chuyển tiếp nội dung MP4 tuỳ kết quả kiểm chứng ở design.md.
-- Hạ tầng: nếu phải chuyển tiếp video qua backend thì băng thông VPS tăng theo số người xem lại (chỉ BTC/trọng tài).
+- Backend: module `livestream` (controller + service), thêm endpoint `GET /livestream/matches/:matchId/recordings/playlist?period=YYYY-MM-DD`; không thêm endpoint chuyển tiếp nội dung.
+- Hạ tầng: video đi thẳng từ máy media AQP tới trình duyệt, không tốn băng thông VPS. Đổi lại đường dẫn file không hết hạn và AQP không đòi đăng nhập (xem design.md, Risks).

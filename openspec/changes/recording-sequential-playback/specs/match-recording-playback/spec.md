@@ -34,21 +34,17 @@ Hệ thống SHALL phát các đoạn của ngày ghi đã chọn liền nhau th
 - **WHEN** một đoạn lỗi tải hoặc lỗi giải mã
 - **THEN** trình phát báo đoạn đó lỗi, bỏ qua và phát đoạn kế tiếp; nếu mọi đoạn đều lỗi thì hiện thông báo không phát được và giữ danh sách file
 
-### Requirement: Chỉ BTC và trọng tài được phân công được xem
+### Requirement: Chỉ BTC và trọng tài được phân công nhận danh sách phát
 
-Hệ thống SHALL chỉ cấp nội dung phát bản ghi của một trận cho người đã đăng nhập có quyền điều khiển trận đó; URL phát MUST hết hạn sau thời gian ngắn và MUST NOT dùng được cho trận khác.
+Hệ thống SHALL chỉ trả danh sách phát (gồm đường dẫn phát từng đoạn) của một trận cho người đã đăng nhập có quyền điều khiển trận đó. Đường dẫn phát là đường dẫn file ghi trực tiếp trên máy media AQP; hệ thống MUST NOT hiển thị danh sách phát ở trang công khai.
 
 #### Scenario: BTC mở bản ghi
 - **WHEN** BTC của giải mở modal bản ghi của một trận thuộc giải
-- **THEN** hệ thống trả danh sách đoạn kèm URL phát và trình phát hoạt động
+- **THEN** hệ thống trả danh sách đoạn kèm đường dẫn phát trên máy media và trình phát hoạt động
 
 #### Scenario: Người không có quyền
 - **WHEN** người dùng đã đăng nhập nhưng không phải BTC hay trọng tài được phân công gọi danh sách phát
-- **THEN** hệ thống từ chối (403) và không trả URL phát nào
-
-#### Scenario: URL phát hết hạn
-- **WHEN** một URL phát được dùng sau khi đã hết hạn
-- **THEN** hệ thống từ chối và trình phát xin lại danh sách phát mới thay vì dừng hẳn
+- **THEN** hệ thống từ chối (403) và không trả đường dẫn phát nào
 
 ### Requirement: Lỗi máy media hiển thị rõ ràng
 
