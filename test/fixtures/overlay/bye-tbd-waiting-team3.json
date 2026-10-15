@@ -1,0 +1,101 @@
+{
+  "h2h": {
+    "title": "ĐỐI ĐẦU",
+    "round": "BÁN KẾT",
+    "left": {
+      "name": "Chờ",
+      "note": "(chờ đồng đội)",
+      "avatars": [
+        {
+          "url": null,
+          "initial": "C"
+        }
+      ]
+    },
+    "right": {
+      "name": "FC Sân Cỏ",
+      "note": null,
+      "avatars": []
+    }
+  },
+  "bracket": {
+    "title": "GIẢI GIAO LƯU CÔNG TY VNDC",
+    "sport": "PICKLEBALL",
+    "columns": [
+      {
+        "title": "BÁN KẾT",
+        "cards": [
+          {
+            "id": "b",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "f",
+            "rows": [
+              {
+                "name": "Thị Anh - Quốc Anh",
+                "note": null,
+                "score": null,
+                "won": true
+              },
+              {
+                "name": "BYE",
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "o",
+            "final": false,
+            "live": true,
+            "litNext": true,
+            "nextId": "f",
+            "rows": [
+              {
+                "name": "Chờ",
+                "note": "(chờ đồng đội)",
+                "score": null,
+                "won": false
+              },
+              {
+                "name": "FC Sân Cỏ",
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "CHUNG KẾT",
+        "cards": [
+          {
+            "id": "f",
+            "final": true,
+            "live": false,
+            "litNext": false,
+            "nextId": null,
+            "rows": [
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              },
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "bracketReason": null
+}

@@ -19,7 +19,7 @@
 ```ts
 interface OverlayPayload {
   h2hVisible: boolean; bracketVisible: boolean;           // = h2hOverlayVisible / bracketOverlayVisible
-  h2h: { round: string; left: Side; right: Side } | null;      // round: "CHUNG KẾT"…; null khi chưa đủ 2 bên
+  h2h: { title: string; round: string | null; left: Side; right: Side } | null;   // title luôn "ĐỐI ĐẦU"; null khi chưa đủ 2 bên
   bracket: { title: string; sport: string; columns: Column[] } | null;
   bracketReason: string | null;                           // tiếng Việt, khi bracket = null
 }
@@ -32,14 +32,15 @@ interface Row { name: string | null; note: string | null; score: string | null; 
 ```
 
 4. **Cửa sổ 4 cột**: `end = min(T, k+3)`, `start = end - min(4,T) + 1` (T số vòng, k vòng của trận đang xem; trận ngoài bracket k = T). Nhãn theo khoảng cách tới chung kết d = T - vòng: 0 CHUNG KẾT, 1 BÁN KẾT, 2 TỨ KẾT, 3 VÒNG 16, 4 VÒNG 32.
-5. **Chỉ tiếng Việt** cho mọi nhãn cố định (CHUNG KẾT, BÁN KẾT, TỨ KẾT, VÒNG 16, ĐANG DIỄN RA, Chờ kết quả, BYE), kể cả khi app để tiếng Anh. Tiêu đề "HEAD TO HEAD" giữ như ảnh mẫu.
+5. **Chỉ tiếng Việt** cho mọi nhãn cố định (CHUNG KẾT, BÁN KẾT, TỨ KẾT, VÒNG 16, ĐANG DIỄN RA, Chờ kết quả, BYE), kể cả khi app để tiếng Anh. Tiêu đề H2H đổi từ "HEAD TO HEAD" sang tiếng Việt đơn giản **"ĐỐI ĐẦU"** (chủ dự án chọn); server trả sẵn trong `h2h.title` để hai app luôn giống nhau.
 6. **Làm mới ở client** (áp dụng cho Web và Flutter, ghi ở đây để hai change sau dùng chung): chỉ GET khi overlay đang bật; GET ngay khi bật, khi nối lại socket, khi nhận `score:update` (debounce ~1 s) và mỗi 30 s cho các trận khác; bỏ phản hồi cũ hơn yêu cầu mới nhất; lỗi thì giữ khung đang hiện, thử lại có backoff, không hiện khung rỗng.
-7. **Cache server** theo `:id` tối đa 3 s; không cache 404.
+7. **Cache server** phần nội dung theo `:id` tối đa 3 s; hai cờ hiện/ẩn luôn lấy mới (không thì BTC bật overlay mà người xem còn thấy cờ cũ tới 3 s); không cache 404.
 8. **Khung vẽ cố định co đều** (ngoại lệ có chủ đích của luật "không kích thước cứng", để hai nền tảng không reflow khác nhau): H2H 1320×225 trên khung 1568×523; Bracket 1568×882; co đều theo khung video (Web: `aspect-ratio` + `cqw`; Flutter: `LayoutBuilder` + `FittedBox`); chữ nhỏ nhất sau khi co ≥ 9 px thật; video quá nhỏ thì cả bracket thu nhỏ theo khung.
 9. **Nổi bật**: thẻ `live` viền sáng + nhãn "ĐANG DIỄN RA"; thẻ khác mờ ~55%; đường nối `litNext` sáng; reduce-motion: không phóng to, chỉ đổi viền/độ mờ. Vào 200–260 ms, ra 160 ms, so le 40 ms giữa các thẻ.
-10. **H2H**: thanh ngang — logo SPORTO | "HEAD TO HEAD" | nhãn vòng; hàng dưới: avatar tròn (bên 1 viền xanh, bên 2 viền đỏ) + khung tên hình bình hành, "VS" giữa. Đôi: mỗi bên hai avatar chồng nhau; chữ dài co tối đa 70% rồi cắt "…". Không seed/ELO/thành tích.
+10. **H2H**: thanh ngang — logo SPORTO | "ĐỐI ĐẦU" | nhãn vòng; hàng dưới: avatar tròn (bên 1 viền xanh, bên 2 viền đỏ) + khung tên hình bình hành, "VS" giữa. Đôi: mỗi bên hai avatar chồng nhau; chữ dài co tối đa 70% rồi cắt "…". Không seed/ELO/thành tích.
 11. **Token (ước lượng bằng mắt từ ảnh, lấy mẫu pixel chính xác khi làm Web/Flutter)**: panel `#0B1F44` ~88% + blur; nhấn `#1E90FF` (gần `AppTheme.primary #1D8EF8`); bên 2 `#E5484D`; khung tên trắng→`#D5E2F6`, chữ `#0B1B3A`; Inter 800/900. Logo: dùng `assets/sporto-wordmark-mono.svg` (`currentColor`).
 12. **Logo vector**: `sporto_v1_with_text.svg` hiện có là ảnh PNG 2060×615 nhúng base64 (534 KB, 0 đường vẽ). Đã dò lại thành đa giác vector từ chính PNG: `assets/sporto-logo.svg` (2 màu + "CHƠI CÙNG NHAU", 5,4 KB), `assets/sporto-wordmark.svg` (2 màu, chữ, 3,7 KB), `assets/sporto-wordmark-mono.svg` (`currentColor`, 3,7 KB). Độ khớp hình dạng với bản gốc IoU 0,989 (đo bằng ImageMagick); màu lấy từ điểm ảnh: navy `#022B6D`, cyan `#00B3FC`. Đã xem trực quan bản màu trên nền trắng và bản đơn sắc trên nền navy; **bạn cần xem kỹ chữ S và chữ O** trước khi dùng chính thức. Flutter hiện dùng PNG `assets/images/sporto_v1_with_text.png`; dùng SVG cần `flutter_svg` (chưa kiểm `pubspec.yaml`), nếu không có thì sinh PNG từ vector ở 3 cỡ.
+13. **Ô điểm** = số set mỗi bên đã thắng, hiện đúng con số (2–0, 2–1, 3–1 ở bo 5), không giới hạn tối đa. **Thành viên** một bên chỉ tính roster ACTIVE + vai trò MAIN, sắp theo `joinedAt`. **Điểm live**: trận ONGOING lấy `p1SetsWon/p2SetsWon/winnerId` từ Redis `match:live:<id>` như `GET /matches/:id`. **Giới hạn**: trận CLB/kèo nằm ngoài bảng `matches` nên endpoint trả 404.
 
 ## Risks / Trade-offs
 
@@ -49,9 +50,21 @@ interface Row { name: string | null; note: string | null; score: string | null; 
 - Phát hành app Flutter chậm: chỉ thêm trường, client bỏ qua trường lạ; không đổi nghĩa trường cũ (cần đổi nghĩa thì endpoint mới).
 - Đổi hành vi ở Web (ở change Web): bật overlay ảnh hưởng mọi người xem.
 
-## Chưa xác minh — phải đối chiếu mã ở task 1.1 trước khi viết mapper
+## Đã đối chiếu mã thật (task 1.1)
 
-- Giá trị thật của `matches.status`, `matches.bracketBranch`, `tournament_rosters.role` và `.status`; cách nhận biết trận tranh hạng ba; cấu trúc `scoreDetails` (dùng `p1SetsWon/p2SetsWon` trước); cách suy "nội dung là đôi" từ division; thứ tự thành viên trong cặp; phản hồi `findById` có trường nhạy cảm nào.
+- `MatchStatus`: SCHEDULED, ONGOING, COMPLETED, DISPUTED (`common/constants/enums.ts:22-27`). Điểm hiện khi trạng thái khác SCHEDULED và không phải BYE.
+- Kiểu stage: `SINGLE_ELIMINATION`, `DOUBLE_ELIMINATION`, `ROUND_ROBIN` (`bracket-generator.service.ts:120,356,837`); chỉ `SINGLE_ELIMINATION` có sơ đồ. Giải "vòng bảng + loại trực tiếp" chưa xác minh được stage loại trực tiếp mang kiểu gì (chỉ thấy stage `ROUND_ROBIN` được tạo ở `bracket-generator.service.ts:1314`), nên hiện trả `bracket: null` cho mọi kiểu ngoài `SINGLE_ELIMINATION`.
+- Nhánh: `MAIN`, `LOSERS`, `GRAND_FINALS`, `THIRD_PLACE` (`bracket-advancement.helper.spec.ts`, `tournament-results.service.ts:94`); sơ đồ chỉ lấy `upper(bracket_branch) = 'MAIN'`.
+- BYE: cột `matches.is_bye` (`matches.schema.ts:83`).
+- Nội dung đôi: `divisionMatchType ?? matchType` ∈ `DOUBLES`, `MIXED_DOUBLES` (`matches.repository.ts:1371-1373`).
+- Roster: `role` MAIN/RESERVE (`tournaments.schema.ts:330`), `status` INVITED/ACTIVE/REMOVED (`:332`), `joinedAt` (`:358`). Truy vấn bracket hiện có (`tournament-bracket.repository.ts:114-130`) **không lọc** roster nên không dùng lại; `findById` cũng không lọc.
+- Avatar: `profiles.avatar_url` (`users.schema.ts:102`). Mapper không nhận `userId`, email, số điện thoại, ELO.
+- Quyền xem: `matchesRepository.canAccessLiveMatch` (`matches.service.ts:1310`). Trận CLB nằm ở bảng khác (`club-match-sessions`, `club-standalone-matches`) nên `findContext` trả null → 404.
+
+## Chưa kiểm chứng
+
+- SQL của `OverlayRepository` mới được dựng bằng Drizzle và in ra bằng `toSQL()` để soi cấu trúc (join, điều kiện xoá mềm, `upper(...)`); **chưa chạy trên Postgres thật** vì Docker daemon không chạy.
+- Giữ nguyên `scoreDetails` chưa dùng; điểm lấy từ `p1SetsWon/p2SetsWon`.
 
 ## Migration / Rollback
 

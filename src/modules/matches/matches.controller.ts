@@ -31,12 +31,16 @@ import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { UserRole } from '../../common/constants/enums';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { OverlayService } from './overlay/overlay.service';
 
 @ApiTags('matches')
 @SkipThrottle()
 @Controller('matches')
 export class MatchesController {
-  constructor(private readonly matchesService: MatchesService) {}
+  constructor(
+    private readonly matchesService: MatchesService,
+    private readonly overlayService: OverlayService,
+  ) {}
 
   @Public()
   @SkipThrottle()
@@ -62,6 +66,23 @@ export class MatchesController {
     @CurrentUser() user?: JwtPayload,
   ) {
     return this.matchesService.findOne(id, user);
+  }
+
+  /**
+   * View-model H2H và bảng nhánh để Web/App vẽ phủ lên video. Quyền xem giống `GET :id`;
+   * hai cờ hiện/ẩn luôn mới, nội dung cache ngắn ở server.
+   */
+  @Public()
+  @SkipThrottle()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Header('Cache-Control', 'private, no-store')
+  @Get(':id/overlay')
+  @ApiOperation({ summary: 'Dữ liệu dựng sẵn cho overlay H2H và bảng nhánh trên video' })
+  async getOverlay(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user?: JwtPayload,
+  ) {
+    return this.overlayService.getOverlay(id, user);
   }
   @Header('Cache-Control', 'private, no-store')
   @Get(':id/score-access')

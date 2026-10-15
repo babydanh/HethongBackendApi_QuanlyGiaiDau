@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Endpoint trả view-model overlay cho một trận
-Hệ thống SHALL cung cấp `GET /matches/:id/overlay`, công khai, áp dụng đúng kiểm tra quyền xem trận của `GET /matches/:id`. Phản hồi MUST theo định dạng chung (`data`, `message`, `statusCode`, `meta`) và `data` gồm `h2hVisible`, `bracketVisible`, `h2h`, `bracket`, `bracketReason`.
+Hệ thống SHALL cung cấp `GET /matches/:id/overlay`, công khai, áp dụng đúng kiểm tra quyền xem trận của `GET /matches/:id`. Phản hồi MUST theo định dạng chung (`data`, `message`, `statusCode`, `meta`) và `data` gồm `h2hVisible`, `bracketVisible`, `h2h`, `bracket`, `bracketReason`. Endpoint chỉ phục vụ trận thuộc giải đấu.
 
 #### Scenario: Trận hợp lệ
 - **WHEN** khách gọi `GET /matches/:id/overlay` với trận công khai có đủ hai bên
@@ -15,8 +15,12 @@ Hệ thống SHALL cung cấp `GET /matches/:id/overlay`, công khai, áp dụng
 - **WHEN** trận mới có một bên hoặc chưa có bên nào
 - **THEN** `h2h` là null, `bracketVisible` và `h2hVisible` vẫn trả theo cờ đã lưu, và trả 200
 
+#### Scenario: Trận không thuộc giải đấu
+- **WHEN** `:id` là trận CLB hoặc trận kèo (nằm ngoài bảng `matches`)
+- **THEN** hệ thống trả 404; đây là giới hạn đã biết của change này
+
 ### Requirement: Tên hiển thị một bên
-Hệ thống SHALL dựng `name` của mỗi bên theo quy tắc: chuẩn hoá Unicode NFC, bỏ khoảng trắng thừa (kể cả NBSP); với 1 hoặc 2 thành viên thì lấy tên gọi (từ cuối của họ tên) của từng người và nối bằng " - ", thứ tự theo vai trò đã lưu; nếu hai tên gọi trong cùng một bên trùng nhau thì dùng 2 từ cuối cho cả hai; nếu không có thành viên hoặc có từ 3 thành viên thì dùng `teamName`. Khi nội dung là đôi nhưng mới có 1 thành viên, `note` MUST là "(chờ đồng đội)".
+Hệ thống SHALL dựng `name` của mỗi bên: chuẩn hoá Unicode NFC và bỏ khoảng trắng thừa (kể cả NBSP); với 1 hoặc 2 thành viên thì nối tên gọi (từ cuối của họ tên) bằng " - ", và nếu hai tên gọi trùng nhau thì dùng 2 từ cuối cho cả hai; với 0 hoặc từ 3 thành viên thì dùng `teamName`. Khi nội dung là đôi nhưng mới có 1 thành viên, `note` MUST là "(chờ đồng đội)".
 
 #### Scenario: Cặp đôi bình thường
 - **WHEN** một bên có hai thành viên "Nguyễn Văn Danh" và "Trần Minh Luân"
@@ -33,6 +37,28 @@ Hệ thống SHALL dựng `name` của mỗi bên theo quy tắc: chuẩn hoá U
 #### Scenario: Cặp mới chỉ có một người
 - **WHEN** nội dung là đôi và người thứ hai chưa nhận lời
 - **THEN** `name` là tên gọi của người đã có và `note` là "(chờ đồng đội)"
+
+### Requirement: Thành viên được tính cho một bên
+Khi dựng tên và avatar của một bên, hệ thống SHALL chỉ tính thành viên có roster ACTIVE và vai trò MAIN, sắp theo thời điểm vào đội.
+
+#### Scenario: Thành viên dự bị hoặc đã bị loại
+- **WHEN** một bên có hai thành viên ACTIVE MAIN và một thành viên RESERVE hoặc REMOVED
+- **THEN** `name` chỉ ghép hai thành viên ACTIVE MAIN
+
+### Requirement: Khối H2H
+`h2h` SHALL gồm `title` luôn là "ĐỐI ĐẦU", `round`, `left` (bên 1) và `right` (bên 2); `round` là nhãn vòng tiếng Việt của trận hoặc null. H2H chỉ giới thiệu hai bên của trận hiện tại và MUST NOT chứa thành tích đối đầu, seed hay ELO.
+
+#### Scenario: Chung kết loại trực tiếp
+- **WHEN** trận chung kết của giải loại trực tiếp có đủ hai bên
+- **THEN** `title` là "ĐỐI ĐẦU" và `round` là "CHUNG KẾT"
+
+#### Scenario: Tranh hạng ba và vòng bảng
+- **WHEN** trận thuộc nhánh THIRD_PLACE, hoặc thuộc vòng bảng
+- **THEN** `round` lần lượt là "TRANH HẠNG BA" và "VÒNG BẢNG"
+
+#### Scenario: Thể thức khác
+- **WHEN** trận thuộc giải loại kép
+- **THEN** `round` là null và `title` vẫn là "ĐỐI ĐẦU"
 
 ### Requirement: Avatar và dự phòng
 Hệ thống SHALL trả cho mỗi bên danh sách `avatars` (0 đến 2 phần tử), mỗi phần tử gồm `url` (có thể null) và `initial` (chữ cái đầu của tên gọi, in hoa). Hệ thống MUST NOT trả email, số điện thoại, `userId`, ELO hoặc seed trong bất kỳ trường nào của phản hồi.
@@ -102,8 +128,12 @@ Mỗi thẻ SHALL có đúng hai dòng. `name` là null khi chưa biết đội 
 - **WHEN** trận đang diễn ra, chưa có `winnerId`
 - **THEN** `score` là số set hiện tại và `won` false ở cả hai dòng
 
+#### Scenario: Trận nhiều set
+- **WHEN** trận bo 5 kết thúc với tỉ số set 3–1
+- **THEN** `score` của hai dòng là "3" và "1", không bị giới hạn ở 2
+
 ### Requirement: Cache theo trận
-Hệ thống SHALL cache view-model theo `:id` tối đa 3 giây, và MUST NOT cache phản hồi lỗi 404.
+Hệ thống SHALL cache phần nội dung (`h2h`, `bracket`, `bracketReason`) theo `:id` tối đa 3 giây; hai cờ `h2hVisible` và `bracketVisible` MUST luôn lấy mới; MUST NOT cache phản hồi lỗi 404.
 
 #### Scenario: Hai lần gọi liên tiếp
 - **WHEN** hai yêu cầu cùng trận đến trong cùng một cửa sổ cache
@@ -112,3 +142,7 @@ Hệ thống SHALL cache view-model theo `:id` tối đa 3 giây, và MUST NOT c
 #### Scenario: Điểm đổi
 - **WHEN** điểm trận đổi và đã qua cửa sổ cache
 - **THEN** lần gọi kế tiếp trả điểm mới
+
+#### Scenario: Cờ hiện/ẩn đổi trong cửa sổ cache
+- **WHEN** BTC bật overlay ngay sau lần gọi trước và yêu cầu mới đến trong 3 giây
+- **THEN** phản hồi mới có cờ đúng trạng thái mới dù nội dung lấy từ cache

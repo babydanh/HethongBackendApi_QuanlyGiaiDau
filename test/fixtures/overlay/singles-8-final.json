@@ -1,0 +1,195 @@
+{
+  "h2h": {
+    "title": "ĐỐI ĐẦU",
+    "round": "CHUNG KẾT",
+    "left": {
+      "name": "Thủ1",
+      "note": null,
+      "avatars": [
+        {
+          "url": null,
+          "initial": "T"
+        }
+      ]
+    },
+    "right": {
+      "name": "Thủ7",
+      "note": null,
+      "avatars": [
+        {
+          "url": null,
+          "initial": "T"
+        }
+      ]
+    }
+  },
+  "bracket": {
+    "title": "GIẢI GIAO LƯU CÔNG TY VNDC",
+    "sport": "PICKLEBALL",
+    "columns": [
+      {
+        "title": "TỨ KẾT",
+        "cards": [
+          {
+            "id": "q0",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "s0",
+            "rows": [
+              {
+                "name": "Thủ1",
+                "note": null,
+                "score": "3",
+                "won": true
+              },
+              {
+                "name": "Thủ2",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "q1",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "s0",
+            "rows": [
+              {
+                "name": "Thủ3",
+                "note": null,
+                "score": "3",
+                "won": true
+              },
+              {
+                "name": "Thủ4",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "q2",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "s1",
+            "rows": [
+              {
+                "name": "Thủ5",
+                "note": null,
+                "score": "3",
+                "won": true
+              },
+              {
+                "name": "Thủ6",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "q3",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "s1",
+            "rows": [
+              {
+                "name": "Thủ7",
+                "note": null,
+                "score": "3",
+                "won": true
+              },
+              {
+                "name": "Thủ8",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "BÁN KẾT",
+        "cards": [
+          {
+            "id": "s0",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "f",
+            "rows": [
+              {
+                "name": "Thủ1",
+                "note": null,
+                "score": "3",
+                "won": true
+              },
+              {
+                "name": "Thủ3",
+                "note": null,
+                "score": "2",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "s1",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "f",
+            "rows": [
+              {
+                "name": "Thủ5",
+                "note": null,
+                "score": "1",
+                "won": false
+              },
+              {
+                "name": "Thủ7",
+                "note": null,
+                "score": "3",
+                "won": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "CHUNG KẾT",
+        "cards": [
+          {
+            "id": "f",
+            "final": true,
+            "live": true,
+            "litNext": false,
+            "nextId": null,
+            "rows": [
+              {
+                "name": "Thủ1",
+                "note": null,
+                "score": "1",
+                "won": false
+              },
+              {
+                "name": "Thủ7",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "bracketReason": null
+}

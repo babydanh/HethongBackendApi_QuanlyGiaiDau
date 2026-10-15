@@ -10,6 +10,8 @@ import { RankingsModule } from '../rankings/rankings.module';
 import { RedisModule } from '../../providers/redis/redis.module';
 import { MatchContextAdapter } from './match-context.adapter';
 import { ClubMatchSessionsModule } from '../club-match-sessions/club-match-sessions.module';
+import { OverlayRepository } from './overlay/overlay.repository';
+import { OverlayService } from './overlay/overlay.service';
 import { LivestreamModule } from '../livestream/livestream.module';
 
 @Module({
@@ -27,6 +29,8 @@ import { LivestreamModule } from '../livestream/livestream.module';
     MatchesRepository,
     MatchContextAdapter,
     LiveScoreGateway,
+    OverlayRepository,
+    OverlayService,
   ],
   exports: [MatchesService, MatchContextAdapter, LiveScoreGateway],
 })

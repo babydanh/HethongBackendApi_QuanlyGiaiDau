@@ -1,0 +1,376 @@
+{
+  "h2h": {
+    "title": "ĐỐI ĐẦU",
+    "round": "TỨ KẾT",
+    "left": {
+      "name": "Vận5a - Vận5b",
+      "note": null,
+      "avatars": [
+        {
+          "url": null,
+          "initial": "V"
+        },
+        {
+          "url": null,
+          "initial": "V"
+        }
+      ]
+    },
+    "right": {
+      "name": "Vận7a - Vận7b",
+      "note": null,
+      "avatars": [
+        {
+          "url": null,
+          "initial": "V"
+        },
+        {
+          "url": null,
+          "initial": "V"
+        }
+      ]
+    }
+  },
+  "bracket": {
+    "title": "GIẢI GIAO LƯU CÔNG TY VNDC",
+    "sport": "PICKLEBALL",
+    "columns": [
+      {
+        "title": "VÒNG 16",
+        "cards": [
+          {
+            "id": "r1m0",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m0",
+            "rows": [
+              {
+                "name": "Vận1a - Vận1b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận2a - Vận2b",
+                "note": null,
+                "score": "0",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r1m1",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m0",
+            "rows": [
+              {
+                "name": "Vận3a - Vận3b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận4a - Vận4b",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r1m2",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m1",
+            "rows": [
+              {
+                "name": "Vận5a - Vận5b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận6a - Vận6b",
+                "note": null,
+                "score": "0",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r1m3",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m1",
+            "rows": [
+              {
+                "name": "Vận7a - Vận7b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận8a - Vận8b",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r1m4",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m2",
+            "rows": [
+              {
+                "name": "Vận9a - Vận9b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận10a - Vận10b",
+                "note": null,
+                "score": "0",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r1m5",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m2",
+            "rows": [
+              {
+                "name": "Vận11a - Vận11b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận12a - Vận12b",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r1m6",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m3",
+            "rows": [
+              {
+                "name": "Vận13a - Vận13b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận14a - Vận14b",
+                "note": null,
+                "score": "0",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r1m7",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r2m3",
+            "rows": [
+              {
+                "name": "Vận15a - Vận15b",
+                "note": null,
+                "score": "2",
+                "won": true
+              },
+              {
+                "name": "Vận16a - Vận16b",
+                "note": null,
+                "score": "1",
+                "won": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "TỨ KẾT",
+        "cards": [
+          {
+            "id": "r2m0",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r3m0",
+            "rows": [
+              {
+                "name": "Vận1a - Vận1b",
+                "note": null,
+                "score": null,
+                "won": false
+              },
+              {
+                "name": "Vận3a - Vận3b",
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r2m1",
+            "final": false,
+            "live": true,
+            "litNext": true,
+            "nextId": "r3m0",
+            "rows": [
+              {
+                "name": "Vận5a - Vận5b",
+                "note": null,
+                "score": "1",
+                "won": false
+              },
+              {
+                "name": "Vận7a - Vận7b",
+                "note": null,
+                "score": "0",
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r2m2",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r3m1",
+            "rows": [
+              {
+                "name": "Vận9a - Vận9b",
+                "note": null,
+                "score": null,
+                "won": false
+              },
+              {
+                "name": "Vận11a - Vận11b",
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r2m3",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r3m1",
+            "rows": [
+              {
+                "name": "Vận13a - Vận13b",
+                "note": null,
+                "score": null,
+                "won": false
+              },
+              {
+                "name": "Vận15a - Vận15b",
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "BÁN KẾT",
+        "cards": [
+          {
+            "id": "r3m0",
+            "final": false,
+            "live": false,
+            "litNext": true,
+            "nextId": "r4m0",
+            "rows": [
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              },
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          },
+          {
+            "id": "r3m1",
+            "final": false,
+            "live": false,
+            "litNext": false,
+            "nextId": "r4m0",
+            "rows": [
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              },
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "CHUNG KẾT",
+        "cards": [
+          {
+            "id": "r4m0",
+            "final": true,
+            "live": false,
+            "litNext": false,
+            "nextId": null,
+            "rows": [
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              },
+              {
+                "name": null,
+                "note": null,
+                "score": null,
+                "won": false
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "bracketReason": null
+}
