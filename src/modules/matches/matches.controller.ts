@@ -15,6 +15,7 @@ import { MatchesService } from './matches.service';
 import { QueryMatchDto } from './dto/query-match.dto';
 import { OperateMatchDto } from './dto/operate-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
+import { UpdateMatchCourtStateDto } from './dto/update-match-court-state.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { UpdateScoreboardVisibilityDto } from './dto/update-scoreboard-visibility.dto';
 import { UpdateOverlayVisibilityDto } from './dto/update-overlay-visibility.dto';
@@ -111,6 +112,23 @@ export class MatchesController {
     @CurrentUser() user: JwtPayload,
   ) {
     return await this.matchesService.updateScore(id, user, updateMatchScoreDto);
+  }
+
+  @Patch(':id/court-state')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE, UserRole.PLAYER)
+  @Verified()
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Cập nhật cài đặt sân pickleball (CourtState)' })
+  async updateCourtState(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateMatchCourtStateDto: UpdateMatchCourtStateDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.updateCourtState(
+      id,
+      user,
+      updateMatchCourtStateDto,
+    );
   }
 
   @Patch(':id/scoreboard-visibility')

@@ -25,6 +25,7 @@ import {
   SCHEDULE_PLAN_STRATEGY,
 } from './dto/create-schedule-plan.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
+import { UpdateMatchCourtStateDto } from './dto/update-match-court-state.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { UpdateScoreboardVisibilityDto } from './dto/update-scoreboard-visibility.dto';
 import { UpdateOverlayVisibilityDto } from './dto/update-overlay-visibility.dto';
@@ -51,6 +52,11 @@ import {
 } from '../tournaments/utils/tournament-product';
 import { validateSportRuleConfig } from '../tournaments/utils/sport-rules/validate-sport-rules-config';
 import { validateScoreDetails } from './utils/score-validation/validate-score-details';
+import {
+  mergeCourtStateIntoScoreDetails,
+  normalizeCourtState,
+  preserveStoredCourtState,
+} from './utils/court-state/court-state.utils';
 import { aggregateFootballTwoLegs } from './utils/football-two-leg-aggregate';
 import {
   isAdminUser,
@@ -1709,7 +1715,7 @@ export class MatchesService {
       }
     }
 
-    const nextScoreDetails =
+    const scoreDetailsWithOverride =
       overrideReason && scoreDetails
         ? {
             ...scoreDetails,
@@ -1720,6 +1726,13 @@ export class MatchesService {
             },
           }
         : scoreDetails;
+    // courtState thuộc endpoint PATCH court-state: payload điểm không ghi đè nó.
+    const nextScoreDetails = scoreDetailsWithOverride
+      ? preserveStoredCourtState(
+          scoreDetailsWithOverride,
+          existing.scoreDetails,
+        )
+      : scoreDetailsWithOverride;
 
     /*
       throw new BadRequestException('Trận đấu đã kết thúc');
@@ -1819,6 +1832,67 @@ export class MatchesService {
     } catch (err) {
       console.error('Failed to invalidate matches list cache:', err);
     }
+
+    return updatedMatch;
+  }
+
+  async updateCourtState(
+    id: string,
+    user: JwtPayload,
+    updateMatchCourtStateDto: UpdateMatchCourtStateDto,
+  ) {
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const { canScore } = await this.getTournamentMatchScoreAccess(
+      existing,
+      user,
+    );
+    if (!canScore) {
+      throw new ForbiddenException(
+        'Bạn không có quyền chỉnh sân cho trận đấu này',
+      );
+    }
+
+    if (existing.status === 'COMPLETED') {
+      throw new BadRequestException(
+        'Trận đấu đã kết thúc, không thể chỉnh sân nữa.',
+      );
+    }
+
+    // Cài đặt sân chỉ có ý nghĩa với luật pickleball (rally và side-out).
+    if (!this.resolveMatchConfig(existing).kind.startsWith('PICKLEBALL_')) {
+      throw new BadRequestException(
+        'Cài đặt sân chỉ áp dụng cho trận pickleball.',
+      );
+    }
+
+    const courtState = normalizeCourtState(
+      updateMatchCourtStateDto.courtState,
+      user.sub,
+      new Date(),
+    );
+    // Ghi merge: sets, điểm và revision giữ nguyên.
+    const updatedMatch = await this.matchesRepository.updateCourtState(
+      id,
+      mergeCourtStateIntoScoreDetails(existing.scoreDetails, courtState),
+    );
+    if (!updatedMatch) throw new NotFoundException('Match not found');
+
+    // Cache live (match:live:<id>) giữ bản scoreDetails cũ và GET đọc lại từ đó;
+    // xoá để lần đọc sau lấy courtState mới từ DB.
+    try {
+      await this.redisService.del(`match:live:${id}`);
+      await this.redisService.delByPattern('matches:list:*');
+    } catch (err) {
+      console.error('Failed to invalidate court state cache:', err);
+    }
+
+    this.liveScoreGateway.broadcastScoreUpdate(
+      id,
+      this.withBroadcastContext(updatedMatch, existing),
+      existing.tournamentId,
+    );
 
     return updatedMatch;
   }

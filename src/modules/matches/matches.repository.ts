@@ -1704,6 +1704,20 @@ export class MatchesRepository {
     return await this.findById(rows[0].id);
   }
 
+  /**
+   * Ghi courtState (scoreDetails đã merge) mà KHÔNG tăng revision và KHÔNG đổi set/điểm.
+   */
+  async updateCourtState(id: string, scoreDetails: Record<string, unknown>) {
+    const [updated] = await this.db
+      .update(schema.matches)
+      .set({ scoreDetails, updatedAt: new Date() })
+      .where(and(eq(schema.matches.id, id), isNull(schema.matches.deletedAt)))
+      .returning({ id: schema.matches.id });
+
+    if (!updated) return null;
+    return await this.findById(updated.id);
+  }
+
   async setScoreboardVisibility(id: string, visible: boolean) {
     const [updated] = await this.db
       .update(schema.matches)
