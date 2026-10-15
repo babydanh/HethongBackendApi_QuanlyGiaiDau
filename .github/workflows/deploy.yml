@@ -6,6 +6,13 @@ on:
       - main
   workflow_dispatch:
 
+# Mỗi lúc chỉ một lượt deploy. 15/10 cùng một commit bị push hai lần cách nhau 1 giây, hai lượt chạy song song
+# cùng `docker compose up` trên VPS và lượt sau lỗi "container name qlgiaidau-backend is already in use".
+# Không huỷ lượt đang chạy (huỷ giữa chừng có thể để backend đang dừng); lượt mới xếp hàng chờ.
+concurrency:
+  group: deploy-backend-vps
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
