@@ -13,11 +13,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { Verified } from '../../common/decorators/verified.decorator';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { UpdateMatchScoreDto } from '../matches/dto/update-match-score.dto';
 import { UpdateScoreboardVisibilityDto } from '../matches/dto/update-scoreboard-visibility.dto';
+import { UpdateOverlayVisibilityDto } from '../matches/dto/update-overlay-visibility.dto';
 import { ClubMatchSessionsService } from './club-match-sessions.service';
 import {
   ClubMatchRevisionDto,
@@ -147,6 +150,22 @@ export class ClubMatchSessionsController {
     @Body() dto: UpdateScoreboardVisibilityDto,
   ) {
     return this.service.setScoreboardVisibility(matchId, user, dto.visible);
+  }
+
+  @Patch('matches/:matchId/overlay-visibility')
+  @Verified()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  setOverlayVisibility(
+    @CurrentUser() user: RequestUser,
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Body() dto: UpdateOverlayVisibilityDto,
+  ) {
+    return this.service.setOverlayVisibility(
+      matchId,
+      user,
+      dto.kind,
+      dto.visible,
+    );
   }
 
   @Post('matches/:matchId/complete')

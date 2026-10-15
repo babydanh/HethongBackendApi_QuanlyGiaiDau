@@ -31,6 +31,8 @@ import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { AuditService } from '../audit/audit.service';
 import { mergeMatchConfig } from './utils/merge-match-config';
+import { overlayVisibilityPatch } from './overlay-visibility';
+import type { OverlayKind } from './overlay-visibility';
 import { reflowScheduleStart } from './utils/reflow-schedule';
 import {
   resolveLoserTargetSlot,
@@ -1717,6 +1719,18 @@ export class MatchesRepository {
     return await this.findById(id);
   }
 
+  async setOverlayVisibility(id: string, kind: OverlayKind, visible: boolean) {
+    const [updated] = await this.db
+      .update(schema.matches)
+      .set({ ...overlayVisibilityPatch(kind, visible), updatedAt: new Date() })
+      .where(and(eq(schema.matches.id, id), isNull(schema.matches.deletedAt)))
+      .returning();
+    if (!updated) {
+      throw new NotFoundException('Match not found');
+    }
+    return await this.findById(id);
+  }
+
   async updateStatus(id: string, data: UpdateMatchStatusDto) {
     const setClause: Record<string, unknown> = {
       status: data.status,
@@ -1728,6 +1742,8 @@ export class MatchesRepository {
       setClause.startedAt = new Date();
     } else if (data.status === 'COMPLETED') {
       setClause.completedAt = new Date();
+      setClause.h2hOverlayVisible = false;
+      setClause.bracketOverlayVisible = false;
     }
 
     const [updated] = await this.db
@@ -1936,6 +1952,9 @@ export class MatchesRepository {
       .update(schema.matches)
       .set({
         status: 'COMPLETED',
+        // Kết thúc trận thì tắt overlay, cùng một UPDATE với chuyển trạng thái.
+        h2hOverlayVisible: false,
+        bracketOverlayVisible: false,
         winnerId,
         p1SetsWon: details.p1SetsWon,
         p2SetsWon: details.p2SetsWon,
