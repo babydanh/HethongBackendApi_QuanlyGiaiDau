@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException, BadRequestException, HttpException, HttpStatus, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DEFAULT_AI_MODEL, NO_REASONING } from '../../config/ai.config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { lookup } from 'node:dns/promises';
@@ -413,7 +414,7 @@ export class AiService {
   ) {
     const apiKey = this.configService.get<string>('ai.apiKey');
     const baseURL = this.configService.get<string>('ai.baseUrl') || 'https://openrouter.ai/api/v1';
-    this.modelName = this.configService.get<string>('ai.modelName') || 'meta-llama/llama-3-8b-instruct:free';
+    this.modelName = this.configService.get<string>('ai.modelName') || DEFAULT_AI_MODEL;
 
     if (apiKey) {
       this.openai = new OpenAI({
@@ -1228,6 +1229,7 @@ ${divisionsStr}
         { role: 'user', content: `Yêu cầu: ${dto.command}\nNgày mặc định: ${dto.date}\nSelected courts: ${JSON.stringify(context.selectedCourtIds)}\nBracket: ${JSON.stringify(context.matches.map((m) => ({ id: m.id, divisionId: m.divisionId, roundNumber: m.roundNumber, matchOrder: m.matchOrder, bracketBranch: m.bracketBranch, status: m.status, scheduledAt: m.scheduledAt, courtId: m.courtId, hasParticipant1: m.hasParticipant1, hasParticipant2: m.hasParticipant2 })))}` },
       ],
       temperature: 0.1,
+      ...NO_REASONING,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -1422,6 +1424,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
           { role: 'user', content: userSections.join('\n\n') },
         ],
         temperature: 0.1,
+        ...NO_REASONING,
       });
     } catch (error: unknown) {
       const status = (error as { status?: number })?.status;
@@ -1496,6 +1499,7 @@ QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo định d
     const request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
       model: this.modelName,
       temperature: 0.1,
+      ...NO_REASONING,
       max_tokens: 4096,
       messages: [
         { role: 'system', content: systemPrompt },
