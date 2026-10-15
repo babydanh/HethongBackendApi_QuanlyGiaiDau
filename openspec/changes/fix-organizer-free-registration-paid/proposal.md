@@ -9,8 +9,8 @@ Gốc lỗi (đã đọc mã): `GET /tournaments/:id/manage/participants` tính 
 ## What Changes
 
 - `findParticipantsForOrganizer` dùng `isRegistrationFeePaid` (`isLiteRegistration: false`) thay cho `is_paid || COMPLETED`. Chỉ thêm trường hợp "đã đóng" (phí <= 0, BTC miễn), không bao giờ biến "đã đóng" thành "chưa đóng".
-- `findParticipants` đọc thêm `entryFeeAtRegistration`, `organizerWaivedFee` và **chỉ trả hai trường này khi `includePaymentDetails=true`** (danh sách BTC). Danh sách mặc định và công khai không đổi, không lộ trường mới.
-- Phản hồi `GET /tournaments/:id/manage/participants`: giá trị trường có sẵn `isPaid` đổi theo quy tắc trên; **thêm** hai trường optional `entryFeeAtRegistration` (chuỗi numeric, ví dụ `"0.00"`) và `organizerWaivedFee` (boolean).
+- `findParticipants` đọc thêm `entryFeeAtRegistration`, `organizerWaivedFee` và **chỉ trả hai trường này khi `includePaymentDetails=true`** (nội bộ giữa repository và service). Danh sách mặc định và công khai không đổi, không lộ trường mới. Service tách hai trường ra khỏi kết quả sau khi tính `isPaid`.
+- Phản hồi `GET /tournaments/:id/manage/participants`: **hình dạng không đổi**, chỉ giá trị trường có sẵn `isPaid` đổi theo quy tắc trên. Vì không đổi hợp đồng nên không phải chạy `node scripts/sync-api-clients.js` (script đó sinh lại `api-client.ts` / `api_service.dart` từ Swagger đang chạy và ghi vào Web/App).
 
 ## Out of scope
 
@@ -22,8 +22,8 @@ Gốc lỗi (đã đọc mã): `GET /tournaments/:id/manage/participants` tính 
 
 ## Impact
 
-- Repo khác: **Web** (`HethongFrontEndWeb_QLgiaidau`) đọc `isPaid` ở `RegistrationTab.tsx` (huy hiệu, ô tick, bộ lọc "Chưa thanh toán", đếm), `FootballRegistrationGroups.tsx`, `ops/components/OpsParticipants.tsx`: **không cần sửa Web**, giá trị hiển thị tự đúng sau khi Backend triển khai. Web đã khai báo `entryFeeAtRegistration?` ở `src/types/tournament.ts`; chưa khai báo `organizerWaivedFee` (không bắt buộc). **App Flutter**: chưa kiểm xem có dùng endpoint này không.
-- Endpoint: `GET /tournaments/:id/manage/participants` (đổi giá trị `isPaid`, thêm 2 trường optional). Không endpoint nào khác đổi.
+- Repo khác: **Web** (`HethongFrontEndWeb_QLgiaidau`) đọc `isPaid` ở `RegistrationTab.tsx` (huy hiệu, ô tick, bộ lọc "Chưa thanh toán", đếm), `FootballRegistrationGroups.tsx`, `ops/components/OpsParticipants.tsx`: **không cần sửa Web**, giá trị hiển thị tự đúng sau khi Backend triển khai. Hình dạng phản hồi không đổi nên không cần cập nhật kiểu ở Web. **App Flutter**: chưa kiểm xem có dùng endpoint này không.
+- Endpoint: `GET /tournaments/:id/manage/participants` (chỉ đổi giá trị `isPaid`; không thêm trường). Không endpoint nào khác đổi.
 - Tệp: `src/modules/tournaments/repositories/tournament-participant.repository.ts`, `src/modules/tournaments/services/tournament-discovery.service.ts`, test `tournament-discovery.service.spec.ts`, `tournament-participant.fee-fields.spec.ts` (mới).
 - Rủi ro: hồ sơ cũ có phí thật nhưng cột `entry_fee_at_registration` giữ mặc định `0.00` sẽ hiện "Đã đóng" ở danh sách BTC. Luồng thanh toán và màn người chơi đã coi các hồ sơ đó là miễn phí từ trước, nên danh sách BTC chỉ trở nên nhất quán với chúng; chưa đo số hồ sơ như vậy trên production.
 - Triển khai: push `main` Backend = deploy production; chờ chủ dự án.

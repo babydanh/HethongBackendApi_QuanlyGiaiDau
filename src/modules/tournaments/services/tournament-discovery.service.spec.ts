@@ -112,5 +112,22 @@ describe('TournamentDiscoveryService', () => {
 
       expect(participant.isPaid).toBe(expected);
     });
+
+    it('keeps the organizer payload shape: the fee inputs are not added to the response', async () => {
+      access.isManager = jest.fn().mockResolvedValue(true);
+      repositoryMock.findParticipants.mockResolvedValue([
+        row({ entryFeeAtRegistration: '0.00', organizerWaivedFee: true }),
+      ]);
+
+      const [participant] = await discovery.findParticipantsForOrganizer(
+        'tournament-1',
+        undefined,
+        'owner-1',
+      );
+
+      expect(participant).not.toHaveProperty('entryFeeAtRegistration');
+      expect(participant).not.toHaveProperty('organizerWaivedFee');
+      expect(participant.teamName).toBe('Doi Linh Hoat');
+    });
   });
 });

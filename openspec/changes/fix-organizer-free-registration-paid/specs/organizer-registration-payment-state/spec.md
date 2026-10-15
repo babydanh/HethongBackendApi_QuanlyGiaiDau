@@ -27,12 +27,12 @@
 - **WHEN** người gọi không phải quản lý giải
 - **THEN** phản hồi 403 và không có dữ liệu hồ sơ
 
-### Requirement: Trường phí chỉ có trong phản hồi BTC
-Phản hồi BTC SHALL mang thêm `entryFeeAtRegistration` và `organizerWaivedFee` cho mỗi hồ sơ. Danh sách mặc định của `findParticipants` và danh sách công khai MUST NOT chứa hai trường này.
+### Requirement: Hình dạng phản hồi BTC không đổi
+Phản hồi `GET /tournaments/:id/manage/participants` MUST NOT mang thêm trường nào so với trước thay đổi này: `entryFeeAtRegistration` và `organizerWaivedFee` chỉ là đầu vào của quy tắc và MUST NOT xuất hiện trong phản hồi BTC, trong danh sách mặc định của `findParticipants` hay trong danh sách công khai. Chỉ giá trị `isPaid` được phép đổi.
 
 #### Scenario: Danh sách BTC
 - **WHEN** BTC gọi `GET /tournaments/:id/manage/participants`
-- **THEN** mỗi hồ sơ có `entryFeeAtRegistration` và `organizerWaivedFee`
+- **THEN** mỗi hồ sơ có các trường như trước, không có `entryFeeAtRegistration`, không có `organizerWaivedFee`, và `isPaid` theo quy tắc ở trên
 
 #### Scenario: Danh sách công khai
 - **WHEN** khách gọi danh sách công khai của giải

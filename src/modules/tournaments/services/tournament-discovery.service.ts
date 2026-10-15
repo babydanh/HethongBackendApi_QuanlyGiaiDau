@@ -370,16 +370,20 @@ export class TournamentDiscoveryService {
     // is_paid sẽ báo "Chưa thanh toán" cho giải miễn phí hoặc hồ sơ BTC thêm vào.
     // isLiteRegistration=false: chỉ thêm trường hợp được coi là đã đóng, không
     // làm hồ sơ đang "đã đóng" thành "chưa đóng".
-    return participants.map((participant) => ({
-      ...participant,
-      isPaid: isRegistrationFeePaid({
-        persistedIsPaid: participant.isPaid,
-        feeSnapshot: participant.entryFeeAtRegistration,
-        hasCompletedPayment:
-          participant.payment?.status === PaymentStatus.COMPLETED,
-        isLiteRegistration: false,
-        organizerWaivedFee: participant.organizerWaivedFee === true,
+    // Hai trường phí chỉ là đầu vào của quy tắc; tách ra để hình dạng payload
+    // BTC không đổi (chỉ giá trị isPaid đổi), nên client Web/App không phải sinh lại.
+    return participants.map(
+      ({ entryFeeAtRegistration, organizerWaivedFee, ...participant }) => ({
+        ...participant,
+        isPaid: isRegistrationFeePaid({
+          persistedIsPaid: participant.isPaid,
+          feeSnapshot: entryFeeAtRegistration,
+          hasCompletedPayment:
+            participant.payment?.status === PaymentStatus.COMPLETED,
+          isLiteRegistration: false,
+          organizerWaivedFee: organizerWaivedFee === true,
+        }),
       }),
-    }));
+    );
   }
 }
