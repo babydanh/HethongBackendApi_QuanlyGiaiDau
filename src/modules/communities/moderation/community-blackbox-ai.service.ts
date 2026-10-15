@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
-import { DEFAULT_AI_MODEL, NO_REASONING } from '../../../config/ai.config';
 
 export interface BlackboxAiCheckResult {
   isSafe: boolean;
@@ -22,7 +21,7 @@ export class CommunityBlackboxAiService {
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('ai.apiKey');
     const baseURL = this.configService.get<string>('ai.baseUrl') || 'https://openrouter.ai/api/v1';
-    this.modelName = this.configService.get<string>('ai.modelName') || DEFAULT_AI_MODEL;
+    this.modelName = this.configService.get<string>('ai.modelName') || 'meta-llama/llama-3-8b-instruct:free';
     this.visionModelName = this.configService.get<string>('ai.visionModelName') || '';
 
     if (apiKey) {
@@ -63,7 +62,6 @@ export class CommunityBlackboxAiService {
       const promptPromise = this.openai.chat.completions.create({
         model: imageUrls.length > 0 ? this.visionModelName : this.modelName,
         temperature: 0,
-        ...NO_REASONING,
         max_tokens: 160,
         response_format: {
           type: 'json_schema',

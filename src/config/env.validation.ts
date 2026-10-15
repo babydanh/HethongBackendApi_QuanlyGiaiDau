@@ -1,5 +1,4 @@
 import * as Joi from 'joi';
-import { DEFAULT_AI_MODEL } from './ai.config';
 
 export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
@@ -58,7 +57,7 @@ export const envValidationSchema = Joi.object({
   OPENROUTER_BASE_URL: Joi.string()
     .uri()
     .default('https://openrouter.ai/api/v1'),
-  AI_MODEL: Joi.string().default(DEFAULT_AI_MODEL),
+  AI_MODEL: Joi.string().default('meta-llama/llama-3-8b-instruct:free'),
   AI_VISION_MODEL: Joi.string().allow('').optional().default(''),
   COMMUNITY_DUPLICATE_WINDOW_MINUTES: Joi.number()
     .integer()
