@@ -89,12 +89,14 @@ type JsonObject = Record<string, unknown>;
 type ParamValue = string | number | boolean | undefined;
 
 /**
- * Cách xác thực của một lời gọi native:
- * - `secret`: `secret=` trên URL `api.media.aqvision.net/index/api/<lệnh>` (theo `api.txt`);
- * - `bearer`: token đại lý (cùng token tạo stream key) trong header `Authorization`, gửi tới đường
- *   AQP công bố cho đại lý `media.aqvision.net/api/rapidmedia/<lệnh>`. KHÔNG có `secret`; `POST`
- *   gửi tham số trong body form (mẫu chính thức của AQP). Host native bỏ qua header `Authorization`
- *   (đã thăm dò 15/10) nên Bearer không dùng được ở đó.
+ * Cách xác thực của một lời gọi AQP:
+ * - `bearer` (mặc định khi có `AQVISION_AGENCY_ID`): AQP cấp MỘT khoá `SK_` cho đại lý; khoá đó đổi lấy JWT
+ *   (cùng token tạo stream key) và JWT dùng cho MỌI lệnh, gửi trong header `Authorization` tới
+ *   `media.aqvision.net/api/rapidmedia/<lệnh>`. KHÔNG có `secret`; `POST` gửi tham số trong body form
+ *   (mẫu chính thức của AQP).
+ * - `secret`: `secret=` trên URL `api.media.aqvision.net/index/api/<lệnh>` (theo `api.txt`), chỉ dùng khi
+ *   KHÔNG cấu hình đại lý. Khoá `SK_` của đại lý bị đường này từ chối (`code -100 Incorrect secret`), nên
+ *   khi đã có đại lý thì không gửi tới đây nữa.
  */
 type AuthMode = 'secret' | 'bearer';
 
@@ -106,36 +108,18 @@ interface AqvisionRequestTarget {
 }
 
 /**
- * Chỉ các thao tác ghi hình mới được thử token đại lý khi `secret=` bị từ chối. Đây là quyết định
- * của chủ dự án (14/10), thay cho nguyên tắc cũ "Agency token không dùng cho Native"; các thao
- * tác khác (kéo luồng, trạng thái, snapshot) KHÔNG đổi.
- */
-const BEARER_FALLBACK_OPERATIONS: Record<string, true> = {
-  startRecord: true,
-  stopRecord: true,
-  isRecording: true,
-  getMP4RecordFile: true,
-};
-
-/**
  * Client server-side cho API AQP.
  *
  * Bất biến (INV-001 trong `00-problem-map.md`):
- * - `secret` là bắt buộc; thiếu secret ⇒ **fail-closed**, ném lỗi TRƯỚC khi dựng URL,
+ * - Thiếu credential (không có token đại lý lẫn `secret`) ⇒ **fail-closed**, ném lỗi TRƯỚC khi dựng URL,
  *   không phát bất kỳ request nào ra ngoài.
- * - **Không bao giờ log URL/query string** (chứa `secret`). Chỉ log method + operation + mã lỗi.
+ * - **Không bao giờ log URL/query string, token hay secret.** Chỉ log method + operation + mã lỗi.
  * - Envelope `{code, msg}`: chỉ `code === 0` là thành công (`-300` thiếu tham số,
  *   `-100` sai secret, `-400` exception, `-200` SQL, `-1` business fail).
  */
 @Injectable()
 export class AqvisionApiClient {
   private readonly logger = new Logger(AqvisionApiClient.name);
-
-  /**
-   * Cách đã chạy được lần gần nhất cho thao tác ghi hình, giữ trong bộ nhớ tiến trình để khỏi gọi
-   * đôi mỗi lần khi `secret=` luôn bị từ chối. Mất khi khởi động lại, không ảnh hưởng đúng sai.
-   */
-  private preferBearer = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -268,6 +252,7 @@ export class AqvisionApiClient {
         expire_sec: params.expireSec,
       },
       { retryAttempts: 2, includeScopeParams: false },
+      this.authMode(),
     );
 
     if (!response.ok) {
@@ -288,74 +273,21 @@ export class AqvisionApiClient {
 
   /**
    * Gọi operation bất kỳ và bóc envelope; dùng cho các task T-005…T-009.
-   *
-   * Thao tác ghi hình: nếu AQP từ chối xác thực (`code -100`, hoặc HTTP 401/403), thử lại ĐÚNG
-   * MỘT lần bằng cách xác thực còn lại. Hai cách đều bị từ chối, hoặc không lấy được token, thì
-   * ném lại lỗi của lần đầu: hành vi y hệt khi không có token đại lý.
+   * Một lần gọi duy nhất theo `authMode()`: không thử chéo giữa hai cách xác thực.
    */
   async call<T = JsonObject>(
     operation: string,
     params: Record<string, ParamValue> = {},
     options: AqvisionOperationOptions = {},
   ): Promise<T> {
-    const modes = this.authModes(operation);
-    let outcome = await this.attempt(operation, params, options, modes[0]);
-
-    if (modes.length > 1 && this.isAuthRejected(outcome)) {
-      // Lỗi ở lần thử thứ hai (không lấy được token, không có secret, mạng) KHÔNG che lỗi gốc.
-      const retry = await this.attempt(operation, params, options, modes[1]).catch(
-        () => null,
-      );
-      if (retry && !this.isAuthRejected(retry)) {
-        const useBearer = modes[1] === 'bearer';
-        if (this.preferBearer !== useBearer) {
-          this.preferBearer = useBearer;
-          this.logger.warn(
-            `AQP ${operation}: ${modes[0]} bị từ chối, ${modes[1]} được chấp nhận; từ nay dùng ${modes[1]} trước.`,
-          );
-        }
-        outcome = retry;
-      } else {
-        this.logger.warn(
-          `AQP ${operation}: cả ${modes[0]} lẫn ${modes[1]} đều không được chấp nhận.`,
-        );
-      }
-    }
-
-    return this.unwrap<T>(operation, outcome);
+    const response = await this.request(operation, params, options, this.authMode());
+    return this.unwrap<T>(operation, { response, payload: await this.parseJson(response) });
   }
 
-  private authModes(operation: string): AuthMode[] {
-    const allowsBearer = Object.prototype.hasOwnProperty.call(
-      BEARER_FALLBACK_OPERATIONS,
-      operation,
-    );
-    if (!this.agencyTokens || !allowsBearer) {
-      return ['secret'];
-    }
-    // Cấu hình chỉ-JWT (không có `AQVISION_API_SECRET`): không có lần thử `secret=` nào để chờ bị từ
-    // chối, nên đi thẳng bằng Bearer. Thao tác khác vẫn fail-closed ở `resolveSecret`.
-    if (this.readSecret().length === 0) {
-      return ['bearer'];
-    }
-    return this.preferBearer ? ['bearer', 'secret'] : ['secret', 'bearer'];
-  }
-
-  private async attempt(
-    operation: string,
-    params: Record<string, ParamValue>,
-    options: AqvisionOperationOptions,
-    auth: AuthMode,
-  ): Promise<{ response: Response; payload: JsonObject }> {
-    const response = await this.request(operation, params, options, auth);
-    return { response, payload: await this.parseJson(response) };
-  }
-
-  /** AQP từ chối xác thực: `code -100` trong envelope, hoặc HTTP 401/403. */
-  private isAuthRejected(outcome: { response: Response; payload: JsonObject }): boolean {
-    const { response, payload } = outcome;
-    if (response.status === 401 || response.status === 403) return true;
-    return response.ok && this.readCode(payload) === -100;
+  /** Có đại lý (`AQVISION_AGENCY_ID` + client token) ⇒ JWT cho mọi lệnh; không có ⇒ `secret=`. */
+  private authMode(): AuthMode {
+    const agencyId = (this.configService.get<string>('AQVISION_AGENCY_ID') ?? '').trim();
+    return this.agencyTokens && agencyId.length > 0 ? 'bearer' : 'secret';
   }
 
   private unwrap<T>(
@@ -394,7 +326,7 @@ export class AqvisionApiClient {
     operation: string,
     params: Record<string, ParamValue>,
     options: AqvisionOperationOptions,
-    auth: AuthMode = 'secret',
+    auth: AuthMode,
   ): Promise<Response> {
     const method = options.method ?? OPERATION_METHODS[operation] ?? 'GET';
     // Fail-closed: credential và URL được dựng TRƯỚC khi gửi bất kỳ request nào.
@@ -512,12 +444,8 @@ export class AqvisionApiClient {
     return (configured ?? 'https://api.media.aqvision.net').replace(/\/+$/, '');
   }
 
-  private readSecret(): string {
-    return (this.configService.get<string>('AQVISION_API_SECRET') ?? '').trim();
-  }
-
   private resolveSecret(operation: string): string {
-    const secret = this.readSecret();
+    const secret = (this.configService.get<string>('AQVISION_API_SECRET') ?? '').trim();
 
     if (secret.length === 0) {
       this.logger.warn(
