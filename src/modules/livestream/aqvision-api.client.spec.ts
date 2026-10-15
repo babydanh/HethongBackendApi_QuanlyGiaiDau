@@ -32,23 +32,27 @@ function makeClient(
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
-  return {
+  const response = {
     ok: status >= 200 && status < 300,
     status,
     json: async () => payload,
     arrayBuffer: async () => new ArrayBuffer(0),
-  } as unknown as Response;
+    clone: () => response,
+  };
+  return response as unknown as Response;
 }
 
 function binaryResponse(bytes: Uint8Array, status = 200): Response {
-  return {
+  const response = {
     ok: status >= 200 && status < 300,
     status,
     json: async () => {
       throw new Error('not json');
     },
     arrayBuffer: async () => bytes.buffer.slice(0),
-  } as unknown as Response;
+    clone: () => response,
+  };
+  return response as unknown as Response;
 }
 
 describe('AqvisionApiClient', () => {
@@ -395,6 +399,12 @@ describe('AqvisionApiClient', () => {
       expect(result).toBe(false);
     });
 
+    it('isRecordingMp4: ZLMediaKit "can not find the stream" (code -500) => false, khong nem loi', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse({ code: -500, msg: 'can not find the stream' }));
+
+      await expect(makeClient().isRecordingMp4('camera01')).resolves.toBe(false);
+    });
+
     it('isRecordingMp4 status malformed (string/missing) => nem AqvisionApiException', async () => {
       fetchSpy.mockResolvedValue(jsonResponse({ code: 0, status: 'true' }));
       await expect(
@@ -537,7 +547,6 @@ describe('AqvisionApiClient', () => {
       callAt(index)[1] as { method?: string; headers?: Record<string, string>; body?: string } | undefined;
 
     it.each([
-      ['isMediaOnline', 'GET', (c: AqvisionApiClient) => c.isMediaOnline('camera01'), { online: true }],
       ['addStreamProxy', 'POST', (c: AqvisionApiClient) => c.addStreamProxy({ stream: 'camera01', url: 'rtsp://cam/1' }), { key: 'proxy-1' }],
       ['delStreamProxy', 'POST', (c: AqvisionApiClient) => c.delStreamProxy('proxy-1'), { flag: true }],
       ['startRecord', 'POST', (c: AqvisionApiClient) => c.startRecordMp4('camera01'), { result: true }],
@@ -602,11 +611,61 @@ describe('AqvisionApiClient', () => {
     });
 
     it('follows AQVISION_AGENCY_BASE_URL', async () => {
-      fetchSpy.mockResolvedValueOnce(accepted({ online: false }));
+      fetchSpy.mockResolvedValueOnce(accepted({ status: false }));
 
-      await makeClient({ ...AGENCY, AQVISION_AGENCY_BASE_URL: 'https://media.example.test' }, provider()).isMediaOnline('camera01');
+      await makeClient({ ...AGENCY, AQVISION_AGENCY_BASE_URL: 'https://media.example.test' }, provider()).isRecordingMp4('camera01');
 
-      expect(urlAt(0).startsWith('https://media.example.test/api/rapidmedia/isMediaOnline?')).toBe(true);
+      expect(urlAt(0).startsWith('https://media.example.test/api/rapidmedia/isRecording?')).toBe(true);
+    });
+
+    describe('isMediaOnline: the agency JWT may not call it, so it is read from isRecording', () => {
+      const streamAbsent = () => jsonResponse({ error: 'can not find the stream' }, 502);
+
+      it('asks rapidmedia/isRecording, never isMediaOnline; a stream the media server knows is online', async () => {
+        fetchSpy.mockResolvedValueOnce(accepted({ status: false }));
+
+        await expect(makeClient(AGENCY, provider()).isMediaOnline('camera01')).resolves.toEqual({ online: true });
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(urlAt(0).startsWith(`${RAPID}/isRecording?`)).toBe(true);
+      });
+
+      it('"can not find the stream" (HTTP 502) means offline: one request, no retry, no warning', async () => {
+        const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+        fetchSpy.mockResolvedValue(streamAbsent());
+
+        await expect(makeClient(AGENCY, provider()).isMediaOnline('camera01')).resolves.toEqual({ online: false });
+
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+
+      it('"Camera not found" (HTTP 404) means offline too', async () => {
+        fetchSpy.mockResolvedValueOnce(jsonResponse({ error: 'Camera not found' }, 404));
+
+        await expect(makeClient(AGENCY, provider()).isMediaOnline('camera01')).resolves.toEqual({ online: false });
+      });
+    });
+
+    describe('isRecordingMp4: a stream AQP does not have cannot be recording', () => {
+      it.each([
+        ['the media server has no such stream (HTTP 502)', jsonResponse({ error: 'can not find the stream' }, 502)],
+        ['the agency has no such camera (HTTP 404)', jsonResponse({ error: 'Camera not found' }, 404)],
+      ])('%s ⇒ false, not an error', async (_label, response) => {
+        fetchSpy.mockResolvedValue(response);
+
+        await expect(makeClient(AGENCY, provider()).isRecordingMp4('camera01')).resolves.toBe(false);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+      });
+
+      it('any other 502 is still a provider failure', async () => {
+        fetchSpy.mockResolvedValue(jsonResponse({ error: 'Bad gateway' }, 502));
+
+        await expect(makeClient(AGENCY, provider()).isRecordingMp4('camera01')).rejects.toMatchObject({
+          providerCode: 502,
+          source: 'http',
+        });
+      });
     });
 
     it('never sends the token to an unsafe base URL: error, no token fetched, no request', async () => {
@@ -632,7 +691,7 @@ describe('AqvisionApiClient', () => {
     });
 
     it('works with AQVISION_API_SECRET empty (the key only lives in the agency client)', async () => {
-      fetchSpy.mockResolvedValueOnce(accepted({ online: true }));
+      fetchSpy.mockResolvedValueOnce(accepted({ status: false }));
 
       await expect(
         makeClient({ ...AGENCY, AQVISION_API_SECRET: '' }, provider()).isMediaOnline('camera01'),

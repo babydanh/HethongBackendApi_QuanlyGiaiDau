@@ -126,8 +126,17 @@ export class AqvisionApiClient {
     @Optional() private readonly agencyTokens?: AqvisionAgencyApiClient,
   ) {}
 
-  /** `GET /index/api/isMediaOnline` — trạng thái online của stream. */
+  /**
+   * Trạng thái online của stream.
+   * - Đường `secret=` (quản trị viên): `GET /index/api/isMediaOnline`.
+   * - Đường JWT đại lý: AQP chặn `isMediaOnline` (HTTP 403 "Administrator browser session required"),
+   *   nên suy từ `isRecording`: máy media còn luồng (trả `status`, dù đang ghi hay không) ⇒ online;
+   *   luồng/camera không tồn tại ⇒ offline.
+   */
   async isMediaOnline(stream: string): Promise<IsMediaOnlineResult> {
+    if (this.authMode() === 'bearer') {
+      return { online: (await this.readRecordingState(stream)) !== 'absent' };
+    }
     const data = await this.call<{ online?: unknown }>(
       'isMediaOnline',
       { schema: this.resolveSchema(), stream },
@@ -211,13 +220,29 @@ export class AqvisionApiClient {
   /**
    * `GET /index/api/isRecording` — `stream` có đang ghi MP4 (`type=1`)?
    * Chỉ literal boolean `status: true` mới là true; `status` không phải
-   * boolean ⇒ nem lỗi thay vì ép kiểu.
+   * boolean ⇒ nem lỗi thay vì ép kiểu. Luồng/camera không tồn tại trên AQP ⇒ `false`
+   * (không thể đang ghi một luồng không có), không phải lỗi.
    */
   async isRecordingMp4(stream: string): Promise<boolean> {
-    const data = await this.call<{ status?: unknown }>('isRecording', {
-      type: 1,
-      stream,
-    });
+    const state = await this.readRecordingState(stream);
+    return state === true;
+  }
+
+  /**
+   * Hỏi `isRecording` (`type=1`). `'absent'` khi AQP trả lời rằng luồng không có mặt:
+   * - máy media không có luồng (ZLMediaKit "can not find the stream": `code -500` trên đường `secret=`,
+   *   HTTP 502 trên đường JWT) ⇒ camera đang không phát;
+   * - đường JWT trả HTTP 404 "Camera not found" ⇒ tên luồng không thuộc camera nào của đại lý.
+   * Đây là câu trả lời bình thường (trận đã xong, camera tắt) nên chỉ log debug. Lỗi khác vẫn ném như cũ.
+   */
+  private async readRecordingState(stream: string): Promise<boolean | 'absent'> {
+    const response = await this.request('isRecording', { type: 1, stream }, {}, this.authMode());
+    const payload = await this.parseJson(response);
+    if (this.isStreamAbsent(response, payload)) {
+      this.logger.debug(`AQP isRecording: luồng không có trên máy media (HTTP ${response.status}).`);
+      return 'absent';
+    }
+    const data = this.unwrap<{ status?: unknown }>('isRecording', { response, payload });
     if (data.status !== true && data.status !== false) {
       throw new AqvisionApiException(
         -1,
@@ -225,6 +250,14 @@ export class AqvisionApiClient {
       );
     }
     return data.status;
+  }
+
+  private isStreamAbsent(response: Response, payload: JsonObject): boolean {
+    const reason = this.readHttpReason(payload).toLowerCase();
+    if (reason.includes('can not find the stream')) {
+      return response.status === 502 || (response.ok && this.readCode(payload) !== 0);
+    }
+    return response.status === 404 && reason.includes('camera not found');
   }
 
   /**
@@ -353,7 +386,12 @@ export class AqvisionApiClient {
           ...(target.body === undefined ? {} : { body: target.body }),
           signal: controller.signal,
         });
-        if (response.status >= 500 && attempt < attemptLimit) {
+        // 502 "can not find the stream" là câu trả lời (luồng không phát), không phải sự cố: không thử lại.
+        if (
+          response.status >= 500 &&
+          attempt < attemptLimit &&
+          !this.isStreamAbsent(response, await this.parseJson(response.clone()))
+        ) {
           lastError = new AqvisionApiException(
             response.status,
             `Máy chủ media AQP trả lỗi HTTP ${response.status}.`,
