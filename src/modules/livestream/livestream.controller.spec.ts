@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { RequestMethod } from '@nestjs/common';
+import { ForbiddenException, RequestMethod } from '@nestjs/common';
 import {
   HEADERS_METADATA,
   METHOD_METADATA,
@@ -128,6 +128,7 @@ describe('LivestreamController match stream control state route', () => {
   it.each([
     ['getMatchRecordingDays', 'matches/:matchId/recording-days'],
     ['getMatchRecordings', 'matches/:matchId/recordings'],
+    ['getMatchRecordingPlaylist', 'matches/:matchId/recordings/playlist'],
   ])('declares %s as an authenticated private GET route', (method, route) => {
     const handler = Object.getOwnPropertyDescriptor(
       LivestreamController.prototype,
@@ -156,5 +157,89 @@ describe('LivestreamController match stream control state route', () => {
       name: 'Cache-Control',
       value: 'private, no-store',
     });
+  });
+});
+
+describe('LivestreamController match recording playlist route', () => {
+  const user: JwtPayload = {
+    sub: 'btc-1',
+    email: 'btc@example.com',
+    role: 'USER',
+    roles: [],
+  };
+  const playlist = {
+    period: '2026-10-15',
+    expiresAt: '2026-10-15T16:22:00.000Z',
+    segments: [],
+  };
+  const livestreamService = { getMatchRecordingPlaylist: jest.fn() };
+  const controller = new LivestreamController(
+    livestreamService as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it('sets the sporto_rec cookie scoped to the recordings path and returns the playlist', async () => {
+    process.env.NODE_ENV = 'development';
+    livestreamService.getMatchRecordingPlaylist.mockResolvedValue({
+      playlist,
+      sessionCookie: 'session-value',
+    });
+    const res = { cookie: jest.fn() };
+
+    await expect(
+      controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user, res as never),
+    ).resolves.toEqual(playlist);
+    expect(livestreamService.getMatchRecordingPlaylist).toHaveBeenCalledWith(
+      'match-1',
+      '2026-10-15',
+      user,
+    );
+    expect(res.cookie).toHaveBeenCalledWith('sporto_rec', 'session-value', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: false,
+      path: '/api/v1/livestream/recordings',
+      maxAge: 600_000,
+    });
+  });
+
+  it('marks the cookie Secure in production', async () => {
+    process.env.NODE_ENV = 'production';
+    livestreamService.getMatchRecordingPlaylist.mockResolvedValue({
+      playlist,
+      sessionCookie: 'session-value',
+    });
+    const res = { cookie: jest.fn() };
+
+    await controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user, res as never);
+    expect(res.cookie).toHaveBeenCalledWith(
+      'sporto_rec',
+      'session-value',
+      expect.objectContaining({ secure: true }),
+    );
+  });
+
+  it('sets no cookie when the service refuses the caller', async () => {
+    livestreamService.getMatchRecordingPlaylist.mockRejectedValue(
+      new ForbiddenException(),
+    );
+    const res = { cookie: jest.fn() };
+
+    await expect(
+      controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user, res as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(res.cookie).not.toHaveBeenCalled();
   });
 });

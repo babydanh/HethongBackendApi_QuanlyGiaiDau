@@ -40,6 +40,11 @@ import { UpdateCameraDeviceDto } from './dto/update-camera-device.dto';
 import { SkipThrottle } from '@nestjs/throttler';
 import { SkipAppKey } from '../../common/decorators/skip-app-key.decorator';
 import type { Request, Response } from 'express';
+import {
+  RECORDING_PLAYBACK_TTL_MS,
+  RECORDING_SESSION_COOKIE_NAME,
+  RECORDING_SESSION_COOKIE_PATH,
+} from './recording-playback-token';
 
 @ApiTags('livestream')
 @SkipThrottle()
@@ -573,6 +578,43 @@ export class LivestreamController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.livestreamService.listMatchRecordings(matchId, period, user);
+  }
+
+  @Header('Cache-Control', 'private, no-store')
+  @Get('matches/:matchId/recordings/playlist')
+  @Verified()
+  @ApiBearerAuth()
+  @ApiQuery({
+    name: 'period',
+    required: true,
+    type: String,
+    example: '2026-10-15',
+  })
+  @ApiOperation({
+    summary: 'Danh sách đoạn phát nối tiếp của một ngày ghi MP4',
+    description:
+      'Các đoạn xếp theo giờ bắt đầu; mỗi đoạn có URL phát hết hạn sau 10 phút. Đặt cookie sporto_rec gắn người gọi; yêu cầu quyền điều khiển trận và không trả đường dẫn nội bộ.',
+  })
+  async getMatchRecordingPlaylist(
+    @Param('matchId', ParseUUIDPipe) matchId: string,
+    @Query('period') period: string,
+    @CurrentUser() user: JwtPayload,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { playlist, sessionCookie } =
+      await this.livestreamService.getMatchRecordingPlaylist(
+        matchId,
+        period,
+        user,
+      );
+    res.cookie(RECORDING_SESSION_COOKIE_NAME, sessionCookie, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: RECORDING_SESSION_COOKIE_PATH,
+      maxAge: RECORDING_PLAYBACK_TTL_MS,
+    });
+    return playlist;
   }
 
   @Public()

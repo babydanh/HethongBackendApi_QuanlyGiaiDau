@@ -15,6 +15,12 @@ import type {
   LivestreamHealthQueue,
 } from './livestream-health.queue';
 import { LivestreamService } from './livestream.service';
+import {
+  RECORDING_PLAYBACK_TTL_MS,
+  RECORDING_STREAM_PATH,
+  verifyRecordingSegmentToken,
+  verifyRecordingSessionCookie,
+} from './recording-playback-token';
 
 type RepositoryMock = {
   findMatchWithTournament: jest.Mock;
@@ -62,6 +68,8 @@ const match = {
   participant1Id: 'team-1',
   participant2Id: 'team-2',
 };
+
+const PLAYBACK_TEST_SECRET = 'test-access-secret';
 
 function makeService(
   stream: unknown = null,
@@ -118,11 +126,13 @@ function makeService(
     decrypt: jest.fn().mockReturnValue('rtsp://camera.local/live'),
   };
   const configService = {
-    get: jest.fn((key: string, fallback?: unknown) =>
-      key === 'AQVISION_PLAYBACK_BASE_URL'
-        ? 'https://media.aqvision.net'
-        : fallback,
-    ),
+    get: jest.fn((key: string, fallback?: unknown) => {
+      if (key === 'AQVISION_PLAYBACK_BASE_URL') {
+        return 'https://media.aqvision.net';
+      }
+      if (key === 'auth.jwtAccessSecret') return PLAYBACK_TEST_SECRET;
+      return fallback;
+    }),
   } as unknown as ConfigService;
   const LivestreamServiceConstructor = LivestreamService as unknown as {
     new (...args: unknown[]): LivestreamService;
@@ -908,4 +918,136 @@ describe('LivestreamService match recording catalog', () => {
       }
     },
   );
+});
+
+describe('LivestreamService match recording playlist', () => {
+  const NOW = Date.parse('2026-10-15T23:12:00+07:00');
+  const EXP = NOW + RECORDING_PLAYBACK_TTL_MS;
+  let nowSpy: jest.SpyInstance<number, []>;
+
+  beforeEach(() => {
+    nowSpy = jest.spyOn(Date, 'now').mockReturnValue(NOW);
+  });
+
+  afterEach(() => {
+    nowSpy.mockRestore();
+  });
+
+  it('forbids a user without control of the match before any provider read', async () => {
+    const { repository, recordingService, service } = makeService(
+      cameraStreamForRecording,
+    );
+    repository.findMatchWithTournament.mockResolvedValue({
+      ...match,
+      refereeId: 'another-referee',
+    });
+
+    await expect(
+      service.getMatchRecordingPlaylist('match-1', '2026-10-15', unrelatedUser),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(recordingService.listRecordFiles).not.toHaveBeenCalled();
+  });
+
+  it.each(['2026-2-15', '2026-02-30', '2026-10-15T00:00:00Z'])(
+    'rejects period %s with 400 before any provider read',
+    async (period) => {
+      const { recordingService, service } = makeService(
+        cameraStreamForRecording,
+      );
+
+      await expect(
+        service.getMatchRecordingPlaylist('match-1', period, owner),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(recordingService.listRecordFiles).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns segments in start-time order with signed URLs and a session cookie for the caller', async () => {
+    const { recordingService, service } = makeService(cameraStreamForRecording);
+    recordingService.listRecordFiles.mockResolvedValue([
+      { name: '2026-10-15-23-04-29-1.mp4', sizeBytes: 900 },
+      { name: 'intro.mp4' },
+      { name: '2026-10-15-23-11-02-0.mp4' },
+      { name: '2026-10-15-23-02-30-0.mp4' },
+    ]);
+
+    const result = await service.getMatchRecordingPlaylist(
+      'match-1',
+      '2026-10-15',
+      owner,
+    );
+
+    expect(recordingService.listRecordFiles).toHaveBeenCalledWith(
+      'camera-stream',
+      '2026-10-15',
+    );
+    expect(result.playlist.period).toBe('2026-10-15');
+    expect(result.playlist.expiresAt).toBe(new Date(EXP).toISOString());
+    expect(
+      result.playlist.segments.map(({ name, startAt }) => ({ name, startAt })),
+    ).toEqual([
+      { name: '2026-10-15-23-02-30-0.mp4', startAt: '2026-10-15T23:02:30+07:00' },
+      { name: '2026-10-15-23-04-29-1.mp4', startAt: '2026-10-15T23:04:29+07:00' },
+      { name: '2026-10-15-23-11-02-0.mp4', startAt: '2026-10-15T23:11:02+07:00' },
+      { name: 'intro.mp4', startAt: null },
+    ]);
+
+    for (const segment of result.playlist.segments) {
+      const url = new URL(segment.url, 'https://sporto.test');
+      expect(url.pathname).toBe(RECORDING_STREAM_PATH);
+      expect(
+        verifyRecordingSegmentToken(
+          PLAYBACK_TEST_SECRET,
+          url.searchParams.get('token'),
+          NOW,
+        ),
+      ).toEqual({
+        matchId: 'match-1',
+        stream: 'camera-stream',
+        period: '2026-10-15',
+        name: segment.name,
+        userId: owner.sub,
+        exp: EXP,
+      });
+    }
+
+    expect(
+      verifyRecordingSessionCookie(PLAYBACK_TEST_SECRET, result.sessionCookie, NOW, {
+        userId: owner.sub,
+      }),
+    ).toEqual({ userId: owner.sub, exp: EXP });
+    expect(
+      verifyRecordingSessionCookie(PLAYBACK_TEST_SECRET, result.sessionCookie, NOW, {
+        userId: unrelatedUser.sub,
+      }),
+    ).toBeNull();
+  });
+
+  it('returns an empty playlist when AQP lists no file for the day', async () => {
+    const { service } = makeService(cameraStreamForRecording);
+
+    await expect(
+      service.getMatchRecordingPlaylist('match-1', '2026-10-09', owner),
+    ).resolves.toMatchObject({ playlist: { segments: [] } });
+  });
+
+  it('maps a provider failure to a generic 503 without exposing the provider message', async () => {
+    const secretProviderMessage = 'provider-credential-or-rootPath';
+    const { recordingService, service } = makeService(cameraStreamForRecording);
+    recordingService.listRecordFiles.mockRejectedValue(
+      new AqvisionApiException(-1, secretProviderMessage),
+    );
+
+    const error = await service
+      .getMatchRecordingPlaylist('match-1', '2026-10-15', owner)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    const failure = error as ServiceUnavailableException;
+    expect(failure.getStatus()).toBe(503);
+    expect(failure.getResponse()).toMatchObject({ code: 'AQP_REJECTED' });
+    expect(JSON.stringify(failure.getResponse())).not.toContain(
+      secretProviderMessage,
+    );
+  });
 });

@@ -42,6 +42,16 @@ import {
   LivestreamProtocol,
   LivestreamRepository,
 } from './livestream.repository';
+import {
+  isValidRecordingPeriod,
+  orderRecordingSegments,
+} from './recording-playlist';
+import {
+  RECORDING_PLAYBACK_TTL_MS,
+  RECORDING_STREAM_PATH,
+  signRecordingSegmentToken,
+  signRecordingSessionCookie,
+} from './recording-playback-token';
 
 type MatchStreamControlStatus = 'IDLE' | 'LIVE' | 'OFFLINE' | 'ERROR' | null;
 type AqpStreamKeyCamera = {
@@ -67,6 +77,25 @@ export interface AqpCameraStreamKeyResponse {
   readonly rtmp: { readonly server: string; readonly streamKey: string } | null;
 }
 
+/** Một đoạn trong danh sách phát; `url` là đường dẫn tương đối có token, hết hạn sau 10 phút. */
+export interface MatchRecordingPlaylistSegment {
+  readonly name: string;
+  readonly startAt: string | null;
+  readonly url: string;
+}
+
+export interface MatchRecordingPlaylist {
+  readonly period: string;
+  readonly expiresAt: string;
+  readonly segments: readonly MatchRecordingPlaylistSegment[];
+}
+
+export interface MatchRecordingPlaylistResult {
+  readonly playlist: MatchRecordingPlaylist;
+  /** Giá trị cookie `sporto_rec`; controller đặt cookie với đúng thuộc tính. */
+  readonly sessionCookie: string;
+}
+
 // Only the statuses the toggle understands are published. `hasCamera` stays
 // true so the client knows a camera is assigned even if a row carries a status
 // this contract does not cover.
@@ -76,26 +105,6 @@ function isMatchStreamControlStatus(
   return (
     status === 'IDLE' || status === 'LIVE' || status === 'OFFLINE' || status === 'ERROR'
   );
-}
-
-const DAYS_IN_COMMON_YEAR = [
-  31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-] as const;
-
-function isValidRecordingPeriod(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!parts) return false;
-
-  const year = Number(parts[1]);
-  const month = Number(parts[2]);
-  const day = Number(parts[3]);
-  if (year < 1 || month < 1 || month > 12) return false;
-
-  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const daysInMonth = DAYS_IN_COMMON_YEAR[month - 1] ?? 0;
-  const maxDay = month === 2 && leapYear ? 29 : daysInMonth;
-  return day >= 1 && day <= maxDay;
 }
 
 function isSafeRecordingFileName(value: unknown): value is string {
@@ -1660,6 +1669,56 @@ export class LivestreamService {
     user: JwtPayload,
   ): Promise<{ name: string; sizeBytes?: number }[]> {
     const streamName = await this.getRecordingStreamName(matchId, user);
+    return this.readRecordingFiles(streamName, period);
+  }
+
+  /**
+   * Danh sách phát của một ngày ghi: các đoạn xếp theo giờ bắt đầu, mỗi đoạn có URL
+   * phát hết hạn sau 10 phút và gắn người gọi cùng trận. Cookie `sporto_rec` gắn cùng
+   * người gọi và cùng hạn; endpoint phát nội dung cần cả token lẫn cookie.
+   * Kiểm quyền, kiểm period và lỗi AQP dùng chung với danh mục `recordings`.
+   */
+  async getMatchRecordingPlaylist(
+    matchId: string,
+    period: string,
+    user: JwtPayload,
+  ): Promise<MatchRecordingPlaylistResult> {
+    const streamName = await this.getRecordingStreamName(matchId, user);
+    const files = await this.readRecordingFiles(streamName, period);
+    const secret = this.getRecordingPlaybackSecret();
+    const exp = Date.now() + RECORDING_PLAYBACK_TTL_MS;
+
+    const segments = orderRecordingSegments(files.map((file) => file.name)).map(
+      ({ name, startAt }) => {
+        const token = signRecordingSegmentToken(secret, {
+          matchId,
+          stream: streamName,
+          period,
+          name,
+          userId: user.sub,
+          exp,
+        });
+        return {
+          name,
+          startAt,
+          url: `${RECORDING_STREAM_PATH}?token=${encodeURIComponent(token)}`,
+        };
+      },
+    );
+
+    return {
+      playlist: { period, expiresAt: new Date(exp).toISOString(), segments },
+      sessionCookie: signRecordingSessionCookie(secret, {
+        userId: user.sub,
+        exp,
+      }),
+    };
+  }
+
+  private async readRecordingFiles(
+    streamName: string,
+    period: string,
+  ): Promise<{ name: string; sizeBytes?: number }[]> {
     if (!isValidRecordingPeriod(period)) {
       throw new BadRequestException('Ngày ghi MP4 không hợp lệ.');
     }
@@ -1682,6 +1741,12 @@ export class LivestreamService {
     } catch (error) {
       throw this.toRecordingCatalogError(error);
     }
+  }
+
+  private getRecordingPlaybackSecret(): string {
+    const secret = this.configService.get<string>('auth.jwtAccessSecret');
+    if (!secret) throw new Error('auth.jwtAccessSecret chưa được cấu hình.');
+    return secret;
   }
 
   /**
