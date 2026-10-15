@@ -10,7 +10,7 @@ Gốc lỗi (đã đọc mã): `GET /tournaments/:id/manage/participants` tính 
 
 - `findParticipantsForOrganizer` dùng `isRegistrationFeePaid` (`isLiteRegistration: false`) thay cho `is_paid || COMPLETED`. Chỉ thêm trường hợp "đã đóng" (phí <= 0, BTC miễn), không bao giờ biến "đã đóng" thành "chưa đóng".
 - `findParticipants` đọc thêm `entryFeeAtRegistration`, `organizerWaivedFee` và **chỉ trả hai trường này khi `includePaymentDetails=true`** (nội bộ giữa repository và service). Danh sách mặc định và công khai không đổi, không lộ trường mới. Service tách hai trường ra khỏi kết quả sau khi tính `isPaid`.
-- Phản hồi `GET /tournaments/:id/manage/participants`: **hình dạng không đổi**, chỉ giá trị trường có sẵn `isPaid` đổi theo quy tắc trên. Vì không đổi hợp đồng nên không phải chạy `node scripts/sync-api-clients.js` (script đó sinh lại `api-client.ts` / `api_service.dart` từ Swagger đang chạy và ghi vào Web/App).
+- Phản hồi `GET /tournaments/:id/manage/participants`: **hình dạng không đổi**, chỉ **giá trị** `isPaid` đổi (thay đổi hành vi, không phải thay đổi hợp đồng). `node scripts/sync-api-clients.js` **chưa chạy** và không cần: diff so với `origin/main` có 0 dòng ở controller, DTO và decorator `@ApiProperty/@ApiResponse/@ApiOperation`, nên Swagger và client sinh ra từ nó không đổi. Script cũng không chạy an toàn lúc này: cần backend sống ở `localhost:3101` (Docker/DB đang tắt) và ghi đè `api-client.ts` / `api_service.dart` ở checkout chính của Web/App đang có việc dở của session khác.
 
 ## Out of scope
 
