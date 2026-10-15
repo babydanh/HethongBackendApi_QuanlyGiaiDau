@@ -1,0 +1,36 @@
+schema: spec-driven
+
+context: |
+  Language: vi
+  All artifacts must be written in vi.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  Dự án: Backend API Quản Lý Giải Đấu (VNSport). NestJS 11 + TypeScript strict, Drizzle ORM 0.45 (drizzle-kit 0.31),
+  PostgreSQL (CI dùng postgis/postgis:16-3.4), Passport JWT, Socket.io, BullMQ, Jest 30, pnpm (node-linker=hoisted).
+  Quy tắc code bắt buộc: INSTRUCTIONS.md (cấm TypeORM, Prisma, any; soft delete; transaction cho tiền; SELECT ... FOR UPDATE cho ELO; prefix /api/v1/). Bản đồ tài liệu: docs/README.md.
+  Schema: src/database/schema/<nhóm>.schema.ts. Migration: src/database/migrations/*.sql. Push main kích hoạt deploy VPS (.github/workflows/deploy.yml): agent KHÔNG push.
+  Web Next.js và App Flutter gọi API này: đổi endpoint, DTO hoặc field phải nêu repo bị ảnh hưởng trong proposal.
+  Nhiều session agent làm song song: mỗi session một worktree (skill git-worktree-lanes), mỗi thay đổi một thư mục openspec/changes/<id>/, không ghi plan/spec ra ngoài thư mục đó.
+
+rules:
+  proposal:
+    - Ghi rõ phần KHÔNG làm (out of scope)
+    - Nêu repo khác bị ảnh hưởng (Web Next.js / App Flutter) nếu có, kèm endpoint (method và path, ví dụ POST /api/v1/...) hoặc field/DTO cụ thể
+  specs:
+    - Mỗi requirement phải có ít nhất 1 scenario cho đường thành công và 1 scenario cho lỗi hoặc dữ liệu rỗng (ghi mã HTTP khi là API)
+    - Response theo định dạng gồm data, message, statusCode, meta (INSTRUCTIONS.md); GET danh sách phải có phân trang (page, limit)
+  tasks:
+    - Mỗi task có tiêu chí xong kiểm chứng được (lệnh cụ thể kèm exit code, hoặc số lỗi typecheck so với baseline)
+    - Task cuối luôn là chạy NODE_OPTIONS=--max-old-space-size=4096 pnpm exec tsc --noEmit và so với baseline 12 lỗi sẵn trong *.spec.ts (không được tăng), cộng jest các file spec liên quan
+
+operations:
+  apply:
+    guidance:
+      - Chỉ đánh dấu [x] một task sau khi đã chạy kiểm chứng của task đó và thấy pass
+  archive:
+    guidance:
+      - Chỉ archive khi openspec validate --strict pass và mọi task đã [x]
+      - Trước khi archive: git fetch rồi rebase lên origin/main mới nhất, để so với spec chung mới nhất (session khác có thể vừa archive)
+      - Nếu archive/validate báo spec chung đã đổi (MODIFIED thiếu scenario/requirement đang có, hoặc ADDED trùng tên đã tồn tại) - tức session khác đã archive trước - thì KHÔNG hỏi lại: tự sửa delta để giữ NGUYÊN phần đang có trong spec chung và thêm phần của change này; ADDED trùng tên thì chuyển thành MODIFIED gộp cả hai. Chạy lại openspec validate --strict rồi archive bình thường
+      - Chỉ dừng hỏi người dùng khi hai bên MÂU THUẪN về nghĩa (cùng điều kiện WHEN nhưng THEN khác nhau, hoặc một bên xóa thứ bên kia cần)
+      - CẤM archive không sync, openspec archive --skip-specs hay --no-validate cho change có thư mục specs/ (chỉ dùng --skip-specs khi .openspec.yaml có skip_specs true); openspec-gate.py sẽ chặn khi gộp
