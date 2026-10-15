@@ -14,6 +14,8 @@ import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import * as schema from '../../database/schema';
 import { LiveScoreGateway } from '../matches/live-score.gateway';
 import { UpdateMatchScoreDto } from '../matches/dto/update-match-score.dto';
+import { overlayVisibilityPatch, toOverlayVisibilityState } from '../matches/overlay-visibility';
+import type { OverlayKind } from '../matches/overlay-visibility';
 import { EloOutboxProcessor } from '../rankings/elo-outbox.processor';
 import { RankingsService } from '../rankings/rankings.service';
 import {
@@ -1944,6 +1946,9 @@ export class ClubMatchSessionsService {
         .update(schema.clubStandaloneMatches)
         .set({
           status: 'COMPLETED',
+          // Kết thúc trận thì tắt overlay, cùng một UPDATE với chuyển trạng thái.
+          h2hOverlayVisible: false,
+          bracketOverlayVisible: false,
           p1SetsWon: dto.p1SetsWon,
           p2SetsWon: dto.p2SetsWon,
           ...(dto.scoreDetails !== undefined
@@ -2145,6 +2150,59 @@ export class ClubMatchSessionsService {
     return projected;
   }
 
+  /**
+   * Overlay H2H/BRACKET cho trận CLB (buổi giao lưu hoặc trận rời). Cùng thẩm
+   * quyền với nhập điểm (requireMatchEditor / requireStandaloneMatchEditor),
+   * không mở thêm đường quyền nào. Payload socket chỉ gồm trạng thái overlay,
+   * phát tới phòng `match:<id>`.
+   */
+  async setOverlayVisibility(
+    matchId: string,
+    actor: Actor,
+    kind: OverlayKind,
+    visible: boolean,
+  ) {
+    if (!(await this.repository.findMatch(matchId))) {
+      return this.setStandaloneOverlayVisibility(matchId, actor, kind, visible);
+    }
+    await this.requireMatchEditor(matchId, actor);
+    const db = this.repository.getDb();
+    const [updated] = await db
+      .update(schema.clubMatchSessionMatches)
+      .set({ ...overlayVisibilityPatch(kind, visible), updatedAt: new Date() })
+      .where(eq(schema.clubMatchSessionMatches.id, matchId))
+      .returning();
+    if (!updated) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
+    const state = {
+      h2hOverlayVisible: updated.h2hOverlayVisible,
+      bracketOverlayVisible: updated.bracketOverlayVisible,
+    };
+    this.liveScoreGateway.broadcastOverlayVisibility(matchId, state);
+    return toOverlayVisibilityState(matchId, state);
+  }
+
+  private async setStandaloneOverlayVisibility(
+    matchId: string,
+    actor: Actor,
+    kind: OverlayKind,
+    visible: boolean,
+  ) {
+    await this.requireStandaloneMatchEditor(matchId, actor);
+    const db = this.repository.getDb();
+    const [updated] = await db
+      .update(schema.clubStandaloneMatches)
+      .set({ ...overlayVisibilityPatch(kind, visible), updatedAt: new Date() })
+      .where(eq(schema.clubStandaloneMatches.id, matchId))
+      .returning();
+    if (!updated) apiError(NotFoundException, 'CLUB_MATCH_NOT_FOUND');
+    const state = {
+      h2hOverlayVisible: updated.h2hOverlayVisible,
+      bracketOverlayVisible: updated.bracketOverlayVisible,
+    };
+    this.liveScoreGateway.broadcastOverlayVisibility(matchId, state);
+    return toOverlayVisibilityState(matchId, state);
+  }
+
   async updateScore(matchId: string, actor: Actor, dto: UpdateMatchScoreDto) {
     if (!(await this.repository.findMatch(matchId))) {
       return this.updateStandaloneScore(matchId, actor, dto);
@@ -2225,6 +2283,9 @@ export class ClubMatchSessionsService {
         .update(schema.clubMatchSessionMatches)
         .set({
           status: 'COMPLETED',
+          // Kết thúc trận thì tắt overlay, cùng một UPDATE với chuyển trạng thái.
+          h2hOverlayVisible: false,
+          bracketOverlayVisible: false,
           p1SetsWon: dto.p1SetsWon,
           p2SetsWon: dto.p2SetsWon,
           ...(dto.scoreDetails !== undefined

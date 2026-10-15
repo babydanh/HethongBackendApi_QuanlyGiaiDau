@@ -27,6 +27,8 @@ import {
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { UpdateScoreboardVisibilityDto } from './dto/update-scoreboard-visibility.dto';
+import { UpdateOverlayVisibilityDto } from './dto/update-overlay-visibility.dto';
+import { toOverlayVisibilityState } from './overlay-visibility';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { LiveScoreGateway } from './live-score.gateway';
 import type { MatchBroadcastData } from './interfaces/match-broadcast.interface';
@@ -1392,6 +1394,63 @@ export class MatchesService {
     );
     this.liveScoreGateway.broadcastScoreboardVisibility(id, dto.visible);
     return updated;
+  }
+
+  /**
+   * Bật/tắt overlay H2H hoặc BRACKET trên sóng. Cùng thẩm quyền với bảng điểm:
+   * canScore của trận (giải đấu) hoặc quyền nhập điểm (trận CLB, uỷ quyền sang
+   * ClubMatchSessionsService).
+   */
+  async setOverlayVisibility(
+    id: string,
+    user: JwtPayload,
+    dto: UpdateOverlayVisibilityDto,
+  ) {
+    const context = await this.matchContextAdapter?.resolve(id);
+    if (
+      context?.type === 'CLUB_SOCIAL_MATCH_SESSION' ||
+      context?.type === 'CLUB_STANDALONE_MATCH'
+    ) {
+      if (!this.clubMatchSessionsService) {
+        throw new NotFoundException('Match not found');
+      }
+      const actor = {
+        id: user.sub,
+        roles: [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
+      };
+      return this.clubMatchSessionsService.setOverlayVisibility(
+        id,
+        actor,
+        dto.kind,
+        dto.visible,
+      );
+    }
+
+    const existing = await this.matchesRepository.findById(id);
+    if (!existing) throw new NotFoundException('Match not found');
+
+    const { canScore } = await this.getTournamentMatchScoreAccess(
+      existing,
+      user,
+    );
+    if (!canScore) {
+      throw new ForbiddenException(
+        'Bạn không có quyền ẩn/hiện overlay của trận đấu này',
+      );
+    }
+
+    const updated = await this.matchesRepository.setOverlayVisibility(
+      id,
+      dto.kind,
+      dto.visible,
+    );
+    if (!updated) throw new NotFoundException('Match not found');
+    const state = {
+      h2hOverlayVisible: updated.h2hOverlayVisible,
+      bracketOverlayVisible: updated.bracketOverlayVisible,
+    };
+    this.liveScoreGateway.broadcastOverlayVisibility(id, state);
+    return toOverlayVisibilityState(id, state);
   }
 
   async updateScore(

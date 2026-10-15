@@ -2321,6 +2321,9 @@ export class TournamentRegistrationRepository {
           .update(schema.matches)
           .set({
             status: 'COMPLETED',
+            // Kết thúc trận (walkover) thì tắt overlay, cùng một UPDATE.
+            h2hOverlayVisible: false,
+            bracketOverlayVisible: false,
             winnerId,
             completedAt: new Date(),
             updatedAt: new Date(),

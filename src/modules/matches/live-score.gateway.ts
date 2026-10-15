@@ -15,6 +15,8 @@ import { MatchContextAdapter } from './match-context.adapter';
 import { extractWsToken } from '../../common/guards/ws-jwt.guard';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { MatchBroadcastData } from './interfaces/match-broadcast.interface';
+import { toOverlayVisibilityState } from './overlay-visibility';
+import type { OverlayVisibilityState } from './overlay-visibility';
 import { corsOptions } from '../../config/cors.config';
 import { monitorEventLoopDelay } from 'perf_hooks';
 
@@ -432,6 +434,18 @@ export class LiveScoreGateway
     );
   }
 
+  /**
+   * Overlay H2H/BRACKET là tín hiệu điều khiển sóng, KHÔNG phải tỷ số: chỉ phát
+   * cho phòng `match:{id}` và luôn gửi đủ cả hai cờ (trạng thái đầy đủ).
+   */
+  broadcastOverlayVisibility(matchId: string, state: OverlayVisibilityState) {
+    if (!this.server) return;
+    this.server.to(`match:${matchId}`).emit(
+      'overlay:visibility',
+      JSON.stringify(toOverlayVisibilityState(matchId, state)),
+    );
+  }
+
   broadcastMatchStatus(matchId: string, matchData: MatchBroadcastData, tournamentId?: string | null) {
     if (!this.server) return;
     const rawPayload = JSON.stringify(this.normalizeMatchBroadcastData(matchData, tournamentId));
@@ -445,7 +459,7 @@ export class LiveScoreGateway
     sessionId: string,
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility' | 'overlay:visibility',
     communityId?: string | null,
   ) {
     if (!this.server) return;
@@ -467,7 +481,7 @@ export class LiveScoreGateway
   broadcastClubStandaloneMatchUpdate(
     matchId: string,
     matchData: unknown,
-    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility',
+    event: 'score:update' | 'match:status' | 'elo:update' | 'match:update' | 'scoreboard:visibility' | 'overlay:visibility',
     communityId?: string | null,
   ) {
     if (!this.server) return;

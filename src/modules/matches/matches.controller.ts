@@ -17,10 +17,11 @@ import { OperateMatchDto } from './dto/operate-match.dto';
 import { UpdateMatchScoreDto } from './dto/update-match-score.dto';
 import { UpdateMatchStatusDto } from './dto/update-match-status.dto';
 import { UpdateScoreboardVisibilityDto } from './dto/update-scoreboard-visibility.dto';
+import { UpdateOverlayVisibilityDto } from './dto/update-overlay-visibility.dto';
 import { UpdateMatchScheduleDto } from './dto/update-match-schedule.dto';
 import { CreateMatchCommentDto } from './dto/create-match-comment.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -128,6 +129,27 @@ export class MatchesController {
       id,
       user,
       updateScoreboardVisibilityDto,
+    );
+  }
+
+  @Patch(':id/overlay-visibility')
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN, UserRole.REFEREE)
+  @Verified()
+  @SkipThrottle({ default: false })
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Bật/tắt overlay H2H hoặc bảng nhánh trên sóng live',
+  })
+  async setOverlayVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateOverlayVisibilityDto: UpdateOverlayVisibilityDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.matchesService.setOverlayVisibility(
+      id,
+      user,
+      updateOverlayVisibilityDto,
     );
   }
 

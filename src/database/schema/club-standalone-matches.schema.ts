@@ -38,6 +38,9 @@ export const clubStandaloneMatches = pgTable(
     scoreDetails: jsonb('score_details').default('{}').notNull(),
     // Cờ ẩn bảng điểm live chung cho cả 3 loại trận; mặc định bật.
     scoreboardVisible: boolean('scoreboard_visible').default(true).notNull(),
+    // Overlay H2H/BRACKET chung cho cả 3 loại trận; mặc định tắt.
+    h2hOverlayVisible: boolean('h2h_overlay_visible').default(false).notNull(),
+    bracketOverlayVisible: boolean('bracket_overlay_visible').default(false).notNull(),
     playbackUrl: text('playback_url'),
     cameraName: varchar('camera_name', { length: 255 }),
     scoreConfig: jsonb('score_config').$type<Record<string, unknown> | null>(),

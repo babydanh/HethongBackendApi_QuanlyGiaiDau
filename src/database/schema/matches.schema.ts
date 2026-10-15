@@ -67,6 +67,10 @@ export const matches = pgTable(
     // Trọng tài/BTC tắt để giấu bảng điểm trên sóng live (overlay) cho MỌI
     // người xem; mặc định bật nên dữ liệu cũ giữ nguyên hành vi.
     scoreboardVisible: boolean('scoreboard_visible').default(true).notNull(),
+    // Overlay H2H/BRACKET trên sóng live: sóng chỉ hiện một overlay tại một
+    // thời điểm; mặc định tắt.
+    h2hOverlayVisible: boolean('h2h_overlay_visible').default(false).notNull(),
+    bracketOverlayVisible: boolean('bracket_overlay_visible').default(false).notNull(),
     p1SetsWon: integer('p1_sets_won').default(0).notNull(),
     p2SetsWon: integer('p2_sets_won').default(0).notNull(),
     totalSetsPlayed: integer('total_sets_played').default(0).notNull(),
