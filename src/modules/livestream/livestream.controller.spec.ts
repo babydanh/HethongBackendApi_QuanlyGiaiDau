@@ -169,8 +169,13 @@ describe('LivestreamController match recording playlist route', () => {
   };
   const playlist = {
     period: '2026-10-15',
-    expiresAt: '2026-10-15T16:22:00.000Z',
-    segments: [],
+    segments: [
+      {
+        name: '2026-10-15-23-02-30-0.mp4',
+        startAt: '2026-10-15T23:02:30+07:00',
+        url: 'https://media.aqvision.net/record/live/camera-stream/2026-10-15/2026-10-15-23-02-30-0.mp4',
+      },
+    ],
   };
   const livestreamService = { getMatchRecordingPlaylist: jest.fn() };
   const controller = new LivestreamController(
@@ -179,67 +184,31 @@ describe('LivestreamController match recording playlist route', () => {
     {} as never,
     {} as never,
   );
-  const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  afterEach(() => {
-    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = originalNodeEnv;
-  });
-
-  it('sets the sporto_rec cookie scoped to the recordings path and returns the playlist', async () => {
-    process.env.NODE_ENV = 'development';
-    livestreamService.getMatchRecordingPlaylist.mockResolvedValue({
-      playlist,
-      sessionCookie: 'session-value',
-    });
-    const res = { cookie: jest.fn() };
+  it('returns the playlist from the service for the caller', async () => {
+    livestreamService.getMatchRecordingPlaylist.mockResolvedValue(playlist);
 
     await expect(
-      controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user, res as never),
+      controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user),
     ).resolves.toEqual(playlist);
     expect(livestreamService.getMatchRecordingPlaylist).toHaveBeenCalledWith(
       'match-1',
       '2026-10-15',
       user,
     );
-    expect(res.cookie).toHaveBeenCalledWith('sporto_rec', 'session-value', {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
-      path: '/api/v1/livestream/recordings',
-      maxAge: 600_000,
-    });
   });
 
-  it('marks the cookie Secure in production', async () => {
-    process.env.NODE_ENV = 'production';
-    livestreamService.getMatchRecordingPlaylist.mockResolvedValue({
-      playlist,
-      sessionCookie: 'session-value',
-    });
-    const res = { cookie: jest.fn() };
-
-    await controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user, res as never);
-    expect(res.cookie).toHaveBeenCalledWith(
-      'sporto_rec',
-      'session-value',
-      expect.objectContaining({ secure: true }),
-    );
-  });
-
-  it('sets no cookie when the service refuses the caller', async () => {
+  it('propagates the service refusal without returning a playlist', async () => {
     livestreamService.getMatchRecordingPlaylist.mockRejectedValue(
       new ForbiddenException(),
     );
-    const res = { cookie: jest.fn() };
 
     await expect(
-      controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user, res as never),
+      controller.getMatchRecordingPlaylist('match-1', '2026-10-15', user),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(res.cookie).not.toHaveBeenCalled();
   });
 });

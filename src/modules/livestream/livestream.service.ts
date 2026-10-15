@@ -46,12 +46,6 @@ import {
   isValidRecordingPeriod,
   orderRecordingSegments,
 } from './recording-playlist';
-import {
-  RECORDING_PLAYBACK_TTL_MS,
-  RECORDING_STREAM_PATH,
-  signRecordingSegmentToken,
-  signRecordingSessionCookie,
-} from './recording-playback-token';
 
 type MatchStreamControlStatus = 'IDLE' | 'LIVE' | 'OFFLINE' | 'ERROR' | null;
 type AqpStreamKeyCamera = {
@@ -77,7 +71,7 @@ export interface AqpCameraStreamKeyResponse {
   readonly rtmp: { readonly server: string; readonly streamKey: string } | null;
 }
 
-/** Một đoạn trong danh sách phát; `url` là đường dẫn tương đối có token, hết hạn sau 10 phút. */
+/** Một đoạn trong danh sách phát; `url` trỏ thẳng file ghi trên máy media AQP (công khai, không cần token). */
 export interface MatchRecordingPlaylistSegment {
   readonly name: string;
   readonly startAt: string | null;
@@ -86,14 +80,7 @@ export interface MatchRecordingPlaylistSegment {
 
 export interface MatchRecordingPlaylist {
   readonly period: string;
-  readonly expiresAt: string;
   readonly segments: readonly MatchRecordingPlaylistSegment[];
-}
-
-export interface MatchRecordingPlaylistResult {
-  readonly playlist: MatchRecordingPlaylist;
-  /** Giá trị cookie `sporto_rec`; controller đặt cookie với đúng thuộc tính. */
-  readonly sessionCookie: string;
 }
 
 // Only the statuses the toggle understands are published. `hasCamera` stays
@@ -221,14 +208,18 @@ export class LivestreamService {
    * sẽ trả về URL mà trình duyệt khán giả không xem được.
    */
   private buildAqvisionHlsUrl(streamName: string) {
-    // `||` chứ không `??`: chuỗi rỗng nghĩa là "chưa cấu hình" (xem
-    // `env.validation.ts`), không phải host rỗng.
-    const baseUrl = (
+    return `${this.getAqvisionPlaybackBaseUrl()}/live/${streamName}/hls.m3u8`;
+  }
+
+  /**
+   * Gốc phát media AQP. `||` chứ không `??`: chuỗi rỗng nghĩa là "chưa cấu hình"
+   * (xem `env.validation.ts`), không phải host rỗng.
+   */
+  private getAqvisionPlaybackBaseUrl(): string {
+    return (
       this.configService.get<string>('AQVISION_PLAYBACK_BASE_URL') ||
       'https://media.aqvision.net'
     ).replace(/\/+$/, '');
-
-    return `${baseUrl}/live/${streamName}/hls.m3u8`;
   }
 
   private isAqvisionGeneratedHlsUrl(
@@ -1673,46 +1664,39 @@ export class LivestreamService {
   }
 
   /**
-   * Danh sách phát của một ngày ghi: các đoạn xếp theo giờ bắt đầu, mỗi đoạn có URL
-   * phát hết hạn sau 10 phút và gắn người gọi cùng trận. Cookie `sporto_rec` gắn cùng
-   * người gọi và cùng hạn; endpoint phát nội dung cần cả token lẫn cookie.
-   * Kiểm quyền, kiểm period và lỗi AQP dùng chung với danh mục `recordings`.
+   * Danh sách phát của một ngày ghi: các đoạn xếp theo giờ bắt đầu, mỗi đoạn có `url`
+   * trỏ thẳng file ghi trên máy media AQP. Kiểm quyền, kiểm period và lỗi AQP dùng chung
+   * với danh mục `recordings`.
    */
   async getMatchRecordingPlaylist(
     matchId: string,
     period: string,
     user: JwtPayload,
-  ): Promise<MatchRecordingPlaylistResult> {
+  ): Promise<MatchRecordingPlaylist> {
     const streamName = await this.getRecordingStreamName(matchId, user);
     const files = await this.readRecordingFiles(streamName, period);
-    const secret = this.getRecordingPlaybackSecret();
-    const exp = Date.now() + RECORDING_PLAYBACK_TTL_MS;
-
     const segments = orderRecordingSegments(files.map((file) => file.name)).map(
-      ({ name, startAt }) => {
-        const token = signRecordingSegmentToken(secret, {
-          matchId,
-          stream: streamName,
-          period,
-          name,
-          userId: user.sub,
-          exp,
-        });
-        return {
-          name,
-          startAt,
-          url: `${RECORDING_STREAM_PATH}?token=${encodeURIComponent(token)}`,
-        };
-      },
-    );
-
-    return {
-      playlist: { period, expiresAt: new Date(exp).toISOString(), segments },
-      sessionCookie: signRecordingSessionCookie(secret, {
-        userId: user.sub,
-        exp,
+      ({ name, startAt }) => ({
+        name,
+        startAt,
+        url: this.buildAqvisionRecordingUrl(streamName, period, name),
       }),
-    };
+    );
+    return { period, segments };
+  }
+
+  /**
+   * URL phát một đoạn: `/record/<app>/<stream>/<ngày>/<file>` trên máy media AQP. AQP
+   * phục vụ file này công khai, không cần token (kiểm chứng 15/10, design.md Decision 2).
+   * `period` đã được kiểm dạng YYYY-MM-DD trong `readRecordingFiles`, nên không mã hoá.
+   */
+  private buildAqvisionRecordingUrl(
+    streamName: string,
+    period: string,
+    name: string,
+  ): string {
+    const app = this.configService.get<string>('AQVISION_APP') || 'live';
+    return `${this.getAqvisionPlaybackBaseUrl()}/record/${encodeURIComponent(app)}/${encodeURIComponent(streamName)}/${period}/${encodeURIComponent(name)}`;
   }
 
   private async readRecordingFiles(
@@ -1741,12 +1725,6 @@ export class LivestreamService {
     } catch (error) {
       throw this.toRecordingCatalogError(error);
     }
-  }
-
-  private getRecordingPlaybackSecret(): string {
-    const secret = this.configService.get<string>('auth.jwtAccessSecret');
-    if (!secret) throw new Error('auth.jwtAccessSecret chưa được cấu hình.');
-    return secret;
   }
 
   /**
