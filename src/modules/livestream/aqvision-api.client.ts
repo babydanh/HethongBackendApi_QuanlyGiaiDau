@@ -295,10 +295,11 @@ export class AqvisionApiClient {
     { response, payload }: { response: Response; payload: JsonObject },
   ): T {
     if (!response.ok) {
-      // Trước đây nhánh này ném mà không log nên 503 phía API rất khó chẩn đoán.
-      // Chỉ log tên operation + HTTP status: KHÔNG log URL/query (chứa secret).
+      // Log tên operation + HTTP status + lý do AQP tự ghi trong body (error/msg/message, cắt ngắn):
+      // body là lời AQP trả, không chứa URL/query/token của mình. KHÔNG log URL/query (chứa secret).
+      const reason = this.readHttpReason(payload);
       this.logger.warn(
-        `AQP ${operation} bị từ chối: HTTP ${response.status} (không phải mã lỗi của provider).`,
+        `AQP ${operation} bị từ chối: HTTP ${response.status} (không phải mã lỗi của provider)${reason ? ` lý do="${reason}"` : ''}.`,
       );
       throw new AqvisionApiException(
         response.status,
@@ -539,6 +540,14 @@ export class AqvisionApiClient {
 
   private readMessage(payload: JsonObject): string {
     return typeof payload.msg === 'string' ? payload.msg : 'không xác định';
+  }
+
+  /** Lý do AQP ghi kèm một phản hồi HTTP lỗi (`error`, `msg` hoặc `message`), một dòng, tối đa 160 ký tự. */
+  private readHttpReason(payload: JsonObject): string {
+    const raw = [payload.error, payload.msg, payload.message].find(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    );
+    return raw ? raw.replace(/\s+/g, ' ').trim().slice(0, 160) : '';
   }
 
   /** Write op chỉ thành công khi AQP xác nhận `result: true` (boolean). */

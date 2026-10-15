@@ -455,6 +455,18 @@ describe('AqvisionApiClient', () => {
       expect(logged).not.toContain('secret=');
       expect(logged).not.toContain('api.media.aqvision.net');
     });
+
+    it('HTTP loi co body => log kem ly do AQP (mot dong, cat 160 ky tu)', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+      fetchSpy.mockResolvedValue(jsonResponse({ error: `Stream not found\n${'x'.repeat(300)}` }, 404));
+
+      await expect(makeClient().isRecordingMp4('camera01')).rejects.toMatchObject({ providerCode: 404 });
+
+      const logged = warnSpy.mock.calls.flat().join(' ');
+      expect(logged).toContain('HTTP 404');
+      expect(logged).toContain('lý do="Stream not found x');
+      expect(logged).not.toContain('x'.repeat(200));
+    });
   });
 
   // The same number can come from different places, so the exception carries
