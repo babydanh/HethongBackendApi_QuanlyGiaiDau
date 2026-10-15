@@ -39,6 +39,19 @@ import {
   resolveWinnerTargetSlot,
 } from '../../common/helpers/bracket-advancement.helper';
 import { aggregateFootballTwoLegs } from './utils/football-two-leg-aggregate';
+import type { CourtState } from './utils/court-state/court-state.utils';
+
+/**
+ * courtState là cài đặt sân, không phải điểm. Mọi lệnh ghi scoreDetails phải giữ
+ * courtState đang có trong DB NGAY TẠI câu UPDATE (không dùng bản đọc trước đó)
+ * và bỏ courtState nếu payload gửi kèm, để lệnh ghi điểm không đè lên court-state
+ * vừa được cập nhật giữa hai bước.
+ */
+function keepStoredCourtStateSql(scoreDetails: Record<string, unknown>): SQL {
+  const next = JSON.stringify(scoreDetails);
+  const column = schema.matches.scoreDetails;
+  return sql`(${next}::jsonb - 'courtState') || CASE WHEN ${column} -> 'courtState' IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('courtState', ${column} -> 'courtState') END`;
+}
 
 /**
  * Tổng điểm ghi được của mỗi bên từ scoreDetails (sum team1Score / team2Score
@@ -1638,7 +1651,9 @@ export class MatchesRepository {
         .set({
           p1SetsWon: data.p1SetsWon,
           p2SetsWon: data.p2SetsWon,
-          ...(data.scoreDetails && { scoreDetails: data.scoreDetails }),
+          ...(data.scoreDetails && {
+            scoreDetails: keepStoredCourtStateSql(data.scoreDetails),
+          }),
           ...(data.winnerId && { winnerId: data.winnerId }),
           scoreConfirmedBy: userId,
           scoreConfirmedAt: new Date(),
@@ -1705,12 +1720,17 @@ export class MatchesRepository {
   }
 
   /**
-   * Ghi courtState (scoreDetails đã merge) mà KHÔNG tăng revision và KHÔNG đổi set/điểm.
+   * Ghi courtState bằng jsonb_set trên đúng key `courtState` trong MỘT câu UPDATE:
+   * không đọc rồi ghi lại cả scoreDetails nên không đè sets/điểm do lệnh ghi điểm
+   * khác vừa cập nhật. Không tăng revision.
    */
-  async updateCourtState(id: string, scoreDetails: Record<string, unknown>) {
+  async updateCourtState(id: string, courtState: CourtState) {
     const [updated] = await this.db
       .update(schema.matches)
-      .set({ scoreDetails, updatedAt: new Date() })
+      .set({
+        scoreDetails: sql`jsonb_set(coalesce(${schema.matches.scoreDetails}, '{}'::jsonb), '{courtState}', ${JSON.stringify(courtState)}::jsonb, true)`,
+        updatedAt: new Date(),
+      })
       .where(and(eq(schema.matches.id, id), isNull(schema.matches.deletedAt)))
       .returning({ id: schema.matches.id });
 
@@ -1972,7 +1992,9 @@ export class MatchesRepository {
         winnerId,
         p1SetsWon: details.p1SetsWon,
         p2SetsWon: details.p2SetsWon,
-        scoreDetails: details.scoreDetails,
+        scoreDetails: details.scoreDetails
+          ? keepStoredCourtStateSql(details.scoreDetails)
+          : details.scoreDetails,
         isBye: details.isBye ?? existing.isBye,
         completedAt: new Date(),
         updatedAt: new Date(),
@@ -2708,7 +2730,7 @@ export class MatchesRepository {
         .update(schema.matches)
         .set({
           status: data.status,
-          scoreDetails: data.scoreDetails,
+          scoreDetails: keepStoredCourtStateSql(data.scoreDetails),
           ...(data.p1SetsWon !== undefined && { p1SetsWon: data.p1SetsWon }),
           ...(data.p2SetsWon !== undefined && { p2SetsWon: data.p2SetsWon }),
           scheduledAt:

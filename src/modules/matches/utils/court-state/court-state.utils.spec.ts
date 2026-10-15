@@ -1,9 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   COURT_STATE_HISTORY_LIMIT,
-  mergeCourtStateIntoScoreDetails,
   normalizeCourtState,
-  preserveStoredCourtState,
 } from './court-state.utils';
 
 const NOW = new Date('2026-10-15T08:00:00.000Z');
@@ -229,67 +227,6 @@ describe('court-state utils', () => {
       expect(() => normalizeCourtState(build(), 'referee-1', NOW)).toThrow(
         new BadRequestException(message),
       );
-    });
-  });
-
-  describe('mergeCourtStateIntoScoreDetails', () => {
-    it('adds courtState and leaves sets and other score fields untouched', () => {
-      const existing = {
-        sets: [{ team1Score: 11, team2Score: 4, isFinished: true }],
-        note: 'kept',
-      };
-      const courtState = normalizeCourtState(courtStateInput(), 'referee-1', NOW);
-
-      const merged = mergeCourtStateIntoScoreDetails(existing, courtState);
-
-      expect(merged).toEqual({ ...existing, courtState });
-      expect(merged.sets).toEqual(existing.sets);
-    });
-
-    it('treats missing existing scoreDetails as an empty object', () => {
-      const courtState = normalizeCourtState(courtStateInput(), 'referee-1', NOW);
-
-      expect(mergeCourtStateIntoScoreDetails(null, courtState)).toEqual({ courtState });
-    });
-  });
-
-  describe('preserveStoredCourtState', () => {
-    const stored = normalizeCourtState(courtStateInput(), 'referee-1', NOW);
-
-    it('keeps the stored courtState when the score payload omits it', () => {
-      const payload = { sets: [{ team1Score: 11, team2Score: 5, isFinished: true }] };
-
-      const next = preserveStoredCourtState(payload, { courtState: stored });
-
-      expect(next).toEqual({ ...payload, courtState: stored });
-    });
-
-    it('replaces a courtState sent by the score payload with the stored one', () => {
-      const staleCopy = { ...stored, startingRight: { team1: 1, team2: 1 } };
-
-      const next = preserveStoredCourtState(
-        { sets: [], courtState: staleCopy },
-        { courtState: stored },
-      );
-
-      expect(next.courtState).toEqual(stored);
-    });
-
-    it('drops a client courtState when nothing is stored yet', () => {
-      const next = preserveStoredCourtState(
-        { sets: [], courtState: { version: 1 } },
-        { sets: [] },
-      );
-
-      expect(next).toEqual({ sets: [] });
-    });
-
-    it('does not mutate the payload it receives', () => {
-      const payload = { sets: [] as unknown[] };
-
-      preserveStoredCourtState(payload, { courtState: stored });
-
-      expect(payload).toEqual({ sets: [] });
     });
   });
 });

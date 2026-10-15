@@ -72,7 +72,12 @@ describe('MatchesService court state', () => {
     autoSwitchEnds: false,
     midSetSwitchDone: true,
     serverOverride: { team: 2, playerIndex: 1 },
-    turnStart: { team: 2, serverNumber: 1, teamScoreAtStart: 4, serverPlayerIndex: 0 },
+    turnStart: {
+      team: 2,
+      serverNumber: 1,
+      teamScoreAtStart: 4,
+      serverPlayerIndex: 0,
+    },
     history: [],
     ...overrides,
   });
@@ -83,26 +88,27 @@ describe('MatchesService court state', () => {
     repository.isTournamentManager.mockResolvedValue(false);
     repository.isRefereeAccepted.mockResolvedValue(false);
     repository.canAccessLiveMatch.mockResolvedValue(false);
+    // Repo trả về bản đã ghi: scoreDetails của DB, giữ sets cũ và courtState mới.
     repository.updateCourtState.mockImplementation(
-      (_id: string, scoreDetails: unknown) =>
-        Promise.resolve({ ...pickleballMatch(), scoreDetails }),
+      (_id: string, courtState: unknown) =>
+        Promise.resolve({
+          ...pickleballMatch(),
+          scoreDetails: { sets: storedSets, courtState },
+        }),
     );
     repository.updateScore.mockResolvedValue(pickleballMatch());
   });
 
   describe('updateCourtState', () => {
-    it('merges courtState into scoreDetails without touching sets or revision', async () => {
-      const result = await service.updateCourtState(
-        'match-1',
-        referee,
-        { courtState: courtStateInput() },
-      );
+    it('passes only the normalized courtState to the repository and never score fields', async () => {
+      await service.updateCourtState('match-1', referee, {
+        courtState: courtStateInput(),
+      });
 
       expect(repository.updateCourtState).toHaveBeenCalledTimes(1);
-      const [matchId, scoreDetails] = repository.updateCourtState.mock.calls[0];
+      const [matchId, courtState] = repository.updateCourtState.mock.calls[0];
       expect(matchId).toBe('match-1');
-      expect(scoreDetails.sets).toEqual(storedSets);
-      expect(scoreDetails.courtState).toEqual(
+      expect(courtState).toEqual(
         expect.objectContaining({
           startingRight: { team1: 1, team2: 0 },
           endsOverride: true,
@@ -111,8 +117,8 @@ describe('MatchesService court state', () => {
           history: [],
         }),
       );
+      expect(courtState).not.toHaveProperty('sets');
       expect(repository.updateScore).not.toHaveBeenCalled();
-      expect(result).toEqual(expect.objectContaining({ id: 'match-1' }));
     });
 
     it('broadcasts the updated match and drops the live cache copy', async () => {
@@ -148,9 +154,9 @@ describe('MatchesService court state', () => {
         courtState: courtStateInput({ history }),
       });
 
-      const [, scoreDetails] = repository.updateCourtState.mock.calls[0];
-      expect(scoreDetails.courtState.history).toHaveLength(20);
-      expect(scoreDetails.courtState.history[0].turnStart.teamScoreAtStart).toBe(2);
+      const [, courtState] = repository.updateCourtState.mock.calls[0];
+      expect(courtState.history).toHaveLength(20);
+      expect(courtState.history[0].turnStart.teamScoreAtStart).toBe(2);
     });
 
     it('rejects users without score access with 403 and never writes', async () => {
@@ -181,7 +187,13 @@ describe('MatchesService court state', () => {
 
     it('rejects a non-pickleball match with 400 and never writes', async () => {
       repository.findById.mockResolvedValue(
-        pickleballMatch({ tournament: { id: 'tournament-1', createdBy: 'owner-1', sportRules: { kind: 'BADMINTON' } } }),
+        pickleballMatch({
+          tournament: {
+            id: 'tournament-1',
+            createdBy: 'owner-1',
+            sportRules: { kind: 'BADMINTON' },
+          },
+        }),
       );
 
       await expect(
@@ -213,8 +225,8 @@ describe('MatchesService court state', () => {
     });
   });
 
-  describe('updateScore keeps courtState owned by the court-state endpoint', () => {
-    it('keeps the stored courtState when the score payload omits it', async () => {
+  describe('updateScore live cache', () => {
+    it('caches the scoreDetails the DB returned, so the live cache keeps courtState', async () => {
       await service.updateScore('match-1', referee, {
         p1SetsWon: 1,
         p2SetsWon: 0,
@@ -223,30 +235,11 @@ describe('MatchesService court state', () => {
         },
       });
 
-      expect(repository.updateScore).toHaveBeenCalledWith(
-        'match-1',
-        'referee-1',
-        expect.objectContaining({
-          scoreDetails: {
-            sets: [{ team1Score: 11, team2Score: 5, isFinished: true }],
-            courtState: storedCourtState,
-          },
-        }),
+      expect(redis.hset).toHaveBeenCalledWith(
+        'match:live:match-1',
+        'scoreDetails',
+        JSON.stringify({ sets: storedSets, courtState: storedCourtState }),
       );
-    });
-
-    it('ignores a courtState sent inside the score payload and keeps the stored one', async () => {
-      await service.updateScore('match-1', referee, {
-        p1SetsWon: 1,
-        p2SetsWon: 0,
-        scoreDetails: {
-          sets: [{ team1Score: 11, team2Score: 5, isFinished: true }],
-          courtState: { ...storedCourtState, startingRight: { team1: 0, team2: 0 } },
-        },
-      });
-
-      const [, , data] = repository.updateScore.mock.calls[0];
-      expect(data.scoreDetails.courtState).toEqual(storedCourtState);
     });
   });
 });

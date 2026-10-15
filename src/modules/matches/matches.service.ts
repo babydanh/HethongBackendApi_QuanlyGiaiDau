@@ -52,11 +52,7 @@ import {
 } from '../tournaments/utils/tournament-product';
 import { validateSportRuleConfig } from '../tournaments/utils/sport-rules/validate-sport-rules-config';
 import { validateScoreDetails } from './utils/score-validation/validate-score-details';
-import {
-  mergeCourtStateIntoScoreDetails,
-  normalizeCourtState,
-  preserveStoredCourtState,
-} from './utils/court-state/court-state.utils';
+import { normalizeCourtState } from './utils/court-state/court-state.utils';
 import { aggregateFootballTwoLegs } from './utils/football-two-leg-aggregate';
 import {
   isAdminUser,
@@ -1715,7 +1711,7 @@ export class MatchesService {
       }
     }
 
-    const scoreDetailsWithOverride =
+    const nextScoreDetails =
       overrideReason && scoreDetails
         ? {
             ...scoreDetails,
@@ -1726,13 +1722,6 @@ export class MatchesService {
             },
           }
         : scoreDetails;
-    // courtState thuộc endpoint PATCH court-state: payload điểm không ghi đè nó.
-    const nextScoreDetails = scoreDetailsWithOverride
-      ? preserveStoredCourtState(
-          scoreDetailsWithOverride,
-          existing.scoreDetails,
-        )
-      : scoreDetailsWithOverride;
 
     /*
       throw new BadRequestException('Trận đấu đã kết thúc');
@@ -1803,11 +1792,12 @@ export class MatchesService {
             'p2SetsWon',
             String(p2SetsWon),
           );
-        if (nextScoreDetails)
+        // Cache scoreDetails từ DB (đã có courtState) để GET overlay không mất court-state.
+        if (updatedMatch.scoreDetails)
           await this.redisService.hset(
             cacheKey,
             'scoreDetails',
-            JSON.stringify(nextScoreDetails),
+            JSON.stringify(updatedMatch.scoreDetails),
           );
         if (winnerId)
           await this.redisService.hset(cacheKey, 'winnerId', winnerId);
@@ -1872,10 +1862,10 @@ export class MatchesService {
       user.sub,
       new Date(),
     );
-    // Ghi merge: sets, điểm và revision giữ nguyên.
+    // Chỉ đụng key courtState (jsonb_set trong repository); sets và điểm giữ nguyên.
     const updatedMatch = await this.matchesRepository.updateCourtState(
       id,
-      mergeCourtStateIntoScoreDetails(existing.scoreDetails, courtState),
+      courtState,
     );
     if (!updatedMatch) throw new NotFoundException('Match not found');
 

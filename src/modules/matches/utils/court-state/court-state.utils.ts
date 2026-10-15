@@ -223,31 +223,3 @@ export function normalizeCourtState(
     updatedBy,
   };
 }
-
-/** Ghi merge: `{ ...existing, courtState }` — không đụng sets hay các trường điểm khác. */
-export function mergeCourtStateIntoScoreDetails(
-  existingScoreDetails: unknown,
-  courtState: CourtState,
-): Record<string, unknown> {
-  const base = isRecord(existingScoreDetails) ? existingScoreDetails : {};
-  return { ...base, courtState };
-}
-
-/**
- * courtState thuộc endpoint PATCH court-state. Payload cập nhật điểm không được
- * ghi đè nó: luôn lấy bản đã lưu (client cũ không gửi, hoặc gửi bản sao đã cũ).
- */
-export function preserveStoredCourtState(
-  scoreDetails: Record<string, unknown>,
-  existingScoreDetails: unknown,
-): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...scoreDetails };
-  delete next.courtState;
-  const stored = isRecord(existingScoreDetails)
-    ? existingScoreDetails.courtState
-    : undefined;
-  if (stored !== undefined) {
-    next.courtState = stored;
-  }
-  return next;
-}
