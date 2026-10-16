@@ -10,5 +10,5 @@
 ## 2. Kiểm tra
 
 - [x] 2.1 `pnpm build` (tsc) exit 0 (`nest build`). Lưu ý: `pnpm exec tsc --noEmit -p tsconfig.json` (gồm cả spec) exit 2 với 12 lỗi có sẵn ở các spec không đổi; lỗi `tournament-import-capacity.spec.ts` (`result.participant` unknown) cũng có ở bản HEAD. `tsconfig.build.json` exit 0.
-- [ ] 2.2 `pnpm test -- tournament-import` pass; cả bộ Jest chạy trên cloud target `backend`. Kết quả local: `pnpm test -- tournament-import` exit 0, 5 suite pass, 1 suite skipped; 124 test pass, 10 skipped, 0 fail. Cả bộ Jest trên cloud CHƯA chạy, giữ `[ ]` cho đến khi có kết quả cloud.
+- [x] 2.2 `pnpm test -- tournament-import` local: 5 suite pass, 124 test pass, 0 fail. Cả bộ Jest trên cloud target `backend`, run 38865228347, commit `e0dcbab`: 187 suite pass (5 skipped), 1856 test pass, 25 skipped, 0 fail.
 - [x] 2.3 `openspec validate import-seed-file-order --strict` exit 0: "Change 'import-seed-file-order' is valid".
