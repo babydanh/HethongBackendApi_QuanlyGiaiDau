@@ -290,6 +290,7 @@ type ImportPersistRow = {
   player2Name: string;
   player2Email: string;
   player2Phone?: string;
+  // Score from the file: kept as importedElo, never written as the seed.
   elo?: number;
   isPaid?: boolean;
   autoApprove?: boolean;
@@ -310,6 +311,8 @@ const IMPORT_OWNED_RESPONSE_KEYS = [
   // A caller must never claim a wildcard slot through form answers;
   // `is_wildcard` is server-owned only.
   'is_wildcard',
+  // The file score is server-owned: a caller cannot forge importedElo.
+  'importedElo',
 ] as const;
 type AddAthleteRepositoryResult = {
   participant: {
@@ -2292,6 +2295,9 @@ export class TournamentImportRepository {
    * route removes import-owned keys from caller form answers before merging,
    * while the legacy route keeps its original behaviour and merges the caller's
    * answers untouched.
+   *
+   * Seeds continue after the division's highest seed, in `rows` order. The
+   * file score is kept as `importedElo` and never becomes a seed.
    */
   private async persistImportRows(
     tx: AppTx,
@@ -2327,6 +2333,34 @@ export class TournamentImportRepository {
         divisionId,
       )
     ).toFixed(2);
+    // Seeds continue after the division's highest seed. The advisory lock is the
+    // one assignNextAvailableSeed takes, so concurrent seeding cannot read the same max.
+    let seedBase = 0;
+    if (rows.length > 0) {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`tournament-seeding:${tournamentId}`}))`,
+      );
+      const [highestSeed] = await tx
+        .select({
+          maxSeed: sql<
+            number | null
+          >`max(${schema.tournamentParticipants.seed})`,
+        })
+        .from(schema.tournamentParticipants)
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            divisionId
+              ? eq(
+                  schema.tournamentParticipants.tournamentDivisionId,
+                  divisionId,
+                )
+              : isNull(schema.tournamentParticipants.tournamentDivisionId),
+            sql`${schema.tournamentParticipants.seed} IS NOT NULL`,
+          ),
+        );
+      seedBase = Number(highestSeed?.maxSeed ?? 0);
+    }
     const participants: (typeof schema.tournamentParticipants.$inferSelect)[] =
       [];
     const linkedAccountNotifications: Array<{
@@ -2336,7 +2370,7 @@ export class TournamentImportRepository {
       divisionId: string | null;
     }> = [];
 
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       const teamStatus =
         row.autoApprove && (row.isPaid ?? true)
           ? 'COMPLETE'
@@ -2358,10 +2392,13 @@ export class TournamentImportRepository {
           entryFeeAtRegistration,
           teamStatus,
           partnerUserId: row.partnerUserId || null,
-          seed: row.elo ? Math.round(row.elo) : null,
+          seed: seedBase + index + 1,
           customResponses: {
             ...customResponses,
             ...row.importMetadata,
+            ...(typeof row.elo === 'number' && Number.isFinite(row.elo)
+              ? { importedElo: row.elo }
+              : {}),
           },
         })
         .returning();

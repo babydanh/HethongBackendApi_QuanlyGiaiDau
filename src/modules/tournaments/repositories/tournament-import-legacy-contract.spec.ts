@@ -115,6 +115,7 @@ function createHarness(
         },
       };
     },
+    execute: () => Promise.resolve([]),
   };
 
   return { tx: tx as unknown as Record<string, unknown>, inserts };

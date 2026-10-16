@@ -129,6 +129,7 @@ function createHarness(reads: Record<string, Row[][]>, users: Row[][]) {
         },
       };
     },
+    execute: () => Promise.resolve([]),
   };
 
   return { tx: tx as unknown as Record<string, unknown>, inserts };

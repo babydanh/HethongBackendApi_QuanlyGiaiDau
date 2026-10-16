@@ -36,6 +36,7 @@ function createHarness(queues: Record<string, Row[][]>) {
   const selections: Array<{ key: string; locked: boolean }> = [];
   const whereConditions: Array<{ key: string; predicate: SQL }> = [];
   const lockCounter = { count: 0 };
+  const executed: unknown[] = [];
   const takeRows = (key: string): Row[] => {
     const queue = queues[key];
     if (!queue || queue.length === 0) return [];
@@ -137,6 +138,10 @@ function createHarness(queues: Record<string, Row[][]>) {
         }),
       };
     },
+    execute: (query: unknown) => {
+      executed.push(query);
+      return Promise.resolve([]);
+    },
     __snapshot: () => ({ inserts: inserts.length, updates: updates.length }),
     __rollback: (snapshot: { inserts: number; updates: number }) => {
       inserts.length = snapshot.inserts;
@@ -150,6 +155,7 @@ function createHarness(queues: Record<string, Row[][]>) {
     updates,
     selections,
     whereConditions,
+    executed,
     lockCount: () => lockCounter.count,
   };
 }
@@ -1955,5 +1961,94 @@ describe('TournamentImportRepository.roster batch account name and identity', ()
       ),
     ).rejects.toThrow('thiếu tên VĐV 1');
     expect(harness.inserts.filter((insert) => insert.table === 'participants')).toHaveLength(0);
+  });
+});
+
+describe('import seeds follow the file order, never the file score', () => {
+  const PAIR_THREE = {
+    teamName: 'Cặp đôi thứ ba',
+    player1Name: 'Nguyen Van E',
+    player1Email: 'player-five@example.test',
+    player2Name: 'Nguyen Van F',
+    player2Email: 'player-six@example.test',
+    autoApprove: true,
+    source: 'GOOGLE_FORM' as const,
+  };
+
+  it('seeds an empty division 1..N in row order and takes the seeding lock', async () => {
+    const harness = createHarness(divisionImportQueues({ entries: [] }));
+
+    await createRepository(harness.tx).importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [PAIR, PAIR_TWO, PAIR_THREE],
+      'division-1',
+    );
+
+    const participants = harness.inserts
+      .filter((insert) => insert.table === 'participants')
+      .map((insert) => insert.values);
+    expect(participants.map((row) => row.teamName)).toEqual([
+      PAIR.teamName,
+      PAIR_TWO.teamName,
+      PAIR_THREE.teamName,
+    ]);
+    expect(participants.map((row) => row.seed)).toEqual([1, 2, 3]);
+    expect(
+      harness.executed.map((query) => dialect.sqlToQuery(query as SQL).params),
+    ).toContainEqual(['tournament-seeding:tournament-1']);
+  });
+
+  it('continues after the highest seed the division already holds', async () => {
+    const harness = createHarness({
+      ...divisionImportQueues({ entries: [] }),
+      participants: [[{ maxSeed: 8 }]],
+    });
+
+    await createRepository(harness.tx).importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [PAIR, PAIR_TWO],
+      'division-1',
+    );
+
+    const participants = harness.inserts
+      .filter((insert) => insert.table === 'participants')
+      .map((insert) => insert.values);
+    expect(participants.map((row) => row.seed)).toEqual([9, 10]);
+  });
+
+  it('keeps a row score in customResponses.importedElo and never as the seed', async () => {
+    const harness = createHarness(divisionImportQueues({ entries: [] }));
+
+    await createRepository(harness.tx).importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [{ ...PAIR, elo: 1200 }],
+      'division-1',
+    );
+
+    const [participant] = harness.inserts
+      .filter((insert) => insert.table === 'participants')
+      .map((insert) => insert.values);
+    expect(participant?.seed).toBe(1);
+    expect(participant?.customResponses).toMatchObject({ importedElo: 1200 });
+  });
+
+  it('writes no importedElo for a row without a score, even when a form answer claims one', async () => {
+    const harness = createHarness(divisionImportQueues({ entries: [] }));
+
+    await createRepository(harness.tx).importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [{ ...PAIR, customResponses: { importedElo: 999 } }],
+      'division-1',
+    );
+
+    const [participant] = harness.inserts
+      .filter((insert) => insert.table === 'participants')
+      .map((insert) => insert.values);
+    expect(participant?.seed).toBe(1);
+    expect(participant?.customResponses).not.toHaveProperty('importedElo');
   });
 });
