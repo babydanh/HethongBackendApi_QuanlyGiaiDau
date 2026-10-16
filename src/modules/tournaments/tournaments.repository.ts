@@ -28,7 +28,7 @@ export class TournamentsRepository {
     private readonly tournamentOperationsRepository: TournamentOperationsRepository,
     private readonly tournamentParticipantRepository: TournamentParticipantRepository,
     private readonly tournamentRegistrationRepository: TournamentRegistrationRepository,
-  ) {}
+  ) { }
 
   countPaidPayments(tournamentId: string) {
     return this.tournamentPaymentRepository.countPaidPayments(tournamentId);

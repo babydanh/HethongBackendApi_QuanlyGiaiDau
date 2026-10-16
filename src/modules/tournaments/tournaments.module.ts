@@ -103,4 +103,4 @@ import { TournamentRegistrationRepository } from './repositories/tournament-regi
     TournamentsRepository,
   ],
 })
-export class TournamentsModule {}
+export class TournamentsModule { }

@@ -14,7 +14,6 @@ import {
   ValidateNested,
   IsInt,
   IsObject,
-  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -195,10 +194,10 @@ export class CreateLiteTournamentDto {
 
   @ApiPropertyOptional({
     type: [CreateLiteDivisionConfigDto],
-    description: 'Danh sách nội dung cấu hình sẵn. [] chủ động tạo giải chưa có nội dung; bỏ trường giữ fallback legacy. null không hợp lệ.',
+    description: 'Các nội dung đã cấu hình trong tạo nhanh. Đây là DTO nghiệp vụ, không nhận state UI như selectedFormats.',
   })
-  @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
+  @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => CreateLiteDivisionConfigDto)
   divisions?: CreateLiteDivisionConfigDto[];
