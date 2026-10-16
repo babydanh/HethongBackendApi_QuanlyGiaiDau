@@ -1,3 +1,5 @@
+import { IMPORT_SOURCES } from '../dto/roster-import.dto';
+
 /**
  * One athlete of a doubles pair: a SportO account (it has a roster row) or a
  * guest the organizer typed in (no account, so no roster row: roster user_id is
@@ -21,14 +23,29 @@ function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-/** An athlete added by the organizer by name/email only (`addDirectAthlete`). */
-export function isDirectGuest(customResponses: unknown): boolean {
-  return asResponses(customResponses).importedFrom === 'ORGANIZER_DIRECT';
+const ORGANIZER_ENTRY_SOURCES: readonly unknown[] = ['ORGANIZER_DIRECT', ...IMPORT_SOURCES];
+
+/**
+ * Athletes a participant holds. An entry the organizer typed in or imported
+ * (Excel, AI Excel, manual email, Google Form) always names athlete 1, so it
+ * holds at least one athlete even without a roster, and a second one when it
+ * names athlete 2. Other participants hold exactly their rosters.
+ */
+export function countParticipantMembers(
+  customResponses: unknown,
+  rosterCount: number,
+): number {
+  const responses = asResponses(customResponses);
+  if (!ORGANIZER_ENTRY_SOURCES.includes(responses.importedFrom)) return rosterCount;
+  const namesAthlete2 = Boolean(
+    text(responses.player2Name) || text(responses.player2Email),
+  );
+  return Math.max(rosterCount, namesAthlete2 ? 2 : 1);
 }
 
 /**
  * The single athlete a waiting doubles participant holds, or null when it does
- * not hold exactly one. A direct guest is one athlete with no roster.
+ * not hold exactly one. An organizer entry without a roster is one guest.
  */
 export function resolveSingleMember(
   participant: { teamName: string | null; customResponses: unknown },
@@ -37,27 +54,17 @@ export function resolveSingleMember(
 ): PairMember | null {
   const responses = asResponses(participant.customResponses);
   if (readPairSlots(responses)) return null;
+  if (countParticipantMembers(responses, rosters.length) !== 1) return null;
   if (rosters.length === 1) {
     const { userId } = rosters[0];
     return { kind: 'ACCOUNT', userId, name: accountName(userId) };
   }
-  if (rosters.length === 0 && isDirectGuest(responses)) {
-    return {
-      kind: 'GUEST',
-      name: text(participant.teamName) ?? text(responses.player1Name) ?? 'VĐV',
-      email: text(responses.player1Email),
-      phone: text(responses.player1Phone),
-    };
-  }
-  return null;
-}
-
-/** Athletes a participant counts when the organizer approves it. */
-export function countParticipantMembers(
-  customResponses: unknown,
-  rosterCount: number,
-): number {
-  return rosterCount === 0 && isDirectGuest(customResponses) ? 1 : rosterCount;
+  return {
+    kind: 'GUEST',
+    name: text(participant.teamName) ?? text(responses.player1Name) ?? 'VĐV',
+    email: text(responses.player1Email),
+    phone: text(responses.player1Phone),
+  };
 }
 
 function withoutSlots(customResponses: unknown): Responses {

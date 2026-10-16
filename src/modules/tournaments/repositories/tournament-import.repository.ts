@@ -34,8 +34,8 @@ import {
 } from '../services/tournament-capacity.service';
 import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
+import { countParticipantMembers } from '../utils/doubles-pair-member';
 import { normalizeHttpsImageUrl } from '../../../common/helpers/https-image-url.helper';
-import { normalizeProfileGender, type NormalizedGender } from '../utils/profile-gender';
 import {
   findEligibleRosterAccountIds,
   findExistingRosterImportEmails,
@@ -116,7 +116,6 @@ export interface AddAthletePairsRepositoryResult {
 type PairingAthlete = {
   userId: string;
   fullName: string;
-  gender: NormalizedGender | null;
 };
 
 function assertRegularAddOpen(
@@ -134,31 +133,6 @@ function assertRegularAddOpen(
     division?.isRegistrationLocked
   ) {
     throw reject('Đăng ký đã được khóa. Không thể thêm VĐV.');
-  }
-}
-
-function assertPairGendersFitDivision(
-  genderRestriction: string | null | undefined,
-  athletes: ReadonlyArray<{ gender: NormalizedGender | null }>,
-): void {
-  const restriction = (genderRestriction ?? '').toUpperCase();
-  if (!['MALE', 'FEMALE', 'MIXED'].includes(restriction)) return;
-  if (athletes.some((athlete) => athlete.gender === null)) {
-    throw new BadRequestException(
-      'Mọi VĐV cần cập nhật giới tính trong hồ sơ trước khi BTC ghép đôi.',
-    );
-  }
-  const mismatch =
-    restriction === 'MIXED'
-      ? athletes.some(
-          (athlete, index) =>
-            index % 2 === 1 && athletes[index - 1].gender === athlete.gender,
-        )
-      : athletes.some((athlete) => athlete.gender !== restriction);
-  if (mismatch) {
-    throw new BadRequestException(
-      'VĐV không phù hợp với giới hạn giới tính của nội dung thi đấu.',
-    );
   }
 }
 
@@ -923,13 +897,9 @@ export class TournamentImportRepository {
           throw new ConflictException('Ứng viên không còn đủ điều kiện.');
         }
         await this.assertNoActiveRoster(tx, tournamentId, userId);
-        athletes.push({
-          userId,
-          gender: normalizeProfileGender(candidate.gender),
-          fullName: candidate.fullName,
-        });
+        athletes.push({ userId, fullName: candidate.fullName });
       }
-      assertPairGendersFitDivision(division?.genderRestriction, athletes);
+      // Organizer pairing never checks gender (owner decision 2026-10-16).
 
       const capacity = await readEffectiveCapacity(tx, {
         tournamentId,
@@ -1002,7 +972,6 @@ export class TournamentImportRepository {
       .select({
         id: schema.users.id,
         fullName: sql<string>`btrim(${schema.profiles.fullName})`,
-        gender: schema.profiles.gender,
       })
       .from(schema.users)
       .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
@@ -1866,7 +1835,7 @@ export class TournamentImportRepository {
       const linkedAccountNotifications: Array<{
         rosterId: string;
         userId: string;
-        status: 'COMPLETE' | 'PENDING_APPROVAL';
+        status: 'COMPLETE' | 'PENDING_APPROVAL' | 'PENDING_PARTNER';
         divisionId: string | null;
       }> = [];
 
@@ -2314,7 +2283,7 @@ export class TournamentImportRepository {
     linkedAccountNotifications: Array<{
       rosterId: string;
       userId: string;
-      status: 'COMPLETE' | 'PENDING_APPROVAL';
+      status: 'COMPLETE' | 'PENDING_APPROVAL' | 'PENDING_PARTNER';
       divisionId: string | null;
     }>;
   }> {
@@ -2333,6 +2302,15 @@ export class TournamentImportRepository {
         divisionId,
       )
     ).toFixed(2);
+    const [division] = divisionId
+      ? await tx
+          .select({ matchType: schema.tournamentDivisions.matchType })
+          .from(schema.tournamentDivisions)
+          .where(eq(schema.tournamentDivisions.id, divisionId))
+          .limit(1)
+      : [];
+    const matchType = division?.matchType ?? tournament.matchType;
+    const isDoubles = matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES';
     // Seeds continue after the division's highest seed. The advisory lock is the
     // one assignNextAvailableSeed takes, so concurrent seeding cannot read the same max.
     let seedBase = 0;
@@ -2366,20 +2344,38 @@ export class TournamentImportRepository {
     const linkedAccountNotifications: Array<{
       rosterId: string;
       userId: string;
-      status: 'COMPLETE' | 'PENDING_APPROVAL';
+      status: 'COMPLETE' | 'PENDING_APPROVAL' | 'PENDING_PARTNER';
       divisionId: string | null;
     }> = [];
 
     for (const [index, row] of rows.entries()) {
-      const teamStatus =
-        row.autoApprove && (row.isPaid ?? true)
-          ? 'COMPLETE'
-          : 'PENDING_APPROVAL';
-
+      const linkedUserIds = [
+        ...new Set(
+          [row.registeredByUserId, row.partnerUserId].filter(
+            (value): value is string => Boolean(value),
+          ),
+        ),
+      ];
       const customResponses = { ...(row.customResponses ?? {}) };
       for (const key of strippedResponseKeys) {
         delete customResponses[key];
       }
+      const storedResponses = {
+        ...customResponses,
+        ...row.importMetadata,
+        ...(typeof row.elo === 'number' && Number.isFinite(row.elo)
+          ? { importedElo: row.elo }
+          : {}),
+      };
+      // A doubles row naming only athlete 1 is one athlete waiting for the
+      // organizer to pair it, never a complete team of one.
+      const holdsOneAthlete =
+        countParticipantMembers(storedResponses, linkedUserIds.length) === 1;
+      const teamStatus = !(row.autoApprove && (row.isPaid ?? true))
+        ? 'PENDING_APPROVAL'
+        : isDoubles && holdsOneAthlete
+          ? 'PENDING_PARTNER'
+          : 'COMPLETE';
 
       const [participant] = await tx
         .insert(schema.tournamentParticipants)
@@ -2393,21 +2389,11 @@ export class TournamentImportRepository {
           teamStatus,
           partnerUserId: row.partnerUserId || null,
           seed: seedBase + index + 1,
-          customResponses: {
-            ...customResponses,
-            ...row.importMetadata,
-            ...(typeof row.elo === 'number' && Number.isFinite(row.elo)
-              ? { importedElo: row.elo }
-              : {}),
-          },
+          customResponses: storedResponses,
         })
         .returning();
 
-      for (const linkedUserId of new Set(
-        [row.registeredByUserId, row.partnerUserId].filter(
-          (value): value is string => Boolean(value),
-        ),
-      )) {
+      for (const linkedUserId of linkedUserIds) {
         const [rosterRow] = await tx
           .insert(schema.tournamentRosters)
           .values({

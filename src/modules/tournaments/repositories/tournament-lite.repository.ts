@@ -23,7 +23,6 @@ import {
   isLiteRegistrationTournament,
   isRegistrationFeePaid,
 } from '../utils/registration-payment-eligibility';
-import { normalizeProfileGender } from '../utils/profile-gender';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 import { TournamentRatingRepository } from './tournament-rating.repository';
 import {
@@ -265,16 +264,8 @@ export class TournamentLiteRepository {
       throw new BadRequestException('Participant 2 phải có đúng 1 thành viên');
     }
 
-    const [division] = p1.tournamentDivisionId
-      ? await tx
-          .select({
-            matchType: schema.tournamentDivisions.matchType,
-            genderRestriction: schema.tournamentDivisions.genderRestriction,
-          })
-          .from(schema.tournamentDivisions)
-          .where(eq(schema.tournamentDivisions.id, p1.tournamentDivisionId))
-          .limit(1)
-      : [null];
+    // Organizer pairing never checks gender: the organizer chose these two
+    // athletes for this division (owner decision 2026-10-16).
     const accountUserIds = [...p1Rosters, ...p2Rosters].map((r) => r.userId);
     const profileRows =
       accountUserIds.length > 0
@@ -282,7 +273,6 @@ export class TournamentLiteRepository {
             .select({
               userId: schema.profiles.userId,
               fullName: schema.profiles.fullName,
-              gender: schema.profiles.gender,
             })
             .from(schema.profiles)
             .where(inArray(schema.profiles.userId, accountUserIds))
@@ -296,7 +286,6 @@ export class TournamentLiteRepository {
         : member;
     const m1 = named(single1);
     const m2 = named(single2);
-    this.assertPairGender(division?.genderRestriction, m1, m2, profiles);
 
     // Verify the joining account does not already play in another active participant
     if (m2.kind === 'ACCOUNT') {
@@ -403,44 +392,6 @@ export class TournamentLiteRepository {
     );
 
     return updatedP1;
-  }
-  /**
-   * Division gender rule, checked only for athletes with an account. A guest
-   * has no profile; the organizer who added it to this division vouches for it
-   * (user decision 2026-10-16), so a mixed pair with a guest is accepted.
-   */
-  private assertPairGender(
-    genderRestriction: string | null | undefined,
-    m1: PairMember,
-    m2: PairMember,
-    profiles: ReadonlyMap<string, { gender: string | null }>,
-  ) {
-    const restriction = (genderRestriction || '').toUpperCase();
-    if (!['MALE', 'FEMALE', 'MIXED'].includes(restriction)) return;
-    const accounts = [m1, m2].filter(
-      (member): member is Extract<PairMember, { kind: 'ACCOUNT' }> =>
-        member.kind === 'ACCOUNT',
-    );
-    const genders = accounts.map((member) =>
-      normalizeProfileGender(profiles.get(member.userId)?.gender),
-    );
-    if (genders.some((gender) => !gender)) {
-      throw new BadRequestException(
-        'Cả hai VĐV cần cập nhật giới tính trong hồ sơ trước khi BTC ghép đôi.',
-      );
-    }
-    const mismatched =
-      (restriction === 'MALE' && genders.some((gender) => gender !== 'MALE')) ||
-      (restriction === 'FEMALE' &&
-        genders.some((gender) => gender !== 'FEMALE')) ||
-      (restriction === 'MIXED' &&
-        genders.length === 2 &&
-        genders[0] === genders[1]);
-    if (mismatched) {
-      throw new BadRequestException(
-        'Hai VĐV không phù hợp với giới hạn giới tính của nội dung thi đấu.',
-      );
-    }
   }
   async unpairParticipantInTx(
     tx: Transaction,

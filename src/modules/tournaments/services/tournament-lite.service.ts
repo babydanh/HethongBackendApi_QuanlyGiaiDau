@@ -29,6 +29,10 @@ import { CommunitySocialRepository } from '../../communities/community-social.re
 import * as schema from '../../../database/schema';
 import { mapTournamentFormat } from '../utils/tournament-presentation';
 import { validateMatchTypeAgainstCategory } from '../utils/tournament-input-policy';
+import {
+  resolveLiteDefaultDivision,
+  resolveLiteFormat,
+} from '../utils/lite-default-division';
 import { assertValidFootballTeamConfig } from '../utils/football-team-config';
 import { resolveEffectiveSportRules } from '../utils/sport-rules/resolve-effective-sport-rules';
 
@@ -199,7 +203,11 @@ export class TournamentLiteService {
     }
 
     // 2. Resolve matchType
-    const format = dto.format || 'singles';
+    const format = resolveLiteFormat({
+      sport,
+      requestedFormat: dto.format,
+      hasDivisions: Boolean(dto.divisions?.length),
+    });
     const matchType =
       format === 'mixed_doubles'
         ? 'MIXED_DOUBLES'
@@ -801,44 +809,14 @@ export class TournamentLiteService {
       ? dto.divisions
       : [
         {
-          name: isSuperLite
-            ? sport === 'football'
-              ? `Bóng đá ${footballTeamSize || 7} người`
-              : dto.format === 'singles'
-                ? 'Đánh Đơn'
-                : 'Đánh Đôi'
-            : sport === 'football'
-              ? dto.genderRestriction === 'FEMALE'
-                ? 'Đội nữ'
-                : dto.genderRestriction === 'MALE'
-                  ? 'Đội nam'
-                  : 'Không giới hạn'
-              : dto.format === 'singles'
-                ? dto.genderRestriction === 'FEMALE'
-                  ? 'Đơn Nữ'
-                  : 'Đơn Nam'
-                : dto.format === 'mixed_doubles' ||
-                  dto.genderRestriction === 'MIXED'
-                  ? 'Đôi Nam Nữ'
-                  : dto.genderRestriction === 'FEMALE'
-                    ? 'Đôi Nữ'
-                    : 'Đôi Nam',
-          // Football is a team-vs-team sport. The category contract uses
-          // SINGLES as the generic match type; it must never be persisted as
-          // a doubles or mixed-doubles division.
-          matchType:
-            sport === 'football'
-              ? MatchType.SINGLES
-              : dto.format === 'singles'
-                ? MatchType.SINGLES
-                : dto.format === 'mixed_doubles' ||
-                  dto.genderRestriction === 'MIXED'
-                  ? MatchType.MIXED_DOUBLES
-                  : MatchType.DOUBLES,
-          genderRestriction:
-            sport === 'football' && !dto.genderRestriction
-              ? undefined
-              : dto.genderRestriction,
+          ...resolveLiteDefaultDivision({
+            sport,
+            requestedFormat: dto.format,
+            genderRestriction: dto.genderRestriction,
+            hasDivisions: false,
+            isSuperLite,
+            footballTeamSize,
+          }),
           maxParticipants: maxTeams,
           bracketType: finalBracketType,
           startDate: startDateTime

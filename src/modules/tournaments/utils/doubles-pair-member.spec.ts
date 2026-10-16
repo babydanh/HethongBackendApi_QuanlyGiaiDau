@@ -23,6 +23,27 @@ describe('doubles pair members', () => {
     expect(countParticipantMembers(null, 2)).toBe(2);
   });
 
+  it('counts an organizer import by the athletes it names, whatever its rosters', () => {
+    expect(countParticipantMembers({ importedFrom: 'EXCEL', player1Name: 'A' }, 0)).toBe(1);
+    expect(
+      countParticipantMembers({ importedFrom: 'AI_EXCEL', player2Name: 'B' }, 0),
+    ).toBe(2);
+    expect(
+      countParticipantMembers({ importedFrom: 'GOOGLE_FORM', player2Email: 'b@x.test' }, 1),
+    ).toBe(2);
+    expect(countParticipantMembers({ importedFrom: 'MANUAL_EMAIL' }, 1)).toBe(1);
+    expect(countParticipantMembers({ importedFrom: 'EXCEL' }, 2)).toBe(2);
+  });
+
+  it('resolves an imported entry with an account but a named athlete 2 as no single athlete', () => {
+    expect(
+      resolveSingleMember(
+        { teamName: 'A / B', customResponses: { importedFrom: 'EXCEL', player2Name: 'B' } },
+        [{ userId: 'u1' }],
+      ),
+    ).toBeNull();
+  });
+
   it('resolves exactly one athlete: one roster, or a direct guest', () => {
     expect(
       resolveSingleMember(

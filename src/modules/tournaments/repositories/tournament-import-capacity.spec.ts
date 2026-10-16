@@ -882,6 +882,40 @@ describe('imported pair metadata survives caller-supplied form answers', () => {
   });
 });
 
+describe('doubles import row naming only athlete 1', () => {
+  it('waits for the organizer to pair it instead of becoming a team of one', async () => {
+    const harness = createHarness(divisionImportQueues({ entries: [] }));
+
+    await createRepository(harness.tx).importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [SOLO_ROSTER_ENTRY, PAIR],
+      'division-1',
+    );
+
+    const statuses = harness.inserts
+      .filter((insert) => insert.table === 'participants')
+      .map((insert) => insert.values.teamStatus);
+    expect(statuses).toEqual(['PENDING_PARTNER', 'COMPLETE']);
+  });
+
+  it('stays pending approval when the organizer did not approve it on import', async () => {
+    const harness = createHarness(divisionImportQueues({ entries: [] }));
+
+    await createRepository(harness.tx).importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [{ ...SOLO_ROSTER_ENTRY, autoApprove: false }],
+      'division-1',
+    );
+
+    expect(
+      harness.inserts.find((insert) => insert.table === 'participants')?.values
+        .teamStatus,
+    ).toBe('PENDING_APPROVAL');
+  });
+});
+
 describe('bulk singles import capacity', () => {
   function singlesImportQueues(): Record<string, Row[][]> {
     const tournament: Row = {
@@ -1679,47 +1713,36 @@ describe('TournamentImportRepository organizer add-athlete pairs flow', () => {
     expect(harness.inserts).toHaveLength(0);
   });
 
-  it('rejects a MIXED_DOUBLES pair whose genders are not mixed', async () => {
-    const userIds = ['user-1', 'user-2'];
-    const harness = createHarness(
-      addAthletePairsQueues({
-        userIds,
-        matchType: 'MIXED_DOUBLES',
-        genderRestriction: 'MIXED',
-        genders: ['MALE', 'MALE'],
-      }),
-    );
+  it.each([
+    ['two athletes of the same gender', ['MALE', 'MALE']],
+    ['an athlete with no gender on file', ['MALE', null]],
+  ] as const)(
+    'creates a MIXED_DOUBLES pair from %s: organizer pairing never checks gender',
+    async (_label, genders) => {
+      const userIds = ['user-1', 'user-2'];
+      const harness = createHarness(
+        addAthletePairsQueues({
+          userIds,
+          matchType: 'MIXED_DOUBLES',
+          genderRestriction: 'MIXED',
+          genders: [...genders],
+        }),
+      );
 
-    await expect(
-      createPairsRepository(harness.tx).addAthletePairs(
+      const result = await createPairsRepository(harness.tx).addAthletePairs(
         'tournament-1',
         'organizer-1',
         pairsDto(userIds),
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(harness.inserts).toHaveLength(0);
-  });
+      );
 
-  it('rejects a MIXED_DOUBLES pair when one athlete has no gender on file', async () => {
-    const userIds = ['user-1', 'user-2'];
-    const harness = createHarness(
-      addAthletePairsQueues({
-        userIds,
-        matchType: 'MIXED_DOUBLES',
-        genderRestriction: 'MIXED',
-        genders: ['MALE', null],
-      }),
-    );
-
-    await expect(
-      createPairsRepository(harness.tx).addAthletePairs(
-        'tournament-1',
-        'organizer-1',
-        pairsDto(userIds),
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(harness.inserts).toHaveLength(0);
-  });
+      expect(result.pairs).toEqual([
+        expect.objectContaining({
+          teamStatus: 'COMPLETE',
+          userIds: ['user-1', 'user-2'],
+        }),
+      ]);
+    },
+  );
 
   it('rejects the whole batch when a later athlete already has an active roster', async () => {
     const userIds = ['user-1', 'user-2', 'user-3', 'user-4'];

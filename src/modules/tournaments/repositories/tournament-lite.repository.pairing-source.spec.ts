@@ -156,7 +156,6 @@ const doublesTournament = {
   tournamentConfig: { isLite: true },
   matchType: 'DOUBLES',
 };
-const division = { matchType: 'DOUBLES', genderRestriction: null };
 
 function manualPairSelects(
   p1: ReturnType<typeof participant>,
@@ -170,8 +169,7 @@ function manualPairSelects(
     [p2],
     [roster('r1', p1.id, 'athlete-1')],
     [roster('r2', p2.id, 'athlete-2')],
-    [division],
-    [], // genders are irrelevant without a restriction
+    [], // account names
     [], // no duplicate roster membership
     [{ tournamentConfig: { isLite: true } }],
   ];
@@ -216,7 +214,6 @@ describe('TournamentLiteRepository pairing source', () => {
         [p2],
         [roster('r1', p1.id, 'athlete-1')],
         [roster('r2', p2.id, 'athlete-2')],
-        [division],
         [
           { userId: 'athlete-1', gender: null },
           { userId: 'athlete-2', gender: null },
@@ -331,11 +328,8 @@ describe('TournamentLiteRepository guest athletes', () => {
   });
   const accountSide = () => ({ ...participant('acct'), customResponses: null });
 
-  function guestPairSelects(
-    genderRestriction: string | null,
-    gender: string | null,
-  ) {
-    const p1 = guestSide();
+  function guestPairSelects(guest = guestSide()) {
+    const p1 = guest;
     const p2 = accountSide();
     return {
       p1,
@@ -348,8 +342,7 @@ describe('TournamentLiteRepository guest athletes', () => {
         [p2],
         [], // a guest has no roster
         [roster('r2', p2.id, 'athlete-2')],
-        [{ matchType: 'DOUBLES', genderRestriction }],
-        [{ userId: 'athlete-2', fullName: 'An', gender }],
+        [{ userId: 'athlete-2', fullName: 'An' }],
         [], // no duplicate roster membership
         [{ tournamentConfig: { isLite: true } }],
       ],
@@ -357,7 +350,7 @@ describe('TournamentLiteRepository guest athletes', () => {
   }
 
   it('pairs a guest with an account and names both athletes on the pair', async () => {
-    const { p1, p2, selects } = guestPairSelects(null, null);
+    const { p1, p2, selects } = guestPairSelects();
     const state = makeRepository(selects, [p1 as never, p2 as never]);
 
     await state.repository.lockTournamentAndPair(
@@ -388,46 +381,47 @@ describe('TournamentLiteRepository guest athletes', () => {
     });
   });
 
-  it('checks the gender rule only for the athlete with an account', async () => {
-    const mixed = guestPairSelects('MIXED', 'MALE');
-    const accepted = makeRepository(mixed.selects, [
-      mixed.p1 as never,
-      mixed.p2 as never,
-    ]);
-    await expect(
-      accepted.repository.lockTournamentAndPair(
-        'tournament-1',
-        'a-guest',
-        'acct',
-        'organizer-1',
-        'APPROVAL',
-        'x',
-      ),
-    ).resolves.toBeDefined();
-
-    const women = guestPairSelects('FEMALE', 'MALE');
-    const rejected = makeRepository(women.selects, [
-      women.p1 as never,
-      women.p2 as never,
-    ]);
-    await expect(
-      rejected.repository.lockTournamentAndPair(
-        'tournament-1',
-        'a-guest',
-        'acct',
-        'organizer-1',
-        'APPROVAL',
-        'x',
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('rejects a no-roster side that is not a direct guest', async () => {
-    const { p2, selects } = guestPairSelects(null, null);
+  it('pairs an athlete the organizer imported from Excel without athlete 2 like a guest', async () => {
     const imported = {
       ...guestSide(),
-      customResponses: { importedFrom: 'ROSTER_IMPORT' },
+      teamName: 'Khách Excel',
+      customResponses: {
+        importedFrom: 'EXCEL',
+        player1Name: 'Khách Excel',
+        player1Email: 'excel@example.test',
+      },
     };
+    const { p1, p2, selects } = guestPairSelects(imported);
+    const state = makeRepository(selects, [p1 as never, p2 as never]);
+
+    await state.repository.lockTournamentAndPair(
+      'tournament-1',
+      p1.id,
+      p2.id,
+      'organizer-1',
+      'APPROVAL',
+      'Khách Excel / An',
+    );
+
+    expect(state.updates).toContainEqual({
+      table: schema.tournamentParticipants,
+      values: expect.objectContaining({
+        teamStatus: 'COMPLETE',
+        customResponses: expect.objectContaining({
+          player1Name: 'Khách Excel',
+          player1UserId: null,
+          player2UserId: 'athlete-2',
+        }),
+      }),
+    });
+  });
+
+  it.each([
+    ['an unknown source', { importedFrom: 'ROSTER_IMPORT' }],
+    ['an import that already names athlete 2', { importedFrom: 'EXCEL', player2Name: 'B' }],
+  ])('rejects a no-roster side from %s', async (_label, customResponses) => {
+    const { p2, selects } = guestPairSelects();
+    const imported = { ...guestSide(), customResponses };
     selects[3] = [imported];
     const state = makeRepository(selects, [imported as never, p2 as never]);
 
