@@ -7,3 +7,4 @@
 - [x] 1.3 Nhập Excel nội dung đôi: dòng chỉ có VĐV 1 duyệt luôn thì `PENDING_PARTNER`; xong khi test repository nhập roster pass
 - [x] 1.4 Tạo giải nhanh không có nội dung và không chỉ định thể thức tạo "Đôi Linh Hoạt" (`DOUBLES`, không giới hạn giới tính); xong khi test tạo giải lite pass
 - [x] 1.5 `npx jest src/modules/tournaments` và `tsc -p tsconfig.build.json` pass (16/10: jest tournaments 624/624, tsc sạch)
+- [x] 1.6 Generator và danh sách xếp hạt giống chỉ nhận VĐV ảo `COMPLETE` (`bracket-generator.service.ts`, `findParticipantsForSeeding`); xong khi e2e Web `btc-doubles-pairing-bracket.spec.ts` xanh trên nhánh này (16/10: run 38895877837 xanh; Backend main đỏ cả 2 ca, run 38895877387)

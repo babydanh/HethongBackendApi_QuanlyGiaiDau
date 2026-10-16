@@ -74,3 +74,12 @@ Creating a quick tournament for a non-football sport with no divisions and no ex
 
 - **WHEN** the request sets `format` `singles`
 - **THEN** the default division is a singles division as before
+
+### Requirement: Sơ đồ chỉ xếp đội hoàn chỉnh
+
+Bracket generation and seeding SHALL seat only `COMPLETE` participants; a virtual athlete SHALL skip the payment rule but not the team rule.
+
+#### Scenario: VĐV ảo đã ghép vào cặp
+
+- **WHEN** four virtual athletes waiting for a partner in a doubles division are paired into two pairs and the bracket is generated
+- **THEN** the bracket has one match seating the two pairs, not the withdrawn virtual rows
