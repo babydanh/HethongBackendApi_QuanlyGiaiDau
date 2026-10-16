@@ -1002,16 +1002,35 @@ export class LivestreamService {
     });
   }
 
+  /**
+   * "Thu hồi key" KHÔNG xoá key trên AQP: tài khoản đại lý giới hạn 10 key, chủ dự án chốt 16/10
+   * giữ key để dùng lại. Đổi mã (rotate) để mã cũ hết hiệu lực, giữ key gắn với camera; lần sau
+   * bấm cấp key thì dùng lại chính key này. Xoá camera vẫn xoá key (`deleteCamera`).
+   */
   async revokeCameraAqpStreamKey(cameraId: string, user: JwtPayload) {
     const camera = await this.getPushCamera(cameraId, user);
     const streamKeyId = camera.aqpStreamKeyId;
     if (!streamKeyId) {
-      return { cameraId: camera.id, keyRevoked: false, disconnected: true };
+      return { cameraId: camera.id, keyRevoked: false, keptForReuse: false };
     }
 
     return this.runWithAqpCameraLock(camera.id, async (lease) => {
-      const result = await this.revokeAqpProviderStreamKey(streamKeyId, lease);
-      return { cameraId: camera.id, ...result };
+      this.assertAqpLeaseOwned(lease);
+      let rotated: AqvisionAgencyStreamKey;
+      try {
+        rotated = await this.aqvisionAgencyApiClient.rotateStreamKey(streamKeyId);
+      } catch (error) {
+        if (error instanceof AqvisionAgencyApiException && error.httpStatus === 404) {
+          // AQP không còn key này: không còn gì để giữ, bỏ liên kết.
+          await this.saveAqpStreamKeyId(camera.id, null, lease);
+          return { cameraId: camera.id, keyRevoked: true, keptForReuse: false };
+        }
+        throw this.toAqpServiceUnavailable(error);
+      }
+      this.assertAqpLeaseOwned(lease);
+      this.assertAqpCameraKeyMatches(camera.streamName, rotated);
+      await this.saveAqpStreamKeyId(camera.id, rotated.id, lease);
+      return { cameraId: camera.id, keyRevoked: true, keptForReuse: true };
     });
   }
 
@@ -2028,19 +2047,20 @@ export class LivestreamService {
     // playbackUrl, nếu không thì khán giả sẽ thấy video dù BTC chưa bấm "Bắt đầu" — đúng
     // triệu chứng "có URL nhưng màn hình đen/ảo" khó chẩn đoán.
     //
-    // Ngoại lệ duy nhất: trận ĐÃ kết thúc (COMPLETED) mà BTC bấm "Bắt đầu" lại. LIVE chỉ
-    // được ghi khi BTC bấm Bắt đầu (xếp lịch ghi IDLE), nên nó là hành động chủ động, không
-    // phải "chỉ có URL". Trận bị hủy hoặc chưa bắt đầu vẫn không có hình dù luồng ghi LIVE.
+    // Ngoại lệ: BTC đã bấm "Bắt đầu" (luồng ghi LIVE) thì phát luôn, kể cả trận chưa bắt đầu
+    // (khởi động trước giờ thi đấu) hoặc đã kết thúc (bấm lại). LIVE chỉ được ghi khi BTC bấm
+    // Bắt đầu (xếp lịch ghi IDLE), nên nó là hành động chủ động, không phải "chỉ có URL".
+    // Trận bị hủy thì không có hình dù luồng ghi LIVE.
     //
     // Trạng thái trận một mình không đủ để tắt hình: nếu BTC đã bấm Dừng (OFFLINE)
     // thì dừng phải thắng, kể cả khi trận vẫn ONGOING. Không có điều kiện này, nút
     // Dừng không có tác dụng gì với trận dùng camera sân.
     const isStoppedByOperator = stream?.streamStatus === 'OFFLINE';
-    const restartedAfterCompletion =
-      match.status === 'COMPLETED' && stream?.streamStatus === 'LIVE';
+    const startedByOperator =
+      stream?.streamStatus === 'LIVE' && match.status !== 'CANCELLED';
     if (
       courtCamera?.playbackUrl &&
-      (match.status === 'ONGOING' || restartedAfterCompletion) &&
+      (match.status === 'ONGOING' || startedByOperator) &&
       !isStoppedByOperator
     ) {
       const courtUrl = this.normalizePublicPlaybackUrl(courtCamera.playbackUrl);

@@ -66,18 +66,30 @@ describe('LivestreamService.getMatchPlayback on the court camera path', () => {
     });
   });
 
-  // The rule is only "a finished match the organiser started again". A LIVE flag must not
-  // open the court camera for a match that was cancelled or has not begun.
-  it.each(['CANCELLED', 'SCHEDULED'] as const)(
-    'a %s match has no live video even when its stream row says LIVE',
-    async (status) => {
-      const { service } = makeService(status, 'LIVE');
+  it('a match that has not begun shows the live video once the organiser pressed Start', async () => {
+    const { service } = makeService('SCHEDULED', 'LIVE');
 
-      await expect(service.getMatchPlayback('match-1')).resolves.toMatchObject({
-        playbackUrl: null,
-      });
-    },
-  );
+    await expect(service.getMatchPlayback('match-1')).resolves.toMatchObject({
+      streamStatus: 'LIVE',
+      playbackUrl: COURT_URL,
+    });
+  });
+
+  it('a match that has not begun and was only scheduled on a court has no live video', async () => {
+    const { service } = makeService('SCHEDULED', 'IDLE');
+
+    await expect(service.getMatchPlayback('match-1')).resolves.toMatchObject({
+      playbackUrl: null,
+    });
+  });
+
+  it('a cancelled match has no live video even when its stream row says LIVE', async () => {
+    const { service } = makeService('CANCELLED', 'LIVE');
+
+    await expect(service.getMatchPlayback('match-1')).resolves.toMatchObject({
+      playbackUrl: null,
+    });
+  });
 
   it('Stop wins on a finished match: an OFFLINE stream hides the video', async () => {
     const { service } = makeService('COMPLETED', 'OFFLINE');

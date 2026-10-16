@@ -404,26 +404,43 @@ describe('LivestreamService AQP stream-key lifecycle', () => {
     expect(result.qrPayload?.stream_url).toContain('key=new-secret');
   });
 
-  it('retries only the vendor-confirmed revoked-but-not-disconnected DELETE outcome', async () => {
+  it('revoking keeps the provider key for reuse: rotates it instead of deleting it', async () => {
     const linkedCamera = { ...camera, aqpStreamKeyId: activeKey.id };
-    const deleteStreamKey = jest
-      .fn()
-      .mockResolvedValueOnce({ keyRevoked: true, disconnected: false })
-      .mockResolvedValueOnce({ keyRevoked: true, disconnected: true });
+    const rotated = { ...activeKey, push: { ...activeKey.push, streamKey: 'new-secret' } };
     const { service, repository, agencyClient } = makeService({
       camera: linkedCamera,
-      agency: { deleteStreamKey },
+      agency: { rotateStreamKey: jest.fn().mockResolvedValue(rotated) },
     });
 
     await expect(service.revokeCameraAqpStreamKey('camera-1', owner)).resolves.toEqual({
       cameraId: 'camera-1',
       keyRevoked: true,
-      disconnected: true,
+      keptForReuse: true,
     });
 
-    expect(deleteStreamKey).toHaveBeenCalledTimes(2);
-    expect(repository.setAqpStreamKeyId).not.toHaveBeenCalled();
-    expect(agencyClient.rotateStreamKey).not.toHaveBeenCalled();
+    expect(agencyClient.rotateStreamKey).toHaveBeenCalledWith(activeKey.id);
+    expect(agencyClient.deleteStreamKey).not.toHaveBeenCalled();
+    expect(agencyClient.createStreamKey).not.toHaveBeenCalled();
+    expect(repository.setAqpStreamKeyId).not.toHaveBeenCalledWith('camera-1', null);
+  });
+
+  it('revoking a key AQP no longer has unlinks it without creating a new one', async () => {
+    const linkedCamera = { ...camera, aqpStreamKeyId: activeKey.id };
+    const { service, repository, agencyClient } = makeService({
+      camera: linkedCamera,
+      agency: {
+        rotateStreamKey: jest.fn().mockRejectedValue(new AqvisionAgencyApiException('gone', 404)),
+      },
+    });
+
+    await expect(service.revokeCameraAqpStreamKey('camera-1', owner)).resolves.toEqual({
+      cameraId: 'camera-1',
+      keyRevoked: true,
+      keptForReuse: false,
+    });
+    expect(repository.setAqpStreamKeyId).toHaveBeenCalledWith('camera-1', null);
+    expect(agencyClient.deleteStreamKey).not.toHaveBeenCalled();
+    expect(agencyClient.createStreamKey).not.toHaveBeenCalled();
   });
   it('revokes and disconnects the provider key before archiving its camera', async () => {
     const linkedCamera = { ...camera, aqpStreamKeyId: activeKey.id };
@@ -459,12 +476,12 @@ describe('LivestreamService AQP stream-key lifecycle', () => {
   });
 
 
-  it('keeps the local link when AQP cannot confirm publisher disconnection', async () => {
+  it('revoking surfaces a provider failure and keeps the local link', async () => {
     const linkedCamera = { ...camera, aqpStreamKeyId: activeKey.id };
     const { service, repository } = makeService({
       camera: linkedCamera,
       agency: {
-        deleteStreamKey: jest.fn().mockResolvedValue({ keyRevoked: true, disconnected: false }),
+        rotateStreamKey: jest.fn().mockRejectedValue(new AqvisionAgencyApiException('down', 503)),
       },
     });
 
