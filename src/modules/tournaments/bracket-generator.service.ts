@@ -25,6 +25,18 @@ import {
 import { sortFootballStandings } from './utils/football-standings';
 import { resolveFootballTeamConfig } from './utils/football-team-config';
 
+/**
+ * A virtual athlete skips the payment rule, never the team rule: a doubles mock
+ * still waiting for a partner, or withdrawn into the pair it joined, is not a
+ * team and must not get a bracket slot.
+ */
+function completeMockParticipant() {
+  return and(
+    eq(schema.tournamentParticipants.isMock, true),
+    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
+  );
+}
+
 @Injectable()
 export class BracketGeneratorService {
   constructor(
@@ -78,14 +90,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   eligibleParticipantStatus,
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   eligibleParticipantStatus,
                 ),
               ),
@@ -311,14 +323,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   eligibleParticipantStatus,
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   eligibleParticipantStatus,
                 ),
               ),
@@ -741,14 +753,14 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   eligibleParticipantStatus,
                 ),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   eligibleParticipantStatus,
                 ),
               ),
@@ -1155,7 +1167,7 @@ export class BracketGeneratorService {
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   and(
                     eligibleParticipantStatus,
                     or(
@@ -1168,7 +1180,7 @@ export class BracketGeneratorService {
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 or(
-                  eq(schema.tournamentParticipants.isMock, true),
+                  completeMockParticipant(),
                   and(
                     eligibleParticipantStatus,
                     or(
