@@ -21,5 +21,13 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  "include": [
+    "src/**/*" // Dòng này ÉP VS Code và TS Server chỉ quét và phân tích lỗi bên trong folder src/
+  ],
+  "exclude": [
+    "node_modules", // Bỏ qua thư mục thư viện để tăng tốc độ analyze
+    "dist", // Bỏ qua thư mục đầu ra của bạn
+    "**/*.spec.ts" // (Tùy chọn) Bỏ qua các file test nếu bạn không muốn hiện lỗi test bừa bãi
+  ]
 }

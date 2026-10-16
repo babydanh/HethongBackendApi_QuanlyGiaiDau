@@ -46,6 +46,21 @@ type CleanupTournament = (
   systemRoles: string[],
 ) => Promise<unknown>;
 
+export const hasDeferredDivisionSetup = (
+  divisions: readonly unknown[] | undefined,
+): boolean => divisions !== undefined && divisions.length === 0;
+
+export const resolveLiteCreateStatus = (
+  deferredDivisionSetup: boolean,
+  requestedPublic: boolean,
+  isAdmin: boolean,
+  registrationStartsInFuture: boolean,
+): 'DRAFT' | 'PENDING_APPROVAL' | 'UPCOMING' | 'REGISTRATION_OPEN' => {
+  if (deferredDivisionSetup) return 'DRAFT';
+  if (requestedPublic && !isAdmin) return 'PENDING_APPROVAL';
+  return registrationStartsInFuture ? 'UPCOMING' : 'REGISTRATION_OPEN';
+};
+
 @Injectable()
 export class TournamentLiteService {
   private readonly logger = new Logger(TournamentLiteService.name);
@@ -258,7 +273,9 @@ export class TournamentLiteService {
       },
     };
     const sportRuleDefaults = litePreset.sportRules as Record<string, unknown>;
+    const deferredDivisionSetup = hasDeferredDivisionSetup(dto.divisions);
     const isSuperLite =
+      !deferredDivisionSetup &&
       !Boolean(dto.divisions?.length) &&
       !Boolean(
         dto.divisions?.some(
@@ -794,10 +811,9 @@ export class TournamentLiteService {
     const record = await this.tournamentsRepository.create(userId, fullDto);
 
     // 9b. Tự động tạo các nội dung thi đấu (divisions) tương ứng cho giải Lite
-    // Lite creates one safe default division. Additional divisions are
-    // materialized explicitly by the typed frontend division API, so wizard
-    // fields such as selectedFormats never cross this API boundary.
-    const formatsToCreate = dto.divisions?.length
+    // Legacy callers that omit divisions keep one safe default. Explicit
+    // division arrays are materialized as-is, including an intentional [].
+    const formatsToCreate = dto.divisions !== undefined
       ? dto.divisions
       : [
           {
@@ -942,18 +958,18 @@ export class TournamentLiteService {
     // Public tournaments still wait for admin approval first.
     const registrationStartsInFuture =
       registrationStartDate.getTime() > Date.now();
-    const initialStatus =
-      requestedPublic && !isAdmin
-        ? 'PENDING_APPROVAL'
-        : registrationStartsInFuture
-          ? 'UPCOMING'
-          : 'REGISTRATION_OPEN';
+    const initialStatus = resolveLiteCreateStatus(
+      deferredDivisionSetup,
+      requestedPublic,
+      isAdmin,
+      registrationStartsInFuture,
+    );
     const updated = await this.tournamentsRepository.update(record.id, userId, {
       status: initialStatus,
     });
 
     // Auto-post to Community Feed
-    if (fullDto.communityId && (!requestedPublic || isAdmin)) {
+    if (!deferredDivisionSetup && fullDto.communityId && (!requestedPublic || isAdmin)) {
       try {
         const post = await this.communitySocialRepository.createTournamentPost(
           fullDto.communityId,
