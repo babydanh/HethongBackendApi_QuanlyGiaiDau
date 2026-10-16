@@ -23,6 +23,7 @@ import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import type { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
 import { isLiteRegistrationTournament } from '../utils/registration-payment-eligibility';
 import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
+import { countParticipantMembers } from '../utils/doubles-pair-member';
 import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
 import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
 
@@ -125,7 +126,11 @@ export class TournamentParticipantAdminService {
       );
     }
 
-    const isAuthorized = await this.tournamentAccessService.isManager(tournament, userId, systemRoles);
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền tạo dữ liệu ảo');
     }
@@ -165,7 +170,11 @@ export class TournamentParticipantAdminService {
       );
     }
 
-    const isAuthorized = await this.tournamentAccessService.isManager(tournament, userId, systemRoles);
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền xóa dữ liệu ảo');
     }
@@ -204,7 +213,11 @@ export class TournamentParticipantAdminService {
       );
     }
 
-    const isAuthorized = await this.tournamentAccessService.isManager(tournament, userId, systemRoles);
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền xóa người tham gia ảo');
     }
@@ -236,7 +249,11 @@ export class TournamentParticipantAdminService {
       );
     }
 
-    const isAuthorized = await this.tournamentAccessService.isManager(tournament, userId, systemRoles);
+    const isAuthorized = await this.tournamentAccessService.isManager(
+      tournament,
+      userId,
+      systemRoles,
+    );
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền cập nhật trạng thái');
     }
@@ -277,9 +294,11 @@ export class TournamentParticipantAdminService {
       nextStatus = resolveDoublesParticipantStatus({
         event: 'APPROVE',
         registrationMode: tournamentConfig.registrationMode,
-        isDoubles:
-          matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES',
-        rosterCount: participantRosters.length,
+        isDoubles: matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES',
+        rosterCount: countParticipantMembers(
+          participant.customResponses,
+          participantRosters.length,
+        ),
         isLite: isLiteRegistrationTournament(tournamentConfig),
         pairingMode:
           tournamentConfig.doublesPairingMode === 'SELF' ? 'SELF' : 'ORGANIZER',
@@ -293,7 +312,9 @@ export class TournamentParticipantAdminService {
               participant.id,
             );
           if (completedPayment) {
-            await this.tournamentsRepository.markParticipantPaid(participant.id);
+            await this.tournamentsRepository.markParticipantPaid(
+              participant.id,
+            );
             participant.isPaid = true;
           }
         }
@@ -515,7 +536,8 @@ export class TournamentParticipantAdminService {
 
       // Report what this call actually did: a payment that already carried a
       // refund state did not get a new request out of it.
-      const refundRequested = completedPayment !== null && !completedPayment.refundStatus;
+      const refundRequested =
+        completedPayment !== null && !completedPayment.refundStatus;
       return {
         participant: updatedParticipant,
         refundRequested,
@@ -595,7 +617,11 @@ export class TournamentParticipantAdminService {
     systemRoles: string[],
     broadcastRegistrationChanged: (
       tournamentId: string,
-      payload: { participantId: string; divisionId?: string | null; action: string },
+      payload: {
+        participantId: string;
+        divisionId?: string | null;
+        action: string;
+      },
     ) => void,
   ) {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
@@ -607,7 +633,9 @@ export class TournamentParticipantAdminService {
       systemRoles,
     );
     if (!isAuthorized) {
-      throw new ForbiddenException('Bạn không có quyền đánh dấu người tham gia có mặt');
+      throw new ForbiddenException(
+        'Bạn không có quyền đánh dấu người tham gia có mặt',
+      );
     }
 
     const participant =

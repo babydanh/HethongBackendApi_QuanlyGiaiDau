@@ -34,8 +34,8 @@ describe('TournamentParticipantAdminService', () => {
   const accessMock = { isManager: jest.fn() };
   const tx = {};
   const dbMock = {
-    transaction: jest.fn(
-      (cb: (arg: unknown) => unknown) => Promise.resolve(cb(tx)),
+    transaction: jest.fn((cb: (arg: unknown) => unknown) =>
+      Promise.resolve(cb(tx)),
     ),
   };
   const auditMock = { logUpdate: jest.fn().mockResolvedValue(undefined) };
@@ -183,7 +183,9 @@ describe('TournamentParticipantAdminService', () => {
       'PENDING_PARTNER',
       'PENDING_APPROVAL',
     );
-    expect(repositoryMock.findCompletedParticipantPayment).not.toHaveBeenCalled();
+    expect(
+      repositoryMock.findCompletedParticipantPayment,
+    ).not.toHaveBeenCalled();
     expect(repositoryMock.assignNextAvailableSeed).not.toHaveBeenCalled();
     expect(broadcast).toHaveBeenCalledWith('tournament-1', {
       participantId: 'participant-1',
@@ -259,7 +261,7 @@ describe('TournamentParticipantAdminService', () => {
     expect(notificationsMock.sendNotification).not.toHaveBeenCalled();
   });
 
-  it('does not gate non-approval doubles when processing an old approval row', async () => {
+  it('sends an approved direct guest in a doubles division to the pairing queue, in any mode', async () => {
     const tournament = {
       id: 'tournament-1',
       status: 'REGISTRATION_OPEN',
@@ -268,6 +270,7 @@ describe('TournamentParticipantAdminService', () => {
       matchType: 'DOUBLES',
       tournamentConfig: { registrationMode: 'OPEN' },
     };
+    // addDirectAthlete: a guest has no roster row, only its name on the participant.
     const participant = {
       id: 'participant-1',
       tournamentId: 'tournament-1',
@@ -275,17 +278,16 @@ describe('TournamentParticipantAdminService', () => {
       teamStatus: 'PENDING_APPROVAL',
       isPaid: true,
       entryFeeAtRegistration: 0,
+      customResponses: { importedFrom: 'ORGANIZER_DIRECT' },
     };
     repositoryMock.findById.mockResolvedValue(tournament);
     accessMock.isManager.mockResolvedValue(true);
     repositoryMock.findParticipantById.mockResolvedValue(participant);
     repositoryMock.findDivisionById.mockResolvedValue({ matchType: 'DOUBLES' });
-    repositoryMock.getParticipantRosters.mockResolvedValue([
-      { userId: 'player-1', role: 'MAIN' },
-    ]);
+    repositoryMock.getParticipantRosters.mockResolvedValue([]);
     repositoryMock.updateParticipantStatus.mockResolvedValue({
       ...participant,
-      teamStatus: 'COMPLETE',
+      teamStatus: 'PENDING_PARTNER',
     });
     repositoryMock.assignNextAvailableSeed.mockResolvedValue(null);
 
@@ -300,13 +302,10 @@ describe('TournamentParticipantAdminService', () => {
 
     expect(repositoryMock.updateParticipantStatus).toHaveBeenCalledWith(
       'participant-1',
-      'COMPLETE',
+      'PENDING_PARTNER',
       'PENDING_APPROVAL',
     );
-    expect(repositoryMock.assignNextAvailableSeed).toHaveBeenCalledWith(
-      'tournament-1',
-      'participant-1',
-    );
+    expect(repositoryMock.assignNextAvailableSeed).not.toHaveBeenCalled();
   });
   it('still requires payment before approving a complete doubles roster', async () => {
     const tournament = {
@@ -524,14 +523,16 @@ describe('TournamentParticipantAdminService', () => {
       repositoryMock.findById.mockResolvedValue(tournament);
       accessMock.isManager.mockResolvedValue(true);
       repositoryMock.findParticipantById.mockResolvedValue(updated);
-      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue({
-        id: 'payment-1',
-        amount: '500.00',
-        platformFeeAmount: '15.00',
-        refundedAmount: '0.00',
-        refundStatus: null,
-        refundableAmount: '500.00',
-      });
+      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue(
+        {
+          id: 'payment-1',
+          amount: '500.00',
+          platformFeeAmount: '15.00',
+          refundedAmount: '0.00',
+          refundStatus: null,
+          refundableAmount: '500.00',
+        },
+      );
       paymentRepositoryMock.setParticipantPaidInTx.mockResolvedValue({
         ...baseParticipant,
       });
@@ -610,14 +611,16 @@ describe('TournamentParticipantAdminService', () => {
         ...baseParticipant,
         isPaid: true,
       });
-      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue({
-        id: 'payment-1',
-        amount: '500.00',
-        platformFeeAmount: '15.00',
-        refundedAmount: '0.00',
-        refundStatus: 'PENDING_REFUND',
-        refundableAmount: '500.00',
-      });
+      paymentRepositoryMock.findCompletedParticipantPaymentInTx.mockResolvedValue(
+        {
+          id: 'payment-1',
+          amount: '500.00',
+          platformFeeAmount: '15.00',
+          refundedAmount: '0.00',
+          refundStatus: 'PENDING_REFUND',
+          refundableAmount: '500.00',
+        },
+      );
       paymentRepositoryMock.setParticipantPaidInTx.mockResolvedValue(cleared);
 
       const result = await admin.setParticipantFeePaid(
@@ -661,7 +664,9 @@ describe('TournamentParticipantAdminService', () => {
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(dbMock.transaction).not.toHaveBeenCalled();
-      expect(paymentRepositoryMock.setParticipantPaidInTx).not.toHaveBeenCalled();
+      expect(
+        paymentRepositoryMock.setParticipantPaidInTx,
+      ).not.toHaveBeenCalled();
     });
 
     it('still allows unmarking after the event, because refunds happen late', async () => {
@@ -774,7 +779,12 @@ describe('TournamentParticipantAdminService', () => {
 
     it('previews while registration is closed and the bracket does not exist yet', async () => {
       await expect(
-        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+        admin.previewRosterImport(
+          'tournament-1',
+          'organizer-1',
+          [],
+          previewDto,
+        ),
       ).resolves.toEqual(previewResult);
 
       expect(repositoryMock.previewRosterImport).toHaveBeenCalledWith(
@@ -789,7 +799,12 @@ describe('TournamentParticipantAdminService', () => {
       });
 
       await expect(
-        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+        admin.previewRosterImport(
+          'tournament-1',
+          'organizer-1',
+          [],
+          previewDto,
+        ),
       ).resolves.toEqual(previewResult);
 
       expect(repositoryMock.previewRosterImport).toHaveBeenCalledWith(
@@ -802,7 +817,12 @@ describe('TournamentParticipantAdminService', () => {
       repositoryMock.hasStartedMatch.mockResolvedValue(true);
 
       await expect(
-        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+        admin.previewRosterImport(
+          'tournament-1',
+          'organizer-1',
+          [],
+          previewDto,
+        ),
       ).resolves.toEqual(previewResult);
 
       // The started-match and bracket reads are gone from the import path altogether.
@@ -851,7 +871,12 @@ describe('TournamentParticipantAdminService', () => {
       });
 
       await expect(
-        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+        admin.previewRosterImport(
+          'tournament-1',
+          'organizer-1',
+          [],
+          previewDto,
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
 
       expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
@@ -861,7 +886,12 @@ describe('TournamentParticipantAdminService', () => {
       accessMock.isManager.mockResolvedValue(false);
 
       await expect(
-        admin.previewRosterImport('tournament-1', 'organizer-1', [], previewDto),
+        admin.previewRosterImport(
+          'tournament-1',
+          'organizer-1',
+          [],
+          previewDto,
+        ),
       ).rejects.toBeInstanceOf(ForbiddenException);
 
       expect(repositoryMock.previewRosterImport).not.toHaveBeenCalled();
@@ -898,5 +928,4 @@ describe('TournamentParticipantAdminService', () => {
       expect(repositoryMock.previewRosterImportBatch).not.toHaveBeenCalled();
     });
   });
-
 });

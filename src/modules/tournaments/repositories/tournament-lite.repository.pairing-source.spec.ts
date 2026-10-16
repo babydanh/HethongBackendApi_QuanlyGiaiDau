@@ -318,3 +318,174 @@ describe('TournamentLiteRepository pairing source', () => {
     });
   });
 });
+
+describe('TournamentLiteRepository guest athletes', () => {
+  const guestSide = () => ({
+    ...participant('a-guest'),
+    teamName: 'Khách A',
+    registeredBy: 'organizer-1',
+    customResponses: {
+      importedFrom: 'ORGANIZER_DIRECT',
+      player1Email: 'a@example.test',
+    },
+  });
+  const accountSide = () => ({ ...participant('acct'), customResponses: null });
+
+  function guestPairSelects(
+    genderRestriction: string | null,
+    gender: string | null,
+  ) {
+    const p1 = guestSide();
+    const p2 = accountSide();
+    return {
+      p1,
+      p2,
+      selects: [
+        [doublesTournament],
+        [{ count: 0 }],
+        [], // lockCapacityOwner
+        [p1],
+        [p2],
+        [], // a guest has no roster
+        [roster('r2', p2.id, 'athlete-2')],
+        [{ matchType: 'DOUBLES', genderRestriction }],
+        [{ userId: 'athlete-2', fullName: 'An', gender }],
+        [], // no duplicate roster membership
+        [{ tournamentConfig: { isLite: true } }],
+      ],
+    };
+  }
+
+  it('pairs a guest with an account and names both athletes on the pair', async () => {
+    const { p1, p2, selects } = guestPairSelects(null, null);
+    const state = makeRepository(selects, [p1 as never, p2 as never]);
+
+    await state.repository.lockTournamentAndPair(
+      'tournament-1',
+      p1.id,
+      p2.id,
+      'organizer-1',
+      'APPROVAL',
+      'Khách A / An',
+    );
+
+    expect(state.updates).toContainEqual({
+      table: schema.tournamentRosters,
+      values: { participantId: p1.id },
+    });
+    expect(state.updates).toContainEqual({
+      table: schema.tournamentParticipants,
+      values: expect.objectContaining({
+        teamStatus: 'COMPLETE',
+        customResponses: expect.objectContaining({
+          importedFrom: 'ORGANIZER_DIRECT',
+          player1Name: 'Khách A',
+          player1UserId: null,
+          player2Name: 'An',
+          player2UserId: 'athlete-2',
+        }),
+      }),
+    });
+  });
+
+  it('checks the gender rule only for the athlete with an account', async () => {
+    const mixed = guestPairSelects('MIXED', 'MALE');
+    const accepted = makeRepository(mixed.selects, [
+      mixed.p1 as never,
+      mixed.p2 as never,
+    ]);
+    await expect(
+      accepted.repository.lockTournamentAndPair(
+        'tournament-1',
+        'a-guest',
+        'acct',
+        'organizer-1',
+        'APPROVAL',
+        'x',
+      ),
+    ).resolves.toBeDefined();
+
+    const women = guestPairSelects('FEMALE', 'MALE');
+    const rejected = makeRepository(women.selects, [
+      women.p1 as never,
+      women.p2 as never,
+    ]);
+    await expect(
+      rejected.repository.lockTournamentAndPair(
+        'tournament-1',
+        'a-guest',
+        'acct',
+        'organizer-1',
+        'APPROVAL',
+        'x',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a no-roster side that is not a direct guest', async () => {
+    const { p2, selects } = guestPairSelects(null, null);
+    const imported = {
+      ...guestSide(),
+      customResponses: { importedFrom: 'ROSTER_IMPORT' },
+    };
+    selects[3] = [imported];
+    const state = makeRepository(selects, [imported as never, p2 as never]);
+
+    await expect(
+      state.repository.lockTournamentAndPair(
+        'tournament-1',
+        'a-guest',
+        'acct',
+        'organizer-1',
+        'APPROVAL',
+        'x',
+      ),
+    ).rejects.toThrow('Participant 1 phải có đúng 1 thành viên');
+  });
+
+  it('unpairs a guest pair back into a guest row and an account row', async () => {
+    const pair = {
+      ...participant('pair-1', 'MANUAL', 'COMPLETE'),
+      registeredBy: 'organizer-1',
+      customResponses: {
+        importedFrom: 'ORGANIZER_DIRECT',
+        player1Name: 'Khách A',
+        player1Email: 'a@example.test',
+        player1Phone: null,
+        player1UserId: null,
+        player2Name: 'An',
+        player2UserId: 'athlete-2',
+      },
+    };
+    const state = makeRepository(
+      [[pair], [roster('r2', pair.id, 'athlete-2')]],
+      [pair as never],
+    );
+
+    const result = await state.repository.unpairParticipantInTx(
+      state.tx as never,
+      'tournament-1',
+      pair.id,
+      'organizer-1',
+    );
+
+    expect(result.partner).toMatchObject({
+      registeredBy: 'athlete-2',
+      teamName: 'An',
+      teamStatus: 'PENDING_PARTNER',
+      customResponses: null,
+    });
+    expect(state.updates).toContainEqual({
+      table: schema.tournamentRosters,
+      values: { participantId: 'new-participant' },
+    });
+    expect(result.leader).toMatchObject({
+      teamName: 'Khách A',
+      teamStatus: 'PENDING_PARTNER',
+      customResponses: {
+        importedFrom: 'ORGANIZER_DIRECT',
+        player1Email: 'a@example.test',
+      },
+    });
+  });
+});

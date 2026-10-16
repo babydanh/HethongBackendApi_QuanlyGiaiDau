@@ -31,6 +31,13 @@ import {
   isDoublesParticipantPairable,
   resolveDoublesParticipantStatus,
 } from '../utils/tournament-participant-status';
+import {
+  type PairMember,
+  readPairSlots,
+  resolveSingleMember,
+  singleMemberResponses,
+  writePairSlots,
+} from '../utils/doubles-pair-member';
 import { lockCapacityOwner } from '../services/tournament-capacity.service';
 
 type PairingSource = 'MANUAL' | 'SYSTEM';
@@ -65,10 +72,9 @@ export class TournamentLiteRepository {
       .where(
         and(
           eq(schema.tournamentParticipants.tournamentId, tournamentId),
-          inArray(
-            schema.tournamentParticipants.teamStatus,
-            [...CAPACITY_RESERVING_TEAM_STATUSES],
-          ),
+          inArray(schema.tournamentParticipants.teamStatus, [
+            ...CAPACITY_RESERVING_TEAM_STATUSES,
+          ]),
         ),
       );
     return Number(result?.count ?? 0);
@@ -132,7 +138,7 @@ export class TournamentLiteRepository {
     return allParticipants.filter(
       (p) =>
         isDoublesParticipantPairable(p.teamStatus, p.teamInviteToken) &&
-        (p.rosters?.length ?? 0) === 1,
+        resolveSingleMember(p, p.rosters ?? []) !== null,
     );
   }
   async hasNonDeletedStagesOrMatches(tournamentId: string): Promise<boolean> {
@@ -240,7 +246,7 @@ export class TournamentLiteRepository {
       );
     }
 
-    // Check each has exactly 1 roster
+    // Each side holds exactly one athlete: one roster, or a direct guest (no roster).
     const p1Rosters = await tx
       .select()
       .from(schema.tournamentRosters)
@@ -250,10 +256,12 @@ export class TournamentLiteRepository {
       .from(schema.tournamentRosters)
       .where(eq(schema.tournamentRosters.participantId, p2Id));
 
-    if (p1Rosters.length !== 1) {
+    const single1 = resolveSingleMember(p1, p1Rosters);
+    if (!single1) {
       throw new BadRequestException('Participant 1 phải có đúng 1 thành viên');
     }
-    if (p2Rosters.length !== 1) {
+    const single2 = resolveSingleMember(p2, p2Rosters);
+    if (!single2) {
       throw new BadRequestException('Participant 2 phải có đúng 1 thành viên');
     }
 
@@ -267,82 +275,65 @@ export class TournamentLiteRepository {
           .where(eq(schema.tournamentDivisions.id, p1.tournamentDivisionId))
           .limit(1)
       : [null];
-    const profileRows = await tx
-      .select({
-        userId: schema.profiles.userId,
-        gender: schema.profiles.gender,
-      })
-      .from(schema.profiles)
-      .where(
-        inArray(schema.profiles.userId, [
-          p1Rosters[0].userId,
-          p2Rosters[0].userId,
-        ]),
-      );
-    const genders = new Map(
-      profileRows.map(
-        (profile) =>
-          [profile.userId, normalizeProfileGender(profile.gender)] as const,
-      ),
+    const accountUserIds = [...p1Rosters, ...p2Rosters].map((r) => r.userId);
+    const profileRows =
+      accountUserIds.length > 0
+        ? await tx
+            .select({
+              userId: schema.profiles.userId,
+              fullName: schema.profiles.fullName,
+              gender: schema.profiles.gender,
+            })
+            .from(schema.profiles)
+            .where(inArray(schema.profiles.userId, accountUserIds))
+        : [];
+    const profiles = new Map(
+      profileRows.map((profile) => [profile.userId, profile]),
     );
-    const p1Gender = genders.get(p1Rosters[0].userId);
-    const p2Gender = genders.get(p2Rosters[0].userId);
-    const restriction = (division?.genderRestriction || '').toUpperCase();
-    const hasGenderRestriction = ['MALE', 'FEMALE', 'MIXED'].includes(
-      restriction,
-    );
-    if (hasGenderRestriction && (!p1Gender || !p2Gender)) {
-      throw new BadRequestException(
-        'Cả hai VĐV cần cập nhật giới tính trong hồ sơ trước khi BTC ghép đôi.',
-      );
-    }
-    if (
-      hasGenderRestriction &&
-      ((restriction === 'MALE' &&
-        (p1Gender !== 'MALE' || p2Gender !== 'MALE')) ||
-        (restriction === 'FEMALE' &&
-          (p1Gender !== 'FEMALE' || p2Gender !== 'FEMALE')) ||
-        (restriction === 'MIXED' && p1Gender === p2Gender))
-    ) {
-      throw new BadRequestException(
-        'Hai VĐV không phù hợp với giới hạn giới tính của nội dung thi đấu.',
-      );
-    }
+    const named = (member: PairMember): PairMember =>
+      member.kind === 'ACCOUNT'
+        ? { ...member, name: profiles.get(member.userId)?.fullName ?? null }
+        : member;
+    const m1 = named(single1);
+    const m2 = named(single2);
+    this.assertPairGender(division?.genderRestriction, m1, m2, profiles);
 
-    // Verify neither roster user already appears in another active participant
-    const p2UserId = p2Rosters[0].userId;
-    const allRostersCheck = await tx
-      .select({ userId: schema.tournamentRosters.userId })
-      .from(schema.tournamentRosters)
-      .innerJoin(
-        schema.tournamentParticipants,
-        eq(
-          schema.tournamentRosters.participantId,
-          schema.tournamentParticipants.id,
-        ),
-      )
-      .where(
-        and(
-          eq(schema.tournamentParticipants.tournamentId, tournamentId),
-          ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
-          ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
-          ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
-          eq(schema.tournamentRosters.userId, p2UserId),
-          ne(schema.tournamentRosters.participantId, p2Id),
-        ),
-      );
-    if (allRostersCheck.length > 0) {
-      throw new BadRequestException(
-        'Thành viên của Participant 2 đã tham gia đội khác trong giải này',
-      );
-    }
+    // Verify the joining account does not already play in another active participant
+    if (m2.kind === 'ACCOUNT') {
+      const allRostersCheck = await tx
+        .select({ userId: schema.tournamentRosters.userId })
+        .from(schema.tournamentRosters)
+        .innerJoin(
+          schema.tournamentParticipants,
+          eq(
+            schema.tournamentRosters.participantId,
+            schema.tournamentParticipants.id,
+          ),
+        )
+        .where(
+          and(
+            eq(schema.tournamentParticipants.tournamentId, tournamentId),
+            ne(schema.tournamentParticipants.teamStatus, 'WITHDRAWN'),
+            ne(schema.tournamentParticipants.teamStatus, 'REJECTED'),
+            ne(schema.tournamentParticipants.teamStatus, 'KICKED'),
+            eq(schema.tournamentRosters.userId, m2.userId),
+            ne(schema.tournamentRosters.participantId, p2Id),
+          ),
+        );
+      if (allRostersCheck.length > 0) {
+        throw new BadRequestException(
+          'Thành viên của Participant 2 đã tham gia đội khác trong giải này',
+        );
+      }
 
-    // Move p2 roster to p1
-    const p2Roster = p2Rosters[0];
-    await tx
-      .update(schema.tournamentRosters)
-      .set({ participantId: p1Id })
-      .where(eq(schema.tournamentRosters.id, p2Roster.id));
+      // Move p2 roster to p1
+      await tx
+        .update(schema.tournamentRosters)
+        .set({ participantId: p1Id })
+        .where(eq(schema.tournamentRosters.id, p2Rosters[0].id));
+    }
+    // A guest has no roster row, so the pair itself must name both athletes.
+    const pairHoldsGuest = m1.kind === 'GUEST' || m2.kind === 'GUEST';
 
     // Update p1
     const [pairTournament] = await tx
@@ -376,6 +367,9 @@ export class TournamentLiteRepository {
         isPaid: registrationIsPaid,
         teamInviteToken: null,
         teamName,
+        ...(pairHoldsGuest
+          ? { customResponses: writePairSlots(p1.customResponses, m1, m2) }
+          : {}),
       })
       .where(eq(schema.tournamentParticipants.id, p1Id))
       .returning();
@@ -410,6 +404,44 @@ export class TournamentLiteRepository {
 
     return updatedP1;
   }
+  /**
+   * Division gender rule, checked only for athletes with an account. A guest
+   * has no profile; the organizer who added it to this division vouches for it
+   * (user decision 2026-10-16), so a mixed pair with a guest is accepted.
+   */
+  private assertPairGender(
+    genderRestriction: string | null | undefined,
+    m1: PairMember,
+    m2: PairMember,
+    profiles: ReadonlyMap<string, { gender: string | null }>,
+  ) {
+    const restriction = (genderRestriction || '').toUpperCase();
+    if (!['MALE', 'FEMALE', 'MIXED'].includes(restriction)) return;
+    const accounts = [m1, m2].filter(
+      (member): member is Extract<PairMember, { kind: 'ACCOUNT' }> =>
+        member.kind === 'ACCOUNT',
+    );
+    const genders = accounts.map((member) =>
+      normalizeProfileGender(profiles.get(member.userId)?.gender),
+    );
+    if (genders.some((gender) => !gender)) {
+      throw new BadRequestException(
+        'Cả hai VĐV cần cập nhật giới tính trong hồ sơ trước khi BTC ghép đôi.',
+      );
+    }
+    const mismatched =
+      (restriction === 'MALE' && genders.some((gender) => gender !== 'MALE')) ||
+      (restriction === 'FEMALE' &&
+        genders.some((gender) => gender !== 'FEMALE')) ||
+      (restriction === 'MIXED' &&
+        genders.length === 2 &&
+        genders[0] === genders[1]);
+    if (mismatched) {
+      throw new BadRequestException(
+        'Hai VĐV không phù hợp với giới hạn giới tính của nội dung thi đấu.',
+      );
+    }
+  }
   async unpairParticipantInTx(
     tx: Transaction,
     tournamentId: string,
@@ -429,9 +461,7 @@ export class TournamentLiteRepository {
     }
 
     if (participant.pairingSource !== 'MANUAL') {
-      throw new BadRequestException(
-        'Chỉ được tách cặp do BTC ghép thủ công.',
-      );
+      throw new BadRequestException('Chỉ được tách cặp do BTC ghép thủ công.');
     }
 
     if (
@@ -443,11 +473,18 @@ export class TournamentLiteRepository {
       );
     }
 
-    // Must have exactly 2 rosters
     const rosters = await tx
       .select()
       .from(schema.tournamentRosters)
       .where(eq(schema.tournamentRosters.participantId, participantId));
+
+    // A pair holding a guest names both athletes in its slots (writePairSlots).
+    const slots = readPairSlots(participant.customResponses);
+    if (slots) {
+      return this.unpairSlotsInTx(tx, participant, slots, rosters, userId);
+    }
+
+    // Must have exactly 2 rosters
 
     if (rosters.length !== 2) {
       throw new BadRequestException(
@@ -528,6 +565,90 @@ export class TournamentLiteRepository {
       userId,
       'tournament_participants',
       participantId,
+      participant,
+      updatedOriginal,
+    );
+
+    return { leader: updatedOriginal, partner: newParticipant };
+  }
+  /**
+   * Unpair a pair written by `writePairSlots`: the row keeps athlete 1, a new
+   * row takes athlete 2. A guest goes back to a direct-guest row (no roster),
+   * an account takes its roster with it; both wait for a partner again.
+   */
+  private async unpairSlotsInTx(
+    tx: Transaction,
+    participant: typeof schema.tournamentParticipants.$inferSelect,
+    [first, second]: [PairMember, PairMember],
+    rosters: ReadonlyArray<typeof schema.tournamentRosters.$inferSelect>,
+    userId: string,
+  ) {
+    const rosterOf = (member: PairMember) =>
+      member.kind === 'ACCOUNT'
+        ? rosters.find((roster) => roster.userId === member.userId)
+        : undefined;
+    const accountRostersMissing = [first, second].some(
+      (member) => member.kind === 'ACCOUNT' && !rosterOf(member),
+    );
+    if (accountRostersMissing) {
+      throw new BadRequestException(
+        'Không thể tách cặp: thành viên của cặp không khớp dữ liệu.',
+      );
+    }
+
+    const [newParticipant] = await tx
+      .insert(schema.tournamentParticipants)
+      .values({
+        tournamentId: participant.tournamentId,
+        tournamentDivisionId: participant.tournamentDivisionId,
+        registeredBy: second.kind === 'ACCOUNT' ? second.userId : userId,
+        teamName: second.name || 'Vận động viên',
+        isPaid: participant.isPaid,
+        entryFeeAtRegistration: participant.entryFeeAtRegistration,
+        organizerWaivedFee: participant.organizerWaivedFee,
+        teamInviteToken: null,
+        teamStatus: 'PENDING_PARTNER',
+        pairingSource: 'UNKNOWN',
+        customResponses:
+          second.kind === 'GUEST' ? singleMemberResponses({}, second) : null,
+      })
+      .returning();
+
+    const secondRoster = rosterOf(second);
+    if (secondRoster) {
+      await tx
+        .update(schema.tournamentRosters)
+        .set({ participantId: newParticipant.id })
+        .where(eq(schema.tournamentRosters.id, secondRoster.id));
+    }
+
+    const [updatedOriginal] = await tx
+      .update(schema.tournamentParticipants)
+      .set({
+        teamStatus: 'PENDING_PARTNER',
+        pairingSource: 'UNKNOWN',
+        teamInviteToken: null,
+        teamName: first.name || 'Vận động viên',
+        customResponses: singleMemberResponses(
+          participant.customResponses,
+          first,
+        ),
+      })
+      .where(eq(schema.tournamentParticipants.id, participant.id))
+      .returning();
+
+    await this.auditService.logCreate(
+      tx,
+      userId,
+      'tournament_participants',
+      newParticipant.id,
+      newParticipant,
+    );
+    await this.auditService.logUpdate(
+      tx,
+      userId,
+      'tournament_participants',
+      participant.id,
       participant,
       updatedOriginal,
     );
@@ -796,7 +917,9 @@ export class TournamentLiteRepository {
       const profileMap = new Map(profiles.map((p) => [p.userId, p]));
 
       const pending = pendingParticipants
-        .filter((p) => (rosterMap.get(p.id)?.length ?? 0) === 1)
+        .filter(
+          (p) => resolveSingleMember(p, rosterMap.get(p.id) ?? []) !== null,
+        )
         .map((p) => ({
           ...p,
           rosters: (rosterMap.get(p.id) || []).map((r) => ({
@@ -873,10 +996,11 @@ export class TournamentLiteRepository {
           const p2 = ordered[i + 1];
           const p1User = p1.rosters?.[0]?.userId;
           const p2User = p2.rosters?.[0]?.userId;
+          // A guest has no roster: its name is the participant's team name.
           const p1Name =
-            (p1User ? profileMap.get(p1User)?.fullName : null) || 'VĐV';
+            (p1User ? profileMap.get(p1User)?.fullName : p1.teamName) || 'VĐV';
           const p2Name =
-            (p2User ? profileMap.get(p2User)?.fullName : null) || 'VĐV';
+            (p2User ? profileMap.get(p2User)?.fullName : p2.teamName) || 'VĐV';
           const teamName = `${p1Name} / ${p2Name}`;
           await this.pairLiteParticipantsInTx(
             tx,

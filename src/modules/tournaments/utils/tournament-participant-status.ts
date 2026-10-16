@@ -48,9 +48,10 @@ export function resolveDoublesParticipantStatus(
       return rosterCount >= 2 ? 'COMPLETE' : 'PENDING_PARTNER';
     }
     case 'APPROVE':
-      return transition.registrationMode === 'APPROVAL' &&
-        transition.isDoubles &&
-        transition.rosterCount === 1
+      // rosterCount counts athletes, a direct guest included (countParticipantMembers).
+      // A doubles entry holding one athlete waits for a partner in every mode:
+      // approving it must never turn one person into a complete pair.
+      return transition.isDoubles && transition.rosterCount === 1
         ? 'PENDING_PARTNER'
         : 'COMPLETE';
     case 'PAIR':

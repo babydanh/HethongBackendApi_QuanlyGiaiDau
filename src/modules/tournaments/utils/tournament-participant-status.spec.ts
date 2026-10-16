@@ -166,12 +166,23 @@ describe('doubles participant approval transitions', () => {
     ).toBe('COMPLETE');
   });
 
-  it('keeps non-approval participant approval behavior unchanged', () => {
+  it('never completes a one-athlete doubles entry on approval, in any mode', () => {
     expect(
       resolveDoublesParticipantStatus({
         event: 'APPROVE',
         registrationMode: 'OPEN',
         isDoubles: true,
+        rosterCount: 1,
+      }),
+    ).toBe('PENDING_PARTNER');
+  });
+
+  it('completes a singles entry on approval', () => {
+    expect(
+      resolveDoublesParticipantStatus({
+        event: 'APPROVE',
+        registrationMode: 'APPROVAL',
+        isDoubles: false,
         rosterCount: 1,
       }),
     ).toBe('COMPLETE');
@@ -180,23 +191,26 @@ describe('doubles participant approval transitions', () => {
   it('does not require a second approval after pairing', () => {
     expect(resolveDoublesParticipantStatus({ event: 'PAIR' })).toBe('COMPLETE');
   });
-  it.each(['PENDING_APPROVAL', 'COMPLETE', 'WAITLISTED', 'REJECTED', undefined])(
-    'does not allow %s to enter the pair operation',
-    (teamStatus) => {
-      expect(
-        isDoublesParticipantPairable(teamStatus as string | undefined),
-      ).toBe(false);
-    },
-  );
+  it.each([
+    'PENDING_APPROVAL',
+    'COMPLETE',
+    'WAITLISTED',
+    'REJECTED',
+    undefined,
+  ])('does not allow %s to enter the pair operation', (teamStatus) => {
+    expect(isDoublesParticipantPairable(teamStatus as string | undefined)).toBe(
+      false,
+    );
+  });
 
   it('allows only the approved/open partner-pending state into pairing', () => {
     expect(isDoublesParticipantPairable('PENDING_PARTNER')).toBe(true);
   });
 
   it('keeps self-invited participants out of BTC pairing', () => {
-    expect(isDoublesParticipantPairable('PENDING_PARTNER', 'invite-token')).toBe(
-      false,
-    );
+    expect(
+      isDoublesParticipantPairable('PENDING_PARTNER', 'invite-token'),
+    ).toBe(false);
   });
 });
 
