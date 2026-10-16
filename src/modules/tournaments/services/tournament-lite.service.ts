@@ -46,21 +46,6 @@ type CleanupTournament = (
   systemRoles: string[],
 ) => Promise<unknown>;
 
-export const hasDeferredDivisionSetup = (
-  divisions: readonly unknown[] | undefined,
-): boolean => divisions !== undefined && divisions.length === 0;
-
-export const resolveLiteCreateStatus = (
-  deferredDivisionSetup: boolean,
-  requestedPublic: boolean,
-  isAdmin: boolean,
-  registrationStartsInFuture: boolean,
-): 'DRAFT' | 'PENDING_APPROVAL' | 'UPCOMING' | 'REGISTRATION_OPEN' => {
-  if (deferredDivisionSetup) return 'DRAFT';
-  if (requestedPublic && !isAdmin) return 'PENDING_APPROVAL';
-  return registrationStartsInFuture ? 'UPCOMING' : 'REGISTRATION_OPEN';
-};
-
 @Injectable()
 export class TournamentLiteService {
   private readonly logger = new Logger(TournamentLiteService.name);
@@ -73,7 +58,7 @@ export class TournamentLiteService {
     private readonly redisService: RedisService,
     private readonly communitySocialRepository: CommunitySocialRepository,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
   private buildLiteSportPreset(sport: string): {
     sportPreset: string;
     sportRules: Record<string, unknown>;
@@ -253,9 +238,9 @@ export class TournamentLiteService {
     > | null;
     const categoryDefaults =
       rawCategoryConfig &&
-      typeof rawCategoryConfig === 'object' &&
-      rawCategoryConfig.defaultSportRules &&
-      typeof rawCategoryConfig.defaultSportRules === 'object'
+        typeof rawCategoryConfig === 'object' &&
+        rawCategoryConfig.defaultSportRules &&
+        typeof rawCategoryConfig.defaultSportRules === 'object'
         ? (rawCategoryConfig.defaultSportRules as Record<string, unknown>)
         : null;
     // Category preset is the shared, editable source of defaults. Keep the
@@ -273,9 +258,7 @@ export class TournamentLiteService {
       },
     };
     const sportRuleDefaults = litePreset.sportRules as Record<string, unknown>;
-    const deferredDivisionSetup = hasDeferredDivisionSetup(dto.divisions);
     const isSuperLite =
-      !deferredDivisionSetup &&
       !Boolean(dto.divisions?.length) &&
       !Boolean(
         dto.divisions?.some(
@@ -307,30 +290,30 @@ export class TournamentLiteService {
 
       ...(sport === 'football'
         ? {
-            halvesCount:
-              dto.footballHalvesCount ??
-              (sportRuleDefaults.halvesCount as number | undefined),
-            halfDuration:
-              dto.footballHalfDuration ??
-              (sportRuleDefaults.halfDuration as number | undefined),
-            allowDraw:
-              dto.footballAllowDraw ??
-              (sportRuleDefaults.allowDraw as boolean | undefined),
-          }
+          halvesCount:
+            dto.footballHalvesCount ??
+            (sportRuleDefaults.halvesCount as number | undefined),
+          halfDuration:
+            dto.footballHalfDuration ??
+            (sportRuleDefaults.halfDuration as number | undefined),
+          allowDraw:
+            dto.footballAllowDraw ??
+            (sportRuleDefaults.allowDraw as boolean | undefined),
+        }
         : {
-            setsToWin:
-              dto.setsToWin ??
-              (sportRuleDefaults.setsToWin as number | undefined),
-            pointsPerSet:
-              dto.pointsPerSet ??
-              (sportRuleDefaults.pointsPerSet as number | undefined),
-            winByTwo:
-              dto.winByTwo ??
-              (sportRuleDefaults.winByTwo as boolean | undefined),
-            ...(dto.maxPoints !== undefined
-              ? { maxPoints: dto.maxPoints }
-              : {}),
-          }),
+          setsToWin:
+            dto.setsToWin ??
+            (sportRuleDefaults.setsToWin as number | undefined),
+          pointsPerSet:
+            dto.pointsPerSet ??
+            (sportRuleDefaults.pointsPerSet as number | undefined),
+          winByTwo:
+            dto.winByTwo ??
+            (sportRuleDefaults.winByTwo as boolean | undefined),
+          ...(dto.maxPoints !== undefined
+            ? { maxPoints: dto.maxPoints }
+            : {}),
+        }),
     };
 
     // 6. Build Lite tournamentConfig shared by App/Web
@@ -409,9 +392,9 @@ export class TournamentLiteService {
         dto.recurringDaysOfWeek && dto.recurringDaysOfWeek.length > 0
           ? dto.recurringDaysOfWeek
           : [
-              dto.recurringDayOfWeek ??
-                (dto.startDate ? new Date(dto.startDate).getDay() : 6),
-            ];
+            dto.recurringDayOfWeek ??
+            (dto.startDate ? new Date(dto.startDate).getDay() : 6),
+          ];
       // When the creator selected a start date, that date is the first event
       // of the recurring series. Only subsequent occurrences are calculated
       // from the frequency; otherwise a Saturday preset could silently move
@@ -428,7 +411,7 @@ export class TournamentLiteService {
           if (requestedStart.getTime() > Date.now()) nextRun = requestedStart;
         }
       }
-      nextRun ??= this.tournamentLifecycleService.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay, );
+      nextRun ??= this.tournamentLifecycleService.calculateNextRecurringDate(frequency, daysOfWeek, timeOfDay,);
       const advanceDays = dto.recurringAdvanceDays ?? 0;
       const nextCreateAt = new Date(
         nextRun.getTime() - advanceDays * 24 * 60 * 60 * 1000,
@@ -482,11 +465,11 @@ export class TournamentLiteService {
       bracketSetupMode: 'RANDOM',
       ...(matchType === 'DOUBLES' || matchType === 'MIXED_DOUBLES'
         ? {
-            // The creator may turn BTC pairing off. Missing/invalid values
-            // are rejected by the DTO; omitting it keeps the safe default.
-            doublesPairingMode:
-              dto.doublesPairingMode === 'SELF' ? 'SELF' : 'ORGANIZER',
-          }
+          // The creator may turn BTC pairing off. Missing/invalid values
+          // are rejected by the DTO; omitting it keeps the safe default.
+          doublesPairingMode:
+            dto.doublesPairingMode === 'SELF' ? 'SELF' : 'ORGANIZER',
+        }
         : {}),
       allowPlayerReferee: true,
       // Only pure Super Lite hides advanced settings. Configured divisions or
@@ -522,10 +505,10 @@ export class TournamentLiteService {
       ...(recurringConfig ? { recurring: recurringConfig } : {}),
       ...(sport === 'football' && footballTeamSize
         ? {
-            teamSize: footballTeamSize,
-            minTeamSize: dto.minTeamSize ?? footballTeamSize,
-            maxReserve: footballMaxReserve ?? 0,
-          }
+          teamSize: footballTeamSize,
+          minTeamSize: dto.minTeamSize ?? footballTeamSize,
+          maxReserve: footballMaxReserve ?? 0,
+        }
         : {}),
     };
 
@@ -637,13 +620,13 @@ export class TournamentLiteService {
       dto.durationMinutes ??
       (dto.durationHours ? Math.round(dto.durationHours * 60) : undefined) ??
       (startDateTime &&
-      endDateTime &&
-      new Date(endDateTime).getTime() > new Date(startDateTime).getTime()
+        endDateTime &&
+        new Date(endDateTime).getTime() > new Date(startDateTime).getTime()
         ? Math.round(
-            (new Date(endDateTime).getTime() -
-              new Date(startDateTime).getTime()) /
-              (60 * 1000),
-          )
+          (new Date(endDateTime).getTime() -
+            new Date(startDateTime).getTime()) /
+          (60 * 1000),
+        )
         : 90); // Default to 90 minutes (1h30) only if not specified or calculable
 
     // A missing end date means the organizer will finish the tournament
@@ -728,19 +711,19 @@ export class TournamentLiteService {
       },
       ...(locationParts.length || effectiveProvinceCode
         ? {
-            location: {
-              ...(dto.venueName ? { venueName: dto.venueName.trim() } : {}),
-              ...(dto.locationAddress
-                ? { address: dto.locationAddress.trim() }
-                : {}),
-              ...(dto.province ? { province: dto.province.trim() } : {}),
-              ...(effectiveProvinceCode ? { provinceCode: effectiveProvinceCode } : {}),
-              ...(dto.district ? { district: dto.district.trim() } : {}),
-              ...(dto.ward ? { ward: dto.ward.trim() } : {}),
-              ...(dto.wardCode ? { wardCode: dto.wardCode.trim() } : {}),
-              ...(locationParts.length ? { display: locationParts.join(', ') } : {}),
-            },
-          }
+          location: {
+            ...(dto.venueName ? { venueName: dto.venueName.trim() } : {}),
+            ...(dto.locationAddress
+              ? { address: dto.locationAddress.trim() }
+              : {}),
+            ...(dto.province ? { province: dto.province.trim() } : {}),
+            ...(effectiveProvinceCode ? { provinceCode: effectiveProvinceCode } : {}),
+            ...(dto.district ? { district: dto.district.trim() } : {}),
+            ...(dto.ward ? { ward: dto.ward.trim() } : {}),
+            ...(dto.wardCode ? { wardCode: dto.wardCode.trim() } : {}),
+            ...(locationParts.length ? { display: locationParts.join(', ') } : {}),
+          },
+        }
         : {}),
     };
 
@@ -811,60 +794,61 @@ export class TournamentLiteService {
     const record = await this.tournamentsRepository.create(userId, fullDto);
 
     // 9b. Tự động tạo các nội dung thi đấu (divisions) tương ứng cho giải Lite
-    // Legacy callers that omit divisions keep one safe default. Explicit
-    // division arrays are materialized as-is, including an intentional [].
-    const formatsToCreate = dto.divisions !== undefined
+    // Lite creates one safe default division. Additional divisions are
+    // materialized explicitly by the typed frontend division API, so wizard
+    // fields such as selectedFormats never cross this API boundary.
+    const formatsToCreate = dto.divisions?.length
       ? dto.divisions
       : [
-          {
-            name: isSuperLite
-              ? sport === 'football'
-                ? `Bóng đá ${footballTeamSize || 7} người`
-                : dto.format === 'singles'
-                  ? 'Đánh Đơn'
-                  : 'Đánh Đôi'
-              : sport === 'football'
+        {
+          name: isSuperLite
+            ? sport === 'football'
+              ? `Bóng đá ${footballTeamSize || 7} người`
+              : dto.format === 'singles'
+                ? 'Đánh Đơn'
+                : 'Đánh Đôi'
+            : sport === 'football'
+              ? dto.genderRestriction === 'FEMALE'
+                ? 'Đội nữ'
+                : dto.genderRestriction === 'MALE'
+                  ? 'Đội nam'
+                  : 'Không giới hạn'
+              : dto.format === 'singles'
                 ? dto.genderRestriction === 'FEMALE'
-                  ? 'Đội nữ'
-                  : dto.genderRestriction === 'MALE'
-                    ? 'Đội nam'
-                    : 'Không giới hạn'
-                : dto.format === 'singles'
-                  ? dto.genderRestriction === 'FEMALE'
-                    ? 'Đơn Nữ'
-                    : 'Đơn Nam'
-                  : dto.format === 'mixed_doubles' ||
-                      dto.genderRestriction === 'MIXED'
-                    ? 'Đôi Nam Nữ'
-                    : dto.genderRestriction === 'FEMALE'
-                      ? 'Đôi Nữ'
-                      : 'Đôi Nam',
-            // Football is a team-vs-team sport. The category contract uses
-            // SINGLES as the generic match type; it must never be persisted as
-            // a doubles or mixed-doubles division.
-            matchType:
-              sport === 'football'
+                  ? 'Đơn Nữ'
+                  : 'Đơn Nam'
+                : dto.format === 'mixed_doubles' ||
+                  dto.genderRestriction === 'MIXED'
+                  ? 'Đôi Nam Nữ'
+                  : dto.genderRestriction === 'FEMALE'
+                    ? 'Đôi Nữ'
+                    : 'Đôi Nam',
+          // Football is a team-vs-team sport. The category contract uses
+          // SINGLES as the generic match type; it must never be persisted as
+          // a doubles or mixed-doubles division.
+          matchType:
+            sport === 'football'
+              ? MatchType.SINGLES
+              : dto.format === 'singles'
                 ? MatchType.SINGLES
-                : dto.format === 'singles'
-                  ? MatchType.SINGLES
-                  : dto.format === 'mixed_doubles' ||
-                      dto.genderRestriction === 'MIXED'
-                    ? MatchType.MIXED_DOUBLES
-                    : MatchType.DOUBLES,
-            genderRestriction:
-              sport === 'football' && !dto.genderRestriction
-                ? undefined
-                : dto.genderRestriction,
-            maxParticipants: maxTeams,
-            bracketType: finalBracketType,
-            startDate: startDateTime
-              ? new Date(startDateTime).toISOString()
-              : undefined,
-            registrationEndDate: registrationEndDate
-              ? registrationEndDate.toISOString()
-              : undefined,
-          },
-        ];
+                : dto.format === 'mixed_doubles' ||
+                  dto.genderRestriction === 'MIXED'
+                  ? MatchType.MIXED_DOUBLES
+                  : MatchType.DOUBLES,
+          genderRestriction:
+            sport === 'football' && !dto.genderRestriction
+              ? undefined
+              : dto.genderRestriction,
+          maxParticipants: maxTeams,
+          bracketType: finalBracketType,
+          startDate: startDateTime
+            ? new Date(startDateTime).toISOString()
+            : undefined,
+          registrationEndDate: registrationEndDate
+            ? registrationEndDate.toISOString()
+            : undefined,
+        },
+      ];
 
     let divisionCreationError: unknown = null;
     const createdDivisionIds: string[] = [];
@@ -958,18 +942,18 @@ export class TournamentLiteService {
     // Public tournaments still wait for admin approval first.
     const registrationStartsInFuture =
       registrationStartDate.getTime() > Date.now();
-    const initialStatus = resolveLiteCreateStatus(
-      deferredDivisionSetup,
-      requestedPublic,
-      isAdmin,
-      registrationStartsInFuture,
-    );
+    const initialStatus =
+      requestedPublic && !isAdmin
+        ? 'PENDING_APPROVAL'
+        : registrationStartsInFuture
+          ? 'UPCOMING'
+          : 'REGISTRATION_OPEN';
     const updated = await this.tournamentsRepository.update(record.id, userId, {
       status: initialStatus,
     });
 
     // Auto-post to Community Feed
-    if (!deferredDivisionSetup && fullDto.communityId && (!requestedPublic || isAdmin)) {
+    if (fullDto.communityId && (!requestedPublic || isAdmin)) {
       try {
         const post = await this.communitySocialRepository.createTournamentPost(
           fullDto.communityId,
