@@ -1634,6 +1634,11 @@ export class TournamentLiteService {
     if (!hasDoublesDivision) {
       throw new BadRequestException('Ghép cặp chỉ hỗ trợ giải đấu đánh đôi.');
     }
+    // A tournament with several divisions must name one; otherwise athletes of
+    // different divisions would be paired together.
+    if (!dto.divisionId && divisions.length > 1) {
+      throw new BadRequestException('Vui lòng chọn nội dung để ghép đôi.');
+    }
 
     // Execute pairing in a transaction (authoritative; tx queries pending inside)
     return await this.tournamentsRepository.generateLitePairsTx(

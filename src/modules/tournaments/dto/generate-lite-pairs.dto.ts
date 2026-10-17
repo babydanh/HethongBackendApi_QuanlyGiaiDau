@@ -9,7 +9,7 @@ export class GenerateLitePairsDto {
   strategy: 'RANDOM' | 'ELO_BALANCED';
 
   @ApiProperty({
-    description: 'Chỉ ghép VĐV thuộc nội dung này (bỏ trống = toàn giải)',
+    description: 'Chỉ ghép VĐV thuộc nội dung này. Bắt buộc khi giải có nhiều nội dung.',
     required: false,
     example: 'uuid-division',
   })

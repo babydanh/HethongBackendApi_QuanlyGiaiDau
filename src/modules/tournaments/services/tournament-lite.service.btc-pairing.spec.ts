@@ -96,3 +96,48 @@ describe('GenerateLitePairsDto divisionId (TC-BTCPAIR-09)', () => {
     );
   });
 });
+
+describe('GenerateLitePairs division scope', () => {
+  it('rejects random pairing without divisionId when the tournament has several divisions', async () => {
+    const { service, tournamentsRepository } = buildService();
+    tournamentsRepository.findById.mockResolvedValue({
+      id: 'tournament-1',
+      matchType: 'DOUBLES',
+      tournamentConfig: { isLite: true },
+    });
+    tournamentsRepository.getDivisionsByTournament.mockResolvedValue([
+      { id: 'division-men', matchType: 'DOUBLES' },
+      { id: 'division-women', matchType: 'DOUBLES' },
+    ]);
+
+    await expect(
+      service.generateLitePairs('tournament-1', 'organizer-1', ['ADMIN'], {
+        strategy: 'RANDOM',
+      }),
+    ).rejects.toThrow('Vui lòng chọn nội dung để ghép đôi.');
+    expect(tournamentsRepository.generateLitePairsTx).not.toHaveBeenCalled();
+  });
+
+  it('allows random pairing without divisionId when the tournament has one division', async () => {
+    const { service, tournamentsRepository } = buildService();
+    tournamentsRepository.findById.mockResolvedValue({
+      id: 'tournament-1',
+      matchType: 'DOUBLES',
+      tournamentConfig: { isLite: true },
+    });
+    tournamentsRepository.getDivisionsByTournament.mockResolvedValue([
+      { id: 'division-men', matchType: 'DOUBLES' },
+    ]);
+
+    await service.generateLitePairs('tournament-1', 'organizer-1', ['ADMIN'], {
+      strategy: 'RANDOM',
+    });
+
+    expect(tournamentsRepository.generateLitePairsTx).toHaveBeenCalledWith(
+      'tournament-1',
+      'organizer-1',
+      'RANDOM',
+      undefined,
+    );
+  });
+});
