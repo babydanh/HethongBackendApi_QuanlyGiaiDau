@@ -14,13 +14,13 @@ import {
   Req,
   UnauthorizedException,
   UseInterceptors,
+  UseGuards,
   UploadedFile,
   ParseFilePipe,
   MaxFileSizeValidator,
 } from '@nestjs/common';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Request } from 'express';
 import { TournamentsService } from './tournaments.service';
 import { CreateTournamentVenueDto } from './dto/create-tournament-venue.dto';
 import { CreateLiteTournamentDto } from './dto/create-lite-tournament.dto';
@@ -77,6 +77,7 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/enums';
 import { Public } from '../../common/decorators/public.decorator';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
 import { Verified } from '../../common/decorators/verified.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -621,6 +622,7 @@ export class TournamentsController {
   }
 
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 1800, ttl: 60000 } })
   @Header('Cache-Control', 'private, no-store')
   @Get(':id')
@@ -631,14 +633,13 @@ export class TournamentsController {
     @Query('pid') participantId?: string,
     @Query('token') teamInviteToken?: string,
     @Query('manage') manage?: string,
-    @Req() req?: Request,
+    @CurrentUser() user?: JwtPayload,
   ) {
-    const authInfo = this.getAuthInfoFromRequest(req);
     return this.tournamentsService.findOne(
       id,
-      authInfo.userId,
+      user?.sub ?? null,
       inviteCode,
-      authInfo.roles,
+      user ? this.getSystemRoles(user) : [],
       participantId,
       teamInviteToken,
       manage === 'true',
@@ -653,76 +654,6 @@ export class TournamentsController {
     @Body('inviteCode') inviteCode: string,
   ) {
     return this.tournamentsService.validateInvite(id, inviteCode);
-  }
-
-  private getAuthInfoFromRequest(request: Request | undefined): {
-    userId: string | null;
-    roles: string[];
-  } {
-    if (!request || !request.headers) return { userId: null, roles: [] };
-    const token = this.extractAccessToken(request);
-    if (!token) {
-      return { userId: null, roles: [] };
-    }
-    try {
-      const payloadPart = token.split('.')[1];
-      if (!payloadPart) {
-        return { userId: null, roles: [] };
-      }
-      const normalizedPayload = payloadPart
-        .replace(/-/g, '+')
-        .replace(/_/g, '/');
-      const payload = JSON.parse(
-        Buffer.from(normalizedPayload, 'base64').toString('utf8'),
-      );
-      let roles: string[] = [];
-      if (Array.isArray(payload.roles)) {
-        roles = payload.roles;
-      } else if (payload.role) {
-        roles = [payload.role];
-      }
-      return { userId: payload.sub || null, roles };
-    } catch {
-      return { userId: null, roles: [] };
-    }
-  }
-
-  private extractAccessToken(request: Request): string | null {
-    const authHeader = request.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      return authHeader.split(' ')[1];
-    }
-
-    const cookieToken = request.cookies?.accessToken;
-    if (typeof cookieToken === 'string' && cookieToken.trim().length > 0) {
-      return cookieToken.trim();
-    }
-
-    const rawCookieHeader = request.headers.cookie;
-    if (
-      typeof rawCookieHeader !== 'string' ||
-      rawCookieHeader.trim().length === 0
-    ) {
-      return null;
-    }
-
-    for (const cookieChunk of rawCookieHeader.split(';')) {
-      const [rawName, ...valueParts] = cookieChunk.trim().split('=');
-      if (rawName !== 'accessToken' || valueParts.length === 0) {
-        continue;
-      }
-      const rawValue = valueParts.join('=').trim();
-      if (!rawValue) {
-        return null;
-      }
-      try {
-        return decodeURIComponent(rawValue);
-      } catch {
-        return rawValue;
-      }
-    }
-
-    return null;
   }
 
   @Post('lite')
