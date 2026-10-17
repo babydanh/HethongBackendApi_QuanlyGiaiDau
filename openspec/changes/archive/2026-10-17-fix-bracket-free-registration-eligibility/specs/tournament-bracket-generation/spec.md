@@ -23,5 +23,10 @@ The system SHALL count a participant as a team for every bracket format (single 
 
 #### Scenario: Thiếu cặp ở nội dung đôi
 
-- **WHEN** a doubles division has fewer eligible pairs than the format minimum
-- **THEN** the request is rejected with a message that names the minimum in "cặp"
+- **WHEN** a doubles division has one eligible pair and the bracket is requested as single elimination
+- **THEN** the rejection reads "Cần ít nhất 2 cặp để tạo sơ đồ loại trực tiếp."
+
+#### Scenario: Thiếu đội ở nội dung đơn
+
+- **WHEN** a singles division has one eligible participant
+- **THEN** the rejection reads "Cần ít nhất 2 đội để tạo sơ đồ loại trực tiếp"

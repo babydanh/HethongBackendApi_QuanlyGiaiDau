@@ -31,7 +31,7 @@ The system SHALL reject a bracket generation request for a tournament with more 
 
 ### Requirement: Điều kiện đội hợp lệ thống nhất cho mọi thể thức
 
-The system SHALL count a participant as a team for every bracket format (single elimination, double elimination, round robin, group stage and knockout) only when `teamStatus` is `COMPLETE` and the participant is paid, waived by the organizer, or virtual (`isMock`). The minimum number of teams per format SHALL be defined in one place. The rejection message SHALL say "cặp" for a doubles division and "đội" for a singles division.
+The system SHALL count a participant as a team for every bracket format (single elimination, double elimination, round robin, group stage and knockout) only when `teamStatus` is `COMPLETE` and the participant is paid, waived by the organizer, virtual (`isMock`), or free at registration (`entryFeeAtRegistration` is null or not greater than zero, matching `isRegistrationFeePaid`). The minimum number of teams per format SHALL be defined in one place. The rejection message SHALL say "cặp" for a doubles division and "đội" for a singles division.
 
 #### Scenario: Cùng bốn cặp COMPLETE, đã đóng phí
 
@@ -40,8 +40,13 @@ The system SHALL count a participant as a team for every bracket format (single 
 
 #### Scenario: Cặp COMPLETE chưa đóng phí
 
-- **WHEN** a `COMPLETE` pair is neither paid nor waived nor virtual
+- **WHEN** a `COMPLETE` pair with a registration fee greater than zero is neither paid nor waived nor virtual
 - **THEN** it is excluded from the bracket of every format
+
+#### Scenario: Cặp đăng ký miễn phí chưa có cờ đã đóng
+
+- **WHEN** a `COMPLETE` pair has `isPaid=false`, is not waived, and its `entryFeeAtRegistration` is 0 or null
+- **THEN** it is seated in the bracket like a paid pair
 
 #### Scenario: Thiếu cặp ở nội dung đôi
 
