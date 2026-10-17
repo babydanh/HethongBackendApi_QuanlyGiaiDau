@@ -1,7 +1,7 @@
 # public-optional-auth Specification
 
 ## Purpose
-TBD - created by archiving change fix-public-jwt-verify. Update Purpose after archive.
+Quy định cách route công khai (`@Public()`) xác định người gọi: chỉ tin danh tính và vai trò từ JWT đã được strategy xác minh chữ ký và hạn; token không hợp lệ thì coi như khách, không trả 401.
 
 ## Requirements
 
