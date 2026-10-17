@@ -114,4 +114,34 @@ describe('doubles pair members', () => {
   it('does not read slots from an ordinary import row', () => {
     expect(readPairSlots({ player1Name: 'A', player2Name: 'B' })).toBeNull();
   });
+
+  it('TC-BTCPAIR-08 marks a pair holding a guest as an organizer import, so capacity counts one full team', () => {
+    const account = { kind: 'ACCOUNT' as const, userId: 'u1', name: 'An' };
+    const visitor = {
+      kind: 'GUEST' as const,
+      name: 'Khách A',
+      email: null,
+      phone: null,
+    };
+
+    const accountFirst = writePairSlots({}, account, visitor);
+    expect(accountFirst).toMatchObject({ importedFrom: 'ORGANIZER_DIRECT' });
+    expect(countParticipantMembers(accountFirst, 1)).toBe(2);
+
+    const guestFirst = writePairSlots({}, visitor, account);
+    expect(guestFirst).toMatchObject({ importedFrom: 'ORGANIZER_DIRECT' });
+
+    expect(
+      writePairSlots({ importedFrom: 'EXCEL' }, account, visitor),
+    ).toMatchObject({ importedFrom: 'EXCEL' });
+  });
+
+  it('TC-BTCPAIR-08 leaves an account-only pair without an organizer marker', () => {
+    const first = { kind: 'ACCOUNT' as const, userId: 'u1', name: 'An' };
+    const second = { kind: 'ACCOUNT' as const, userId: 'u2', name: 'Bình' };
+
+    expect(writePairSlots({}, first, second)).not.toHaveProperty(
+      'importedFrom',
+    );
+  });
 });

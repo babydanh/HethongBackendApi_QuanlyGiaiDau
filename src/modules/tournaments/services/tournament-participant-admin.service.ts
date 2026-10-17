@@ -22,7 +22,10 @@ import {
 import type { RosterImportPreviewDto } from '../dto/roster-import-preview.dto';
 import type { RosterImportBatchDto } from '../dto/roster-import-batch.dto';
 import { isLiteRegistrationTournament } from '../utils/registration-payment-eligibility';
-import { resolveDoublesParticipantStatus } from '../utils/tournament-participant-status';
+import {
+  ORGANIZER_ENTRY_SOURCES,
+  resolveDoublesParticipantStatus,
+} from '../utils/tournament-participant-status';
 import { countParticipantMembers } from '../utils/doubles-pair-member';
 import { calculateTournamentRefundQuote } from '../utils/tournament-refund-policy';
 import { assertSpreadsheetRosterEligible } from '../utils/spreadsheet-roster-eligibility';
@@ -35,6 +38,32 @@ export type RegistrationChanged = (
     action: string;
   },
 ) => void;
+
+const LOCKED_TOURNAMENT_STATUSES: Record<string, true> = {
+  IN_PROGRESS: true,
+  COMPLETED: true,
+  CANCELLED: true,
+};
+const CLOSED_LIST_MESSAGE =
+  'Giải đấu đã chốt danh sách, không thể duyệt hoặc từ chối vận động viên.';
+
+/**
+ * Rows the organizer added stay approvable after registration closes; a
+ * self-registered row does not.
+ */
+function isOrganizerAddedParticipant(participant: {
+  organizerWaivedFee: boolean;
+  customResponses: unknown;
+}): boolean {
+  if (participant.organizerWaivedFee) return true;
+  const responses = participant.customResponses;
+  if (!responses || typeof responses !== 'object') return false;
+  const importedFrom = (responses as Record<string, unknown>).importedFrom;
+  return (
+    typeof importedFrom === 'string' &&
+    ORGANIZER_ENTRY_SOURCES.includes(importedFrom)
+  );
+}
 
 @Injectable()
 export class TournamentParticipantAdminService {
@@ -243,10 +272,8 @@ export class TournamentParticipantAdminService {
     const tournament = await this.tournamentsRepository.findById(tournamentId);
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
-    if (tournament.status !== 'REGISTRATION_OPEN') {
-      throw new BadRequestException(
-        'Giải đấu đã chốt danh sách, không thể duyệt hoặc từ chối vận động viên.',
-      );
+    if (LOCKED_TOURNAMENT_STATUSES[tournament.status] === true) {
+      throw new BadRequestException(CLOSED_LIST_MESSAGE);
     }
 
     const isAuthorized = await this.tournamentAccessService.isManager(
@@ -274,6 +301,13 @@ export class TournamentParticipantAdminService {
       throw new BadRequestException(
         'Chỉ hồ sơ đang chờ duyệt mới được phép duyệt hoặc từ chối.',
       );
+    }
+
+    if (
+      tournament.status !== 'REGISTRATION_OPEN' &&
+      !isOrganizerAddedParticipant(participant)
+    ) {
+      throw new BadRequestException(CLOSED_LIST_MESSAGE);
     }
 
     let nextStatus = status;

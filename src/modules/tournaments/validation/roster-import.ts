@@ -213,6 +213,7 @@ export interface RosterImportItem {
   player2Email?: string;
   player2Phone?: string;
   elo?: number;
+  /** deprecated, ignored: organizer rows are always fee-settled. */
   isPaid?: boolean;
   autoApprove?: boolean;
   customResponses?: Record<string, unknown>;

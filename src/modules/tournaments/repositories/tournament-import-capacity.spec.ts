@@ -1096,6 +1096,7 @@ function addAthleteQueues(options: {
   divisionLimit?: number;
   emailAccount?: Row[];
   tournamentCommunityId?: string | null;
+  matchType?: 'SINGLES' | 'DOUBLES';
 }): Record<string, Row[][]> {
   const tournament: Row = {
     id: 'tournament-1',
@@ -1105,7 +1106,7 @@ function addAthleteQueues(options: {
         : 'community-1',
     status: 'REGISTRATION_OPEN',
     isRegistrationLocked: false,
-    matchType: 'SINGLES',
+    matchType: options.matchType ?? 'SINGLES',
     maxParticipants: 4,
     tournamentConfig: null,
     entryFee: 0,
@@ -1113,7 +1114,7 @@ function addAthleteQueues(options: {
   const division: Row = {
     id: 'division-1',
     tournamentId: 'tournament-1',
-    matchType: 'SINGLES',
+    matchType: options.matchType ?? 'SINGLES',
     maxParticipants: options.divisionLimit ?? 4,
     tournamentConfig: null,
   };
@@ -1411,11 +1412,13 @@ describe('TournamentImportRepository organizer add-athlete flow', () => {
 
     expect(result.participant).toMatchObject({
       participantId: expect.any(String),
-      teamStatus: 'PENDING_APPROVAL',
+      teamStatus: 'COMPLETE',
     });
     expect(participant?.values).toMatchObject({
       registeredBy: 'organizer-1',
       teamName: 'VĐV thử nghiệm',
+      isPaid: true,
+      organizerWaivedFee: true,
     });
     expect(roster?.values).toMatchObject({ userId: 'athlete-1' });
     expect(roster?.values).not.toHaveProperty('rankingConsentAt');
@@ -1692,6 +1695,33 @@ describe('TournamentImportRepository organizer add-athlete pairs flow', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(harness.inserts).toHaveLength(0);
+  });
+
+  it('TC-BTCPAIR-03 records every pair survivor as fee-settled, COMPLETE or waiting', async () => {
+    const userIds = ['user-1', 'user-2', 'user-3'];
+    const harness = createHarness(addAthletePairsQueues({ userIds }));
+
+    await createPairsRepository(harness.tx).addAthletePairs(
+      'tournament-1',
+      'organizer-1',
+      pairsDto(userIds),
+    );
+
+    const participants = harness.inserts
+      .filter((row) => row.table === 'participants')
+      .map((row) => row.values);
+    expect(participants).toEqual([
+      expect.objectContaining({
+        teamStatus: 'COMPLETE',
+        isPaid: true,
+        organizerWaivedFee: true,
+      }),
+      expect.objectContaining({
+        teamStatus: 'PENDING_PARTNER',
+        isPaid: true,
+        organizerWaivedFee: true,
+      }),
+    ]);
   });
 
   it('rejects a team-sport division', async () => {
@@ -2073,5 +2103,173 @@ describe('import seeds follow the file order, never the file score', () => {
       .map((insert) => insert.values);
     expect(participant?.seed).toBe(1);
     expect(participant?.customResponses).not.toHaveProperty('importedElo');
+  });
+});
+
+describe('TC-BTCPAIR-01 organizer-added athletes wait for a partner and are fee-settled', () => {
+  const PAID_DIVISION_FEE = 150000;
+  const guestDto = Object.assign(new AddAthleteDirectDto(), {
+    name: 'Khách trực tiếp',
+    tournamentDivisionId: 'division-1',
+  });
+
+  function directAddQueues(
+    matchType: 'SINGLES' | 'DOUBLES',
+  ): Record<string, Row[][]> {
+    const tournament: Row = {
+      id: 'tournament-1',
+      communityId: 'community-1',
+      status: 'REGISTRATION_OPEN',
+      isRegistrationLocked: false,
+      matchType,
+      maxParticipants: 4,
+      tournamentConfig: null,
+      entryFee: 0,
+    };
+    const division: Row = {
+      id: 'division-1',
+      tournamentId: 'tournament-1',
+      matchType,
+      maxParticipants: 4,
+      tournamentConfig: null,
+    };
+    return {
+      tournaments: [[tournament], [tournament]],
+      divisions: [[division], [division]],
+      'divisions+tournaments': [[division]],
+      'participants+rosters': [[]],
+    };
+  }
+
+  function paidRepository(tx: unknown): AddAthleteRepository {
+    return createRepository(tx, {
+      resolveDivisionEntryFee: jest.fn().mockResolvedValue(PAID_DIVISION_FEE),
+    }) as unknown as AddAthleteRepository;
+  }
+
+  it('TC-BTCPAIR-01 puts a guest in a paid doubles division in PENDING_PARTNER, fee-settled', async () => {
+    const harness = createHarness(directAddQueues('DOUBLES'));
+
+    const result = await paidRepository(harness.tx).addDirectAthlete(
+      'tournament-1',
+      'organizer-1',
+      guestDto,
+    );
+
+    expect(result).toMatchObject({
+      participant: { teamStatus: 'PENDING_PARTNER' },
+    });
+    const participant = harness.inserts.find(
+      (insert) => insert.table === 'participants',
+    );
+    expect(participant?.values).toMatchObject({
+      teamStatus: 'PENDING_PARTNER',
+      isPaid: true,
+      organizerWaivedFee: true,
+      entryFeeAtRegistration: '150000.00',
+      customResponses: {
+        importedFrom: 'ORGANIZER_DIRECT',
+        player1Name: 'Khách trực tiếp',
+      },
+    });
+  });
+
+  it('TC-BTCPAIR-01 puts a guest in a singles division in COMPLETE, fee-settled', async () => {
+    const harness = createHarness(directAddQueues('SINGLES'));
+
+    await paidRepository(harness.tx).addDirectAthlete(
+      'tournament-1',
+      'organizer-1',
+      guestDto,
+    );
+
+    const participant = harness.inserts.find(
+      (insert) => insert.table === 'participants',
+    );
+    expect(participant?.values).toMatchObject({
+      teamStatus: 'COMPLETE',
+      isPaid: true,
+      organizerWaivedFee: true,
+    });
+  });
+
+  it('TC-BTCPAIR-01 puts an account athlete added to a paid doubles division in PENDING_PARTNER, fee-settled', async () => {
+    const harness = createHarness(
+      addAthleteQueues({
+        source: 'FRIENDS',
+        relationRows: [{ id: 'friendship-1' }],
+        duplicateRows: [],
+        occupancyRows: [],
+        matchType: 'DOUBLES',
+      }),
+    );
+
+    await paidRepository(harness.tx).addAthleteCandidate(
+      'tournament-1',
+      'organizer-1',
+      Object.assign(new AddAthleteCandidateDto(), {
+        source: 'FRIENDS',
+        userId: 'athlete-1',
+        tournamentDivisionId: 'division-1',
+      }),
+    );
+
+    const participant = harness.inserts.find(
+      (insert) => insert.table === 'participants',
+    );
+    expect(participant?.values).toMatchObject({
+      teamStatus: 'PENDING_PARTNER',
+      isPaid: true,
+      organizerWaivedFee: true,
+    });
+  });
+});
+
+describe('TC-BTCPAIR-02 organizer import rows are fee-settled', () => {
+  it('TC-BTCPAIR-02 keeps a paid doubles row out of PENDING_APPROVAL', async () => {
+    const harness = createHarness(divisionImportQueues({ entries: [] }));
+    const repository = createRepository(harness.tx, {
+      resolveDivisionEntryFee: jest.fn().mockResolvedValue(150000),
+    });
+
+    await repository.importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [SOLO_ROSTER_ENTRY],
+      'division-1',
+    );
+
+    const participant = harness.inserts.find(
+      (insert) => insert.table === 'participants',
+    );
+    expect(participant?.values).toMatchObject({
+      teamStatus: 'PENDING_PARTNER',
+      isPaid: true,
+      organizerWaivedFee: true,
+      entryFeeAtRegistration: '150000.00',
+    });
+  });
+
+  it('TC-BTCPAIR-02 completes a paid doubles pair, fee-settled', async () => {
+    const harness = createHarness(divisionImportQueues({ entries: [] }));
+    const repository = createRepository(harness.tx, {
+      resolveDivisionEntryFee: jest.fn().mockResolvedValue(150000),
+    });
+
+    await repository.importRosterRows(
+      'tournament-1',
+      'organizer-1',
+      [PAIR],
+      'division-1',
+    );
+
+    const participant = harness.inserts.find(
+      (insert) => insert.table === 'participants',
+    );
+    expect(participant?.values).toMatchObject({
+      teamStatus: 'COMPLETE',
+      isPaid: true,
+      organizerWaivedFee: true,
+    });
   });
 });

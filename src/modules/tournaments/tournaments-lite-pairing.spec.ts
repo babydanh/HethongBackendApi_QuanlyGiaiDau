@@ -596,6 +596,7 @@ describe('TournamentsService — Lite pairing guards', () => {
         },
         undefined,
         'moderator-1',
+        { organizerAdded: true },
       );
     });
 

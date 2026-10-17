@@ -5,13 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PG_CONNECTION } from '../../../database/database.module';
-import type { AppDb } from '../../../database/db.types';
+import type { AppDb, AppTx } from '../../../database/db.types';
 import * as schema from '../../../database/schema';
 import { and, count, eq, inArray, ne, notInArray } from 'drizzle-orm';
 import { AuditService } from '../../audit/audit.service';
 import { CreateDivisionDto } from '../dto/create-division.dto';
 import { UpdateDivisionDto } from '../dto/update-division.dto';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
+import { resolveLiteTournamentPolicy } from '../utils/lite-default-division';
 
 @Injectable()
 export class TournamentDivisionRepository {
@@ -200,6 +201,17 @@ export class TournamentDivisionRepository {
     try {
       return await this.db.transaction(async (tx) => {
         try {
+          const [tournament] = await tx
+            .select({
+              id: schema.tournaments.id,
+              matchType: schema.tournaments.matchType,
+              genderRestriction: schema.tournaments.genderRestriction,
+              tournamentConfig: schema.tournaments.tournamentConfig,
+            })
+            .from(schema.tournaments)
+            .where(eq(schema.tournaments.id, division.tournamentId))
+            .for('update')
+            .limit(1);
           const [created] = await tx
             .insert(schema.tournamentDivisions)
             .values({
@@ -236,6 +248,9 @@ export class TournamentDivisionRepository {
             created.id,
             created,
           );
+          if (tournament) {
+            await this.syncLiteTournamentPolicy(tx, tournament, userId);
+          }
 
           return created;
         } catch (txError) {
@@ -319,21 +334,6 @@ export class TournamentDivisionRepository {
           );
         }
 
-        const [divisionCount] = await tx
-          .select({ value: count() })
-          .from(schema.tournamentDivisions)
-          .where(
-            eq(schema.tournamentDivisions.tournamentId, oldRecord.tournamentId),
-          );
-
-        const tournamentConfig = tournamentRecord?.tournamentConfig as
-          | Record<string, unknown>
-          | null
-          | undefined;
-        const isLiteTournament =
-          tournamentConfig?.mode === 'LITE' &&
-          tournamentConfig?.hideAdvancedSettings === true;
-
         const [updated] = await tx
           .update(schema.tournamentDivisions)
           .set({
@@ -380,31 +380,8 @@ export class TournamentDivisionRepository {
           .where(eq(schema.tournamentDivisions.id, id))
           .returning();
 
-        if (
-          updated &&
-          isLiteTournament &&
-          divisionCount.value === 1 &&
-          (updated.matchType !== oldRecord.matchType ||
-            updated.genderRestriction !== oldRecord.genderRestriction)
-        ) {
-          const [updatedTournament] = await tx
-            .update(schema.tournaments)
-            .set({
-              matchType: updated.matchType,
-              genderRestriction: updated.genderRestriction,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.tournaments.id, oldRecord.tournamentId))
-            .returning();
-
-          await this.auditService.logUpdate(
-            tx,
-            userId,
-            'tournaments',
-            oldRecord.tournamentId,
-            tournamentRecord,
-            updatedTournament,
-          );
+        if (updated && tournamentRecord) {
+          await this.syncLiteTournamentPolicy(tx, tournamentRecord, userId);
         }
 
         await this.auditService.logUpdate(
@@ -422,6 +399,61 @@ export class TournamentDivisionRepository {
       console.error(`Failed to update division ${id}:`, error);
       throw error;
     }
+  }
+  /**
+   * D9: after a Lite division is created or edited, the tournament-level match
+   * type and gender restriction follow its divisions.
+   */
+  private async syncLiteTournamentPolicy(
+    tx: AppTx,
+    tournament: {
+      id: string;
+      matchType: string;
+      genderRestriction: string | null;
+      tournamentConfig: unknown;
+    },
+    userId: string | null,
+  ) {
+    const config = tournament.tournamentConfig as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    if (config?.mode !== 'LITE') return;
+
+    const divisions = await tx
+      .select({
+        matchType: schema.tournamentDivisions.matchType,
+        genderRestriction: schema.tournamentDivisions.genderRestriction,
+      })
+      .from(schema.tournamentDivisions)
+      .where(eq(schema.tournamentDivisions.tournamentId, tournament.id));
+    const policy = resolveLiteTournamentPolicy(divisions);
+    if (
+      !policy ||
+      (policy.matchType === tournament.matchType &&
+        policy.genderRestriction === tournament.genderRestriction)
+    ) {
+      return;
+    }
+
+    const [updatedTournament] = await tx
+      .update(schema.tournaments)
+      .set({
+        matchType: policy.matchType,
+        genderRestriction: policy.genderRestriction,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.tournaments.id, tournament.id))
+      .returning();
+
+    await this.auditService.logUpdate(
+      tx,
+      userId,
+      'tournaments',
+      tournament.id,
+      tournament,
+      updatedTournament,
+    );
   }
   async deleteDivision(id: string, userId: string | null) {
     try {

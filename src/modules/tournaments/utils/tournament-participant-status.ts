@@ -1,5 +1,16 @@
 import { resolveFootballTeamConfig } from './football-team-config';
 import { isDoublesMatchType } from './tournament-input-policy';
+import { IMPORT_SOURCES } from '../dto/roster-import.dto';
+
+/**
+ * `customResponses.importedFrom` of entries the organizer added: a typed-in
+ * name, an account pairing or an imported file. These entries are fee-settled
+ * and stay approvable after registration closes.
+ */
+export const ORGANIZER_ENTRY_SOURCES: readonly string[] = [
+  'ORGANIZER_DIRECT',
+  ...IMPORT_SOURCES,
+];
 
 export type DoublesPairingMode = 'ORGANIZER' | 'SELF';
 export type DoublesParticipantTransition =

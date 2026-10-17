@@ -338,7 +338,7 @@ describeIfDb('addAthletePairs integration (Postgres thật)', () => {
     expect(outcomes.some((o) => o === 'ok=2')).toBe(true);
   });
 
-  test('SEED-001: pair COMPLETE do BTC ghép (organizerWaivedFee=true, isPaid=false) vẫn vào seeding bracket', async () => {
+  test('SEED-001: pair COMPLETE do BTC ghép (organizerWaivedFee=true, isPaid=true) vẫn vào seeding bracket', async () => {
     const { tournamentId, divisionId } = await seedTournament(organizerId, 10);
     const u1 = await seedUser('seed1-a');
     const u2 = await seedUser('seed1-b');
@@ -354,7 +354,7 @@ describeIfDb('addAthletePairs integration (Postgres thật)', () => {
       .where(eq(schema.tournamentParticipants.id, participantId));
     expect(row).toMatchObject({
       teamStatus: 'COMPLETE',
-      isPaid: false,
+      isPaid: true,
       organizerWaivedFee: true,
     });
 

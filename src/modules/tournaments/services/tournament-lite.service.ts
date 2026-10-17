@@ -28,7 +28,10 @@ import { RedisService } from '../../../providers/redis/redis.service';
 import { CommunitySocialRepository } from '../../communities/community-social.repository';
 import * as schema from '../../../database/schema';
 import { mapTournamentFormat } from '../utils/tournament-presentation';
-import { validateMatchTypeAgainstCategory } from '../utils/tournament-input-policy';
+import {
+  validateMatchTypeAgainstCategory,
+  validateMatchTypeGenderRestriction,
+} from '../utils/tournament-input-policy';
 import {
   resolveLiteDefaultDivision,
   resolveLiteFormat,
@@ -42,6 +45,7 @@ type RegisterLiteParticipant = (
   data: RegisterTournamentDto,
   inviteCode?: string,
   actorUserId?: string,
+  options?: { organizerAdded?: boolean },
 ) => Promise<unknown>;
 
 type CleanupTournament = (
@@ -206,7 +210,6 @@ export class TournamentLiteService {
     const format = resolveLiteFormat({
       sport,
       requestedFormat: dto.format,
-      hasDivisions: Boolean(dto.divisions?.length),
     });
     const matchType =
       format === 'mixed_doubles'
@@ -758,6 +761,14 @@ export class TournamentLiteService {
       }
     }
 
+    const genderRestriction =
+      dto.genderRestriction ?? (matchType === 'MIXED_DOUBLES' ? 'MIXED' : null);
+    validateMatchTypeGenderRestriction(
+      matchType,
+      genderRestriction,
+      'tournament',
+    );
+
     const fullDto = new CreateTournamentDto();
     Object.assign(fullDto, {
       name: dto.name,
@@ -771,7 +782,7 @@ export class TournamentLiteService {
       ...(dto.parentId ? { parentId: dto.parentId } : {}),
       categoryId: category.id,
       matchType,
-      genderRestriction: dto.genderRestriction ?? null,
+      genderRestriction,
       description: dto.description || '',
       maxParticipants: maxTeams,
       entryFee: dto.entryFee ?? 0,
@@ -813,7 +824,6 @@ export class TournamentLiteService {
             sport,
             requestedFormat: dto.format,
             genderRestriction: dto.genderRestriction,
-            hasDivisions: false,
             isSuperLite,
             footballTeamSize,
           }),
@@ -1415,6 +1425,7 @@ export class TournamentLiteService {
       },
       undefined,
       actorUserId,
+      { organizerAdded: true },
     );
   }
   private async checkLiteAuthorization(
@@ -1654,6 +1665,7 @@ export class TournamentLiteService {
       id,
       userId,
       dto.strategy,
+      dto.divisionId,
     );
   }
   async unpairLiteParticipant(

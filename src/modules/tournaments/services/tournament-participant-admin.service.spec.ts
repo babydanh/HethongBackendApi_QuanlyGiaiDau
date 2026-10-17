@@ -395,6 +395,181 @@ describe('TournamentParticipantAdminService', () => {
     );
   });
 
+  describe('organizer-added participants before the tournament starts', () => {
+    const closedMessage =
+      'Giải đấu đã chốt danh sách, không thể duyệt hoặc từ chối vận động viên.';
+    const organizerAddedGuest = {
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      tournamentDivisionId: 'division-1',
+      teamStatus: 'PENDING_APPROVAL',
+      isPaid: true,
+      organizerWaivedFee: true,
+      entryFeeAtRegistration: 500,
+      customResponses: {
+        importedFrom: 'ORGANIZER_DIRECT',
+        player1Name: 'Khách',
+      },
+    };
+    const selfRegistered = {
+      id: 'participant-1',
+      tournamentId: 'tournament-1',
+      tournamentDivisionId: 'division-1',
+      teamStatus: 'PENDING_APPROVAL',
+      isPaid: true,
+      organizerWaivedFee: false,
+      entryFeeAtRegistration: 500,
+      customResponses: null,
+    };
+    const tournamentWith = (status: string, matchType = 'DOUBLES') => ({
+      id: 'tournament-1',
+      status,
+      name: 'Regional event',
+      entryFee: 500,
+      matchType,
+      tournamentConfig: {
+        registrationMode: 'APPROVAL',
+        doublesPairingMode: 'ORGANIZER',
+      },
+    });
+
+    it('TC-BTCPAIR-04 approves an organizer-added guest left pending after registration closed', async () => {
+      repositoryMock.findById.mockResolvedValue(
+        tournamentWith('REGISTRATION_CLOSED'),
+      );
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue(organizerAddedGuest);
+      repositoryMock.findDivisionById.mockResolvedValue({
+        matchType: 'DOUBLES',
+      });
+      repositoryMock.getParticipantRosters.mockResolvedValue([]);
+      repositoryMock.updateParticipantStatus.mockResolvedValue({
+        ...organizerAddedGuest,
+        teamStatus: 'PENDING_PARTNER',
+      });
+
+      await admin.updateParticipantStatus(
+        'tournament-1',
+        'participant-1',
+        'COMPLETE',
+        'organizer-1',
+        [],
+        jest.fn(),
+      );
+
+      expect(repositoryMock.updateParticipantStatus).toHaveBeenCalledWith(
+        'participant-1',
+        'PENDING_PARTNER',
+        'PENDING_APPROVAL',
+      );
+    });
+
+    it('TC-BTCPAIR-04 approves a row an organizer source imported after registration closed', async () => {
+      repositoryMock.findById.mockResolvedValue(
+        tournamentWith('REGISTRATION_CLOSED', 'SINGLES'),
+      );
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue({
+        ...selfRegistered,
+        tournamentDivisionId: null,
+        entryFeeAtRegistration: 0,
+        customResponses: { importedFrom: 'EXCEL' },
+      });
+      repositoryMock.getParticipantRosters.mockResolvedValue([
+        { userId: 'player-1', role: 'MAIN' },
+      ]);
+      repositoryMock.assignNextAvailableSeed.mockResolvedValue(null);
+      repositoryMock.updateParticipantStatus.mockResolvedValue({
+        ...selfRegistered,
+        teamStatus: 'COMPLETE',
+      });
+
+      await admin.updateParticipantStatus(
+        'tournament-1',
+        'participant-1',
+        'COMPLETE',
+        'organizer-1',
+        [],
+        jest.fn(),
+      );
+
+      expect(repositoryMock.updateParticipantStatus).toHaveBeenCalledWith(
+        'participant-1',
+        'COMPLETE',
+        'PENDING_APPROVAL',
+      );
+    });
+
+    it('TC-BTCPAIR-04 rejects an organizer-added guest after registration closed', async () => {
+      repositoryMock.findById.mockResolvedValue(
+        tournamentWith('REGISTRATION_CLOSED'),
+      );
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue(organizerAddedGuest);
+      repositoryMock.getParticipantRosters.mockResolvedValue([]);
+      repositoryMock.updateParticipantStatus.mockResolvedValue({
+        ...organizerAddedGuest,
+        teamStatus: 'REJECTED',
+      });
+
+      await admin.updateParticipantStatus(
+        'tournament-1',
+        'participant-1',
+        'REJECTED',
+        'organizer-1',
+        [],
+        jest.fn(),
+      );
+
+      expect(repositoryMock.updateParticipantStatus).toHaveBeenCalledWith(
+        'participant-1',
+        'REJECTED',
+        'PENDING_APPROVAL',
+      );
+    });
+
+    it('TC-BTCPAIR-05 keeps the closed-registration gate for a self-registered row', async () => {
+      repositoryMock.findById.mockResolvedValue(
+        tournamentWith('REGISTRATION_CLOSED'),
+      );
+      accessMock.isManager.mockResolvedValue(true);
+      repositoryMock.findParticipantById.mockResolvedValue(selfRegistered);
+
+      const attempt = admin.updateParticipantStatus(
+        'tournament-1',
+        'participant-1',
+        'COMPLETE',
+        'organizer-1',
+        [],
+        jest.fn(),
+      );
+      await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+      await expect(attempt).rejects.toThrow(closedMessage);
+      expect(repositoryMock.updateParticipantStatus).not.toHaveBeenCalled();
+    });
+
+    it.each(['IN_PROGRESS', 'COMPLETED', 'CANCELLED'])(
+      'TC-BTCPAIR-05 rejects an organizer-added guest once the tournament is %s',
+      async (status) => {
+        repositoryMock.findById.mockResolvedValue(tournamentWith(status));
+        accessMock.isManager.mockResolvedValue(true);
+        repositoryMock.findParticipantById.mockResolvedValue(organizerAddedGuest);
+
+        const attempt = admin.updateParticipantStatus(
+          'tournament-1',
+          'participant-1',
+          'COMPLETE',
+          'organizer-1',
+          [],
+          jest.fn(),
+        );
+        await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+        await expect(attempt).rejects.toThrow(closedMessage);
+        expect(repositoryMock.updateParticipantStatus).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   describe('setParticipantFeePaid', () => {
     const tournament = {
       id: 'tournament-1',

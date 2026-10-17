@@ -1,38 +1,38 @@
 # Tasks
 
-Test ID: `TC-BTCPAIR-NN`. Test đỏ viết trước khi sửa code (TDD). Chỉ tick khi việc đã làm và test xanh.
+Test ID: `TC-BTCPAIR-NN` (plus suffix `b` for a related case). Test đỏ viết trước code (TDD). Chỉ tick khi việc đã làm và test chạy thật.
 
 ## 1. Đề xuất và test đỏ
 
-- [ ] 1.1 Proposal, design, tasks, spec delta (commit đầu lane)
-- [ ] 1.2 Test đỏ tái hiện luồng: TC-BTCPAIR-01..17 (ghi kết quả đỏ)
+- [x] 1.1 Proposal, design, tasks, spec delta (commit `36b9eb0`, đầu lane)
+- [x] 1.2 Test đỏ tái hiện luồng TC-BTCPAIR-01..17 trước khi sửa code (kết quả đỏ ghi trong báo cáo lane). TC-BTCPAIR-05 và TC-BTCPAIR-13 là test khoá hành vi, đã xanh trước sửa, không phải test đỏ.
 
 ## 2. Phí và trạng thái khi BTC thêm
 
-- [ ] 2.1 `addDirectAthlete`: trạng thái theo đôi/đơn, `organizerWaivedFee`, `isPaid` (TC-BTCPAIR-01)
-- [ ] 2.2 `persistImportRows`: hàng BTC luôn đã đóng phí, không `PENDING_APPROVAL` vì phí (TC-BTCPAIR-02)
-- [ ] 2.3 `addAthletePairs`: giữ hành vi, thêm `isPaid = true` (TC-BTCPAIR-03)
-- [ ] 2.4 `updateParticipantStatus`: duyệt hàng BTC trước khi giải bắt đầu (TC-BTCPAIR-04, TC-BTCPAIR-05)
+- [x] 2.1 `addDirectAthlete` và `addAthleteCandidate`: đôi + 1 VĐV → PENDING_PARTNER, đơn → COMPLETE; `isPaid`/`organizerWaivedFee` = true; khách có `customResponses.player1Name` (TC-BTCPAIR-01)
+- [x] 2.2 `persistImportRows`: hàng BTC fee-settled, không PENDING_APPROVAL vì phí (TC-BTCPAIR-02)
+- [x] 2.3 `addAthletePairs`: `isPaid = true` (TC-BTCPAIR-03)
+- [x] 2.4 `updateParticipantStatus`: duyệt hàng BTC trước khi giải bắt đầu, cổng REGISTRATION_OPEN giữ cho tự đăng ký (TC-BTCPAIR-04, TC-BTCPAIR-05)
 
 ## 3. Ghép cặp do BTC
 
-- [ ] 3.1 `pairLiteParticipantsInTx`: hàng sống sót `isPaid`/`organizerWaivedFee` (TC-BTCPAIR-06; cập nhật test C của audit)
-- [ ] 3.2 `unpairParticipantInTx`: đội trưởng là roster đầu tiên khi `registeredBy` không khớp (TC-BTCPAIR-07, test A của audit)
-- [ ] 3.3 `writePairSlots`: marker nhập từ BTC cho cặp có khách (TC-BTCPAIR-08, test B của audit)
-- [ ] 3.4 `generateLitePairsTx(divisionId?)` và kết quả `memberNames`/`unpairedNames`/`LITE_NO_PAIRABLE_MESSAGE` (TC-BTCPAIR-09..11)
+- [x] 3.1 `pairLiteParticipantsInTx`: survivor `isPaid`/`organizerWaivedFee` = true (TC-BTCPAIR-06; đổi kỳ vọng characterization của audit test C)
+- [x] 3.2 `unpairParticipantInTx`: đội trưởng là roster có `registeredBy`, nếu không thì roster đầu theo `id` (TC-BTCPAIR-07, audit test A)
+- [x] 3.3 `writePairSlots`: cặp có khách ghi `importedFrom = ORGANIZER_DIRECT`, capacity đếm đủ đội (TC-BTCPAIR-08, audit test B). Đánh đổi: ghi đè nhãn nguồn cũ (`UNKNOWN_CONTACT_EMAIL`, `CALLER_VALUE`, `ROSTER_IMPORT`).
+- [x] 3.4 `generateLitePairsTx(…, divisionId?)`, `memberNames`, `unpairedNames`, `LITE_NO_PAIRABLE_MESSAGE`, `divisionId` ở `GenerateLitePairsDto` (TC-BTCPAIR-09, 10, 11)
 
-## 4. Giới tính do BTC thêm
+## 4. Giới tính và phí do BTC thêm
 
-- [ ] 4.1 Cờ `organizerAdded` qua chuỗi club add, bỏ kiểm giới tính có cờ (TC-BTCPAIR-12; TC-BTCPAIR-13 giữ chặn cho tự đăng ký)
+- [x] 4.1 Cờ `organizerAdded` qua chuỗi club add; hàng CLB BTC thêm: `isPaid`/`organizerWaivedFee` = true, PENDING_PARTNER/COMPLETE (TC-BTCPAIR-12, 01b). TC-BTCPAIR-13: tự đăng ký nữ vào nội dung Nam vẫn bị chặn.
 
 ## 5. Tạo giải nhanh và đồng bộ tầng giải
 
-- [ ] 5.1 `resolveLiteFormat` và `resolveLiteDefaultDivision`: "Đôi linh hoạt" / "Đơn linh hoạt", không MALE mặc định (TC-BTCPAIR-14, TC-BTCPAIR-15; cập nhật `lite-default-division.spec.ts`)
-- [ ] 5.2 Lite create `mixed_doubles` gán `MIXED` và chạy policy (TC-BTCPAIR-16)
-- [ ] 5.3 Đồng bộ `tournaments.matchType`/`genderRestriction` khi sửa nội dung lite (TC-BTCPAIR-17)
+- [x] 5.1 `resolveLiteFormat` (thiếu format → doubles, football giữ singles) và `resolveLiteDefaultDivision`: "Đôi linh hoạt" / "Đơn linh hoạt", không MALE mặc định (TC-BTCPAIR-14, 15)
+- [x] 5.2 `mixed_doubles` → MIXED_DOUBLES + genderRestriction MIXED, qua validator (TC-BTCPAIR-16)
+- [x] 5.3 Đồng bộ `tournaments.matchType`/`genderRestriction` khi tạo/sửa nội dung lite, bỏ cổng `divisionCount === 1` (TC-BTCPAIR-17)
 
 ## 6. Kiểm tra và hồ sơ
 
-- [ ] 6.1 Jest các spec liên quan xanh; `tsc --noEmit` không tăng lỗi (baseline 12 lỗi trong `*.spec.ts`)
-- [ ] 6.2 `openspec validate fix-btc-pairing-guest-fee --strict`; archive sau khi rebase main
-- [ ] 6.3 Báo hợp đồng API cho lane Web/App/BeBracket (trường `memberNames`, `unpairedNames`, `format` thiếu = doubles)
+- [x] 6.1 `tsc --noEmit -p tsconfig.json`: exit 0, 0 lỗi. Jest `src/modules/tournaments`: 672 passed, 0 failed, 20 skipped (3 suite DB, skipped sẵn)
+- [x] 6.2 `openspec validate fix-btc-pairing-guest-fee --strict`: hợp lệ, không INFO/ERROR; archive sau commit code
+- [x] 6.3 Báo hợp đồng API cho WebFlow, AppFlow, BeBracket, Main (chữ ký generateLitePairsTx, `autoPaired`/`unpairedNames`, `format` thiếu = doubles, `organizerWaivedFee`)

@@ -134,6 +134,7 @@ export class TournamentRegistrationRepository {
     userId: string,
     data: RegisterTournamentDto,
     inviteCode?: string,
+    options?: { organizerAdded?: boolean },
   ) {
     return await this.db.transaction(async (tx) => {
       // 1. Kiểm tra giải đấu
@@ -939,7 +940,8 @@ export class TournamentRegistrationRepository {
         isTeamSport &&
         Boolean(data.footballTeamId) &&
         footballTeamMemberIds.length < requiredFootballMainRosterCount;
-      const teamStatus = isDoublesPairing
+      const organizerAdded = options?.organizerAdded === true;
+      const registrationTeamStatus = isDoublesPairing
         ? resolveDoublesParticipantStatus({
             event: 'REGISTER',
             registrationMode: regMode,
@@ -954,7 +956,18 @@ export class TournamentRegistrationRepository {
             waitlisted: isWaitlisted,
             incompleteRoster: hasUndersizedFootballRoster,
           });
-      const isPaid = payableEntryFeeAmount === 0;
+      // BTC-added rows are fee-settled and never wait for approval (fee or gate):
+      // a doubles entry waits for a partner, a singles entry is complete.
+      const teamStatus =
+        organizerAdded && !isWaitlisted && !isTeamSport
+          ? resolveDoublesParticipantStatus({
+              event: 'APPROVE',
+              registrationMode: regMode,
+              isDoubles: isDoublesPairing,
+              rosterCount: 1,
+            })
+          : registrationTeamStatus;
+      const isPaid = organizerAdded || payableEntryFeeAmount === 0;
 
       if (isTeamSport && data.footballTeamId && selectedDivision) {
         const divisionGender = (selectedDivision.genderRestriction || '')
@@ -1078,6 +1091,7 @@ export class TournamentRegistrationRepository {
           rankingConsent: data.rankingConsent === true,
           customResponses: registrationResponses,
           isPaid,
+          organizerWaivedFee: organizerAdded,
           entryFeeAtRegistration: payableEntryFeeAmount.toFixed(2),
           // Keep the invite token even when a known partner was selected so the
           // invited account can confirm through the same join URL/QR flow.

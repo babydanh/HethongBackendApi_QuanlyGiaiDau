@@ -285,7 +285,6 @@ describe('importing a participant by email links only an existing account', () =
           teamName: 'VĐV Chưa Có Tài Khoản',
           player1Name: 'VĐV Chưa Có Tài Khoản',
           player1Email: UNKNOWN_CONTACT_EMAIL,
-          isPaid: false,
           autoApprove: true,
           source: 'MANUAL_EMAIL',
         },
@@ -306,8 +305,9 @@ describe('importing a participant by email links only an existing account', () =
     // Without a linked account the importing manager owns the registration, so
     // an unmatched contact never borrows another athlete's identity.
     expect(participant.values.registeredBy).toBe(MANAGER_ID);
-    expect(participant.values.isPaid).toBe(false);
-    expect(participant.values.teamStatus).toBe('PENDING_APPROVAL');
+    expect(participant.values.isPaid).toBe(true);
+    expect(participant.values.organizerWaivedFee).toBe(true);
+    expect(participant.values.teamStatus).toBe('COMPLETE');
     expect(participant.values.customResponses).toMatchObject({
       player1Email: UNKNOWN_CONTACT_EMAIL,
     });

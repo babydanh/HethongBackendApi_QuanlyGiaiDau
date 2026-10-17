@@ -19,10 +19,6 @@ import {
   sql,
 } from 'drizzle-orm';
 import { AuditService, Transaction } from '../../audit/audit.service';
-import {
-  isLiteRegistrationTournament,
-  isRegistrationFeePaid,
-} from '../utils/registration-payment-eligibility';
 import { TournamentPaymentRepository } from './tournament-payment.repository';
 import { TournamentRatingRepository } from './tournament-rating.repository';
 import {
@@ -46,6 +42,9 @@ export interface LitePairInput {
   p2Id: string;
   teamName: string;
 }
+
+export const LITE_NO_PAIRABLE_MESSAGE =
+  'Cần ít nhất 2 người chơi đang chờ ghép cặp.';
 
 @Injectable()
 export class TournamentLiteRepository {
@@ -324,36 +323,15 @@ export class TournamentLiteRepository {
     // A guest has no roster row, so the pair itself must name both athletes.
     const pairHoldsGuest = m1.kind === 'GUEST' || m2.kind === 'GUEST';
 
-    // Update p1
-    const [pairTournament] = await tx
-      .select({ tournamentConfig: schema.tournaments.tournamentConfig })
-      .from(schema.tournaments)
-      .where(eq(schema.tournaments.id, tournamentId))
-      .limit(1);
-    const tournamentConfig = pairTournament?.tournamentConfig;
+    // Update p1. The organizer's pair is fee-settled for the survivor (D4).
     const targetStatus = resolveDoublesParticipantStatus({ event: 'PAIR' });
-    const isLitePairing =
-      isLiteRegistrationTournament(tournamentConfig) ||
-      registrationMode === 'LITE';
-    const primaryCapturedPayment =
-      await this.tournamentPaymentRepository.findCompletedParticipantPaymentInTx(
-        tx,
-        tournamentId,
-        p1Id,
-      );
-    const registrationIsPaid = isRegistrationFeePaid({
-      persistedIsPaid: p1.isPaid,
-      organizerWaivedFee: p1.organizerWaivedFee,
-      feeSnapshot: p1.entryFeeAtRegistration,
-      hasCompletedPayment: Boolean(primaryCapturedPayment),
-      isLiteRegistration: isLitePairing,
-    });
     const [updatedP1] = await tx
       .update(schema.tournamentParticipants)
       .set({
         teamStatus: targetStatus,
         pairingSource,
-        isPaid: registrationIsPaid,
+        isPaid: true,
+        organizerWaivedFee: true,
         teamInviteToken: null,
         teamName,
         ...(pairHoldsGuest
@@ -443,13 +421,12 @@ export class TournamentLiteRepository {
       );
     }
 
-    // Deterministic leader: roster whose userId == participant.registeredBy
-    const leaderRoster = rosters.find(
-      (r) => r.userId === participant.registeredBy,
-    );
-    const partnerRoster = rosters.find(
-      (r) => r.userId !== participant.registeredBy,
-    );
+    // The leader is the roster registered by the participant. Organizer-made
+    // pairs may match no roster, so the first roster by id leads (stable, D5).
+    const byId = [...rosters].sort((a, b) => a.id.localeCompare(b.id));
+    const leaderRoster =
+      byId.find((r) => r.userId === participant.registeredBy) ?? byId[0];
+    const partnerRoster = byId.find((r) => r !== leaderRoster);
 
     if (!leaderRoster || !partnerRoster) {
       throw new BadRequestException(
@@ -478,6 +455,7 @@ export class TournamentLiteRepository {
         registeredBy: partnerRoster.userId,
         teamName: partnerProfile?.fullName || 'Vận động viên',
         isPaid: participant.isPaid,
+        organizerWaivedFee: participant.organizerWaivedFee,
         teamInviteToken: null,
         teamStatus: 'PENDING_PARTNER',
         pairingSource: 'UNKNOWN',
@@ -812,6 +790,7 @@ export class TournamentLiteRepository {
     tournamentId: string,
     userId: string,
     strategy: 'RANDOM' | 'ELO_BALANCED',
+    divisionId?: string,
   ) {
     return await this.db.transaction(async (tx) => {
       // Lock tournament and validate
@@ -828,6 +807,15 @@ export class TournamentLiteRepository {
         // Only registrations that chose "BTC ghép đôi" have no invite token.
         // Keep direct invite/QR registrations out of the organizer queue.
         isNull(schema.tournamentParticipants.teamInviteToken),
+        // Optional division scope: only that division's participants pair.
+        ...(divisionId
+          ? [
+              eq(
+                schema.tournamentParticipants.tournamentDivisionId,
+                divisionId,
+              ),
+            ]
+          : []),
       ];
       const pendingParticipants = await tx
         .select()
@@ -880,17 +868,25 @@ export class TournamentLiteRepository {
         }));
 
       if (pending.length < 2) {
-        throw new BadRequestException(
-          'Cần ít nhất 2 người chơi đang chờ ghép cặp.',
-        );
+        throw new BadRequestException(LITE_NO_PAIRABLE_MESSAGE);
       }
 
+      // A guest has no roster: its name is the participant's team name.
+      const displayName = (p: (typeof pending)[number]): string => {
+        const userId = p.rosters?.[0]?.userId;
+        return (
+          (userId ? profileMap.get(userId)?.fullName : p.teamName) || 'VĐV'
+        );
+      };
+
       const paired: Array<{
+        participantId: string;
         participant1Id: string;
         participant2Id: string;
         teamName: string;
+        memberNames: string[];
       }> = [];
-      const unpairedIds: string[] = [];
+      const unpaired: (typeof pending)[number][] = [];
 
       // A tournament may contain multiple divisions. Pair only within the
       // same division so a men's queue can never consume a mixed/women slot.
@@ -940,18 +936,13 @@ export class TournamentLiteRepository {
 
         for (let i = 0; i < ordered.length; i += 2) {
           if (i + 1 >= ordered.length) {
-            unpairedIds.push(ordered[i].id);
+            unpaired.push(ordered[i]);
             break;
           }
           const p1 = ordered[i];
           const p2 = ordered[i + 1];
-          const p1User = p1.rosters?.[0]?.userId;
-          const p2User = p2.rosters?.[0]?.userId;
-          // A guest has no roster: its name is the participant's team name.
-          const p1Name =
-            (p1User ? profileMap.get(p1User)?.fullName : p1.teamName) || 'VĐV';
-          const p2Name =
-            (p2User ? profileMap.get(p2User)?.fullName : p2.teamName) || 'VĐV';
+          const p1Name = displayName(p1);
+          const p2Name = displayName(p2);
           const teamName = `${p1Name} / ${p2Name}`;
           await this.pairLiteParticipantsInTx(
             tx,
@@ -964,18 +955,21 @@ export class TournamentLiteRepository {
             'SYSTEM',
           );
           paired.push({
+            participantId: p1.id,
             participant1Id: p1.id,
             participant2Id: p2.id,
             teamName,
+            memberNames: [p1Name, p2Name],
           });
         }
       }
 
       return {
         message: `Đã ghép ${paired.length} cặp thành công.`,
-        paired,
-        unpairedParticipantIds: unpairedIds,
         strategy,
+        paired,
+        unpairedParticipantIds: unpaired.map((p) => p.id),
+        unpairedNames: unpaired.map(displayName),
       };
     });
   }

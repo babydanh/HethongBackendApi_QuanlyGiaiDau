@@ -276,6 +276,7 @@ export class TournamentRegistrationService {
     inviteCode: string | undefined,
     actorUserId: string | undefined,
     autoSeedFromElo: AutoSeedFromElo,
+    options?: { organizerAdded?: boolean },
   ) {
     const tournament = await this.tournamentsRepository.findById(id);
     if (!tournament) {
@@ -459,14 +460,18 @@ export class TournamentRegistrationService {
     await this.validateEloLimits(tournament, userIds, {
       division: requestedDivision,
     });
-    // Khi mời partner ngay: chặn đội vi phạm genderRestriction của division
-    await this.validateGenderRestriction(requestedDivision, userIds);
+    // Khi mời partner ngay: chặn đội vi phạm genderRestriction của division.
+    // BTC tự thêm (organizerAdded) bỏ qua kiểm này; tự đăng ký vẫn kiểm.
+    if (!options?.organizerAdded) {
+      await this.validateGenderRestriction(requestedDivision, userIds);
+    }
 
     const result = await this.tournamentsRepository.registerParticipant(
       id,
       userId,
       registerTournamentDto,
       inviteCode,
+      options,
     );
 
     if (footballTeam && result.participant.tournamentDivisionId) {

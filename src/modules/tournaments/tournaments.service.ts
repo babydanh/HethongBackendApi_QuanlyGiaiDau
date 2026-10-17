@@ -1284,6 +1284,7 @@ export class TournamentsService {
     registerTournamentDto: RegisterTournamentDto,
     inviteCode?: string,
     actorUserId?: string,
+    options?: { organizerAdded?: boolean },
   ) {
     return this.tournamentRegistrationService.register(
       id,
@@ -1298,6 +1299,7 @@ export class TournamentsService {
           systemRoles,
           divisionId,
         ),
+      options,
     );
   }
 
@@ -1527,8 +1529,8 @@ export class TournamentsService {
       tournamentId,
       memberUserId,
       actorUserId,
-      (id, userId, data, inviteCode, actor) =>
-        this.register(id, userId, data, inviteCode, actor),
+      (id, userId, data, inviteCode, actor, options) =>
+        this.register(id, userId, data, inviteCode, actor, options),
       systemRoles,
       divisionId,
     );

@@ -99,8 +99,17 @@ export function writePairSlots(
   first: PairMember,
   second: PairMember,
 ): Responses {
+  const rest = withoutSlots(customResponses);
+  // A pair holding a guest is an organizer entry (no roster row for the guest),
+  // so mark it: capacity then counts both athletes, not one roster.
+  const holdsGuest = first.kind === 'GUEST' || second.kind === 'GUEST';
+  const organizerMarker =
+    holdsGuest && !ORGANIZER_ENTRY_SOURCES.includes(rest.importedFrom)
+      ? { importedFrom: 'ORGANIZER_DIRECT' }
+      : {};
   return {
-    ...withoutSlots(customResponses),
+    ...rest,
+    ...organizerMarker,
     ...slotValues('player1', first),
     ...slotValues('player2', second),
   };

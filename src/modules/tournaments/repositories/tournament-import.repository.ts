@@ -33,6 +33,7 @@ import {
   readTournamentCapacity,
 } from '../services/tournament-capacity.service';
 import { calculateRequestedTeamSlots } from '../utils/tournament-participant-status';
+import { isDoublesMatchType } from '../utils/tournament-input-policy';
 import { resolveFootballTeamConfig } from '../utils/football-team-config';
 import { countParticipantMembers } from '../utils/doubles-pair-member';
 import { normalizeHttpsImageUrl } from '../../../common/helpers/https-image-url.helper';
@@ -251,7 +252,6 @@ export type LegacyImportItem = {
   player2Email?: string;
   player2Phone?: string;
   elo?: number;
-  isPaid?: boolean;
   autoApprove?: boolean;
   customResponses?: Record<string, unknown>;
 };
@@ -266,7 +266,6 @@ type ImportPersistRow = {
   player2Phone?: string;
   // Score from the file: kept as importedElo, never written as the seed.
   elo?: number;
-  isPaid?: boolean;
   autoApprove?: boolean;
   customResponses?: Record<string, unknown>;
   importMetadata: Record<string, unknown>;
@@ -830,7 +829,13 @@ export class TournamentImportRepository {
           registeredBy: organizerId,
           teamName: candidate.fullName,
           entryFeeAtRegistration,
-          teamStatus: 'PENDING_APPROVAL',
+          teamStatus: isDoublesMatchType(
+            division?.matchType ?? tournament.matchType,
+          )
+            ? 'PENDING_PARTNER'
+            : 'COMPLETE',
+          isPaid: true,
+          organizerWaivedFee: true,
         })
         .returning();
       const [roster] = await tx
@@ -937,6 +942,7 @@ export class TournamentImportRepository {
             entryFeeAtRegistration: isComplete ? entryFee : '0.00',
             teamStatus,
             organizerWaivedFee: true,
+            isPaid: true,
             pairingSource: 'MANUAL',
           })
           .returning({ id: schema.tournamentParticipants.id });
@@ -1038,9 +1044,16 @@ export class TournamentImportRepository {
           registeredBy: organizerId,
           teamName: dto.name,
           entryFeeAtRegistration,
-          teamStatus: 'PENDING_APPROVAL',
+          teamStatus: isDoublesMatchType(
+            division?.matchType ?? tournament.matchType,
+          )
+            ? 'PENDING_PARTNER'
+            : 'COMPLETE',
+          isPaid: true,
+          organizerWaivedFee: true,
           customResponses: {
             importedFrom: 'ORGANIZER_DIRECT',
+            player1Name: dto.name,
             ...(dto.email ? { player1Email: dto.email } : {}),
           },
         })
@@ -1902,7 +1915,6 @@ export class TournamentImportRepository {
             player2Email,
             player2Phone,
             elo: item.elo,
-            isPaid: item.isPaid,
             autoApprove: item.autoApprove,
             customResponses,
             importMetadata,
@@ -2056,7 +2068,6 @@ export class TournamentImportRepository {
           player2Email,
           player2Phone,
           elo: item.elo,
-          isPaid: item.isPaid,
           autoApprove: item.autoApprove,
           customResponses: item.customResponses,
           importMetadata,
@@ -2217,7 +2228,6 @@ export class TournamentImportRepository {
           player2Email: p2Email ?? '',
           player2Phone: p2Phone,
           elo: item.elo,
-          isPaid: item.isPaid,
           autoApprove: item.autoApprove,
           customResponses: item.customResponses,
           importMetadata,
@@ -2267,6 +2277,9 @@ export class TournamentImportRepository {
    *
    * Seeds continue after the division's highest seed, in `rows` order. The
    * file score is kept as `importedElo` and never becomes a seed.
+   *
+   * Every organizer-added row is fee-settled (`isPaid`, `organizerWaivedFee`);
+   * the file's own payment column is ignored.
    */
   private async persistImportRows(
     tx: AppTx,
@@ -2371,7 +2384,7 @@ export class TournamentImportRepository {
       // organizer to pair it, never a complete team of one.
       const holdsOneAthlete =
         countParticipantMembers(storedResponses, linkedUserIds.length) === 1;
-      const teamStatus = !(row.autoApprove && (row.isPaid ?? true))
+      const teamStatus = !row.autoApprove
         ? 'PENDING_APPROVAL'
         : isDoubles && holdsOneAthlete
           ? 'PENDING_PARTNER'
@@ -2384,7 +2397,8 @@ export class TournamentImportRepository {
           tournamentDivisionId: divisionId ?? null,
           registeredBy: row.registeredByUserId || managerUserId,
           teamName: row.teamName || 'Đội đăng ký',
-          isPaid: row.isPaid ?? true,
+          isPaid: true,
+          organizerWaivedFee: true,
           entryFeeAtRegistration,
           teamStatus,
           partnerUserId: row.partnerUserId || null,

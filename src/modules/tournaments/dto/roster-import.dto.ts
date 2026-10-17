@@ -65,7 +65,15 @@ export class RosterImportItemDto {
   @IsNumber()
   elo?: number;
 
-  @ApiPropertyOptional({ description: 'Đã thanh toán lệ phí hay chưa' })
+  /**
+   * deprecated, ignored: organizer rows are always fee-settled. Kept declared
+   * so released clients are not rejected by the global forbidNonWhitelisted pipe.
+   */
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'Đã bỏ: giá trị bị bỏ qua, hồ sơ BTC luôn được ghi nhận đã thanh toán.',
+  })
   @IsOptional()
   @IsBoolean()
   isPaid?: boolean;

@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import * as schema from '../../../database/schema';
-import { TournamentLiteRepository } from './tournament-lite.repository';
+import {
+  LITE_NO_PAIRABLE_MESSAGE,
+  TournamentLiteRepository,
+} from './tournament-lite.repository';
 
 type PairingSource = 'UNKNOWN' | 'MANUAL' | 'SYSTEM';
 
@@ -481,5 +484,296 @@ describe('TournamentLiteRepository guest athletes', () => {
         player1Email: 'a@example.test',
       },
     });
+  });
+});
+
+describe('TournamentLiteRepository BTC pairing (TC-BTCPAIR)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('TC-BTCPAIR-06 marks the surviving participant of an organizer pair as fee-settled', async () => {
+    const p1 = { ...participant('p1'), entryFeeAtRegistration: '150000.00' };
+    const p2 = participant('p2');
+    const state = makeRepository(manualPairSelects(p1, p2), [p1, p2]);
+
+    await state.repository.lockTournamentAndPair(
+      'tournament-1',
+      'p1',
+      'p2',
+      'organizer-1',
+      'OPEN',
+      'Athlete 1 / Athlete 2',
+    );
+
+    expect(state.updates).toContainEqual({
+      table: schema.tournamentParticipants,
+      values: expect.objectContaining({
+        pairingSource: 'MANUAL',
+        isPaid: true,
+        organizerWaivedFee: true,
+      }),
+    });
+  });
+
+  it('TC-BTCPAIR-07 unpairs a pair whose registeredBy matches no roster: the first roster by id leads', async () => {
+    const existingPair = {
+      ...participant('pair-1', 'MANUAL', 'COMPLETE'),
+      registeredBy: 'organizer-1',
+      organizerWaivedFee: true,
+    };
+    const leader = roster('r1', existingPair.id, 'athlete-1');
+    const partner = roster('r2', existingPair.id, 'athlete-2');
+    const state = makeRepository(
+      [
+        [existingPair],
+        [partner, leader],
+        [{ fullName: 'Athlete 1' }],
+        [{ fullName: 'Athlete 2' }],
+      ],
+      [existingPair],
+    );
+
+    const result = await state.repository.unpairParticipantInTx(
+      state.tx as never,
+      'tournament-1',
+      existingPair.id,
+      'organizer-1',
+    );
+
+    expect(result.leader).toMatchObject({
+      teamName: 'Athlete 1',
+      teamStatus: 'PENDING_PARTNER',
+    });
+    expect(result.partner).toMatchObject({
+      registeredBy: 'athlete-2',
+      teamName: 'Athlete 2',
+      teamStatus: 'PENDING_PARTNER',
+    });
+    expect(state.insertions[0].values).toMatchObject({
+      registeredBy: 'athlete-2',
+      organizerWaivedFee: true,
+    });
+    expect(state.updates).toContainEqual({
+      table: schema.tournamentRosters,
+      values: { participantId: 'new-participant' },
+    });
+  });
+
+  it('TC-BTCPAIR-08 writes the organizer marker when an account pairs with a guest', async () => {
+    const account = { ...participant('acct-p'), customResponses: null };
+    const guest = {
+      ...participant('guest-p'),
+      teamName: 'Khách A',
+      registeredBy: 'organizer-1',
+      customResponses: {
+        importedFrom: 'ORGANIZER_DIRECT',
+        player1Email: 'a@example.test',
+      },
+    };
+    const state = makeRepository(
+      [
+        [doublesTournament],
+        [{ count: 0 }],
+        [], // lockCapacityOwner
+        [account], // sorted lock order: 'acct-p' before 'guest-p'
+        [guest],
+        [roster('r1', account.id, 'athlete-1')],
+        [], // a guest has no roster
+        [{ userId: 'athlete-1', fullName: 'An' }],
+        [{ tournamentConfig: { isLite: true } }],
+      ],
+      [account, guest],
+    );
+
+    await state.repository.lockTournamentAndPair(
+      'tournament-1',
+      'acct-p',
+      'guest-p',
+      'organizer-1',
+      'OPEN',
+      'An / Khách A',
+    );
+
+    expect(state.updates).toContainEqual({
+      table: schema.tournamentParticipants,
+      values: expect.objectContaining({
+        customResponses: expect.objectContaining({
+          importedFrom: 'ORGANIZER_DIRECT',
+          player1UserId: 'athlete-1',
+          player2Name: 'Khách A',
+          player2UserId: null,
+        }),
+      }),
+    });
+  });
+
+  it('TC-BTCPAIR-09 random pairing with a division id pairs only that division', async () => {
+    jest.spyOn(Math, 'random').mockReturnValue(0.9); // keeps shuffle in list order
+    const first = { ...participant('p1'), tournamentDivisionId: 'division-1' };
+    const second = { ...participant('p2'), tournamentDivisionId: 'division-1' };
+    const other = { ...participant('p3'), tournamentDivisionId: 'division-2' };
+    const another = { ...participant('p4'), tournamentDivisionId: 'division-2' };
+    const state = makeRepository(
+      [
+        [doublesTournament],
+        [{ count: 0 }],
+        [first, second], // SQL division scope: only division-1 rows come back
+        [
+          roster('r1', 'p1', 'athlete-1'),
+          roster('r2', 'p2', 'athlete-2'),
+        ],
+        [
+          { userId: 'athlete-1', fullName: 'Athlete 1' },
+          { userId: 'athlete-2', fullName: 'Athlete 2' },
+        ],
+        [], // lockCapacityOwner
+        [first],
+        [second],
+        [roster('r1', 'p1', 'athlete-1')],
+        [roster('r2', 'p2', 'athlete-2')],
+        [
+          { userId: 'athlete-1', fullName: 'Athlete 1' },
+          { userId: 'athlete-2', fullName: 'Athlete 2' },
+        ],
+        [], // no duplicate roster membership
+        [{ tournamentConfig: { isLite: true } }],
+      ],
+      [first, second, other, another],
+    );
+
+    const result = await state.repository.generateLitePairsTx(
+      'tournament-1',
+      'organizer-1',
+      'RANDOM',
+      'division-1',
+    );
+
+    expect(
+      result.paired.map((pair) => [pair.participant1Id, pair.participant2Id]),
+    ).toEqual([['p1', 'p2']]);
+    expect(result.unpairedParticipantIds).toEqual([]);
+    expect(
+      state.auditService.logUpdate.mock.calls.map((call) => call[3]),
+    ).toEqual(['p1', 'p2']);
+  });
+
+  it('TC-BTCPAIR-10 reports both member names, a guest by team name, and the leftover name', async () => {
+    jest.spyOn(Math, 'random').mockReturnValue(0.9); // keeps shuffle in list order
+    const first = participant('p1');
+    const guest = {
+      ...participant('p2'),
+      teamName: 'Khách B',
+      customResponses: {
+        importedFrom: 'ORGANIZER_DIRECT',
+        player1Email: 'b@example.test',
+      },
+    };
+    const third = participant('p3');
+    const state = makeRepository(
+      [
+        [doublesTournament],
+        [{ count: 0 }],
+        [first, guest, third],
+        [roster('r1', 'p1', 'athlete-1'), roster('r3', 'p3', 'athlete-3')],
+        [
+          { userId: 'athlete-1', fullName: 'Athlete 1' },
+          { userId: 'athlete-3', fullName: 'Athlete 3' },
+        ],
+        [], // lockCapacityOwner
+        [first],
+        [guest],
+        [roster('r1', 'p1', 'athlete-1')],
+        [], // a guest has no roster
+        [{ userId: 'athlete-1', fullName: 'Athlete 1' }],
+        [{ tournamentConfig: { isLite: true } }],
+      ],
+      [first, guest, third],
+    );
+
+    const result = await state.repository.generateLitePairsTx(
+      'tournament-1',
+      'organizer-1',
+      'RANDOM',
+    );
+
+    expect(result).toMatchObject({
+      strategy: 'RANDOM',
+      paired: [
+        {
+          participantId: 'p1',
+          participant1Id: 'p1',
+          participant2Id: 'p2',
+          teamName: 'Athlete 1 / Khách B',
+          memberNames: ['Athlete 1', 'Khách B'],
+        },
+      ],
+      unpairedParticipantIds: ['p3'],
+      unpairedNames: ['Athlete 3'],
+    });
+  });
+
+  it('TC-BTCPAIR-11 rejects random pairing under two waiting participants with the shared message', async () => {
+    const only = participant('p1');
+    const state = makeRepository(
+      [
+        [doublesTournament],
+        [{ count: 0 }],
+        [only],
+        [roster('r1', 'p1', 'athlete-1')],
+        [{ userId: 'athlete-1', fullName: 'Athlete 1' }],
+      ],
+      [only],
+    );
+    expect(LITE_NO_PAIRABLE_MESSAGE).toBe(
+      'Cần ít nhất 2 người chơi đang chờ ghép cặp.',
+    );
+
+    await expect(
+      state.repository.generateLitePairsTx(
+        'tournament-1',
+        'organizer-1',
+        'RANDOM',
+      ),
+    ).rejects.toThrow(LITE_NO_PAIRABLE_MESSAGE);
+  });
+
+  it('TC-BTCPAIR-11 does not turn a failed pair into a success', async () => {
+    jest.spyOn(Math, 'random').mockReturnValue(0.9); // keeps shuffle in list order
+    const first = participant('p1');
+    const second = participant('p2');
+    const state = makeRepository(
+      [
+        [doublesTournament],
+        [{ count: 0 }],
+        [first, second],
+        [roster('r1', 'p1', 'athlete-1'), roster('r2', 'p2', 'athlete-2')],
+        [
+          { userId: 'athlete-1', fullName: 'Athlete 1' },
+          { userId: 'athlete-2', fullName: 'Athlete 2' },
+        ],
+        [], // lockCapacityOwner
+        [first],
+        [second],
+        [roster('r1', 'p1', 'athlete-1')],
+        [roster('r2', 'p2', 'athlete-2')],
+        [
+          { userId: 'athlete-1', fullName: 'Athlete 1' },
+          { userId: 'athlete-2', fullName: 'Athlete 2' },
+        ],
+        [{ userId: 'athlete-2' }], // athlete 2 already plays another participant
+      ],
+      [first, second],
+    );
+
+    await expect(
+      state.repository.generateLitePairsTx(
+        'tournament-1',
+        'organizer-1',
+        'RANDOM',
+      ),
+    ).rejects.toThrow(
+      'Thành viên của Participant 2 đã tham gia đội khác trong giải này',
+    );
   });
 });

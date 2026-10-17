@@ -199,15 +199,26 @@ describe('legacy import request contract', () => {
     ).toEqual([]);
   });
 
-  it('keeps optional phone and unpaid payment fields accepted', async () => {
+  it('keeps optional phone fields accepted', async () => {
     const item = plainToInstance(ParticipantImportItemDto, {
       teamName: 'VĐV 1',
       player1Name: 'VĐV 1',
       player1Phone: '0900000000',
-      isPaid: false,
     });
 
     expect(await validate(item)).toEqual([]);
+  });
+
+  it('still accepts the deprecated isPaid field under the global whitelist', async () => {
+    const item = plainToInstance(ParticipantImportItemDto, {
+      teamName: 'VĐV 1',
+      player1Name: 'VĐV 1',
+      isPaid: false,
+    });
+
+    expect(
+      await validate(item, { whitelist: true, forbidNonWhitelisted: true }),
+    ).toEqual([]);
   });
 });
 
@@ -238,6 +249,24 @@ describe('strict roster request contract', () => {
           },
         ],
       }),
+    ).toEqual([]);
+  });
+
+  it('still accepts the deprecated isPaid field on a roster row under the global whitelist', async () => {
+    const dto = plainToInstance(RosterImportDto, {
+      participants: [
+        {
+          teamName: 'VĐV 1',
+          player1Name: 'VĐV 1',
+          player1Email: 'athlete@example.test',
+          source: 'EXCEL',
+          isPaid: false,
+        },
+      ],
+    });
+
+    expect(
+      await validate(dto, { whitelist: true, forbidNonWhitelisted: true }),
     ).toEqual([]);
   });
 });
@@ -338,5 +367,28 @@ describe('legacy import keeps email-less rows importable', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(insertsOf(harness.inserts, 'participants')).toEqual([]);
+  });
+
+  it('ignores a deprecated isPaid input: the organizer row is fee-settled', async () => {
+    const harness = createHarness(legacyScopes('SINGLES'), [[]]);
+
+    await createRepository(harness.tx).importParticipants(
+      TOURNAMENT_ID,
+      MANAGER_ID,
+      [
+        plainToInstance(ParticipantImportItemDto, {
+          teamName: 'VĐV đã đóng',
+          player1Name: 'VĐV đã đóng',
+          isPaid: false,
+        }),
+      ],
+      DIVISION_ID,
+    );
+
+    const [participant] = insertsOf(harness.inserts, 'participants');
+    expect(participant.values).toMatchObject({
+      isPaid: true,
+      organizerWaivedFee: true,
+    });
   });
 });
