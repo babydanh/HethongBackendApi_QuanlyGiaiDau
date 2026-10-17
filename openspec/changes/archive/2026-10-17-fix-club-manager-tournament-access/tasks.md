@@ -29,4 +29,4 @@
 ## 5. Hoàn tất
 
 - [x] 5.1 Archive change: chuyển sang `openspec/changes/archive/<date>-fix-club-manager-tournament-access/`.
-- [ ] 5.2 Commit trong worktree, push branch, gộp qua `merge-lane.py` với `openspec-gate.py`, kiểm tra run deploy qua GitHub API.
+- [x] 5.2 Commit trong worktree (34a7958), push branch, gộp qua `merge-lane.py` với `openspec-gate.py`, kiểm tra run deploy qua GitHub API.
