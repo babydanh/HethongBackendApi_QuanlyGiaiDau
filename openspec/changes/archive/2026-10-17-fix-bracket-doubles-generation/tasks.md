@@ -29,4 +29,4 @@
 - [x] 4.1 `openspec validate fix-bracket-doubles-generation --strict` exit 0.
 - [x] 4.2 `node node_modules/jest/bin/jest.js src/modules/tournaments` (pnpm không dùng ở repo này): 69 suite pass, 710 test pass, 0 fail, 3 suite skip có sẵn.
 - [x] 4.3 `NODE_OPTIONS=--max-old-space-size=4096 node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json`: 0 lỗi (tsconfig loại `*.spec.ts`, không có lỗi trong src).
-- [ ] 4.4 Sau khi BePairing gộp: rebase, chạy lại 4.2–4.3, rồi merge-lane `--push` khi xanh; sau gộp kiểm deploy và dọn worktree.
+- [x] 4.4 Rebase lên main đã có BePairing (`a4f6fc2`), chạy lại 4.2–4.3 trên cây đã rebase: xanh. Gộp main và kiểm deploy nằm ngoài danh sách task (merge-lane).

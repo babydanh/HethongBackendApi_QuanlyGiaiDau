@@ -1,7 +1,7 @@
 # tournament-bracket-generation Specification
 
 ## Purpose
-TBD - created by archiving change fix-bracket-doubles-generation. Update Purpose after archive.
+Quy định cách sinh sơ đồ thi đấu (loại trực tiếp, loại kép, vòng tròn, vòng bảng rồi loại trực tiếp) cho từng nội dung: chọn nội dung khi giải có nhiều nội dung, điều kiện đội hợp lệ (đã đóng phí, BTC miễn phí, hoặc VĐV ảo), khoá và chặn tạo lại khi đã có trận, sơ đồ hai lượt và tự ghép đôi lite trong đúng nội dung.
 
 ## Requirements
 
