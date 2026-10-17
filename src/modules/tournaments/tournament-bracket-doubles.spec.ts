@@ -32,7 +32,7 @@ function tokenize(src: string): Tok[] {
     if (col) { toks.push({ k: 'col', t: col[1], c: col[2] }); pos += col[0].length; continue; }
     const par = /^\$(\d+)/.exec(rest);
     if (par) { toks.push({ k: 'param', i: Number(par[1]) - 1 }); pos += par[0].length; continue; }
-    const sym = /^(<>|=|\(|\)|,)/.exec(rest);
+    const sym = /^(<>|<=|=|\(|\)|,)/.exec(rest);
     if (sym) { toks.push({ k: 'sym', v: sym[1] }); pos += sym[0].length; continue; }
     const kw = /^[A-Za-z_]+/.exec(rest);
     if (kw) { toks.push({ k: 'kw', v: kw[0].toLowerCase() }); pos += kw[0].length; continue; }
@@ -45,7 +45,7 @@ type Expr =
   | { op: 'col'; t: string; c: string }
   | { op: 'param'; i: number }
   | { op: 'lit'; v: boolean | null }
-  | { op: 'eq' | 'ne' | 'and' | 'or'; a: Expr; b: Expr }
+  | { op: 'eq' | 'ne' | 'lte' | 'and' | 'or'; a: Expr; b: Expr }
   | { op: 'isNull' | 'isNotNull' | 'not'; a: Expr }
   | { op: 'in'; a: Expr; list: Expr[] };
 
@@ -112,6 +112,7 @@ class Parser {
     const left = this.operand();
     if (this.sym('=')) { this.p++; return { op: 'eq', a: left, b: this.operand() }; }
     if (this.sym('<>')) { this.p++; return { op: 'ne', a: left, b: this.operand() }; }
+    if (this.sym('<=')) { this.p++; return { op: 'lte', a: left, b: this.operand() }; }
     if (this.kw('is')) {
       this.p++;
       let neg = false;
@@ -158,6 +159,11 @@ function evaluate(e: Expr, ctx: Ctx): unknown {
     case 'lit': return e.v;
     case 'eq': return evaluate(e.a, ctx) === evaluate(e.b, ctx);
     case 'ne': return evaluate(e.a, ctx) !== evaluate(e.b, ctx);
+    case 'lte': {
+      const a = evaluate(e.a, ctx);
+      const b = evaluate(e.b, ctx);
+      return a !== null && b !== null && Number(a) <= Number(b);
+    }
     case 'isNull': return evaluate(e.a, ctx) === null;
     case 'isNotNull': return evaluate(e.a, ctx) !== null;
     case 'in': {
@@ -523,10 +529,10 @@ describe('TC-BRK bracket đôi (fake DB)', () => {
         participants: [
           pairRow('TK-TK', DIV_A),
           pairRow('Excel', DIV_A, { pairingSource: 'MANUAL' }),
-          pairRow('TK-khách', DIV_A, { isPaid: false, pairingSource: 'MANUAL' }),
+          pairRow('TK-khách', DIV_A, { isPaid: false, pairingSource: 'MANUAL', entryFeeAtRegistration: 100000 }),
           pairRow('khách-khách', DIV_A, {
             __rosterCount: 0, pairingSource: 'MANUAL', isPaid: false, organizerWaivedFee: false,
-            customResponses: GUEST_ENTRY,
+            customResponses: GUEST_ENTRY, entryFeeAtRegistration: 100000,
           }),
         ],
         divisions: [divisionOf(DIV_A, 'Đôi A', null)],
@@ -540,7 +546,7 @@ describe('TC-BRK bracket đôi (fake DB)', () => {
         participants: [
           pairRow('TK-TK', DIV_A),
           pairRow('Excel', DIV_A),
-          pairRow('TK-khách', DIV_A, { isPaid: false }),
+          pairRow('TK-khách', DIV_A, { isPaid: false, entryFeeAtRegistration: 100000 }),
         ],
         divisions: [divisionOf(DIV_A, 'Đôi A', 'GROUP_STAGE_KNOCKOUT')],
       });
@@ -576,6 +582,20 @@ describe('TC-BRK bracket đôi (fake DB)', () => {
       });
       await service.generateBracket(T, ORG, [], DIV_A, undefined, true);
       expect(sorted(summarize(db, names).round1Teams)).toEqual(sorted(['TK-TK', 'TK-khách', 'Excel']));
+    });
+
+    it('TC-BRK-FREE-01 cặp đăng ký miễn phí (phí 0 hoặc rỗng) chưa có cờ đã đóng vẫn vào sơ đồ', async () => {
+      const { db, service, names } = setup({
+        participants: [
+          pairRow('Miễn-phí-0', DIV_A, { isPaid: false, entryFeeAtRegistration: 0 }),
+          pairRow('Miễn-phí-rỗng', DIV_A, { isPaid: false, entryFeeAtRegistration: null }),
+          pairRow('Có-phí-chưa-đóng', DIV_A, { isPaid: false, entryFeeAtRegistration: 100000 }),
+          pairRow('TK-TK', DIV_A),
+        ],
+        divisions: [divisionOf(DIV_A, 'Đôi A', null)],
+      });
+      await service.generateBracket(T, ORG, [], DIV_A, undefined, true);
+      expect(sorted(summarize(db, names).round1Teams)).toEqual(sorted(['Miễn-phí-0', 'Miễn-phí-rỗng', 'TK-TK']));
     });
 
     it('TC-BRK-07 nội dung đôi thiếu cặp: thông báo nói "cặp", không nói "đội"', async () => {

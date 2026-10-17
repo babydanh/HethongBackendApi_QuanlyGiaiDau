@@ -1,11 +1,11 @@
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, isNull, lte, or } from 'drizzle-orm';
 import * as schema from '../../../database/schema';
 import { MIN_DOUBLE_ELIMINATION_PARTICIPANTS } from '../../../common/helpers/bracket-advancement.helper';
 
 /**
  * Đội hợp lệ để vào sơ đồ, dùng chung cho mọi thể thức và mọi môn: đã đăng ký
- * đủ (COMPLETE) và đã đóng phí, hoặc BTC miễn phí, hoặc là VĐV ảo. Đăng ký
- * miễn phí được set isPaid=true khi đăng ký nên vẫn hợp lệ.
+ * đủ (COMPLETE) và đã đóng phí, hoặc BTC miễn phí, hoặc là VĐV ảo, hoặc miễn
+ * phí lúc đăng ký (phí chụp rỗng hoặc <= 0, cùng quy tắc `isRegistrationFeePaid`).
  */
 export function eligibleTeamCondition() {
   const participants = schema.tournamentParticipants;
@@ -15,6 +15,8 @@ export function eligibleTeamCondition() {
       eq(participants.isMock, true),
       eq(participants.isPaid, true),
       eq(participants.organizerWaivedFee, true),
+      isNull(participants.entryFeeAtRegistration),
+      lte(participants.entryFeeAtRegistration, '0'),
     ),
   );
 }
