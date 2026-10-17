@@ -20,8 +20,23 @@ import {
   validateSportRuleConfig,
 } from '../utils/sport-rules/validate-sport-rules-config';
 import { BRACKET_MIN_TEAMS } from '../utils/bracket-team-eligibility';
+import { LITE_NO_PAIRABLE_MESSAGE } from '../repositories/tournament-lite.repository';
 
 const PAIR_MATCH_TYPES = new Set(['DOUBLES', 'MIXED_DOUBLES']);
+
+/** Kết quả tự ghép đôi lite trong nội dung, trả về để UI hiển thị. */
+export interface LitePairingSummary {
+  autoPaired: { participantId: string; memberNames: string[] }[];
+  unpairedNames: string[];
+}
+
+/** Gắn kết quả tự ghép (nếu ghép thực sự chạy) vào response tạo sơ đồ. */
+function attachLitePairing<T extends object>(
+  result: T,
+  pairing: LitePairingSummary | undefined,
+): T & Partial<LitePairingSummary> {
+  return pairing ? { ...result, ...pairing } : result;
+}
 
 @Injectable()
 export class TournamentBracketService {
@@ -419,12 +434,9 @@ export class TournamentBracketService {
       );
     }
 
+    let litePairing: LitePairingSummary | undefined;
     if (isLite && isPairEvent) {
-      try {
-        await this.tournamentsRepository.generateLitePairsTx(id, userId, 'RANDOM');
-      } catch {
-        // Silently proceed if already paired or < 2 pending participants
-      }
+      litePairing = await this.autoPairLiteDivision(id, userId, divisionId);
     }
 
     // Đếm đội/cặp hợp lệ sau khi ghép lite, cùng quy tắc với generator.
@@ -452,7 +464,7 @@ export class TournamentBracketService {
         division,
         result,
       );
-      return result;
+      return attachLitePairing(result, litePairing);
     } else if (bracketType === 'ROUND_ROBIN') {
       const result = await this.bracketGeneratorService.generateRoundRobin(
         id,
@@ -467,7 +479,7 @@ export class TournamentBracketService {
         division,
         result,
       );
-      return result;
+      return attachLitePairing(result, litePairing);
     } else if (bracketType === 'GROUP_STAGE_KNOCKOUT') {
       // Số đội/cặp tối thiểu đã kiểm ở trên, theo BRACKET_MIN_TEAMS.
       const result =
@@ -484,7 +496,7 @@ export class TournamentBracketService {
         division,
         result,
       );
-      return result;
+      return attachLitePairing(result, litePairing);
     } else {
       const result =
         await this.bracketGeneratorService.generateSingleElimination(
@@ -500,7 +512,41 @@ export class TournamentBracketService {
         division,
         result,
       );
-      return result;
+      return attachLitePairing(result, litePairing);
+    }
+  }
+
+  /**
+   * Tự ghép đôi lite trong đúng nội dung. Chỉ bỏ qua lỗi "không còn ai để ghép";
+   * lỗi khác được ném ra để không tạo sơ đồ dở dang.
+   */
+  private async autoPairLiteDivision(
+    id: string,
+    userId: string,
+    divisionId: string | undefined,
+  ): Promise<LitePairingSummary | undefined> {
+    try {
+      const pairing = await this.tournamentsRepository.generateLitePairsTx(
+        id,
+        userId,
+        'RANDOM',
+        divisionId,
+      );
+      return {
+        autoPaired: pairing.paired.map((pair) => ({
+          participantId: pair.participantId,
+          memberNames: pair.memberNames,
+        })),
+        unpairedNames: pairing.unpairedNames,
+      };
+    } catch (err) {
+      if (
+        err instanceof BadRequestException &&
+        err.message === LITE_NO_PAIRABLE_MESSAGE
+      ) {
+        return undefined;
+      }
+      throw err;
     }
   }
 
