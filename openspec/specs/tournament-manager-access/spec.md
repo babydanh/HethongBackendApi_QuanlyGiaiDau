@@ -60,7 +60,7 @@ Các thao tác trên trận (`PATCH /api/v1/matches/:id/schedule`, `GET /api/v1/
 - **THEN** phản hồi 404
 
 ### Requirement: Route ngoài phạm vi trang manage giữ nguyên quyền ORGANIZER/ADMIN
-Các route trong danh sách ngoài phạm vi của `design.md` (series, playoff, finalize, cancel, groups, import-participants, roster-import một bước, confirm-roster, assign-referee, overlay-visibility, scoreboard-visibility) MUST giữ `@Roles(ORGANIZER, ADMIN)`. Người chỉ có `PLAYER` MUST nhận 403 từ `RolesGuard` dù là quản lý CLB sở hữu giải.
+Các route ngoài phạm vi trang manage MUST giữ `@Roles(ORGANIZER, ADMIN)`, gồm tạo và xóa giải cha (`POST`, `DELETE /api/v1/tournaments/parent/:id`), playoff, finalize, cancel, groups, import, roster, trọng tài và hiển thị. Người chỉ có `PLAYER` MUST nhận 403 từ `RolesGuard`, kể cả khi là quản lý CLB sở hữu giải.
 
 #### Scenario: Quản lý CLB sở hữu giải không tạo được giải series
 - **WHEN** người có `PLAYER` là OWNER của CLB gọi `POST /api/v1/tournaments/parent`
@@ -80,3 +80,40 @@ Thay đổi MUST NOT đổi path, method, DTO, mã lỗi hay định dạng ph�
 #### Scenario: Phản hồi thành công giữ nguyên định dạng
 - **WHEN** quản lý CLB sở hữu giải gọi `PATCH /api/v1/tournaments/:id` thành công
 - **THEN** phản hồi có `data`, `message`, `statusCode` và `meta` như trước change này
+
+### Requirement: Quản lý CLB sở hữu giải cập nhật giải cha qua giải con thuộc CLB
+`PATCH /api/v1/tournaments/parent/:id` MUST cho người có `PLAYER` đi qua cổng role khi và chỉ khi `TournamentAccessService.isManager` đúng với chính giải cha, hoặc đúng với một giải con chưa xóa có `communityId` thuộc giải cha đó. Người không thỏa điều kiện nào MUST nhận 403 và giải cha MUST NOT thay đổi.
+
+#### Scenario: Chủ CLB sở hữu một giải con sửa logo giải cha
+- **WHEN** người có `PLAYER` là OWNER `JOINED` của CLB sở hữu một giải con gọi `PATCH /api/v1/tournaments/parent/:id` với `logoUrl`
+- **THEN** phản hồi 200 và giải cha được cập nhật
+
+#### Scenario: Cựu quản lý CLB không sửa được giải cha
+- **WHEN** người đã rời CLB (không còn dòng thành viên) hoặc đã bị cấm gọi `PATCH /api/v1/tournaments/parent/:id`
+- **THEN** phản hồi 403 và giải cha không đổi
+
+#### Scenario: Giải con không thuộc CLB không mở quyền giải cha
+- **WHEN** người có `PLAYER` là quản lý của giải con không có `communityId` gọi `PATCH /api/v1/tournaments/parent/:id`
+- **THEN** phản hồi 403 và giải cha không đổi
+
+### Requirement: Quyền quản lý CLB theo một điều kiện thành viên duy nhất
+Mọi quyết định quản lý giải theo CLB MUST dùng cùng một điều kiện: thành viên có status `JOINED` hoặc `ACTIVE` và role `OWNER` hoặc `MODERATOR` (không phân biệt hoa thường). Thành viên có status khác, hoặc không còn dòng thành viên, MUST NOT có quyền đó.
+
+#### Scenario: MODERATOR bị cấm không cập nhật được giải CLB
+- **WHEN** người có `PLAYER` là MODERATOR với status `BANNED` của CLB sở hữu giải gọi `PATCH /api/v1/tournaments/:id`
+- **THEN** phản hồi 403 và giải không đổi
+
+#### Scenario: OWNER đang chờ duyệt không đọc được danh sách Lite
+- **WHEN** người là OWNER với status `PENDING` của CLB sở hữu giải gọi `GET /api/v1/tournaments/lite/:id/participants`
+- **THEN** phản hồi 403
+
+#### Scenario: MODERATOR đang JOINED vẫn quản lý được giải CLB
+- **WHEN** người có `PLAYER` là MODERATOR với status `JOINED` của CLB sở hữu giải gọi `POST /api/v1/tournaments/:id/publish`
+- **THEN** quyền CLB được chấp nhận và thao tác tiếp tục theo hành vi hiện có của publish
+
+### Requirement: Người tạo CLB không giữ quyền theo CLB khi không còn là quản lý
+Người tạo CLB MUST NOT có quyền quản lý giải CLB chỉ vì là `creatorId` của CLB khi không còn là thành viên OWNER/MODERATOR đang hiệu lực.
+
+#### Scenario: Người tạo CLB đã rời CLB không xóa được giải CLB
+- **WHEN** người đã tạo CLB, nay không còn dòng thành viên của CLB, gọi `DELETE /api/v1/tournaments/:id` cho giải CLB đó
+- **THEN** phản hồi 403 và giải không bị xóa

@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Route ngoài phạm vi trang manage giữ nguyên quyền ORGANIZER/ADMIN
-Các route trong danh sách ngoài phạm vi của `design.md` MUST giữ `@Roles(ORGANIZER, ADMIN)`: tạo và xóa giải cha (`POST`, `DELETE /api/v1/tournaments/parent/:id`), playoff, finalize, cancel, groups, import-participants, roster-import một bước, confirm-roster, assign-referee, overlay-visibility, scoreboard-visibility. Người chỉ có `PLAYER` MUST nhận 403 từ `RolesGuard` dù là quản lý CLB sở hữu giải. `PATCH /api/v1/tournaments/parent/:id` không còn thuộc nhóm này; xem requirement cập nhật giải cha qua giải con.
+Các route ngoài phạm vi trang manage MUST giữ `@Roles(ORGANIZER, ADMIN)`, gồm tạo và xóa giải cha (`POST`, `DELETE /api/v1/tournaments/parent/:id`), playoff, finalize, cancel, groups, import, roster, trọng tài và hiển thị. Người chỉ có `PLAYER` MUST nhận 403 từ `RolesGuard`, kể cả khi là quản lý CLB sở hữu giải.
 
 #### Scenario: Quản lý CLB sở hữu giải không tạo được giải series
 - **WHEN** người có `PLAYER` là OWNER của CLB gọi `POST /api/v1/tournaments/parent`
