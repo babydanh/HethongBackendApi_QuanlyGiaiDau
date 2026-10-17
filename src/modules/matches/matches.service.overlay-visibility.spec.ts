@@ -1,10 +1,10 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { MatchesService } from './matches.service';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 describe('MatchesService overlay visibility', () => {
   const repository = {
     findById: jest.fn(),
-    isTournamentManager: jest.fn(),
     isRefereeAccepted: jest.fn(),
     setOverlayVisibility: jest.fn(),
     canAccessLiveMatch: jest.fn(),
@@ -15,6 +15,14 @@ describe('MatchesService overlay visibility', () => {
   const rankings = {};
   const notifications = {};
   const redis = { hgetall: jest.fn(), hset: jest.fn(), getClient: jest.fn() };
+  const tournamentsRepository = {
+    isCoOrganizer: jest.fn().mockResolvedValue(false),
+    findCommunityById: jest.fn().mockResolvedValue(null),
+    findCommunityMember: jest.fn().mockResolvedValue(null),
+  };
+  const tournamentAccess = new TournamentAccessService(
+    tournamentsRepository as never,
+  );
   // `matchContextAdapter` is omitted on purpose: every case runs the tournament path.
   const service = new MatchesService(
     repository as never,
@@ -22,6 +30,7 @@ describe('MatchesService overlay visibility', () => {
     rankings as never,
     notifications as never,
     redis as never,
+    tournamentAccess as never,
   );
 
   const baseMatch = {
@@ -46,7 +55,7 @@ describe('MatchesService overlay visibility', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repository.findById.mockResolvedValue({ ...baseMatch });
-    repository.isTournamentManager.mockResolvedValue(false);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(false);
     repository.isRefereeAccepted.mockResolvedValue(false);
     repository.canAccessLiveMatch.mockResolvedValue(true);
   });

@@ -3,6 +3,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { MatchesService } from './matches.service';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 function match(overrides: Record<string, unknown> = {}) {
   return {
@@ -33,16 +34,24 @@ function result(data: unknown[]) {
 describe('MatchesService schedule plan preview', () => {
   const repository = {
     findScheduleTournament: jest.fn(),
-    isTournamentManager: jest.fn(),
     findScheduleCourts: jest.fn(),
     findAll: jest.fn(),
   };
+  const tournamentsRepository = {
+    isCoOrganizer: jest.fn().mockResolvedValue(false),
+    findCommunityById: jest.fn().mockResolvedValue(null),
+    findCommunityMember: jest.fn().mockResolvedValue(null),
+  };
+  const tournamentAccess = new TournamentAccessService(
+    tournamentsRepository as never,
+  );
   const service = new MatchesService(
     repository as never,
     {} as never,
     {} as never,
     {} as never,
     {} as never,
+    tournamentAccess as never,
   );
 
   beforeEach(() => {
@@ -54,7 +63,7 @@ describe('MatchesService schedule plan preview', () => {
       endDate: new Date('2026-08-27T22:00:00.000Z'),
       updatedAt: new Date('2026-08-27T00:00:00.000Z'),
     });
-    repository.isTournamentManager.mockResolvedValue(false);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(false);
     repository.findScheduleCourts.mockResolvedValue([
       { id: 'court-1', venueId: 'venue-1', courtName: 'Court 1', status: 'AVAILABLE' },
     ]);
@@ -92,7 +101,7 @@ describe('MatchesService schedule plan preview', () => {
   });
 
   it('rejects a court outside the tournament scope', async () => {
-    repository.isTournamentManager.mockResolvedValue(true);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(true);
     repository.findScheduleCourts.mockResolvedValue([]);
 
     await expect(

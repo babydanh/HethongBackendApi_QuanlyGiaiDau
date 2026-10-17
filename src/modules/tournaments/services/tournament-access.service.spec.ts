@@ -56,4 +56,37 @@ describe('TournamentAccessService', () => {
       access.assertCommunityTournamentCreator('community-1', 'member-1'),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('grants a club OWNER or MODERATOR only for a tournament of their own community', async () => {
+    const memberships: Record<string, { status: string; role: string }> = {
+      'community-1:club-owner-1': { status: 'JOINED', role: 'OWNER' },
+      'community-2:club-owner-2': { status: 'JOINED', role: 'OWNER' },
+    };
+    repository.findCommunityMember = jest
+      .fn()
+      .mockImplementation(
+        async (communityId: string, userId: string) =>
+          memberships[`${communityId}:${userId}`] ?? null,
+      );
+
+    await expect(
+      access.isManager(tournament, 'club-owner-1', ['PLAYER']),
+    ).resolves.toBe(true);
+    await expect(
+      access.isManager(tournament, 'club-owner-2', ['PLAYER']),
+    ).resolves.toBe(false);
+    await expect(
+      access.isManager(tournament, 'player-1', ['PLAYER']),
+    ).resolves.toBe(false);
+  });
+
+  it('denies a club OWNER whose membership is not JOINED or ACTIVE', async () => {
+    repository.findCommunityMember = jest
+      .fn()
+      .mockResolvedValue({ status: 'PENDING', role: 'OWNER' });
+
+    await expect(
+      access.isManager(tournament, 'club-owner-1', ['PLAYER']),
+    ).resolves.toBe(false);
+  });
 });

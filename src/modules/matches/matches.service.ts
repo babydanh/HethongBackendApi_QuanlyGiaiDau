@@ -61,6 +61,7 @@ import {
 import { MatchContextAdapter } from './match-context.adapter';
 import { ClubMatchSessionsService } from '../club-match-sessions/club-match-sessions.service';
 import { LivestreamService } from '../livestream/livestream.service';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 // Bump when the read-scope contract changes so an old Redis list response
 // cannot survive a deployment and reintroduce stale live rows.
@@ -75,6 +76,7 @@ export class MatchesService {
     private readonly rankingsService: RankingsService,
     private readonly notificationsService: NotificationsService,
     private readonly redisService: RedisService,
+    private readonly tournamentAccessService: TournamentAccessService,
     @Optional() private readonly matchContextAdapter?: MatchContextAdapter,
     @Optional()
     @Inject(forwardRef(() => ClubMatchSessionsService))
@@ -166,12 +168,15 @@ export class MatchesService {
     user: JwtPayload,
   ) {
     if (!match) return false;
-    if (this.isAdmin(user) || match.tournament?.createdBy === user.sub) {
-      return true;
-    }
-    return this.matchesRepository.isTournamentManager(
-      match.tournamentId,
+    if (this.isAdmin(user)) return true;
+    return this.tournamentAccessService.isManager(
+      {
+        id: match.tournamentId,
+        createdBy: match.tournament?.createdBy ?? null,
+        communityId: match.tournament?.communityId ?? null,
+      },
       user.sub,
+      [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
     );
   }
   private async getTournamentMatchScoreAccess(
@@ -905,10 +910,14 @@ export class MatchesService {
 
     const isManager =
       this.isAdmin(user) ||
-      tournament.createdBy === user.sub ||
-      (await this.matchesRepository.isTournamentManager(
-        tournamentId,
+      (await this.tournamentAccessService.isManager(
+        {
+          id: tournament.id,
+          createdBy: tournament.createdBy,
+          communityId: tournament.communityId,
+        },
         user.sub,
+        [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
       ));
     if (!isManager)
       throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');
@@ -959,10 +968,14 @@ export class MatchesService {
 
     const isManager =
       this.isAdmin(user) ||
-      tournament.createdBy === user.sub ||
-      (await this.matchesRepository.isTournamentManager(
-        tournamentId,
+      (await this.tournamentAccessService.isManager(
+        {
+          id: tournament.id,
+          createdBy: tournament.createdBy,
+          communityId: tournament.communityId,
+        },
         user.sub,
+        [...(user.roles ?? []), ...(user.role ? [user.role] : [])],
       ));
     if (!isManager)
       throw new ForbiddenException('Không có quyền xếp lịch giải đấu này');

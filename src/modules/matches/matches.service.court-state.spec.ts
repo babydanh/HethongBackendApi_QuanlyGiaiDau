@@ -4,11 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { MatchesService } from './matches.service';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 describe('MatchesService court state', () => {
   const repository = {
     findById: jest.fn(),
-    isTournamentManager: jest.fn(),
     isRefereeAccepted: jest.fn(),
     canAccessLiveMatch: jest.fn(),
     updateCourtState: jest.fn(),
@@ -21,12 +21,21 @@ describe('MatchesService court state', () => {
     hset: jest.fn(),
     getClient: jest.fn(() => ({ expire: jest.fn() })),
   };
+  const tournamentsRepository = {
+    isCoOrganizer: jest.fn().mockResolvedValue(false),
+    findCommunityById: jest.fn().mockResolvedValue(null),
+    findCommunityMember: jest.fn().mockResolvedValue(null),
+  };
+  const tournamentAccess = new TournamentAccessService(
+    tournamentsRepository as never,
+  );
   const service = new MatchesService(
     repository as never,
     gateway as never,
     {} as never,
     {} as never,
     redis as never,
+    tournamentAccess as never,
   );
 
   const referee = { sub: 'referee-1', roles: ['REFEREE'] } as never;
@@ -85,7 +94,7 @@ describe('MatchesService court state', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repository.findById.mockResolvedValue(pickleballMatch());
-    repository.isTournamentManager.mockResolvedValue(false);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(false);
     repository.isRefereeAccepted.mockResolvedValue(false);
     repository.canAccessLiveMatch.mockResolvedValue(false);
     // Repo trả về bản đã ghi: scoreDetails của DB, giữ sets cũ và courtState mới.

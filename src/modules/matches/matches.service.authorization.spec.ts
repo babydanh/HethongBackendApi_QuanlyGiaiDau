@@ -4,11 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { MatchesService } from './matches.service';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 describe('MatchesService object-level football authority', () => {
   const repository = {
     findById: jest.fn(),
-    isTournamentManager: jest.fn(),
     isRefereeAccepted: jest.fn(),
     findAllowedCourtForMatch: jest.fn(),
     getRostersForParticipants: jest.fn(),
@@ -17,6 +17,11 @@ describe('MatchesService object-level football authority', () => {
     updateRefereeId: jest.fn(),
     updateStatus: jest.fn(),
     canAccessLiveMatch: jest.fn(),
+  };
+  const tournamentsRepository = {
+    isCoOrganizer: jest.fn(),
+    findCommunityById: jest.fn(),
+    findCommunityMember: jest.fn(),
   };
   const gateway = {
     broadcastScoreUpdate: jest.fn(),
@@ -30,12 +35,16 @@ describe('MatchesService object-level football authority', () => {
     getClient: jest.fn(() => ({ expire: jest.fn() })),
     delByPattern: jest.fn(),
   };
+  const tournamentAccess = new TournamentAccessService(
+    tournamentsRepository as never,
+  );
   const service = new MatchesService(
     repository as never,
     gateway as never,
     rankings as never,
     notifications as never,
     redis as never,
+    tournamentAccess as never,
   );
 
   const baseMatch = {
@@ -56,7 +65,7 @@ describe('MatchesService object-level football authority', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     repository.findById.mockResolvedValue({ ...baseMatch });
-    repository.isTournamentManager.mockResolvedValue(false);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(false);
     repository.isRefereeAccepted.mockResolvedValue(false);
     repository.findAllowedCourtForMatch.mockResolvedValue({
       id: 'court-1',
@@ -240,7 +249,7 @@ describe('MatchesService object-level football authority', () => {
   });
 
   it('allows a co-organizer scoped to this tournament to enter score', async () => {
-    repository.isTournamentManager.mockResolvedValue(true);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(true);
 
     await expect(
       service.updateScore(
@@ -263,7 +272,7 @@ describe('MatchesService object-level football authority', () => {
   });
 
   it('allows a tournament-scoped PLAYER co-organizer to assign an available court', async () => {
-    repository.isTournamentManager.mockResolvedValue(true);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(true);
 
     await expect(
       service.updateSchedule(
@@ -285,7 +294,7 @@ describe('MatchesService object-level football authority', () => {
   });
 
   it('rejects a cross-tournament or disabled court before persistence', async () => {
-    repository.isTournamentManager.mockResolvedValue(true);
+    tournamentsRepository.isCoOrganizer.mockResolvedValue(true);
     repository.findAllowedCourtForMatch.mockResolvedValue(null);
 
     await expect(
@@ -320,7 +329,7 @@ describe('MatchesService object-level football authority', () => {
   });
   describe('getScoreAccess', () => {
     it('returns true for a tournament manager', async () => {
-      repository.isTournamentManager.mockResolvedValue(true);
+      tournamentsRepository.isCoOrganizer.mockResolvedValue(true);
 
       await expect(
         service.getScoreAccess('match-1', {
@@ -397,6 +406,104 @@ describe('MatchesService object-level football authority', () => {
           roles: ['ORGANIZER'],
         } as never),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('club-managed tournament authority (CLB scope)', () => {
+    const clubMatch = {
+      ...baseMatch,
+      tournament: {
+        createdBy: 'owner-1',
+        communityId: 'community-1',
+        sportRules: null,
+      },
+    };
+    const memberships: Record<string, { status: string; role: string }> = {
+      'community-1:club-owner-1': { status: 'JOINED', role: 'OWNER' },
+      'community-1:club-moderator-1': { status: 'ACTIVE', role: 'MODERATOR' },
+      'community-2:club-owner-2': { status: 'JOINED', role: 'OWNER' },
+    };
+
+    beforeEach(() => {
+      repository.findById.mockResolvedValue({ ...clubMatch });
+      tournamentsRepository.isCoOrganizer.mockResolvedValue(false);
+      tournamentsRepository.findCommunityById.mockResolvedValue(null);
+      tournamentsRepository.findCommunityMember.mockImplementation(
+        async (communityId: string, userId: string) =>
+          memberships[`${communityId}:${userId}`] ?? null,
+      );
+    });
+
+    it('lets the OWNER of the tournament community reschedule the match', async () => {
+      await expect(
+        service.updateSchedule(
+          'match-1',
+          { sub: 'club-owner-1', roles: ['PLAYER'] } as never,
+          { courtId: 'court-1' },
+        ),
+      ).resolves.toBeDefined();
+      expect(repository.updateSchedule).toHaveBeenCalled();
+    });
+
+    it('lets an ACTIVE MODERATOR of the tournament community enter the score', async () => {
+      await expect(
+        service.updateScore(
+          'match-1',
+          { sub: 'club-moderator-1', roles: ['PLAYER'] } as never,
+          { p1SetsWon: 1, p2SetsWon: 0 } as never,
+        ),
+      ).resolves.toBeDefined();
+      expect(repository.updateScore).toHaveBeenCalled();
+    });
+
+    it('reports canScore for the OWNER of the tournament community', async () => {
+      await expect(
+        service.getScoreAccess('match-1', {
+          sub: 'club-owner-1',
+          roles: ['PLAYER'],
+        } as never),
+      ).resolves.toEqual({ canScore: true });
+    });
+
+    it('rejects the OWNER of another community from rescheduling the match', async () => {
+      await expect(
+        service.updateSchedule(
+          'match-1',
+          { sub: 'club-owner-2', roles: ['PLAYER'] } as never,
+          { courtId: 'court-1' },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repository.updateSchedule).not.toHaveBeenCalled();
+    });
+
+    it('rejects the OWNER of another community from entering a score', async () => {
+      await expect(
+        service.updateScore(
+          'match-1',
+          { sub: 'club-owner-2', roles: ['PLAYER'] } as never,
+          { p1SetsWon: 1, p2SetsWon: 0 } as never,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repository.updateScore).not.toHaveBeenCalled();
+    });
+
+    it('rejects an ordinary PLAYER outside the community from rescheduling and scoring', async () => {
+      await expect(
+        service.updateSchedule(
+          'match-1',
+          { sub: 'player-1', roles: ['PLAYER'] } as never,
+          { courtId: 'court-1' },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.updateScore(
+          'match-1',
+          { sub: 'player-1', roles: ['PLAYER'] } as never,
+          { p1SetsWon: 1, p2SetsWon: 0 } as never,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repository.updateSchedule).not.toHaveBeenCalled();
+      expect(repository.updateScore).not.toHaveBeenCalled();
     });
   });
 

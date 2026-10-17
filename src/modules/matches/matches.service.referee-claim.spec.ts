@@ -5,6 +5,8 @@ import type { LiveScoreGateway } from './live-score.gateway';
 import type { RankingsService } from '../rankings/rankings.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { RedisService } from '../../providers/redis/redis.service';
+import type { TournamentsRepository } from '../tournaments/tournaments.repository';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 describe('MatchesService — referee claims match when starting Live', () => {
   let service: MatchesService;
@@ -13,6 +15,7 @@ describe('MatchesService — referee claims match when starting Live', () => {
   let mockRankings: jest.Mocked<Partial<RankingsService>>;
   let mockNotifications: jest.Mocked<Partial<NotificationsService>>;
   let mockRedis: jest.Mocked<Partial<RedisService>>;
+  let mockTournamentsRepo: jest.Mocked<Partial<TournamentsRepository>>;
 
   const scheduledMatch = {
     id: 'match-1',
@@ -34,12 +37,16 @@ describe('MatchesService — referee claims match when starting Live', () => {
   };
 
   beforeEach(() => {
+    mockTournamentsRepo = {
+      isCoOrganizer: jest.fn().mockResolvedValue(false),
+      findCommunityById: jest.fn().mockResolvedValue(null),
+      findCommunityMember: jest.fn().mockResolvedValue(null),
+    };
     mockRepo = {
       // Fresh copy per call so one test cannot mutate state seen by another.
       findById: jest.fn().mockImplementation(() =>
         Promise.resolve({ ...scheduledMatch, refereeId: null }),
       ),
-      isTournamentManager: jest.fn().mockResolvedValue(false),
       isRefereeAccepted: jest.fn().mockResolvedValue(true),
       updateRefereeId: jest.fn().mockResolvedValue({ refereeId: 'referee-1' }),
       updateStatus: jest.fn().mockImplementation((id: string) =>
@@ -62,6 +69,9 @@ describe('MatchesService — referee claims match when starting Live', () => {
       mockRankings as unknown as RankingsService,
       mockNotifications as unknown as NotificationsService,
       mockRedis as unknown as RedisService,
+      new TournamentAccessService(
+        mockTournamentsRepo as unknown as TournamentsRepository,
+      ),
     );
   });
 

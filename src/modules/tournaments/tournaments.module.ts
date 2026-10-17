@@ -101,6 +101,7 @@ import { TournamentRegistrationRepository } from './repositories/tournament-regi
     TournamentsService,
     BracketGeneratorService,
     TournamentsRepository,
+    TournamentAccessService,
   ],
 })
 export class TournamentsModule { }

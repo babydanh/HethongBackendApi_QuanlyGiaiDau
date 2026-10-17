@@ -2818,46 +2818,12 @@ export class MatchesRepository {
     return Number(result[0]?.count || 0) > 0;
   }
 
-  /**
-   * Object-level tournament authority. A global ORGANIZER role is not enough
-   * to operate an arbitrary match; the user must own the tournament or be an
-   * accepted CO_ORGANIZER assignment for that tournament.
-   */
-  async isTournamentManager(
-    tournamentId: string,
-    userId: string,
-  ): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: schema.tournaments.id })
-      .from(schema.tournaments)
-      .leftJoin(
-        schema.tournamentStaff,
-        and(
-          eq(schema.tournamentStaff.tournamentId, schema.tournaments.id),
-          eq(schema.tournamentStaff.userId, userId),
-          eq(schema.tournamentStaff.role, 'CO_ORGANIZER'),
-        ),
-      )
-      .where(
-        and(
-          eq(schema.tournaments.id, tournamentId),
-          isNull(schema.tournaments.deletedAt),
-          or(
-            eq(schema.tournaments.createdBy, userId),
-            eq(schema.tournamentStaff.userId, userId),
-          ),
-        ),
-      )
-      .limit(1);
-
-    return Boolean(row);
-  }
-
   async findScheduleTournament(tournamentId: string) {
     const [tournament] = await this.db
       .select({
         id: schema.tournaments.id,
         createdBy: schema.tournaments.createdBy,
+        communityId: schema.tournaments.communityId,
         startDate: schema.tournaments.startDate,
         endDate: schema.tournaments.endDate,
         venueId: schema.tournaments.venueId,

@@ -13,6 +13,7 @@ import { ClubMatchSessionsModule } from '../club-match-sessions/club-match-sessi
 import { OverlayRepository } from './overlay/overlay.repository';
 import { OverlayService } from './overlay/overlay.service';
 import { LivestreamModule } from '../livestream/livestream.module';
+import { TournamentsModule } from '../tournaments/tournaments.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { LivestreamModule } from '../livestream/livestream.module';
     RedisModule,
     forwardRef(() => ClubMatchSessionsModule),
     LivestreamModule,
+    forwardRef(() => TournamentsModule),
   ],
   controllers: [MatchesController, TournamentScheduleController],
   providers: [

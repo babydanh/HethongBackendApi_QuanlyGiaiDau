@@ -5,6 +5,8 @@ import type { LiveScoreGateway } from './live-score.gateway';
 import type { RankingsService } from '../rankings/rankings.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { RedisService } from '../../providers/redis/redis.service';
+import type { TournamentsRepository } from '../tournaments/tournaments.repository';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D3)', () => {
   let service: MatchesService;
@@ -13,6 +15,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
   let mockRankings: jest.Mocked<Partial<RankingsService>>;
   let mockNotifications: jest.Mocked<Partial<NotificationsService>>;
   let mockRedis: jest.Mocked<Partial<RedisService>>;
+  let mockTournamentsRepo: jest.Mocked<Partial<TournamentsRepository>>;
 
   const existingMatch = {
     id: 'match-1',
@@ -34,9 +37,13 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
   };
 
   beforeEach(() => {
+    mockTournamentsRepo = {
+      isCoOrganizer: jest.fn().mockResolvedValue(false),
+      findCommunityById: jest.fn().mockResolvedValue(null),
+      findCommunityMember: jest.fn().mockResolvedValue(null),
+    };
     mockRepo = {
       findById: jest.fn().mockResolvedValue(existingMatch),
-      isTournamentManager: jest.fn().mockResolvedValue(false),
       isRefereeAccepted: jest.fn().mockResolvedValue(false),
       canAccessLiveMatch: jest.fn().mockResolvedValue(true),
       completeMatch: jest.fn(),
@@ -71,6 +78,9 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
       mockRankings as unknown as RankingsService,
       mockNotifications as unknown as NotificationsService,
       mockRedis as unknown as RedisService,
+      new TournamentAccessService(
+        mockTournamentsRepo as unknown as TournamentsRepository,
+      ),
     );
   });
 
@@ -697,7 +707,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         scoreDetails: {},
       };
       mockRepo.findById = jest.fn().mockResolvedValue(footballMatch);
-      mockRepo.isTournamentManager = jest.fn().mockResolvedValue(true);
+      mockTournamentsRepo.isCoOrganizer = jest.fn().mockResolvedValue(true);
       mockRepo.completeMatch = jest.fn().mockResolvedValue(footballMatch);
 
       await service.operateMatch(
@@ -737,7 +747,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         scoreDetails: {},
       };
       mockRepo.findById = jest.fn().mockResolvedValue(footballMatch);
-      mockRepo.isTournamentManager = jest.fn().mockResolvedValue(true);
+      mockTournamentsRepo.isCoOrganizer = jest.fn().mockResolvedValue(true);
       mockRepo.completeMatch = jest.fn().mockResolvedValue(footballMatch);
 
       await service.operateMatch(
@@ -771,7 +781,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         scoreDetails: {},
       };
       mockRepo.findById = jest.fn().mockResolvedValue(footballMatch);
-      mockRepo.isTournamentManager = jest.fn().mockResolvedValue(true);
+      mockTournamentsRepo.isCoOrganizer = jest.fn().mockResolvedValue(true);
 
       await expect(
         service.operateMatch(
@@ -799,7 +809,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         },
       };
       mockRepo.findById = jest.fn().mockResolvedValue(footballMatch);
-      mockRepo.isTournamentManager = jest.fn().mockResolvedValue(true);
+      mockTournamentsRepo.isCoOrganizer = jest.fn().mockResolvedValue(true);
       mockRepo.completeMatch = jest.fn().mockResolvedValue(footballMatch);
 
       await service.operateMatch(
@@ -836,7 +846,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         scoreDetails: {},
       };
       mockRepo.findById = jest.fn().mockResolvedValue(scheduledMatch);
-      mockRepo.isTournamentManager = jest.fn().mockResolvedValue(true);
+      mockTournamentsRepo.isCoOrganizer = jest.fn().mockResolvedValue(true);
       mockRepo.recordNonFinalOperation = jest
         .fn()
         .mockResolvedValue({ ...scheduledMatch, status: 'SCHEDULED' });
@@ -875,7 +885,7 @@ describe('MatchesService — completion idempotency & optimistic lock (NOTE-1, D
         scoreDetails: {},
       };
       mockRepo.findById = jest.fn().mockResolvedValue(ongoingMatch);
-      mockRepo.isTournamentManager = jest.fn().mockResolvedValue(true);
+      mockTournamentsRepo.isCoOrganizer = jest.fn().mockResolvedValue(true);
       mockRepo.recordNonFinalOperation = jest
         .fn()
         .mockResolvedValue({ ...ongoingMatch, status: 'DISPUTED' });
