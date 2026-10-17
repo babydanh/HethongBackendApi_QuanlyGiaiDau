@@ -92,7 +92,7 @@ Creating a quick tournament for a non-football sport with no divisions SHALL cre
 
 ### Requirement: Sơ đồ chỉ xếp đội hoàn chỉnh
 
-Bracket generation and seeding SHALL seat only `COMPLETE` participants; a virtual athlete SHALL skip the payment rule but not the team rule.
+Bracket generation and seeding SHALL seat only `COMPLETE` participants that are paid, waived by the organizer, or virtual, in every bracket format. A virtual athlete SHALL skip the payment rule but not the team rule.
 
 #### Scenario: VĐV ảo đã ghép vào cặp
 
