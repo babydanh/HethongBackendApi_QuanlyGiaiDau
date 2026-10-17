@@ -258,7 +258,7 @@ export class TournamentsController {
   }
 
   @Patch('parent/:id')
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(...TOURNAMENT_MANAGER_ROLES)
   @Verified()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật thông tin giải đấu cha' })

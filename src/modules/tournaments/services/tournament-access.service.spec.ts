@@ -89,4 +89,41 @@ describe('TournamentAccessService', () => {
       access.isManager(tournament, 'club-owner-1', ['PLAYER']),
     ).resolves.toBe(false);
   });
+
+  it('denies the community creator who no longer holds an active OWNER membership', async () => {
+    repository.findCommunityById = jest
+      .fn()
+      .mockResolvedValue({ id: 'community-1', creatorId: 'club-owner-1' });
+    repository.findCommunityMember = jest.fn().mockResolvedValue(null);
+
+    await expect(
+      access.isManager(tournament, 'club-owner-1', ['PLAYER']),
+    ).resolves.toBe(false);
+  });
+
+  it('denies a former community creator who was demoted to MEMBER', async () => {
+    repository.findCommunityById = jest
+      .fn()
+      .mockResolvedValue({ id: 'community-1', creatorId: 'club-owner-1' });
+    repository.findCommunityMember = jest
+      .fn()
+      .mockResolvedValue({ status: 'JOINED', role: 'MEMBER' });
+
+    await expect(
+      access.isManager(tournament, 'club-owner-1', ['PLAYER']),
+    ).resolves.toBe(false);
+  });
+
+  it.each(['PENDING', 'INVITED', 'REJECTED', 'BANNED'])(
+    'denies a MODERATOR whose membership status is %s',
+    async (status) => {
+      repository.findCommunityMember = jest
+        .fn()
+        .mockResolvedValue({ status, role: 'MODERATOR' });
+
+      await expect(
+        access.isManager(tournament, 'moderator-1', ['PLAYER']),
+      ).resolves.toBe(false);
+    },
+  );
 });

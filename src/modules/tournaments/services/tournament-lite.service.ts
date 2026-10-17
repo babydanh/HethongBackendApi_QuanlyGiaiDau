@@ -21,7 +21,10 @@ import {
   MatchType,
 } from '../dto/create-division.dto';
 import type { CategoryConfig } from '../interfaces/tournament-config.interface';
-import { TournamentAccessService } from './tournament-access.service';
+import {
+  isActiveCommunityManager,
+  TournamentAccessService,
+} from './tournament-access.service';
 import { TournamentLifecycleService } from './tournament-lifecycle.service';
 import { TournamentBracketService } from './tournament-bracket.service';
 import { RedisService } from '../../../providers/redis/redis.service';
@@ -1446,7 +1449,7 @@ export class TournamentLiteService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }

@@ -100,6 +100,66 @@ describe('TournamentLifecycleService parent operations', () => {
       dto,
     );
   });
+
+  it('lets a club OWNER of a child tournament update the parent series', async () => {
+    const existing = { id: 'parent-1', createdBy: 'organizer-1' };
+    const dto = {
+      logoUrl: 'https://cdn.example.com/logo.png',
+    } as UpdateParentTournamentDto;
+    repositoryMock.findParentById.mockResolvedValue(existing);
+    repositoryMock.findByParentId.mockResolvedValue([
+      { id: 'child-1', createdBy: 'organizer-1', communityId: 'club-1' },
+    ]);
+    accessMock.isManager.mockImplementation(
+      async (tournament: { id: string }) => tournament.id === 'child-1',
+    );
+    repositoryMock.updateParent.mockResolvedValue({ ...existing, ...dto });
+
+    await expect(
+      lifecycle.updateParent('parent-1', 'club-owner-1', dto),
+    ).resolves.toEqual({ ...existing, ...dto });
+    expect(repositoryMock.updateParent).toHaveBeenCalledWith(
+      'parent-1',
+      'club-owner-1',
+      dto,
+    );
+  });
+
+  it('denies a former club manager of a child tournament', async () => {
+    const existing = { id: 'parent-1', createdBy: 'organizer-1' };
+    const dto = {
+      logoUrl: 'https://cdn.example.com/logo.png',
+    } as UpdateParentTournamentDto;
+    repositoryMock.findParentById.mockResolvedValue(existing);
+    repositoryMock.findByParentId.mockResolvedValue([
+      { id: 'child-1', createdBy: 'organizer-1', communityId: 'club-1' },
+    ]);
+    accessMock.isManager.mockResolvedValue(false);
+
+    await expect(
+      lifecycle.updateParent('parent-1', 'former-manager-1', dto),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repositoryMock.updateParent).not.toHaveBeenCalled();
+  });
+
+  it('does not grant parent access through a child tournament without a club', async () => {
+    const existing = { id: 'parent-1', createdBy: 'organizer-1' };
+    const dto = {
+      logoUrl: 'https://cdn.example.com/logo.png',
+    } as UpdateParentTournamentDto;
+    repositoryMock.findParentById.mockResolvedValue(existing);
+    repositoryMock.findByParentId.mockResolvedValue([
+      { id: 'child-1', createdBy: 'user-1', communityId: null },
+    ]);
+    accessMock.isManager.mockImplementation(
+      async (tournament: { id: string }) => tournament.id === 'child-1',
+    );
+
+    await expect(
+      lifecycle.updateParent('parent-1', 'user-1', dto),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repositoryMock.updateParent).not.toHaveBeenCalled();
+  });
 });
 
 interface ClosedTournamentFixture {
@@ -133,6 +193,7 @@ describe('TournamentLifecycleService registration deadline extensions', () => {
     findCategory: jest.fn(),
     update: jest.fn(),
     getFollowerUserIds: jest.fn(),
+    findCommunityMember: jest.fn(),
   };
   const accessMock = { isManager: jest.fn() };
   const feePolicyMock = { assertEntryFeeAllowed: jest.fn() };
@@ -211,6 +272,23 @@ describe('TournamentLifecycleService registration deadline extensions', () => {
       'organizer-1',
       { registrationEndDate: extendedDeadline.toISOString() },
     );
+  });
+
+  it('denies a banned club MODERATOR from updating a club tournament', async () => {
+    const existing = { ...makeClosedTournament(), communityId: 'club-1' };
+    prepareUpdate(existing);
+    accessMock.isManager.mockResolvedValue(false);
+    repositoryMock.findCommunityMember.mockResolvedValue({
+      role: 'MODERATOR',
+      status: 'BANNED',
+    });
+
+    await expect(
+      lifecycle.update(existing.id, 'moderator-1', {
+        name: 'Renamed',
+      } as UpdateTournamentDto),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repositoryMock.update).not.toHaveBeenCalled();
   });
 
   it('does not accept a non-extension or other locked registration changes', async () => {

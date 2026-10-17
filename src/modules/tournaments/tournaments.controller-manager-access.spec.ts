@@ -54,7 +54,6 @@ const CLUB_MANAGEABLE_HANDLERS = [
 // Handlers outside the management page scope: must keep ORGANIZER/ADMIN only.
 const ORGANIZER_ONLY_HANDLERS = [
   'createParent',
-  'updateParent',
   'removeParent',
   'cancelTournament',
   'createPlayoffMatch',
@@ -66,13 +65,18 @@ const ORGANIZER_ONLY_HANDLERS = [
   'confirmRoster',
 ] as const;
 
+// Series update: a club OWNER/MODERATOR passes the role gate and is admitted
+// by TournamentLifecycleService.updateParent only for a series whose child
+// tournament they manage.
+const PARENT_CLUB_MANAGEABLE_HANDLERS = ['updateParent'] as const;
+
 describe('TournamentsController manager-scoped route roles', () => {
   it('covers exactly the 34 club-manageable handlers', () => {
     expect(CLUB_MANAGEABLE_HANDLERS).toHaveLength(34);
     expect(new Set(CLUB_MANAGEABLE_HANDLERS).size).toBe(34);
   });
 
-  it.each(CLUB_MANAGEABLE_HANDLERS)(
+  it.each([...CLUB_MANAGEABLE_HANDLERS, ...PARENT_CLUB_MANAGEABLE_HANDLERS])(
     '%s lets PLAYER through the role gate while keeping ORGANIZER and ADMIN',
     (handler) => {
       const roles = getRoles(handler);
@@ -96,4 +100,9 @@ describe('TournamentsController manager-scoped route roles', () => {
       expect(roles).not.toContain(UserRole.PLAYER);
     },
   );
+
+  it('keeps referee reads open to PLAYER and division reads without a role gate', () => {
+    expect(getRoles('findReferees')).toContain(UserRole.PLAYER);
+    expect(getRoles('findDivisions')).toBeUndefined();
+  });
 });

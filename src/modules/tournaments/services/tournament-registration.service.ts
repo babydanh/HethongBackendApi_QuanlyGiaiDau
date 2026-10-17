@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { TournamentsRepository } from '../tournaments.repository';
 import { RegisterTournamentDto } from '../dto/register-tournament.dto';
-import { TournamentAccessService } from './tournament-access.service';
+import {
+  isActiveCommunityManager,
+  TournamentAccessService,
+} from './tournament-access.service';
 import { TournamentRealtimeService } from './tournament-realtime.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { TournamentConfig } from '../interfaces/tournament-config.interface';
@@ -1164,7 +1167,7 @@ export class TournamentRegistrationService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }

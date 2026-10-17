@@ -13,7 +13,10 @@ import { TournamentsRepository } from '../tournaments.repository';
 import { BracketGeneratorService } from '../bracket-generator.service';
 import { UpdateStageDto } from '../dto/update-stage.dto';
 import { UpdateGroupDto } from '../dto/update-group.dto';
-import { TournamentAccessService } from './tournament-access.service';
+import {
+  isActiveCommunityManager,
+  TournamentAccessService,
+} from './tournament-access.service';
 import {
   inferAllowedSportRuleKinds,
   inferExpectedSportRuleKind,
@@ -86,7 +89,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }
@@ -148,7 +151,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      isAuthorized = member?.role === 'OWNER' || member?.role === 'MODERATOR';
+      isAuthorized = isActiveCommunityManager(member);
     }
     if (!isAuthorized) {
       throw new ForbiddenException('Bạn không có quyền cập nhật bảng đấu này');
@@ -199,7 +202,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR'))
+      if (isActiveCommunityManager(member))
         isAuthorized = true;
     }
     if (!isAuthorized)
@@ -247,7 +250,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR'))
+      if (isActiveCommunityManager(member))
         isAuthorized = true;
     }
     if (!isAuthorized)
@@ -277,7 +280,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR'))
+      if (isActiveCommunityManager(member))
         isAuthorized = true;
     }
     if (!isAuthorized)
@@ -391,7 +394,7 @@ export class TournamentBracketService {
         existing.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }
@@ -600,7 +603,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      isAuthorized = member?.role === 'OWNER' || member?.role === 'MODERATOR';
+      isAuthorized = isActiveCommunityManager(member);
     }
     if (!isAuthorized) {
       throw new ForbiddenException(
@@ -659,7 +662,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      isAuthorized = member?.role === 'OWNER' || member?.role === 'MODERATOR';
+      isAuthorized = isActiveCommunityManager(member);
     }
     if (!isAuthorized) {
       throw new ForbiddenException(
@@ -704,7 +707,7 @@ export class TournamentBracketService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR'))
+      if (isActiveCommunityManager(member))
         isAuthorized = true;
     }
     if (!isAuthorized)

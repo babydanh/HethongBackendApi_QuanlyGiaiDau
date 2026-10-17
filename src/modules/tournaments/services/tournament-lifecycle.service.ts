@@ -11,7 +11,10 @@ import { buildCommunityPostNewNotification } from '../../notifications/notificat
 import { CreateParentTournamentDto } from '../dto/create-parent-tournament.dto';
 import { UpdateParentTournamentDto } from '../dto/update-parent-tournament.dto';
 import { TournamentsRepository } from '../tournaments.repository';
-import { TournamentAccessService } from './tournament-access.service';
+import {
+  isActiveCommunityManager,
+  TournamentAccessService,
+} from './tournament-access.service';
 import { RedisService } from '../../../providers/redis/redis.service';
 import { TournamentMediaService } from './tournament-media.service';
 import { TournamentFeePolicyService } from './tournament-fee-policy.service';
@@ -74,7 +77,7 @@ export class TournamentLifecycleService {
     const existing = await this.tournamentsRepository.findParentById(id);
     if (!existing) throw new NotFoundException('Giải đấu cha không tồn tại');
 
-    const canUpdate = await this.tournamentAccessService.isManager(existing, userId, systemRoles);
+    const canUpdate = await this.canManageSeries(existing, userId, systemRoles);
     if (!canUpdate) {
       throw new ForbiddenException(
         'Bạn không có quyền cập nhật giải đấu lớn này',
@@ -82,6 +85,32 @@ export class TournamentLifecycleService {
     }
 
     return this.tournamentsRepository.updateParent(id, userId, data);
+  }
+
+  /**
+   * Giải cha không có communityId, nên quyền CLB chỉ đi qua giải con: người quản lý
+   * giải con thuộc CLB (theo isManager của chính giải con đó) được cập nhật giải cha.
+   */
+  private async canManageSeries(
+    series: { id: string; createdBy: string | null },
+    userId: string,
+    systemRoles: string[],
+  ): Promise<boolean> {
+    if (
+      await this.tournamentAccessService.isManager(series, userId, systemRoles)
+    ) {
+      return true;
+    }
+    const children = await this.tournamentsRepository.findByParentId(series.id);
+    for (const child of children) {
+      if (!child.communityId) continue;
+      if (
+        await this.tournamentAccessService.isManager(child, userId, systemRoles)
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   async findParentById(id: string) {
@@ -440,11 +469,7 @@ export class TournamentLifecycleService {
           createTournamentDto.communityId,
           userId,
         );
-        if (
-          !member ||
-          !['OWNER', 'MODERATOR'].includes(member.role) ||
-          member.status !== 'JOINED'
-        ) {
+        if (!isActiveCommunityManager(member)) {
           throw new ForbiddenException(
             'Bạn cần vừa có quyền Ban tổ chức vừa là Chủ/Điều hành viên của đúng câu lạc bộ để tạo giải nâng cao.',
           );
@@ -618,7 +643,7 @@ export class TournamentLifecycleService {
         existing.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         canUpdate = true;
       }
     }
@@ -1079,32 +1104,6 @@ export class TournamentLifecycleService {
       hasPermission = true;
     }
 
-    if (!hasPermission && existing.communityId) {
-      if (typeof this.tournamentsRepository.findCommunityById === 'function') {
-        const community = await this.tournamentsRepository.findCommunityById(
-          existing.communityId,
-        );
-        if (community && community.creatorId === userId) {
-          hasPermission = true;
-        }
-      }
-      if (!hasPermission) {
-        const member = await this.tournamentsRepository.findCommunityMember(
-          existing.communityId,
-          userId,
-        );
-        if (
-          member &&
-          (member.status === 'JOINED' || member.status === 'ACTIVE') &&
-          ['OWNER', 'MODERATOR'].includes(
-            member.role?.toUpperCase?.() ?? member.role,
-          )
-        ) {
-          hasPermission = true;
-        }
-      }
-    }
-
     if (!hasPermission) {
       throw new ForbiddenException('Bạn không có quyền xóa giải đấu này');
     }
@@ -1377,7 +1376,7 @@ export class TournamentLifecycleService {
         existing.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }
@@ -1560,7 +1559,7 @@ export class TournamentLifecycleService {
         existing.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }
@@ -1711,7 +1710,7 @@ export class TournamentLifecycleService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }
@@ -1740,7 +1739,7 @@ export class TournamentLifecycleService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }
@@ -1805,7 +1804,7 @@ export class TournamentLifecycleService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }
@@ -1849,7 +1848,7 @@ export class TournamentLifecycleService {
         tournament.communityId,
         userId,
       );
-      if (member && (member.role === 'OWNER' || member.role === 'MODERATOR')) {
+      if (isActiveCommunityManager(member)) {
         isAuthorized = true;
       }
     }

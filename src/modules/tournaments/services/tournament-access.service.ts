@@ -1,6 +1,22 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { TournamentsRepository } from '../tournaments.repository';
 
+const ACTIVE_COMMUNITY_MEMBER_STATUSES: string[] = ['JOINED', 'ACTIVE'];
+const COMMUNITY_MANAGER_ROLES: string[] = ['OWNER', 'MODERATOR'];
+
+/**
+ * Điều kiện duy nhất để thành viên CLB được quản lý giải của CLB đó: còn hiệu lực
+ * (JOINED/ACTIVE) và là OWNER/MODERATOR. Đã rời (không còn dòng), BANNED, PENDING,
+ * INVITED, REJECTED đều không đủ điều kiện.
+ */
+export function isActiveCommunityManager(
+  member: { role: string; status: string } | null | undefined,
+): boolean {
+  if (!member) return false;
+  if (!ACTIVE_COMMUNITY_MEMBER_STATUSES.includes(member.status)) return false;
+  return COMMUNITY_MANAGER_ROLES.includes(member.role.toUpperCase());
+}
+
 @Injectable()
 export class TournamentAccessService {
   constructor(private readonly tournamentsRepository: TournamentsRepository) {}
@@ -23,24 +39,11 @@ export class TournamentAccessService {
       return true;
     }
     if (!tournament.communityId) return false;
-    if (typeof this.tournamentsRepository.findCommunityById === 'function') {
-      const community = await this.tournamentsRepository.findCommunityById(
-        tournament.communityId,
-      );
-      if (community && community.creatorId === userId) {
-        return true;
-      }
-    }
     const member = await this.tournamentsRepository.findCommunityMember(
       tournament.communityId,
       userId,
     );
-    return (
-      (member?.status === 'JOINED' || member?.status === 'ACTIVE') &&
-      ['OWNER', 'MODERATOR'].includes(
-        member.role?.toUpperCase?.() ?? member.role,
-      )
-    );
+    return isActiveCommunityManager(member);
   }
 
   isSystemTournamentCreator(systemRoles: string[] = []): boolean {
@@ -57,11 +60,7 @@ export class TournamentAccessService {
       communityId,
       userId,
     );
-    if (
-      !member ||
-      member.status !== 'JOINED' ||
-      !['OWNER', 'MODERATOR'].includes(member.role)
-    ) {
+    if (!isActiveCommunityManager(member)) {
       throw new ForbiddenException(
         'Chỉ Chủ CLB hoặc Quản trị viên CLB mới có thể tạo giải thuộc CLB.',
       );
