@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { LivestreamRepository } from './livestream.repository';
+import { isTournamentCreatorInForce } from '../tournaments/services/tournament-access.service';
 import {
   FacebookLiveProviderException,
   FacebookLiveService,
@@ -682,7 +683,12 @@ export class LiveSessionService {
     if (!tournament) {
       throw new NotFoundException('Giải đấu không tồn tại.');
     }
-    if (this.isAdmin(user) || tournament.createdBy === user.sub) {
+    const isCreator = await isTournamentCreatorInForce(
+      tournament,
+      user.sub,
+      this.livestreamRepository,
+    );
+    if (this.isAdmin(user) || isCreator) {
       return true;
     }
     return this.livestreamRepository.isTournamentStaff(tournamentId, user.sub);

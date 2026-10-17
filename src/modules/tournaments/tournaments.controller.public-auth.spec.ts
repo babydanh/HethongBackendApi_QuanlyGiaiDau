@@ -8,7 +8,7 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { RedisService } from '../../providers/redis/redis.service';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
-import { TournamentAccessService } from './services/tournament-access.service';
+import { isTournamentCreatorInForce, TournamentAccessService } from './services/tournament-access.service';
 import { TournamentDiscoveryService } from './services/tournament-discovery.service';
 import { TournamentsRepository } from './tournaments.repository';
 import { TournamentsController } from './tournaments.controller';
@@ -42,7 +42,13 @@ const repository = {
   findCommunityMember: jest.fn(),
   isUserParticipant: jest.fn(),
 };
-const access = { isManager: jest.fn() };
+const access = {
+  isManager: jest.fn(),
+  isCreatorInForce: (
+    tournament: { createdBy: string | null; communityId?: string | null },
+    userId: string,
+  ) => isTournamentCreatorInForce(tournament, userId, repository),
+};
 
 // Real discovery rules; only persistence and access lookups are stubbed.
 const discovery = new TournamentDiscoveryService(

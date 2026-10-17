@@ -6,6 +6,7 @@ import {
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { SponsorsService } from './sponsors.service';
 import type { SponsorsRepository } from './sponsors.repository';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 const tournament = {
   id: 'tournament-1',
@@ -70,7 +71,10 @@ const makeService = () => {
   };
   return {
     repository,
-    service: new SponsorsService(repository as unknown as SponsorsRepository),
+    service: new SponsorsService(
+      repository as unknown as SponsorsRepository,
+      new TournamentAccessService(repository as never),
+    ),
   };
 };
 
@@ -112,6 +116,28 @@ describe('SponsorsService', () => {
       }),
     );
     expect(result).toEqual(expect.objectContaining({ tournamentId: 'tournament-1' }));
+  });
+
+  it('denies the creator of a club tournament who has left the club from managing sponsors', async () => {
+    const { service, repository } = makeService();
+    repository.findTournamentForAccess.mockResolvedValue({
+      ...tournament,
+      communityId: 'club-1',
+    });
+    repository.findCommunityMember.mockResolvedValue(null);
+
+    await expect(
+      service.create('tournament-1', owner, {
+        displayName: '  Ace Sports  ',
+        tier: 'GOLD',
+        logoUrl: 'https://cdn.example.com/ace.png',
+        websiteUrl: 'https://ace.example.com',
+        displayOrder: 0,
+        status: 'PUBLISHED',
+        isPublic: true,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('rejects a non-manager before reading or mutating a sponsor', async () => {

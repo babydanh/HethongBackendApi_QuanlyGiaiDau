@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { isTournamentCreatorInForce } from '../tournaments/services/tournament-access.service';
 import { AssignCameraCourtDto } from './dto/assign-camera-court.dto';
 import { AssignCameraDto } from './dto/assign-camera.dto';
 import { CreateCameraDto } from './dto/create-camera.dto';
@@ -325,7 +326,12 @@ export class LivestreamService {
       throw new NotFoundException('Giải đấu không tồn tại');
     }
 
-    if (this.isAdmin(user) || tournament.createdBy === user.sub) {
+    const isCreator = await isTournamentCreatorInForce(
+      tournament,
+      user.sub,
+      this.livestreamRepository,
+    );
+    if (this.isAdmin(user) || isCreator) {
       return tournament;
     }
 
@@ -345,7 +351,14 @@ export class LivestreamService {
 
     const isOperator =
       this.isAdmin(user) ||
-      match.tournamentCreatedBy === user.sub ||
+      (await isTournamentCreatorInForce(
+        {
+          createdBy: match.tournamentCreatedBy,
+          communityId: match.tournamentCommunityId,
+        },
+        user.sub,
+        this.livestreamRepository,
+      )) ||
       (await this.livestreamRepository.isTournamentStaff(match.tournamentId, user.sub));
     const isAssignedReferee = match.refereeId === user.sub;
 

@@ -55,12 +55,27 @@ export class LivestreamRepository {
         id: schema.tournaments.id,
         name: schema.tournaments.name,
         createdBy: schema.tournaments.createdBy,
+        communityId: schema.tournaments.communityId,
       })
       .from(schema.tournaments)
       .where(and(eq(schema.tournaments.id, tournamentId), isNull(schema.tournaments.deletedAt)))
       .limit(1);
 
     return tournament ?? null;
+  }
+
+  async findCommunityMember(communityId: string, userId: string) {
+    const [member] = await this.db
+      .select({ status: schema.communityMembers.status, role: schema.communityMembers.role })
+      .from(schema.communityMembers)
+      .where(
+        and(
+          eq(schema.communityMembers.communityId, communityId),
+          eq(schema.communityMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+    return member ?? null;
   }
 
   async isTournamentStaff(tournamentId: string, userId: string) {
@@ -576,6 +591,7 @@ export class LivestreamRepository {
         participant2Id: schema.matches.participant2Id,
         courtId: schema.matches.courtId,
         tournamentCreatedBy: schema.tournaments.createdBy,
+        tournamentCommunityId: schema.tournaments.communityId,
         tournamentName: schema.tournaments.name,
         tournamentStatus: schema.tournaments.status,
         tournamentVisibility: schema.tournaments.visibility,

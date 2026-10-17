@@ -22,16 +22,3 @@ export function isAdminUser(
 ): boolean {
   return hasRole(user, UserRole.ADMIN);
 }
-
-/**
- * Object-level ownership policy for matches:
- * ADMIN (via canonical role helper) or the tournament creator is allowed.
- */
-export function isMatchOwnerOrAdmin(
-  user: Pick<JwtPayload, 'roles' | 'role' | 'sub'> | null | undefined,
-  tournamentCreatedBy: string | null | undefined,
-): boolean {
-  if (!user) return false;
-  if (isAdminUser(user)) return true;
-  return Boolean(tournamentCreatedBy && user.sub && tournamentCreatedBy === user.sub);
-}

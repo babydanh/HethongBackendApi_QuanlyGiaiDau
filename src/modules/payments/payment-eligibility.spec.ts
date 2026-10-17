@@ -1,6 +1,7 @@
 import { PaymentsService } from './payments.service';
 import { BadRequestException } from '@nestjs/common';
 import { PaymentPurpose } from './dto/create-payment.dto';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 const makeService = (
   participant: Record<string, unknown>,
@@ -18,6 +19,7 @@ const makeService = (
     repository as never,
     { sendNotification: jest.fn() } as never,
     { get: jest.fn().mockReturnValue(undefined) } as never,
+      new TournamentAccessService({} as never),
   );
   return service as unknown as {
     calculatePayment: (
@@ -202,6 +204,7 @@ describe('registration payment eligibility', () => {
       repository as never,
       { sendNotification: jest.fn() } as never,
       { get: jest.fn().mockReturnValue(undefined) } as never,
+      new TournamentAccessService({} as never),
     ) as unknown as {
       calculatePayment: (
         userId: string,
@@ -258,6 +261,7 @@ describe('payment sandbox verification', () => {
       repository as never,
       { sendNotification: jest.fn() } as never,
       { get: jest.fn((key: string) => config[key]) } as never,
+      new TournamentAccessService({} as never),
     );
     return { service, repository };
   };
@@ -337,6 +341,7 @@ describe('registration platform-fee authority', () => {
       repository as never,
       { sendNotification: jest.fn() } as never,
       { get: jest.fn().mockReturnValue(undefined) } as never,
+      new TournamentAccessService({} as never),
     ) as unknown as {
       calculatePayment: (
         userId: string,

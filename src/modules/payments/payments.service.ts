@@ -31,6 +31,7 @@ import {
   isRegistrationFeePaid,
   isRegistrationRosterCompleteForPayment,
 } from '../tournaments/utils/registration-payment-eligibility';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 interface CalculatedPayment {
   amount: number;
@@ -55,6 +56,7 @@ export class PaymentsService {
     private readonly paymentsRepository: PaymentsRepository,
     private readonly notificationsService: NotificationsService,
     private readonly configService: ConfigService,
+    private readonly tournamentAccessService: TournamentAccessService,
   ) {
     const clientId = this.configService.get<string>('PAYOS_CLIENT_ID');
     const apiKey = this.configService.get<string>('PAYOS_API_KEY');
@@ -369,7 +371,11 @@ export class PaymentsService {
       data.tournamentId,
     );
     if (!tournament) throw new NotFoundException('Không tìm thấy giải đấu.');
-    if (tournament.createdBy !== organizerId) {
+    const isCreatorInForce = await this.tournamentAccessService.isCreatorInForce(
+      tournament,
+      organizerId,
+    );
+    if (!isCreatorInForce) {
       throw new ForbiddenException(
         'Chỉ chủ sở hữu giải đấu được yêu cầu giải ngân.',
       );
@@ -631,7 +637,11 @@ export class PaymentsService {
         'Phí cấp giải không nhận participantId hoặc divisionId.',
       );
     }
-    if (tournament.createdBy !== userId) {
+    const isCreatorInForce = await this.tournamentAccessService.isCreatorInForce(
+      tournament,
+      userId,
+    );
+    if (!isCreatorInForce) {
       throw new ForbiddenException(
         'Chỉ chủ giải đấu được thanh toán khoản phí này.',
       );

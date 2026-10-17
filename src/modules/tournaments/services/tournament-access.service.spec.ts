@@ -22,8 +22,9 @@ describe('TournamentAccessService', () => {
     repository.findCommunityMember = jest.fn().mockResolvedValue(null);
   });
 
-  it('allows the tournament owner and a system administrator', async () => {
-    await expect(access.isManager(tournament, 'owner-1')).resolves.toBe(true);
+  it('allows the tournament owner of a non-club tournament and a system administrator', async () => {
+    const standalone = { ...tournament, communityId: null };
+    await expect(access.isManager(standalone, 'owner-1')).resolves.toBe(true);
     await expect(access.isManager(tournament, 'member-1', ['ADMIN'])).resolves.toBe(
       true,
     );
@@ -112,6 +113,44 @@ describe('TournamentAccessService', () => {
     await expect(
       access.isManager(tournament, 'club-owner-1', ['PLAYER']),
     ).resolves.toBe(false);
+  });
+
+  it('denies the creator of a club tournament who has left the club', async () => {
+    repository.findCommunityMember = jest.fn().mockResolvedValue(null);
+
+    await expect(access.isManager(tournament, 'owner-1')).resolves.toBe(false);
+  });
+
+  it.each(['PENDING', 'INVITED', 'REJECTED', 'BANNED'])(
+    'denies the creator of a club tournament whose membership is %s',
+    async (status) => {
+      repository.findCommunityMember = jest
+        .fn()
+        .mockResolvedValue({ status, role: 'OWNER' });
+
+      await expect(access.isManager(tournament, 'owner-1')).resolves.toBe(false);
+    },
+  );
+
+  it('keeps the creator of a club tournament who is still a JOINED member of any role', async () => {
+    repository.findCommunityMember = jest
+      .fn()
+      .mockResolvedValue({ status: 'JOINED', role: 'MEMBER' });
+
+    await expect(access.isManager(tournament, 'owner-1')).resolves.toBe(true);
+  });
+
+  it('keeps the creator of a tournament that does not belong to a club', async () => {
+    const standalone = { ...tournament, communityId: null };
+
+    await expect(access.isManager(standalone, 'owner-1')).resolves.toBe(true);
+    expect(repository.findCommunityMember).not.toHaveBeenCalled();
+  });
+
+  it('keeps a co-organizer of a club tournament who is not a club member', async () => {
+    repository.isCoOrganizer = jest.fn().mockResolvedValue(true);
+
+    await expect(access.isManager(tournament, 'co-1')).resolves.toBe(true);
   });
 
   it.each(['PENDING', 'INVITED', 'REJECTED', 'BANNED'])(

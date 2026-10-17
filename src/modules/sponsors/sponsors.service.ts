@@ -14,12 +14,16 @@ import {
 } from './dto/create-sponsor.dto';
 import { UpdateSponsorDto } from './dto/update-sponsor.dto';
 import { SponsorsRepository } from './sponsors.repository';
+import { TournamentAccessService } from '../tournaments/services/tournament-access.service';
 
 const HTTP_PROTOCOLS = new Set(['http:', 'https:']);
 
 @Injectable()
 export class SponsorsService {
-  constructor(private readonly sponsorsRepository: SponsorsRepository) {}
+  constructor(
+    private readonly sponsorsRepository: SponsorsRepository,
+    private readonly tournamentAccessService: TournamentAccessService,
+  ) {}
 
   async listPublic(tournamentId: string) {
     const tournament = await this.sponsorsRepository.findTournamentForAccess(tournamentId);
@@ -105,7 +109,10 @@ export class SponsorsService {
     }
 
     const systemRoles = [...(user.roles ?? []), ...(user.role ? [user.role] : [])];
-    if (systemRoles.includes('ADMIN') || tournament.createdBy === user.sub) {
+    if (
+      systemRoles.includes('ADMIN') ||
+      (await this.tournamentAccessService.isCreatorInForce(tournament, user.sub))
+    ) {
       return tournament;
     }
 

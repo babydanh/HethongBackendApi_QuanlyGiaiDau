@@ -2,7 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { PaymentStatus } from '../../../common/constants/enums';
 import type { RedisService } from '../../../providers/redis/redis.service';
 import { TournamentsRepository } from '../tournaments.repository';
-import { TournamentAccessService } from './tournament-access.service';
+import { isTournamentCreatorInForce, TournamentAccessService } from './tournament-access.service';
 import { TournamentDiscoveryService } from './tournament-discovery.service';
 
 describe('TournamentDiscoveryService', () => {
@@ -25,6 +25,10 @@ describe('TournamentDiscoveryService', () => {
   const repository = repositoryMock as unknown as TournamentsRepository;
   const access = {
     isManager: jest.fn(),
+    isCreatorInForce: (
+      tournament: { createdBy: string | null; communityId?: string | null },
+      userId: string,
+    ) => isTournamentCreatorInForce(tournament, userId, repository),
   } as unknown as TournamentAccessService;
   const discovery = new TournamentDiscoveryService(
     repository,

@@ -7,6 +7,7 @@ import {
 import { PG_CONNECTION } from '../../database/database.module';
 import type { AppDb } from '../../database/db.types';
 import * as schema from '../../database/schema';
+import { isActiveCommunityMember } from '../tournaments/services/tournament-access.service';
 import {
   eq,
   and,
@@ -119,7 +120,25 @@ export class MatchesRepository {
     if (!tournament) return false;
 
     const isAdmin = systemRoles.includes('ADMIN');
-    const isOwner = Boolean(userId && tournament.createdBy === userId);
+    // Người tạo giải CLB chỉ là chủ khi còn là thành viên CLB hiệu lực (mọi role).
+    let clubMember: { status: string } | undefined;
+    if (tournament.communityId && userId) {
+      [clubMember] = await this.db
+        .select({ status: schema.communityMembers.status })
+        .from(schema.communityMembers)
+        .where(
+          and(
+            eq(schema.communityMembers.communityId, tournament.communityId),
+            eq(schema.communityMembers.userId, userId),
+          ),
+        )
+        .limit(1);
+    }
+    const isOwner = Boolean(
+      userId &&
+        tournament.createdBy === userId &&
+        (!tournament.communityId || isActiveCommunityMember(clubMember)),
+    );
     const privileged = isAdmin || isOwner;
 
     if (
@@ -143,20 +162,7 @@ export class MatchesRepository {
     if (!userId) return false;
     if (privileged) return true;
 
-    if (tournament.communityId) {
-      const [member] = await this.db
-        .select({ id: schema.communityMembers.id })
-        .from(schema.communityMembers)
-        .where(
-          and(
-            eq(schema.communityMembers.communityId, tournament.communityId),
-            eq(schema.communityMembers.userId, userId),
-            eq(schema.communityMembers.status, 'JOINED'),
-          ),
-        )
-        .limit(1);
-      if (member) return true;
-    }
+    if (isActiveCommunityMember(clubMember)) return true;
 
     const [roster] = await this.db
       .select({ id: schema.tournamentRosters.id })

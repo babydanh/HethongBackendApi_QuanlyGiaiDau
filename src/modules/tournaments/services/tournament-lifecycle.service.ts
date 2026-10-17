@@ -1097,12 +1097,8 @@ export class TournamentLifecycleService {
       }
     }
 
-    // Check permissions: creator of tournament, club owner/moderator, or admin
-    let hasPermission = await this.tournamentAccessService.isManager(existing, userId, systemRoles);
-
-    if (!hasPermission && existing.createdBy === userId) {
-      hasPermission = true;
-    }
+    // Quyền xóa: ADMIN, chủ giải còn hiệu lực, đồng BTC hoặc quản lý CLB (isManager).
+    const hasPermission = await this.tournamentAccessService.isManager(existing, userId, systemRoles);
 
     if (!hasPermission) {
       throw new ForbiddenException('Bạn không có quyền xóa giải đấu này');

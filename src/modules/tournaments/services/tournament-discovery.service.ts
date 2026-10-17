@@ -231,7 +231,9 @@ export class TournamentDiscoveryService {
       }
     }
 
-    const isOwner = userId && tournament.createdBy === userId;
+    const isOwner = userId
+      ? await this.tournamentAccessService.isCreatorInForce(tournament, userId)
+      : false;
     const isAdmin = systemRoles.includes('ADMIN');
 
     if (

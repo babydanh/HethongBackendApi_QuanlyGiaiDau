@@ -1,5 +1,5 @@
 import { UserRole } from '../constants/enums';
-import { hasRole, isAdminUser, isMatchOwnerOrAdmin } from './role.helper';
+import { hasRole, isAdminUser } from './role.helper';
 
 describe('role.helper', () => {
   describe('hasRole', () => {
@@ -36,25 +36,6 @@ describe('role.helper', () => {
 
     it('false for ORGANIZER', () => {
       expect(isAdminUser({ roles: ['ORGANIZER'] })).toBe(false);
-    });
-  });
-
-  describe('isMatchOwnerOrAdmin', () => {
-    it('allows admin from roles array', () => {
-      expect(isMatchOwnerOrAdmin({ sub: 'u1', roles: ['ADMIN'] }, 'creator-other')).toBe(true);
-    });
-
-    it('allows tournament creator', () => {
-      expect(isMatchOwnerOrAdmin({ sub: 'creator-1', roles: ['ORGANIZER'] }, 'creator-1')).toBe(true);
-    });
-
-    it('rejects organizer from another tournament', () => {
-      expect(isMatchOwnerOrAdmin({ sub: 'u2', roles: ['ORGANIZER'] }, 'creator-1')).toBe(false);
-    });
-
-    it('rejects null user and missing creator', () => {
-      expect(isMatchOwnerOrAdmin(null, 'creator-1')).toBe(false);
-      expect(isMatchOwnerOrAdmin({ sub: 'u1', roles: ['ORGANIZER'] }, null)).toBe(false);
     });
   });
 });

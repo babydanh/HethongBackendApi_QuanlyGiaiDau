@@ -62,4 +62,12 @@ describe('TournamentLiteService club manager authorization', () => {
       service.getLiteParticipants('tournament-1', 'former-1', ['PLAYER']),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('denies the creator of a club Lite tournament who has left the club', async () => {
+    const service = buildService(null);
+
+    await expect(
+      service.getLiteParticipants('tournament-1', 'creator-1', ['PLAYER']),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });

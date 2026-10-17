@@ -291,6 +291,16 @@ describe('TournamentLifecycleService registration deadline extensions', () => {
     expect(repositoryMock.update).not.toHaveBeenCalled();
   });
 
+  it('denies the creator of a club tournament who has left the club from deleting it', async () => {
+    const existing = { ...makeClosedTournament(), communityId: 'club-1' };
+    repositoryMock.findById.mockResolvedValue(existing);
+    accessMock.isManager.mockResolvedValue(false);
+
+    await expect(
+      lifecycle.remove(existing.id, 'organizer-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('does not accept a non-extension or other locked registration changes', async () => {
     const existing = makeClosedTournament();
     prepareUpdate(existing);

@@ -128,7 +128,10 @@ describe('TournamentsService — Lite pairing guards', () => {
       findById: jest.fn(),
       findCategory: jest.fn(),
       create: jest.fn(),
-      findCommunityMember: jest.fn(),
+      // The fixture creator (user-1) is still an active club member; other users are not.
+      findCommunityMember: jest.fn(async (_communityId: string, userId: string) =>
+        userId === 'user-1' ? { role: 'MEMBER', status: 'JOINED' } : null,
+      ),
       findUserProfile: jest.fn(),
       isCoOrganizer: jest.fn(),
       hasNonDeletedStagesOrMatches: jest.fn(),
@@ -627,7 +630,7 @@ describe('TournamentsService — Lite pairing guards', () => {
     };
 
     it.each([
-      ['creator', 'creator-1', [], null, false],
+      ['creator', 'creator-1', [], { role: 'MEMBER', status: 'JOINED' }, false],
       ['admin', 'other-user', ['ADMIN'], null, false],
       ['co-organizer', 'other-user', [], null, true],
       [
@@ -972,7 +975,7 @@ describe('TournamentsService — Lite pairing guards', () => {
 
     it('builds a blank pair name from both selected athlete profiles', async () => {
       mockRepo.findById!.mockResolvedValue(liteTournament);
-      mockRepo.findCommunityMember!.mockResolvedValue(null);
+      mockRepo.findCommunityMember!.mockResolvedValue({ role: 'MEMBER', status: 'JOINED' });
       mockRepo.getDivisionsByTournament!.mockResolvedValue([]);
       mockRepo.findLeaderByParticipantId!
         .mockResolvedValueOnce({ userId: 'leader-1' })

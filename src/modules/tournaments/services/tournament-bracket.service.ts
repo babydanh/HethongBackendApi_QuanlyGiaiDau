@@ -380,7 +380,7 @@ export class TournamentBracketService {
 
     let isAuthorized = await this.tournamentAccessService.isManager(existing, userId, systemRoles);
 
-    if (!isAuthorized && existing.parentId) {
+    if (!isAuthorized && existing.parentId && !existing.communityId) {
       const parent = await this.tournamentsRepository.findParentById(
         existing.parentId,
       );
@@ -592,7 +592,7 @@ export class TournamentBracketService {
     if (!tournament) throw new NotFoundException('Giải đấu không tồn tại');
 
     let isAuthorized = await this.tournamentAccessService.isManager(tournament, userId, systemRoles);
-    if (!isAuthorized && tournament.parentId) {
+    if (!isAuthorized && tournament.parentId && !tournament.communityId) {
       const parent = await this.tournamentsRepository.findParentById(
         tournament.parentId,
       );
@@ -651,7 +651,7 @@ export class TournamentBracketService {
       userId,
       systemRoles,
     );
-    if (!isAuthorized && tournament.parentId) {
+    if (!isAuthorized && tournament.parentId && !tournament.communityId) {
       const parent = await this.tournamentsRepository.findParentById(
         tournament.parentId,
       );

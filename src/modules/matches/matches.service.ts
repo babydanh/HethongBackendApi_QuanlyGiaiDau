@@ -54,10 +54,7 @@ import { validateSportRuleConfig } from '../tournaments/utils/sport-rules/valida
 import { validateScoreDetails } from './utils/score-validation/validate-score-details';
 import { normalizeCourtState } from './utils/court-state/court-state.utils';
 import { aggregateFootballTwoLegs } from './utils/football-two-leg-aggregate';
-import {
-  isAdminUser,
-  isMatchOwnerOrAdmin,
-} from '../../common/helpers/role.helper';
+import { isAdminUser } from '../../common/helpers/role.helper';
 import { MatchContextAdapter } from './match-context.adapter';
 import { ClubMatchSessionsService } from '../club-match-sessions/club-match-sessions.service';
 import { LivestreamService } from '../livestream/livestream.service';
@@ -2686,7 +2683,9 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
-    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isCreator = existing.tournament
+      ? await this.tournamentAccessService.isCreatorInForce(existing.tournament, user.sub)
+      : false;
     const isAdmin = this.isAdmin(user);
     if (!isAdmin && !isCreator) {
       throw new ForbiddenException(
@@ -2718,7 +2717,9 @@ export class MatchesService {
     if (!existing) throw new NotFoundException('Match not found');
 
     // Object-level authorization: admin or tournament creator only (NOTE-4)
-    const isCreator = existing.tournament?.createdBy === user.sub;
+    const isCreator = existing.tournament
+      ? await this.tournamentAccessService.isCreatorInForce(existing.tournament, user.sub)
+      : false;
     const isAdmin = this.isAdmin(user);
     if (!isAdmin && !isCreator) {
       throw new ForbiddenException(
@@ -2739,7 +2740,10 @@ export class MatchesService {
     const existing = await this.matchesRepository.findById(id);
     if (!existing) throw new NotFoundException('Match not found');
 
-    if (!isMatchOwnerOrAdmin(user, existing.tournament?.createdBy)) {
+    const isCreator = existing.tournament
+      ? await this.tournamentAccessService.isCreatorInForce(existing.tournament, user.sub)
+      : false;
+    if (!this.isAdmin(user) && !isCreator) {
       throw new ForbiddenException(
         'Bạn không có quyền xem danh sách người dùng bị hạn chế',
       );
