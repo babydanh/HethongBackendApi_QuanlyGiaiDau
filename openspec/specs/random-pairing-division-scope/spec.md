@@ -1,7 +1,7 @@
 # random-pairing-division-scope Specification
 
 ## Purpose
-TBD - created by archiving change fix-random-pairing-division-be. Update Purpose after archive.
+Ghép ngẫu nhiên đôi chỉ trong một nội dung: khi giải có từ hai nội dung trở lên, Backend từ chối yêu cầu thiếu `divisionId` với thông báo "Vui lòng chọn nội dung để ghép đôi.", và không ghép chéo VĐV giữa các nội dung.
 
 ## Requirements
 
