@@ -4,7 +4,6 @@ import './instrument';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -13,6 +12,7 @@ import { configureRosterImportBodyParser } from './config/roster-import-body-par
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { corsOptions } from './config/cors.config';
+import { API_GLOBAL_PREFIX, createOpenApiDocument } from './openapi/openapi-document';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(
@@ -27,7 +27,7 @@ async function bootstrap() {
   }
 
   // Global Prefix
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix(API_GLOBAL_PREFIX);
 
   // Global Pipes
   app.useGlobalPipes(
@@ -47,16 +47,8 @@ async function bootstrap() {
   // Global Filters
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  // Swagger Configuration
-  const config = new DocumentBuilder()
-    .setTitle('Tournament Management API')
-    .setDescription(
-      'The API description for the Tournament Management Platform',
-    )
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
+  // Swagger Configuration (dùng chung với `pnpm openapi:export`)
+  const document = createOpenApiDocument(app);
   app.use(
     '/api/docs',
     apiReference({
