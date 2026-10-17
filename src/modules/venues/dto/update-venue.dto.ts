@@ -1,4 +1,4 @@
-import { PartialType } from '@nestjs/swagger';
+import { ApiHideProperty, PartialType } from '@nestjs/swagger';
 import { Validate, ValidationArguments, ValidatorConstraint, ValidatorConstraintInterface } from 'class-validator';
 import { CreateVenueDto } from './create-venue.dto';
 
@@ -20,6 +20,9 @@ class VenueCoordinatePairConstraint implements ValidatorConstraintInterface {
 }
 
 export class UpdateVenueDto extends PartialType(CreateVenueDto) {
+  // Thuộc tính phụ chỉ để gắn validator cặp toạ độ; không phải trường API nên ẩn khỏi Swagger
+  // (plugin @nestjs/swagger báo vòng lặp với kiểu `never`).
+  @ApiHideProperty()
   @Validate(VenueCoordinatePairConstraint)
   private readonly _coordinatePair?: never;
 }
