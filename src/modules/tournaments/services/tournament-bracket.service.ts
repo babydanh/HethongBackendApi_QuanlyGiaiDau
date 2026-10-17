@@ -19,6 +19,9 @@ import {
   inferExpectedSportRuleKind,
   validateSportRuleConfig,
 } from '../utils/sport-rules/validate-sport-rules-config';
+import { BRACKET_MIN_TEAMS } from '../utils/bracket-team-eligibility';
+
+const PAIR_MATCH_TYPES = new Set(['DOUBLES', 'MIXED_DOUBLES']);
 
 @Injectable()
 export class TournamentBracketService {
@@ -392,47 +395,47 @@ export class TournamentBracketService {
       division = divisions[0];
       divisionId = divisions[0].id;
     } else if (divisions.length > 1) {
-      // If no divisionId is specified but tournament has multiple divisions,
-      // check if this is a Lite tournament and default to first division
-      const configCheck = (existing.tournamentConfig || {}) as Record<
-        string,
-        unknown
-      >;
-      const isLiteTournament =
-        (configCheck.isLite as boolean | undefined) === true ||
-        configCheck.mode === 'LITE';
-      if (isLiteTournament) {
-        division = divisions[0];
-        divisionId = divisions[0].id;
-      }
+      // Giải nhiều nội dung: không đoán nội dung, BTC phải chọn để tránh trộn VĐV.
+      throw new BadRequestException('Vui lòng chọn nội dung để tạo sơ đồ.');
     }
 
     const config = (existing.tournamentConfig || {}) as Record<string, unknown>;
     const isLite =
       (config.isLite as boolean | undefined) === true || config.mode === 'LITE';
-    const isDoublesFormat =
-      existing.matchType === 'DOUBLES' ||
-      existing.matchType === 'MIXED_DOUBLES' ||
-      division?.matchType === 'DOUBLES' ||
-      division?.matchType === 'MIXED_DOUBLES';
-
-    if (isLite && isDoublesFormat) {
-      try {
-        await this.tournamentsRepository.generateLitePairsTx(
-          id,
-          userId,
-          'RANDOM',
-        );
-      } catch (_err) {
-        // Silently proceed if already paired or < 2 pending participants
-      }
-    }
+    // Cặp là đơn vị thi đấu của nội dung đôi; nội dung đơn không ghép cặp.
+    const isPairEvent = PAIR_MATCH_TYPES.has(
+      division?.matchType ?? existing.matchType,
+    );
 
     const bracketType = (
       division?.bracketType ||
       (config.bracketType as string) ||
       'SINGLE_ELIMINATION'
     ).toUpperCase();
+    const rule = BRACKET_MIN_TEAMS[bracketType];
+    if (!rule) {
+      throw new BadRequestException(
+        `Thể thức "${bracketType}" chưa được hỗ trợ để tạo sơ đồ.`,
+      );
+    }
+
+    if (isLite && isPairEvent) {
+      try {
+        await this.tournamentsRepository.generateLitePairsTx(id, userId, 'RANDOM');
+      } catch {
+        // Silently proceed if already paired or < 2 pending participants
+      }
+    }
+
+    // Đếm đội/cặp hợp lệ sau khi ghép lite, cùng quy tắc với generator.
+    const eligibleCount = (
+      await this.tournamentsRepository.findParticipantsForSeeding(id, divisionId)
+    ).length;
+    if (eligibleCount < rule.min) {
+      throw new BadRequestException(
+        `Cần ít nhất ${rule.min} ${isPairEvent ? 'cặp' : 'đội'} để tạo sơ đồ ${rule.label}.`,
+      );
+    }
 
     if (bracketType === 'DOUBLE_ELIMINATION') {
       const result =
@@ -466,21 +469,7 @@ export class TournamentBracketService {
       );
       return result;
     } else if (bracketType === 'GROUP_STAGE_KNOCKOUT') {
-      // Keep the organizer's saved group configuration. The generator validates
-      // the capacity and advancement rules against the eligible participants.
-      const participants =
-        await this.tournamentsRepository.findParticipantsForSeeding(
-          id,
-          divisionId,
-        );
-      const actualTeams = participants.length;
-
-      if (actualTeams < 4) {
-        throw new BadRequestException(
-          'Cần ít nhất 4 đội để tạo vòng bảng + loại trực tiếp.',
-        );
-      }
-
+      // Số đội/cặp tối thiểu đã kiểm ở trên, theo BRACKET_MIN_TEAMS.
       const result =
         await this.bracketGeneratorService.generateGroupStageKnockout(
           id,
@@ -513,6 +502,29 @@ export class TournamentBracketService {
       );
       return result;
     }
+  }
+
+  /**
+   * Chốt giải: giải nhiều nội dung thì sinh sơ đồ từng nội dung, không gộp chung
+   * (gộp sẽ trộn VĐV của nội dung này sang nội dung khác).
+   */
+  async generateBracketForEachDivision(
+    id: string,
+    userId: string,
+    systemRoles: string[] = [],
+  ) {
+    const divisions =
+      await this.tournamentsRepository.getDivisionsByTournament(id);
+    if (divisions.length <= 1) {
+      return this.generateBracket(id, userId, systemRoles);
+    }
+    const results: unknown[] = [];
+    for (const division of divisions) {
+      results.push(
+        await this.generateBracket(id, userId, systemRoles, division.id),
+      );
+    }
+    return results;
   }
   async updateBracketSlots(
     id: string,

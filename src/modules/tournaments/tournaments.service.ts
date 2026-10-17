@@ -1749,7 +1749,11 @@ export class TournamentsService {
       id,
       userId,
       () =>
-        this.tournamentBracketService.generateBracket(id, userId, systemRoles),
+        this.tournamentBracketService.generateBracketForEachDivision(
+          id,
+          userId,
+          systemRoles,
+        ),
       systemRoles,
     );
   }

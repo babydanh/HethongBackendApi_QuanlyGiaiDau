@@ -990,7 +990,7 @@ export class TournamentsController {
       this.getSystemRoles(user),
       divisionId,
       seedingType,
-      allowReset ?? true,
+      allowReset ?? false,
     );
   }
 

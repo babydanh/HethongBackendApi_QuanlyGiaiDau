@@ -1339,31 +1339,6 @@ export class TournamentLiteService {
       );
     }
 
-    const bracket = await this.tournamentsRepository.findBracket(
-      id,
-      divisionId,
-    );
-    const scheduledStatuses = new Set([
-      'SCHEDULED',
-      'PENDING',
-      'NOT_STARTED',
-      'UPCOMING',
-    ]);
-    const started =
-      bracket?.stages.some((stage) =>
-        stage.groups?.some((group) =>
-          group.matches?.some(
-            (match) =>
-              !scheduledStatuses.has(match.status.trim().toUpperCase()),
-          ),
-        ),
-      ) ?? false;
-    if (started) {
-      throw new BadRequestException(
-        'Không thể reset bracket sau khi đã bắt đầu ít nhất một trận.',
-      );
-    }
-
     // generateBracket performs the same BTC/community authorization and persists
     // stages, groups and matches in one generator transaction.
     return this.tournamentBracketService.generateBracket(
@@ -1372,7 +1347,7 @@ export class TournamentLiteService {
       systemRoles,
       divisionId,
       'RANDOM',
-      true,
+      reset,
     );
   }
   async addLiteClubMember(
