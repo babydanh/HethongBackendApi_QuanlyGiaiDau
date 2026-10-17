@@ -16,11 +16,13 @@ Omp chỉ tự nạp file này. Luật cấp dự án `D:/Duancanhan/Project_Qua
 - Lint: không có script `lint`; `pnpm exec eslint <file>`. Chưa có số lỗi toàn repo.
 - Không có script `db:docs` hay `db:docs:check` trên origin/main.
 - Chưa chạy (cần PostgreSQL/Docker): `pnpm test:e2e`, `pnpm db:push`, `node run-prod-migration.js`.
+- Bản mô tả API: `pnpm build && pnpm openapi:export` → ghi `openapi.json` (chế độ preview của Nest, không cần DB/Redis). Kiểm hợp đồng trên cloud: `cloud-test-runner.py run --target api-contract --backend-ref <nhánh>` (đỏ khi `openapi.json` đã commit lệch bản xuất, hoặc phá vỡ so với `main` theo oasdiff).
 
 ## Quy ước thật trong code
 
 - Module: `src/modules/<tên>/` gồm `<tên>.controller.ts`, `<tên>.service.ts`, `<tên>.module.ts` và thư mục dto.
 - Contract HTTP: sự thật là `src/modules/*/*.controller.ts`. Tài liệu endpoint trong `docs/` có thể lệch.
+- API mới hoặc API đang sửa: DTO đặt trong file `*.dto.ts`; hàm controller khai kiểu trả về là class DTO (plugin `@nestjs/swagger` trong `nest-cli.json` tự sinh mô tả từ đó; `TransformInterceptor` bọc thành `{statusCode, message, data}` nên kiểu khai là kiểu của `data`). Đổi API thì chạy `pnpm openapi:export` và commit `openapi.json` cùng commit. Thuộc tính phụ không phải trường API (chỉ để gắn validator) gắn `@ApiHideProperty()`.
 - Schema Drizzle: `src/database/schema/<nhóm>.schema.ts`, export qua `src/database/schema/index.ts`.
 - `.env` không được đọc hay chép; `.env.example` chỉ là mẫu.
 

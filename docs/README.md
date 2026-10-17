@@ -49,7 +49,8 @@ Trả lời câu hỏi "đọc bản đồ DB ở đâu" và "thêm bảng/cột
 | `pnpm exec jest src/common/helpers/gender.helper.spec.ts` | exit 0; 30/30 test pass | 1 file |
 | `pnpm exec eslint src/common/helpers/gender.helper.ts` | exit 0 | 1 file; không có script lint; chưa chạy toàn repo |
 | `pnpm test` (jest toàn bộ, 179 file spec) | chưa chạy | |
-| `pnpm build` | chưa chạy | |
+| `pnpm build` + `pnpm test` (target `backend` trên CI) | xanh, run `39030119827` (nhánh `api-contract-tooling-20261017`, plugin swagger bật): 199/204 suite pass (5 skip), 2047 test pass, 25 skip | Không chạy ở máy |
+| `pnpm openapi:export` (sau `pnpm build`) | xanh trên CI, run `39030229467`: 434 path, 507 route, 166 schema; mới 3 route có kiểu trả về | Ghi `openapi.json` ở gốc repo; preview, không cần DB/Redis |
 | `pnpm test:e2e` | chưa chạy | cần DB/Docker |
 | `pnpm db:push`, `pnpm db:migrate` (= `node run-prod-migration.js`), `pnpm db:setup` | chưa chạy | cần PostgreSQL |
 | `npm run db:docs`, `npm run db:docs:check` | KHÔNG có trong `package.json` | |
