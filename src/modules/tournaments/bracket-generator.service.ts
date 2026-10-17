@@ -1,8 +1,8 @@
 import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { PG_CONNECTION } from '../../database/database.module';
-import type { AppDb } from '../../database/db.types';
+import type { AppDb, AppTx } from '../../database/db.types';
 import * as schema from '../../database/schema';
-import { eq, and, ne, or, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, inArray, isNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { MatchNode } from './interfaces/match-node.interface';
 import {
@@ -23,19 +23,15 @@ import {
   resolveRoundsToPlay,
 } from './utils/round-robin-config';
 import { sortFootballStandings } from './utils/football-standings';
-import { resolveFootballTeamConfig } from './utils/football-team-config';
+import { eligibleTeamCondition } from './utils/bracket-team-eligibility';
 
-/**
- * A virtual athlete skips the payment rule, never the team rule: a doubles mock
- * still waiting for a partner, or withdrawn into the pair it joined, is not a
- * team and must not get a bracket slot.
- */
-function completeMockParticipant() {
-  return and(
-    eq(schema.tournamentParticipants.isMock, true),
-    eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-  );
-}
+/** Trạng thái chưa đấu: trận còn trong nhóm này chưa bắt đầu. */
+const SCHEDULED_MATCH_STATUSES = new Set([
+  'SCHEDULED',
+  'PENDING',
+  'NOT_STARTED',
+  'UPCOMING',
+]);
 
 @Injectable()
 export class BracketGeneratorService {
@@ -43,23 +39,50 @@ export class BracketGeneratorService {
     @Inject(PG_CONNECTION) private readonly db: AppDb,
   ) {}
 
-  private getEligibleParticipantStatus(tournamentConfig: unknown) {
-    const isFootballTeamTournament = resolveFootballTeamConfig(
-      asConfigRecord(tournamentConfig) || {},
-    ).isTeamSport;
-    const completeStatus = eq(
-      schema.tournamentParticipants.teamStatus,
-      'COMPLETE',
-    );
-    return isFootballTeamTournament
-      ? and(
-          completeStatus,
-          or(
-            eq(schema.tournamentParticipants.isPaid, true),
-            eq(schema.tournamentParticipants.organizerWaivedFee, true),
-          ),
-        )
-      : completeStatus;
+  /**
+   * Sơ đồ cũ chỉ được thay khi chưa có trận nào bắt đầu (BYE tự động không tính).
+   * Gọi sau khi đã khoá hàng giải nên hai lần tạo lại không chạy chồng nhau.
+   */
+  private async assertNoStartedMatches(
+    tx: AppTx,
+    tournamentId: string,
+    divisionId?: string,
+  ) {
+    const stages = await tx
+      .select()
+      .from(schema.tournamentStages)
+      .where(
+        divisionId
+          ? and(
+              eq(schema.tournamentStages.tournamentId, tournamentId),
+              eq(schema.tournamentStages.tournamentDivisionId, divisionId),
+              isNull(schema.tournamentStages.deletedAt),
+            )
+          : and(
+              eq(schema.tournamentStages.tournamentId, tournamentId),
+              isNull(schema.tournamentStages.deletedAt),
+            ),
+      );
+    if (stages.length === 0) return;
+
+    const matches = await tx
+      .select()
+      .from(schema.matches)
+      .where(
+        inArray(
+          schema.matches.stageId,
+          stages.map((stage) => stage.id),
+        ),
+      );
+    if (
+      matches.some(
+        (match) => !match.isBye && !SCHEDULED_MATCH_STATUSES.has(match.status),
+      )
+    ) {
+      throw new BadRequestException(
+        'Không thể tạo lại sơ đồ sau khi đã bắt đầu ít nhất một trận.',
+      );
+    }
   }
 
   async generateSingleElimination(
@@ -74,11 +97,13 @@ export class BracketGeneratorService {
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
+        .for('update')
         .limit(1);
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
-      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+      // Khoá hàng giải xong mới kiểm trận và xoá sơ đồ cũ, để hai lần tạo không chồng nhau.
+      await this.assertNoStartedMatches(tx, tournamentId, divisionId);
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -89,17 +114,11 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                or(
-                  completeMockParticipant(),
-                  eligibleParticipantStatus,
-                ),
+                eligibleTeamCondition(),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                or(
-                  completeMockParticipant(),
-                  eligibleParticipantStatus,
-                ),
+                eligibleTeamCondition(),
               ),
         );
 
@@ -233,48 +252,28 @@ export class BracketGeneratorService {
         }
       }
 
+      // Hai lượt: mỗi tie = 2 node liên tiếp (lượt đi = 2t, lượt về = 2t+1) dùng chung
+      // hai slot của tie t; lượt về đảo vai home/away.
       const round1Matches = matchNodesByRound.get(1)!;
       for (let i = 0; i < round1Matches.length; i++) {
-        const p1 = slots[2 * i];
-        const p2 = slots[2 * i + 1];
+        const tie = twoLegged ? Math.floor(i / 2) : i;
+        const isReturnLeg = twoLegged && i % 2 === 1;
+        const first = slots[2 * tie];
+        const second = slots[2 * tie + 1];
+        const p1 = isReturnLeg ? second : first;
+        const p2 = isReturnLeg ? first : second;
 
         round1Matches[i].participant1Id = p1 || null;
         round1Matches[i].participant2Id = p2 || null;
 
-        // Nếu có 1 bên là BYE (null)
-        if (p1 && !p2) {
+        // BYE (một bên trống, hoặc cả hai): đội có mặt thắng; cả hai trống thì không có thắng.
+        if (!p1 || !p2) {
           round1Matches[i].status = 'COMPLETED';
-          round1Matches[i].winnerId = p1;
+          round1Matches[i].winnerId = p1 || p2 || null;
           round1Matches[i].isBye = true;
-          this.advanceWinner(round1Matches[i], matchNodesByRound);
-        } else if (!p1 && p2) {
-          round1Matches[i].status = 'COMPLETED';
-          round1Matches[i].winnerId = p2;
-          round1Matches[i].isBye = true;
-          this.advanceWinner(round1Matches[i], matchNodesByRound);
-        } else if (!p1 && !p2) {
-          // Both slots empty (BYE) — skip, don't propagate null winner
-          round1Matches[i].status = 'COMPLETED';
-          round1Matches[i].winnerId = null;
-          round1Matches[i].isBye = true;
-          // No advanceWinner call — null winner would propagate incorrectly
-        }
-      }
-
-      // Two-legged: leg2 phải có cùng cặp đối thủ với leg1 (đổi vai home/away).
-      // Round1 mỗi cặp = 2 trận liên tiếp (i, i+1). Gán lại p1/p2 cho leg2 ngược vai.
-      if (twoLegged) {
-        for (let i = 0; i < round1Matches.length; i += 2) {
-          const leg1 = round1Matches[i];
-          const leg2 = round1Matches[i + 1];
-          if (!leg1 || !leg2) continue;
-          leg2.participant1Id = leg1.participant2Id;
-          leg2.participant2Id = leg1.participant1Id;
-          // BYE: nếu leg1 là bye, leg2 cũng bye → không advance lần 2
-          if (leg1.isBye) {
-            leg2.status = 'COMPLETED';
-            leg2.winnerId = leg1.winnerId;
-            leg2.isBye = true;
+          // Lượt về của tie không advance lần 2: tie chỉ đi tiếp một lần qua lượt đi.
+          if (round1Matches[i].winnerId && !isReturnLeg) {
+            this.advanceWinner(round1Matches[i], matchNodesByRound);
           }
         }
       }
@@ -307,11 +306,13 @@ export class BracketGeneratorService {
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
+        .for('update')
         .limit(1);
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
-      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+      // Khoá hàng giải xong mới kiểm trận và xoá sơ đồ cũ.
+      await this.assertNoStartedMatches(tx, tournamentId, divisionId);
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -322,17 +323,11 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                or(
-                  completeMockParticipant(),
-                  eligibleParticipantStatus,
-                ),
+                eligibleTeamCondition(),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                or(
-                  completeMockParticipant(),
-                  eligibleParticipantStatus,
-                ),
+                eligibleTeamCondition(),
               ),
         );
 
@@ -737,11 +732,13 @@ export class BracketGeneratorService {
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
+        .for('update')
         .limit(1);
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
-      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+      // Khoá hàng giải xong mới kiểm trận và xoá sơ đồ cũ.
+      await this.assertNoStartedMatches(tx, tournamentId, divisionId);
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -752,17 +749,11 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                or(
-                  completeMockParticipant(),
-                  eligibleParticipantStatus,
-                ),
+                eligibleTeamCondition(),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                or(
-                  completeMockParticipant(),
-                  eligibleParticipantStatus,
-                ),
+                eligibleTeamCondition(),
               ),
         );
 
@@ -1151,11 +1142,13 @@ export class BracketGeneratorService {
         .select()
         .from(schema.tournaments)
         .where(eq(schema.tournaments.id, tournamentId))
+        .for('update')
         .limit(1);
 
       if (!tournament) throw new BadRequestException('Giải đấu không tồn tại');
 
-      const eligibleParticipantStatus = this.getEligibleParticipantStatus(tournament.tournamentConfig);
+      // Khoá hàng giải xong mới kiểm trận và xoá sơ đồ cũ.
+      await this.assertNoStartedMatches(tx, tournamentId, divisionId);
 
       // 2. Lấy danh sách đội tham gia
       const participants = await tx
@@ -1166,29 +1159,11 @@ export class BracketGeneratorService {
             ? and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
                 eq(schema.tournamentParticipants.tournamentDivisionId, divisionId),
-                or(
-                  completeMockParticipant(),
-                  and(
-                    eligibleParticipantStatus,
-                    or(
-                      eq(schema.tournamentParticipants.isPaid, true),
-                      eq(schema.tournamentParticipants.organizerWaivedFee, true),
-                    ),
-                  ),
-                ),
+                eligibleTeamCondition(),
               )
             : and(
                 eq(schema.tournamentParticipants.tournamentId, tournamentId),
-                or(
-                  completeMockParticipant(),
-                  and(
-                    eligibleParticipantStatus,
-                    or(
-                      eq(schema.tournamentParticipants.isPaid, true),
-                      eq(schema.tournamentParticipants.organizerWaivedFee, true),
-                    ),
-                  ),
-                ),
+                eligibleTeamCondition(),
               ),
         );
 

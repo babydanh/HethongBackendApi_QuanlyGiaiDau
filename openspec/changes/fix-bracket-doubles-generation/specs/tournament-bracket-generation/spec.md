@@ -28,7 +28,7 @@ The system SHALL reject a bracket generation request for a tournament with more 
 
 ### Requirement: Điều kiện đội hợp lệ thống nhất cho mọi thể thức
 
-The system SHALL count a participant as a team for every bracket format (single elimination, double elimination, round robin, group stage and knockout) only when `teamStatus` is `COMPLETE` and the participant is paid, waived by the organizer, or virtual (`isMock`). A doubles team SHALL hold exactly two athletes. The minimum number of teams per format SHALL be defined in one place. The rejection message SHALL say "cặp" for a doubles division and "đội" for a singles division.
+The system SHALL count a participant as a team for every bracket format (single elimination, double elimination, round robin, group stage and knockout) only when `teamStatus` is `COMPLETE` and the participant is paid, waived by the organizer, or virtual (`isMock`). The minimum number of teams per format SHALL be defined in one place. The rejection message SHALL say "cặp" for a doubles division and "đội" for a singles division.
 
 #### Scenario: Cùng bốn cặp COMPLETE, đã đóng phí
 

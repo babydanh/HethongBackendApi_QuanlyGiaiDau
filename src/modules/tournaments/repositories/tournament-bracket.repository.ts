@@ -40,6 +40,7 @@ import {
   resolveLoserTargetSlot,
   resolveWinnerTargetSlot,
 } from '../../../common/helpers/bracket-advancement.helper';
+import { eligibleTeamCondition } from '../utils/bracket-team-eligibility';
 
 @Injectable()
 export class TournamentBracketRepository {
@@ -704,14 +705,7 @@ export class TournamentBracketRepository {
           divisionId
             ? eq(schema.tournamentParticipants.tournamentDivisionId, divisionId)
             : undefined,
-          // A virtual athlete skips payment, never the team rule (same as the
-          // bracket generator): a doubles mock waiting for a partner is no team.
-          eq(schema.tournamentParticipants.teamStatus, 'COMPLETE'),
-          or(
-            eq(schema.tournamentParticipants.isMock, true),
-            eq(schema.tournamentParticipants.isPaid, true),
-            eq(schema.tournamentParticipants.organizerWaivedFee, true),
-          ),
+          eligibleTeamCondition(),
         ),
       );
 
